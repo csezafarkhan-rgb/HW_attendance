@@ -36,6 +36,14 @@
         return cache;
       });
     },
+    hydrateDataset: function () {
+      return api('GET', '/api/dataset').then(function (r) {
+        return (r && r.employees && r.records) ? r : {employees: [], records: []};
+      });
+    },
+    saveDataset: function (dataset) {
+      return api('PUT', '/api/dataset', dataset || {employees: [], records: []});
+    },
     cached: function () { return cache; }
   };
 
@@ -88,12 +96,16 @@
           var fromOthers = r.changes.filter(function (c) { return c.changed_by !== r.self; });
           cursor = r.cursor;
           if (fromOthers.length) {
-            window.HWSync.hydrate().then(function () {
-              if (typeof onRemoteChange === 'function') onRemoteChange(fromOthers);
+            var needsDataset = fromOthers.some(function(c){ return c.entity === 'records' || c.entity === 'employees'; });
+            var refresh = needsDataset
+              ? window.HWSync.hydrateDataset()
+              : window.HWSync.hydrate();
+            refresh.then(function (dataset) {
+              if (typeof onRemoteChange === 'function') onRemoteChange(fromOthers, dataset);
             });
           }
         }).catch(function () { /* transient network errors are not fatal */ });
-      }, 5000);
+      }, 2000);
     }
   };
 })();

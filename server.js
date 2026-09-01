@@ -304,6 +304,51 @@ app.get('/api/dataset', requireAuth, async (req, res) => {
   });
 });
 
+/* Save the current attendance dataset to Postgres. This is deliberately an upsert
+   rather than a replace-all: concurrent users can import/edit without deleting
+   rows another user has just added. The browser uses this after an import and
+   whenever the attendance dataset is changed locally. */
+app.put('/api/dataset', requireAuth, async (req, res) => {
+  if (req.session.role === 'viewer') return res.status(403).json({ error: 'read_only' });
+  const employees = Array.isArray(req.body && req.body.employees) ? req.body.employees : [];
+  const records = Array.isArray(req.body && req.body.records) ? req.body.records : [];
+  const client = await pool.connect();
+  let employeesUpserted = 0, recordsUpserted = 0;
+  try {
+    await client.query('BEGIN');
+    for (const e of employees) {
+      if (!e || !e.name) continue;
+      await client.query(
+        `INSERT INTO employees (org_id, code, name, shift) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (org_id, name) DO UPDATE SET code = EXCLUDED.code, shift = EXCLUDED.shift, is_active = TRUE`,
+        [req.session.orgId, e.code || null, String(e.name), e.shift || null]
+      );
+      employeesUpserted++;
+    }
+    for (const r of records) {
+      if (!r || !r.e || !r.d) continue;
+      const data = Object.assign({}, r);
+      delete data.e; delete data.d;
+      await client.query(
+        `INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (org_id, employee, day)
+         DO UPDATE SET data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+        [req.session.orgId, String(r.e), r.d, JSON.stringify(data), req.session.userId]
+      );
+      recordsUpserted++;
+    }
+    if (employeesUpserted) await logChange(client, req.session.orgId, 'employees', null, req.session.userId);
+    if (recordsUpserted) await logChange(client, req.session.orgId, 'records', null, req.session.userId);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  res.json({ ok: true, employees: employeesUpserted, records: recordsUpserted });
+});
+
 /* Upsert a batch of records — used by the Excel import and by day edits.
    Per-row upsert (not replace-all) so concurrent editors don't wipe each
    other's work. */

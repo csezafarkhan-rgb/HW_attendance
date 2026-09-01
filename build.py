@@ -54,9 +54,11 @@ def main():
         'function initLoginGate(startWorkspace){',
         'function __legacyInitLoginGate_UNUSED(startWorkspace){', 1)
 
-    # hw-auth.js sets window.initLoginGate; load it before the shell script runs.
+    # Load the server sync helper in the shell as well. The shell owns the
+    # cross-user change polling and forwards attendance changes into the iframe.
+    # The dashboard receives its own copy too (separate iframe window).
     head_end = shell.index('</head>')
-    shell = shell[:head_end] + '<script>\n' + auth + '\n</script>\n' + shell[head_end:]
+    shell = shell[:head_end] + '<script>\n' + sync + '\n</script>\n<script>\n' + auth + '\n</script>\n' + shell[head_end:]
 
     # ---- embed the dashboard ----
     b64 = base64.b64encode(dash.encode('utf-8')).decode('ascii')

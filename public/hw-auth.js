@@ -82,11 +82,13 @@
         setTimeout(function () { gate.style.display = 'none'; }, 380);
         startWorkspace('attendance');
         if (window.HWLiveSync) {
-          window.HWLiveSync.start(function () {
-            // Someone else changed shared data - tell the dashboard to reread.
+          window.HWLiveSync.start(function (changes, dataset) {
+            // Someone else changed shared data - tell the dashboard to refresh.
+            // When attendance/employees changed, pass the already-fetched dataset
+            // so the iframe does not make a second database request.
             var fr = document.querySelector('#frames iframe[data-id="attendance"]');
             if (fr && fr.contentWindow) {
-              try { fr.contentWindow.postMessage({ type: 'hw-remote-change' }, '*'); } catch (e) {}
+              try { fr.contentWindow.postMessage({ type: 'hw-remote-change', dataset: dataset || null }, '*'); } catch (e) {}
             }
           });
         }

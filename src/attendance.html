@@ -2622,21 +2622,56 @@ input:focus,select:focus,textarea:focus,.search:focus{
   }
   function applySavedJson(v){ if(!v) return false; try{ var d = JSON.parse(v); if(d && d.employees && d.records){ applyDataset(d); return true; } }catch(e){} return false; }
   function loadCustomDataset(){
-    return idbData('get').then(function(v){
-      if(applySavedJson(v)) return;
-      // migrate/read older localStorage copy if IndexedDB had nothing yet
-      return storage.get('customDataset', true).then(function(res){
-        if(res && res.value && applySavedJson(res.value)){ idbData('set', res.value).catch(function(){}); }
-      }).catch(function(){});
-    }).catch(function(){
-      return storage.get('customDataset', true).then(function(res){ if(res && res.value) applySavedJson(res.value); }).catch(function(){});
-    });
+    var localLoad = function(){
+      return idbData('get').then(function(v){
+        if(applySavedJson(v)) return true;
+        return storage.get('customDataset', true).then(function(res){
+          if(res && res.value && applySavedJson(res.value)){
+            idbData('set', res.value).catch(function(){});
+            return true;
+          }
+          return false;
+        }).catch(function(){ return false; });
+      }).catch(function(){
+        return storage.get('customDataset', true).then(function(res){
+          if(res && res.value) return applySavedJson(res.value);
+          return false;
+        }).catch(function(){ return false; });
+      });
+    };
+
+    if(window.HWSync && window.HWSync.hydrateDataset){
+      return window.HWSync.hydrateDataset().then(function(remote){
+        if(remote && (remote.employees.length || remote.records.length)){
+          applyDataset(remote);
+          // The database is authoritative once it has data.
+          return true;
+        }
+        // Empty DB: recover an existing browser import and push it once.
+        return localLoad().then(function(hadLocal){
+          if(hadLocal) return persistDataset().then(function(){ return true; });
+          return false;
+        });
+      }).catch(function(){ return localLoad(); });
+    }
+    return localLoad();
   }
   function persistDataset(){
-    var json = JSON.stringify({employees:EMPLOYEES, records:RECORDS});
-    return idbData('set', json).catch(function(){
-      // last resort: localStorage (may fail on very large data)
-      return storage.set('customDataset', json, true).catch(function(e){ console.error('dataset save failed', e); });
+    var dataset = {employees:EMPLOYEES, records:RECORDS};
+    var json = JSON.stringify(dataset);
+    // Postgres is now the source of truth. Keep IndexedDB as a local fallback
+    // and migration bridge so an existing imported backup is not lost while the
+    // first database sync happens.
+    var serverSave = (window.HWSync && window.HWSync.saveDataset)
+      ? window.HWSync.saveDataset(dataset)
+      : Promise.reject(new Error('server sync unavailable'));
+    return serverSave.then(function(){
+      return idbData('set', json).catch(function(){});
+    }).catch(function(e){
+      console.error('server dataset save failed', e);
+      return idbData('set', json).catch(function(){
+        return storage.set('customDataset', json, true).catch(function(err){ console.error('dataset save failed', err); });
+      });
     });
   }
 
@@ -6357,6 +6392,26 @@ function buildExcelBackup(){
     }), true)
       .catch(function(e){ console.error(e); });
   }
+  // Receive a dataset refresh from the shell when another user changes
+  // attendance/employees. The server has already fetched the newest dataset.
+  window.addEventListener('message', function(e){
+    if(!e.data || e.data.type !== 'hw-remote-change') return;
+    var applyRemote = function(d){
+      if(d && (d.employees.length || d.records.length)){
+        applyDataset(d);
+        renderMonthDropdown(); renderMonthLabel();
+        renderEmpDropdown(); renderEmpBtnLabel(); renderShiftDropdown();
+        refreshActivePage();
+      }
+    };
+    if(e.data.dataset) {
+      applyRemote(e.data.dataset);
+    } else if(window.HWSync && window.HWSync.hydrateDataset){
+      window.HWSync.hydrateDataset().then(applyRemote)
+        .catch(function(err){ console.warn('remote dataset refresh failed', err); });
+    }
+  });
+
   window.addEventListener('message', function(e){
     if(!e.data || e.data.type !== 'hw-set-letterhead') return;
     if(e.data.field === 'name'){ coNameEl.textContent = e.data.value; saveCompanyInfo(); }
