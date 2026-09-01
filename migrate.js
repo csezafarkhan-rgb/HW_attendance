@@ -43,7 +43,14 @@ const pool = new Pool({
 
   // Older builds used viewer/editor for non-admin accounts. Normalize them
   // to the current two-role model before the app starts using the Users panel.
+  // Keep older databases compatible with the current user model.
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE');
   await pool.query("UPDATE users SET role = 'employee' WHERE org_id = $1 AND role IN ('viewer','editor')", [orgId]);
+
+  // Older builds may have had a role constraint that still allowed viewer/editor.
+  // Replace it so the current two-role model is enforced consistently.
+  await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_chk");
+  await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_chk CHECK (role IN ('admin','employee'))");
 
   const { rows: existing } = await pool.query('SELECT count(*)::int AS n FROM users WHERE org_id = $1', [orgId]);
   if (existing[0].n > 0) {
