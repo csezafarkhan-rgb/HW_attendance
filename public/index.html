@@ -342,22 +342,28 @@
       if (usersBtn) usersBtn.style.display = user.role === 'admin' ? '' : 'none';
       if (pbBtn) pbBtn.style.display = user.role === 'admin' ? '' : 'none';
 
-      var ready = (window.HWSync && typeof window.HWSync.hydrate === 'function')
-        ? window.HWSync.hydrate()
-        : Promise.resolve();
-      Promise.resolve(ready).catch(function () {}).then(function () {
-        gate.classList.add('lg-out');
-        setTimeout(function () { gate.style.display = 'none'; }, 380);
-        if (typeof startWorkspace === 'function') startWorkspace('attendance');
-        if (window.HWLiveSync && typeof window.HWLiveSync.start === 'function') {
-          window.HWLiveSync.start(function (changes, dataset) {
+      /* Do not make the login transition wait on a bulk settings query.
+         A slow/waking database used to leave the user staring at the login
+         screen even though authentication had already succeeded. The
+         attendance frame has its own server-backed storage and will load its
+         dataset independently. */
+      if (window.HWSync && typeof window.HWSync.hydrate === 'function') {
+        window.HWSync.hydrate().catch(function (e) { console.warn('initial settings hydrate failed', e); });
+      }
+      gate.classList.add('lg-out');
+      setTimeout(function () { gate.style.display = 'none'; }, 380);
+      if (typeof startWorkspace === 'function') startWorkspace('attendance');
+      if (window.HWLiveSync && typeof window.HWLiveSync.start === 'function') {
+        window.HWLiveSync.start(function (changes, dataset) {
             var fr = document.querySelector('#frames iframe[data-id="attendance"]');
             if (fr && fr.contentWindow) {
-              try { fr.contentWindow.postMessage({ type: 'hw-remote-change', dataset: dataset || null }, '*'); } catch (e) {}
+              /* Never send the admin-wide dataset to an employee frame.
+                 Employees fetch their own filtered dataset from the API. */
+              var safeDataset = (window.HWAuth.user && window.HWAuth.user.role === 'employee') ? null : (dataset || null);
+              try { fr.contentWindow.postMessage({ type: 'hw-remote-change', dataset: safeDataset }, '*'); } catch (e) {}
             }
           });
         }
-      });
     }
     function submit(ev) {
       if (ev && ev.preventDefault) ev.preventDefault();
@@ -653,6 +659,53 @@
 <script>
 (function(){
   var CHILD_SHIM = document.getElementById('child-shim').textContent;
+  /* Server storage must be available inside the embedded attendance frame too.
+     The old child shim only mirrored IndexedDB into the parent browser, which
+     made attendance appear local and could leave a restored/large dataset
+     loading forever.  This adapter uses the authenticated parent origin so the
+     frame reads/writes the same Postgres-backed APIs as the shell. */
+  var CHILD_SERVER_SYNC = `(function(){
+    'use strict';
+    var cache=Object.create(null), hydrated=false, hydratePromise=null;
+    var API_BASE='';
+    try{ API_BASE=(window.parent && window.parent.location && window.parent.location.origin && window.parent.location.origin!=='null') ? window.parent.location.origin : ''; }catch(e){}
+    function api(method,url,body){
+      var controller=typeof AbortController!=='undefined'?new AbortController():null;
+      var timer=controller?setTimeout(function(){controller.abort();},15000):null;
+      return fetch(API_BASE+url,{method:method,credentials:'include',headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:controller?controller.signal:undefined})
+        .then(function(r){ return r.text().then(function(t){ var b={}; try{b=t?JSON.parse(t):{};}catch(e){b={};} if(!r.ok){var x=new Error(b.error||('HTTP '+r.status));x.status=r.status;throw x;} return b; }); })
+        .finally(function(){if(timer)clearTimeout(timer);});
+    }
+    function hydrate(){
+      if(hydratePromise) return hydratePromise;
+      hydratePromise=api('GET','/api/kv-all').then(function(r){cache=(r&&r.values)||Object.create(null);hydrated=true;return cache;}).finally(function(){hydratePromise=null;});
+      return hydratePromise;
+    }
+    window.HWSync={
+      hydrate:hydrate,
+      hydrateDataset:function(){return api('GET','/api/dataset').then(function(r){return(r&&r.employees&&r.records)?r:{employees:[],records:[]};});},
+      saveDataset:function(d){return api('PUT','/api/dataset',d||{employees:[],records:[]});},
+      cached:function(){return cache;}
+    };
+    window.storage={
+      get:function(key,shared){
+        if(hydrated && Object.prototype.hasOwnProperty.call(cache,key)) return Promise.resolve({key:key,value:cache[key],shared:!!shared});
+        return hydrate().then(function(){
+          if(Object.prototype.hasOwnProperty.call(cache,key)) return {key:key,value:cache[key],shared:!!shared};
+          return null;
+        });
+      },
+      set:function(key,value,shared){
+        var v=String(value); cache[key]=v;
+        return api('PUT','/api/kv/'+encodeURIComponent(key),{value:v,shared:shared!==false}).then(function(){return{key:key,value:v,shared:!!shared};});
+      },
+      delete:function(key,shared){
+        delete cache[key];
+        return api('DELETE','/api/kv/'+encodeURIComponent(key)+'?shared='+(shared!==false)).then(function(){return{key:key,deleted:true,shared:!!shared};});
+      },
+      list:function(prefix,shared){return api('GET','/api/kv?prefix='+encodeURIComponent(prefix||'')+'&shared='+(shared!==false));}
+    };
+  })();`;
   var NAMES = {"attendance": "Attendance"};
   var SEP = '\u0000';
 
@@ -754,6 +807,7 @@
     var seed;
     try { seed = JSON.stringify(dumpLS()).replace(/</g, '\\u003c'); } catch(e){ seed = '{}'; }
     var inject = '<script>window.__HW_SEED_LS=' + seed + ';window.__HW_VIEW=' + JSON.stringify(id) + ';<\/script>'
+               + '<script>' + CHILD_SERVER_SYNC + '<\/script>'
                + '<script>' + CHILD_SHIM + '<\/script>'
                + '<style>#backToConsole,#backConsole,#__hwBackBtn,[id*="ackConsole"]{display:none!important}body.hw-embedded .toolbar,body.hw-hasback .toolbar{padding-left:14px!important}<\/style>';
     if(/<head[^>]*>/.test(doc)) return doc.replace(/<head[^>]*>/, function(mt){ return mt + inject; });

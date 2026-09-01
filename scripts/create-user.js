@@ -1,6 +1,6 @@
 'use strict';
 /* Usage: node scripts/create-user.js <email> <password> [role] [name]
-   role: admin | editor | viewer   (default admin for the first user) */
+   role: admin | employee   (default admin for the first user) */
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 if (!process.env.DATABASE_URL) {
