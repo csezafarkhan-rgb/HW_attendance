@@ -95,6 +95,10 @@ function requireRole(...roles) {
     next();
   };
 }
+// Shared keys an employee is allowed to write. Everything else org-wide stays
+// admin-only.
+const EMPLOYEE_WRITABLE = ['leaveRequests'];
+
 // Mirrors the key rules the dashboard's own storage shim enforced.
 function validKey(k) {
   return typeof k === 'string' && k.length > 0 && k.length < 200 && !/[\s\/\\'"]/.test(k);
@@ -280,7 +284,11 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   const shared = req.body && req.body.shared !== false;
   // Viewers are read-only for org-wide data, but must still be able to store
   // their own UI preferences, which are personal rows.
-  if (shared && req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
+  // Leave requests are the exception: employees raise them, so they have to be
+  // able to write that shared key or the request never reaches an admin.
+  if (shared && req.session.role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) === -1) {
+    return res.status(403).json({ error: 'read_only' });
+  }
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   const client = await pool.connect();
   try {
