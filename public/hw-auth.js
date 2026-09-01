@@ -1,91 +1,102 @@
-/* Server-backed login gate.
+/* Server-backed login gate for Homeweavers Attendance.
  *
- * Replaces the old client-side gate, which compared a SHA-256 hash that was
- * embedded in the HTML - anyone could read it or bypass it in devtools. This
- * version holds no credentials at all; the server decides, and the session
- * lives in an HTTP-only cookie the page cannot read.
- *
- * Reuses the existing gate markup so the sign-in screen looks unchanged, but
- * asks for email + password in one step instead of the old two-step flow.
+ * Authentication is handled only by the Node/Express API.  This file is
+ * intentionally self-contained so the sign-in button still works even if a
+ * legacy dashboard script has a JavaScript error.
  */
 (function () {
   'use strict';
 
-  window.HWAuth = {
-    user: null,
-    onExpired: function () {
-      // Session died mid-session (expired, or signed out elsewhere).
-      if (window.HWAuth.__reloading) return;
-      window.HWAuth.__reloading = true;
-      location.reload();
-    }
+  window.HWAuth = window.HWAuth || {};
+  window.HWAuth.user = null;
+  window.HWAuth.__booted = false;
+  window.HWAuth.__reloading = false;
+  window.HWAuth.onExpired = function () {
+    if (window.HWAuth.__reloading) return;
+    window.HWAuth.__reloading = true;
+    location.reload();
   };
 
-  function post(url, body) {
-    return fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); });
+  function apiJson(url, options) {
+    options = options || {};
+    options.credentials = 'same-origin';
+    options.headers = Object.assign({ 'content-type': 'application/json' }, options.headers || {});
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 15000) : null;
+    if (controller) options.signal = controller.signal;
+    return fetch(url, options).then(function (r) {
+      return r.text().then(function (text) {
+        var body = {};
+        try { body = text ? JSON.parse(text) : {}; } catch (e) { body = { error: text || ('HTTP ' + r.status) }; }
+        if (!r.ok) {
+          var err = new Error(body.error || ('HTTP ' + r.status));
+          err.status = r.status;
+          throw err;
+        }
+        return body;
+      });
+    }).finally(function () { if (timer) clearTimeout(timer); });
   }
 
-  window.initLoginGate = function (startWorkspace) {
+  function setupGate(startWorkspace) {
+    if (window.HWAuth.__booted) return;
     var gate = document.getElementById('loginGate');
+    if (!gate) return;
+    window.HWAuth.__booted = true;
+
     var uEl = document.getElementById('lgUser');
     var pEl = document.getElementById('lgPass');
     var btn = document.getElementById('lgBtn');
+    var form = document.getElementById('lgForm');
     var errEl = document.getElementById('lgErr');
     var who = document.getElementById('whoami');
     var outBtn = document.getElementById('logoutBtn');
     var usersBtn = document.getElementById('usersBtn');
     var pbBtn = document.getElementById('pbBtn');
     var sub = document.getElementById('lgTitleSub');
-
-    // Email + password together; no separate "Continue" step.
     var passField = document.getElementById('lgPassField');
-    if (passField) passField.style.display = '';
     var backBtn = document.getElementById('lgBack');
-    if (backBtn) backBtn.style.display = 'none';
     var rememberRow = document.getElementById('lgRememberRow');
-    if (rememberRow) rememberRow.style.display = 'none'; // cookie handles this now
-    if (btn) btn.textContent = 'Sign in';
-    if (sub) sub.textContent = 'Sign in with your work email or username';
     var lbl = document.querySelector('label[for="lgUser"]');
-    if (lbl) lbl.textContent = 'Email or username';
-    if (uEl) { uEl.type = 'text'; uEl.setAttribute('autocomplete', 'username'); }
 
-    // Password recovery is an admin action now, not a client-side question.
-    ['lgCpLink', 'lgFpLink'].forEach(function (id) {
-      var a = document.getElementById(id);
-      if (a && id === 'lgFpLink') { a.textContent = 'Forgot password? Ask an admin'; a.removeAttribute('href'); a.style.cursor = 'default'; }
-    });
+    if (passField) passField.style.display = '';
+    if (backBtn) backBtn.style.display = 'none';
+    if (rememberRow) rememberRow.style.display = 'none';
+    if (btn) btn.textContent = 'Sign in';
+    if (sub) sub.textContent = 'Sign in to open your dashboards';
+    if (lbl) lbl.textContent = 'Username or email';
+    if (uEl) {
+      uEl.type = 'text';
+      uEl.setAttribute('autocomplete', 'username');
+      uEl.setAttribute('autocapitalize', 'none');
+      uEl.setAttribute('spellcheck', 'false');
+    }
+    var fp = document.getElementById('lgFpLink');
+    if (fp) { fp.textContent = 'Forgot password? Ask an admin'; fp.removeAttribute('href'); fp.style.cursor = 'default'; }
 
-    function fail(msg) {
-      if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+    function showError(message) {
+      if (errEl) { errEl.textContent = message; errEl.style.display = 'block'; }
       if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
     }
-
+    function clearError() {
+      if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+    }
     function enter(user) {
       window.HWAuth.user = user;
-      if (who) who.textContent = '\uD83D\uDC64 ' + (user.name || user.email) + (user.role === 'admin' ? ' \u00B7 Admin' : '');
+      if (who) who.textContent = '👤 ' + (user.name || user.email) + (user.role === 'admin' ? ' · Admin' : '');
       if (outBtn) outBtn.style.display = '';
-      // Only admins manage users or take whole-project backups.
       if (usersBtn) usersBtn.style.display = user.role === 'admin' ? '' : 'none';
       if (pbBtn) pbBtn.style.display = user.role === 'admin' ? '' : 'none';
 
-      // Load every shared setting in one request before the dashboard boots,
-      // so its ~30 startup reads are served from cache.
-      var ready = (window.HWSync && window.HWSync.hydrate) ? window.HWSync.hydrate() : Promise.resolve();
-      ready.catch(function () {}).then(function () {
+      var ready = (window.HWSync && typeof window.HWSync.hydrate === 'function')
+        ? window.HWSync.hydrate()
+        : Promise.resolve();
+      Promise.resolve(ready).catch(function () {}).then(function () {
         gate.classList.add('lg-out');
         setTimeout(function () { gate.style.display = 'none'; }, 380);
-        startWorkspace('attendance');
-        if (window.HWLiveSync) {
+        if (typeof startWorkspace === 'function') startWorkspace('attendance');
+        if (window.HWLiveSync && typeof window.HWLiveSync.start === 'function') {
           window.HWLiveSync.start(function (changes, dataset) {
-            // Someone else changed shared data - tell the dashboard to refresh.
-            // When attendance/employees changed, pass the already-fetched dataset
-            // so the iframe does not make a second database request.
             var fr = document.querySelector('#frames iframe[data-id="attendance"]');
             if (fr && fr.contentWindow) {
               try { fr.contentWindow.postMessage({ type: 'hw-remote-change', dataset: dataset || null }, '*'); } catch (e) {}
@@ -94,39 +105,64 @@
         }
       });
     }
-
-    function submit() {
-      var email = (uEl && uEl.value || '').trim();
-      var pass = (pEl && pEl.value) || '';
-      if (!email || !pass) return fail('Enter your email/username and password.');
-      if (errEl) errEl.style.display = 'none';
+    function submit(ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      if (btn && btn.disabled) return;
+      var username = (uEl && uEl.value || '').trim();
+      var password = (pEl && pEl.value) || '';
+      if (!username || !password) return showError('Enter your username/email and password.');
+      clearError();
       if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
-      post('/api/login', { email: email, password: pass }).then(function (r) {
-        if (r.status === 200 && r.body && r.body.user) return enter(r.body.user);
-        if (r.status === 429) return fail('Too many attempts. Try again in a few minutes.');
-        fail('Incorrect email or password.');
-      }).catch(function () { fail('Could not reach the server. Check your connection.'); });
-    }
-
-    if (btn) btn.addEventListener('click', submit);
-    var form = document.getElementById('lgForm');
-    if (form) form.addEventListener('submit', function (e) { e.preventDefault(); submit(); });
-    if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
-    if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
-
-    if (outBtn) {
-      outBtn.addEventListener('click', function () {
-        post('/api/logout').then(function () { location.reload(); });
+      apiJson('/api/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: username, password: password })
+      }).then(function (body) {
+        if (!body || !body.user) throw new Error('invalid_login_response');
+        enter(body.user);
+      }).catch(function (e) {
+        if (e && e.status === 429) return showError('Too many attempts. Try again in a few minutes.');
+        if (e && e.name === 'AbortError') return showError('The server took too long to respond. Please try again.');
+        if (e && e.message === 'invalid_credentials') return showError('Incorrect username/email or password.');
+        if (e && e.message === 'invalid_login_response') return showError('The server returned an invalid login response.');
+        showError('Login failed. Please try again.');
       });
     }
 
-    // Already signed in? Skip the gate.
+    if (btn) btn.addEventListener('click', submit);
+    if (form) form.addEventListener('submit', submit);
+    if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
+    if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
+    if (outBtn) outBtn.addEventListener('click', function () {
+      apiJson('/api/logout', { method: 'POST', body: '{}' }).finally(function () { location.reload(); });
+    });
+
+    // Ask the server whether a valid session already exists.
     fetch('/api/me', { credentials: 'same-origin' })
       .then(function (r) { return r.status === 200 ? r.json() : null; })
       .then(function (j) {
         if (j && j.user) enter(j.user);
-        else setTimeout(function () { try { uEl.focus(); } catch (e) {} }, 60);
+        else setTimeout(function () { try { if (uEl) uEl.focus(); } catch (e) {} }, 60);
       })
-      .catch(function () {});
+      .catch(function () { setTimeout(function () { try { if (uEl) uEl.focus(); } catch (e) {} }, 60); });
+  }
+
+  window.initLoginGate = function (startWorkspace) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { setupGate(startWorkspace); }, { once: true });
+    } else {
+      setupGate(startWorkspace);
+    }
   };
+
+  // Safety net: if a legacy script fails before it reaches the normal call at
+  // the bottom of index.html, the login form still gets initialized.
+  function autoBoot() {
+    if (document.getElementById('loginGate') && !window.HWAuth.__booted) {
+      window.initLoginGate(function (first) {
+        if (typeof window.__HWStartWorkspace === 'function') window.__HWStartWorkspace(first);
+      });
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoBoot, { once: true });
+  else setTimeout(autoBoot, 0);
 })();

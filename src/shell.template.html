@@ -2660,6 +2660,14 @@ function _initLoginGateReal(startWorkspace){
   addUser = serverAddUser;
   renderUsers = serverRenderUsers;
 
+  /* Expose a minimal workspace starter for the login safety-net in hw-auth.js. */
+  window.__HWStartWorkspace = function(first){
+    try { show(first); } catch (e) {}
+    try { broadcastSession(); } catch (e) {}
+    setTimeout(function(){ try { broadcastSession(); } catch (e) {} }, 120);
+    setTimeout(function(){ try { broadcastSession(); } catch (e) {} }, 600);
+  };
+
   initLoginGate(function(first){
     show(first);
     /* Tell every frame straight away. Warmed frames asked for the session
