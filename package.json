@@ -4,10 +4,12 @@
   "private": true,
   "description": "Homeweavers Attendance - multi-user attendance dashboard with Postgres sync",
   "main": "server.js",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
-    "migrate": "node scripts/migrate.js",
+    "migrate": "node migrate.js",
     "create-user": "node scripts/create-user.js",
     "test:api": "node test/api.test.js"
   },
