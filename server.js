@@ -101,7 +101,13 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'missing_credentials' });
 
   const { rows } = await pool.query(
-    'SELECT id, org_id, email, password_hash, name, role, is_active FROM users WHERE lower(email) = $1',
+    `SELECT id, org_id, email, password_hash, name, role, is_active
+       FROM users
+      WHERE lower(email) = $1
+         OR lower(split_part(email, '@', 1)) = $1
+         OR lower(COALESCE(name, '')) = $1
+      ORDER BY CASE WHEN lower(email) = $1 THEN 0 ELSE 1 END, id
+      LIMIT 1`,
     [email]
   );
   const u = rows[0];
@@ -468,7 +474,12 @@ app.get('/healthz', async (req, res) => {
   catch (e) { res.status(500).json({ ok: false }); }
 });
 
-app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  extensions: ['html'],
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-store, max-age=0');
+  }
+}));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((err, req, res, next) => {

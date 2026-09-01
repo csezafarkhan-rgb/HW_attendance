@@ -50,10 +50,10 @@
     var rememberRow = document.getElementById('lgRememberRow');
     if (rememberRow) rememberRow.style.display = 'none'; // cookie handles this now
     if (btn) btn.textContent = 'Sign in';
-    if (sub) sub.textContent = 'Sign in with your work email';
+    if (sub) sub.textContent = 'Sign in with your work email or username';
     var lbl = document.querySelector('label[for="lgUser"]');
-    if (lbl) lbl.textContent = 'Email';
-    if (uEl) { uEl.type = 'email'; uEl.setAttribute('autocomplete', 'username'); }
+    if (lbl) lbl.textContent = 'Email or username';
+    if (uEl) { uEl.type = 'text'; uEl.setAttribute('autocomplete', 'username'); }
 
     // Password recovery is an admin action now, not a client-side question.
     ['lgCpLink', 'lgFpLink'].forEach(function (id) {
@@ -98,7 +98,7 @@
     function submit() {
       var email = (uEl && uEl.value || '').trim();
       var pass = (pEl && pEl.value) || '';
-      if (!email || !pass) return fail('Enter your email and password.');
+      if (!email || !pass) return fail('Enter your email/username and password.');
       if (errEl) errEl.style.display = 'none';
       if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
       post('/api/login', { email: email, password: pass }).then(function (r) {

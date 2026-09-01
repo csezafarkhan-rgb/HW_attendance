@@ -148,9 +148,9 @@
       <div id="lgOk"></div>
       <form id="lgForm">
         <div class="lg-field"><label for="lgUser">Username</label><input id="lgUser" type="text" autocomplete="username" spellcheck="false" autocapitalize="none" autocorrect="off"></div>
-        <div class="lg-field" id="lgPassField" style="display:none"><label for="lgPass">Password</label><div class="lg-pwwrap"><input id="lgPass" type="password" autocomplete="current-password"><button type="button" id="lgEye" tabindex="-1" aria-label="Show password">👁</button></div></div>
+        <div class="lg-field" id="lgPassField"><label for="lgPass">Password</label><div class="lg-pwwrap"><input id="lgPass" type="password" autocomplete="current-password"><button type="button" id="lgEye" tabindex="-1" aria-label="Show password">👁</button></div></div>
         <div class="lg-row" id="lgRememberRow" style="display:none"><input id="lgRemember" type="checkbox"><label for="lgRemember">Keep me signed in for 30 days</label></div>
-        <button id="lgBtn" type="button">Continue</button>
+        <button id="lgBtn" type="button">Sign in</button>
         <button id="lgBack" type="button" style="display:none;background:none;border:0;color:#5B6472;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;">← Not you? Use a different name</button>
         <div class="lg-links"><a href="#" id="lgCpLink">Change password</a> · <a href="#" id="lgFpLink">Forgot password?</a></div>
       </form>
@@ -1961,9 +1961,11 @@ function _initLoginGateReal(startWorkspace){
   /* Two steps: the name first, then the password. Asking for both at once
      makes the card busier than it needs to be, and the name is what decides
      whose password is being asked for. */
-  var LG_STEP = 'user';
+  var LG_STEP = 'pass';
   function lgShowStep(step){
-    LG_STEP = step;
+    // Compatibility only. Production login is handled by hw-auth.js.
+    LG_STEP = 'pass';
+    step = 'pass';
     var pf = document.getElementById('lgPassField');
     var rr = document.getElementById('lgRememberRow');
     var bk = document.getElementById('lgBack');
