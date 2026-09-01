@@ -1645,15 +1645,23 @@
      The session - who is signed in, and what they may see inside Attendance -
      is handed to every frame, and re-sent whenever a frame asks. */
   function sessionPayload(){
-    var a = null;
-    try{ a = readAuth(); }catch(e){}
-    if (!a || !a.u) return null;
-    var rec = null;
-    try{ rec = (getDB().users || {})[a.u] || null; }catch(e){}
-    var att = (rec && rec.att) ? rec.att : { role: (rec && rec.role === 'admin') ? 'admin' : 'employee', emp: '' };
-    if (rec && rec.role === 'admin') att = { role:'admin', emp: att.emp || '' };
-    return { type:'hw-session', user:a.u, role:(rec && rec.role) || 'user',
-             tabs:(rec && rec.tabs) || [], att:att };
+    /* The production login is owned by hw-auth.js and lives in the server
+       session. The old client-side getDB()/readAuth() path is intentionally
+       no longer authoritative, so it is empty after a fresh server login.
+       Use the authenticated server user directly when broadcasting the session
+       into the embedded attendance dashboard. */
+    var u = null;
+    try{ u = window.HWAuth && window.HWAuth.user; }catch(e){}
+    if (!u || !u.email) return null;
+    var isAdmin = u.role === 'admin';
+    var empName = u.name || u.email;
+    return {
+      type:'hw-session',
+      user:u.email,
+      role:u.role || 'viewer',
+      tabs:isAdmin ? ['attendance'] : ['attendance'],
+      att:{ role:isAdmin ? 'admin' : 'employee', emp:isAdmin ? '' : empName }
+    };
   }
   function broadcastSession(){
     var p = sessionPayload();
