@@ -2759,12 +2759,16 @@ function _initLoginGateReal(startWorkspace){
   var fpBtn = document.getElementById('fpBtn');
   if (fpBtn) fpBtn.addEventListener('click', function(ev){ ev.preventDefault(); fpDoReset(); });
   if (outBtn) outBtn.addEventListener('click', function(){ clearAuth(); location.reload(); });
-  if (usersBtn) usersBtn.addEventListener('click', openUsers);
+  /* The production app uses PostgreSQL accounts. Bind these controls directly
+     to the server-backed handlers; the legacy browser-local user functions
+     remain only for compatibility with old backup data and must never handle
+     the live Users button. */
+  if (usersBtn) usersBtn.addEventListener('click', serverOpenUsers);
   var umClose = document.getElementById('umClose');
   if (umClose) umClose.addEventListener('click', closeUsers);
   var umAdd = document.getElementById('umAdd');
-  if (umAdd) umAdd.addEventListener('click', addUser);
-  function umEnter(ev){ if (ev.key === 'Enter' || ev.keyCode === 13){ ev.preventDefault(); addUser(); } }
+  if (umAdd) umAdd.addEventListener('click', serverAddUser);
+  function umEnter(ev){ if (ev.key === 'Enter' || ev.keyCode === 13){ ev.preventDefault(); serverAddUser(); } }
   var umNewUserEl = document.getElementById('umNewUser'); if (umNewUserEl) umNewUserEl.addEventListener('keydown', umEnter);
   var umNewPassEl = document.getElementById('umNewPass'); if (umNewPassEl) umNewPassEl.addEventListener('keydown', umEnter);
   var modal = document.getElementById('usersModal');
