@@ -1,9 +1,11 @@
-# Render blueprint - creates the web service and Postgres together.
+# Render blueprint - free tier for testing.
+# To move to paid later: change `plan: free` to `plan: starter` (service)
+# and `plan: basic-256mb` (database), then redeploy.
 services:
   - type: web
     name: hw-attendance
     runtime: node
-    plan: starter          # Pro-tier account; bump if you need more memory
+    plan: free
     buildCommand: npm ci
     startCommand: npm run migrate && npm start
     healthCheckPath: /healthz
@@ -16,8 +18,16 @@ services:
         fromDatabase:
           name: hw-attendance-db
           property: connectionString
+      # Free-tier services have no Shell, so the first admin cannot be created
+      # by hand. Set these two in the Render dashboard and the migration will
+      # create that account on first boot. Safe to leave set: it only ever
+      # acts when the users table is empty.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
 
 databases:
   - name: hw-attendance-db
-    plan: basic-256mb
+    plan: free
     postgresMajorVersion: "16"
