@@ -150,7 +150,8 @@ app.post('/api/change-password', requireAuth, async (req, res) => {
 
 app.get('/api/users', requireRole('admin'), async (req, res) => {
   const { rows } = await pool.query(
-    'SELECT id, email, name, role, is_active, last_login_at FROM users WHERE org_id = $1 ORDER BY email',
+    `SELECT id, email, name, role, is_active, last_login_at, created_at
+       FROM users WHERE org_id = $1 ORDER BY email`,
     [req.session.orgId]
   );
   res.json({ users: rows });
@@ -159,15 +160,18 @@ app.get('/api/users', requireRole('admin'), async (req, res) => {
 app.post('/api/users', requireRole('admin'), async (req, res) => {
   const { email, password, name, role } = req.body || {};
   const e = String(email || '').trim().toLowerCase();
+  const r = role === 'admin' ? 'admin' : 'employee';
+  const n = String(name || '').trim();
   if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return res.status(400).json({ error: 'invalid_email' });
   if (!password || String(password).length < 8) return res.status(400).json({ error: 'password_too_short' });
-  const r = ['admin', 'editor', 'viewer'].indexOf(role) >= 0 ? role : 'viewer';
+  if (r === 'employee' && !n) return res.status(400).json({ error: 'employee_name_required' });
   const hash = await bcrypt.hash(String(password), 12);
   try {
     const { rows } = await pool.query(
       `INSERT INTO users (org_id, email, password_hash, name, role)
-       VALUES ($1,$2,$3,$4,$5) RETURNING id, email, name, role, is_active`,
-      [req.session.orgId, e, hash, name || null, r]
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, email, name, role, is_active, last_login_at, created_at`,
+      [req.session.orgId, e, n || 'Admin', r]
     );
     res.json({ user: rows[0] });
   } catch (err) {
@@ -178,23 +182,53 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
 
 app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { role, is_active, password } = req.body || {};
+  const { role, is_active, password, name } = req.body || {};
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const currentQ = await pool.query('SELECT id, role, is_active FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
+  if (!currentQ.rows[0]) return res.status(404).json({ error: 'not_found' });
+  if (id === req.session.userId && role !== undefined && role !== 'admin') return res.status(400).json({ error: 'cannot_remove_own_admin' });
+  if (id === req.session.userId && is_active === false) return res.status(400).json({ error: 'cannot_disable_self' });
+  if (currentQ.rows[0].role === 'admin' && role === 'employee') {
+    const admins = await pool.query("SELECT count(*)::int AS n FROM users WHERE org_id = $1 AND role = 'admin' AND is_active = TRUE", [req.session.orgId]);
+    if (admins.rows[0].n <= 1) return res.status(400).json({ error: 'last_admin' });
+  }
   const sets = [], vals = [];
-  if (role && ['admin', 'editor', 'viewer'].indexOf(role) >= 0) { vals.push(role); sets.push(`role = $${vals.length}`); }
+  if (role !== undefined) {
+    if (!['admin','employee'].includes(role)) return res.status(400).json({ error: 'invalid_role' });
+    vals.push(role); sets.push(`role = $${vals.length}`);
+  }
+  if (name !== undefined) {
+    const n = String(name || '').trim();
+    if (!n && role !== 'admin') return res.status(400).json({ error: 'employee_name_required' });
+    vals.push(n || 'Admin'); sets.push(`name = $${vals.length}`);
+  }
   if (typeof is_active === 'boolean') { vals.push(is_active); sets.push(`is_active = $${vals.length}`); }
-  if (password) {
+  if (password !== undefined && String(password) !== '') {
     if (String(password).length < 8) return res.status(400).json({ error: 'password_too_short' });
-    vals.push(await bcrypt.hash(String(password), 12));
-    sets.push(`password_hash = $${vals.length}`);
+    vals.push(await bcrypt.hash(String(password), 12)); sets.push(`password_hash = $${vals.length}`);
   }
   if (!sets.length) return res.status(400).json({ error: 'nothing_to_update' });
   vals.push(id, req.session.orgId);
   const { rows } = await pool.query(
     `UPDATE users SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND org_id = $${vals.length}
-     RETURNING id, email, name, role, is_active`, vals
+     RETURNING id, email, name, role, is_active, last_login_at, created_at`, vals
   );
   if (!rows[0]) return res.status(404).json({ error: 'not_found' });
   res.json({ user: rows[0] });
+});
+
+app.delete('/api/users/:id', requireRole('admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (id === req.session.userId) return res.status(400).json({ error: 'cannot_delete_self' });
+  const target = await pool.query('SELECT id, role FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
+  if (!target.rows[0]) return res.status(404).json({ error: 'not_found' });
+  if (target.rows[0].role === 'admin') {
+    const admins = await pool.query("SELECT count(*)::int AS n FROM users WHERE org_id = $1 AND role = 'admin' AND is_active = TRUE", [req.session.orgId]);
+    if (admins.rows[0].n <= 1) return res.status(400).json({ error: 'last_admin' });
+  }
+  await pool.query('DELETE FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
+  res.json({ ok: true });
 });
 
 /* ---------------- KV: backs window.storage ---------------- */
@@ -219,7 +253,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   const shared = req.body && req.body.shared !== false;
   // Viewers are read-only for org-wide data, but must still be able to store
   // their own UI preferences, which are personal rows.
-  if (shared && req.session.role === 'viewer') return res.status(403).json({ error: 'read_only' });
+  if (shared && req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   const client = await pool.connect();
   try {
@@ -250,7 +284,7 @@ app.delete('/api/kv/:key', requireAuth, async (req, res) => {
   const key = req.params.key;
   if (!validKey(key)) return res.status(400).json({ error: 'bad_key' });
   const shared = req.query.shared !== 'false';
-  if (shared && req.session.role === 'viewer') return res.status(403).json({ error: 'read_only' });
+  if (shared && req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
   await pool.query(
     shared
       ? 'DELETE FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL'
@@ -288,11 +322,17 @@ app.get('/api/kv-all', requireAuth, async (req, res) => {
 
 app.get('/api/dataset', requireAuth, async (req, res) => {
   const orgId = req.session.orgId;
-  const emp = await pool.query(
-    'SELECT code, name, shift FROM employees WHERE org_id = $1 AND is_active = TRUE ORDER BY id', [orgId]
-  );
+  const emp = req.session.role === 'employee'
+    ? await pool.query(
+        `SELECT code, name, shift FROM employees WHERE org_id = $1 AND is_active = TRUE
+         AND name = (SELECT name FROM users WHERE id = $2) ORDER BY id`, [orgId, req.session.userId]
+      )
+    : await pool.query(
+        'SELECT code, name, shift FROM employees WHERE org_id = $1 AND is_active = TRUE ORDER BY id', [orgId]
+      );
   const params = [orgId];
   let where = 'org_id = $1';
+  if (req.session.role === 'employee') { params.push(req.session.userId); where += ` AND employee = (SELECT name FROM users WHERE id = $${params.length})`; }
   if (req.query.from) { params.push(req.query.from); where += ` AND day >= $${params.length}`; }
   if (req.query.to)   { params.push(req.query.to);   where += ` AND day <= $${params.length}`; }
   const rec = await pool.query(
@@ -309,7 +349,7 @@ app.get('/api/dataset', requireAuth, async (req, res) => {
    rows another user has just added. The browser uses this after an import and
    whenever the attendance dataset is changed locally. */
 app.put('/api/dataset', requireAuth, async (req, res) => {
-  if (req.session.role === 'viewer') return res.status(403).json({ error: 'read_only' });
+  if (req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
   const employees = Array.isArray(req.body && req.body.employees) ? req.body.employees : [];
   const records = Array.isArray(req.body && req.body.records) ? req.body.records : [];
   const client = await pool.connect();
@@ -353,7 +393,7 @@ app.put('/api/dataset', requireAuth, async (req, res) => {
    Per-row upsert (not replace-all) so concurrent editors don't wipe each
    other's work. */
 app.post('/api/records', requireAuth, async (req, res) => {
-  if (req.session.role === 'viewer') return res.status(403).json({ error: 'read_only' });
+  if (req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
   const records = (req.body && req.body.records) || [];
   if (!Array.isArray(records)) return res.status(400).json({ error: 'records_must_be_array' });
   const client = await pool.connect();
@@ -379,7 +419,7 @@ app.post('/api/records', requireAuth, async (req, res) => {
 });
 
 app.post('/api/employees', requireAuth, async (req, res) => {
-  if (req.session.role === 'viewer') return res.status(403).json({ error: 'read_only' });
+  if (req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
   const employees = (req.body && req.body.employees) || [];
   const client = await pool.connect();
   let n = 0;

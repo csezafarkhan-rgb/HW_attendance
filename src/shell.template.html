@@ -229,21 +229,17 @@
   <div id="usersModal">
     <div class="um-card">
       <div class="um-top"><h2>👥 Users &amp; Access</h2><button id="umClose" class="um-btn">✕ Close</button></div>
-      <div class="um-note">Passwords are one-way encrypted (SHA-256) — nobody can view existing passwords, only set new ones. Use 👁 to see what you’re typing, or 🎲 to generate a strong one.</div>
+      <div class="um-note">Accounts are stored securely in PostgreSQL. Create either an Admin account (full access) or an Employee account (their own attendance only). Passwords are never stored in plain text.</div>
       <div class="um-addbox">
         <div class="um-addrow">
-          <input id="umNewUser" type="text" placeholder="username" spellcheck="false" autocapitalize="none">
-          <input id="umNewPass" type="password" placeholder="password">
-          <select id="umNewRole"><option value="user">User</option><option value="admin">Admin</option></select>
+          <input id="umNewUser" type="email" placeholder="work email" spellcheck="false" autocapitalize="none" autocorrect="off">
+          <input id="umNewPass" type="password" placeholder="password (8+ chars)">
+          <select id="umNewRole"><option value="employee">Employee</option><option value="admin">Admin</option></select>
           <button id="umAdd" class="um-btn um-add">+ Add user</button>
         </div>
         <div id="umNewTabs" class="um-tabs"></div>
         <div class="um-addrow um-sqrow">
-          <select id="umNewAttRole" title="What this person sees inside Attendance">
-            <option value="employee">Attendance: own record only</option>
-            <option value="admin">Attendance: full access</option>
-          </select>
-          <input id="umNewAttEmp" type="text" placeholder="their name in Attendance (for own-record view)" spellcheck="false">
+          <input id="umNewAttEmp" type="text" placeholder="Employee name exactly as shown in Attendance (employees only)" spellcheck="false">
         </div>
         <div class="um-addrow um-sqrow">
           <input id="umNewSqQ" type="text" placeholder="security question (optional)">
@@ -2545,6 +2541,107 @@ function _initLoginGateReal(startWorkspace){
 }
 
   
+  /* ---------------- server-backed Users panel ----------------
+     The old workspace user store was browser-local. Authentication is now
+     owned by PostgreSQL, so the Users panel must use the same API or accounts
+     would work only on the admin's browser. */
+  function userApi(url, options){
+    options = options || {}; options.credentials = 'same-origin';
+    options.headers = Object.assign({'content-type':'application/json'}, options.headers || {});
+    return fetch(url, options).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(body){
+        if (!r.ok) { var e = new Error(body.error || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+        return body;
+      });
+    });
+  }
+  function escText(v){ return String(v == null ? '' : v); }
+  function serverFlash(text, ok){
+    var el = document.getElementById('umErr');
+    if(!el) return;
+    el.textContent = text; el.style.display = 'block';
+    el.className = ok ? 'um-flash-ok' : '';
+  }
+  function serverErrorMessage(e){
+    var m = e && e.message || 'Could not save user.';
+    var map = {
+      invalid_email:'Enter a valid work email.', password_too_short:'Password must be at least 8 characters.',
+      email_exists:'That email already has an account.', employee_name_required:'Employee name is required.',
+      last_admin:'At least one active admin is required.', cannot_delete_self:'You cannot delete your own account.',
+      cannot_remove_own_admin:'You cannot remove your own admin access.', cannot_disable_self:'You cannot disable your own account.'
+    };
+    return map[m] || m;
+  }
+  function serverRenderUsers(){
+    var list = document.getElementById('umList');
+    if(!list) return;
+    list.innerHTML = '<div class="um-count">Loading users…</div>';
+    userApi('/api/users').then(function(data){
+      var users = data.users || [];
+      list.innerHTML = '';
+      var count = document.createElement('div'); count.className='um-count';
+      count.textContent = users.length + ' user' + (users.length===1?'':'s') + ' total'; list.appendChild(count);
+      users.forEach(function(u){
+        var row=document.createElement('div'); row.className='um-row';
+        var head=document.createElement('div'); head.className='um-head';
+        var b=document.createElement('b'); b.textContent=u.email; head.appendChild(b);
+        if(window.HWAuth && window.HWAuth.user && window.HWAuth.user.id===u.id){ var you=document.createElement('span'); you.className='um-you'; you.textContent='you'; head.appendChild(you); }
+        var stat=document.createElement('span'); stat.className='um-rec'; stat.textContent=(u.is_active?'Active':'Disabled'); head.appendChild(stat);
+        var role=document.createElement('select'); role.className='um-role';
+        [['employee','Employee'],['admin','Admin']].forEach(function(x){ var o=document.createElement('option'); o.value=x[0]; o.textContent=x[1]; if(u.role===x[0]) o.selected=true; role.appendChild(o); });
+        var name=document.createElement('input'); name.type='text'; name.className='um-pwin'; name.placeholder=u.role==='admin'?'Admin display name':'Employee name'; name.value=u.name||'';
+        var active=document.createElement('label'); active.className='um-tab';
+        var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!u.is_active; active.appendChild(cb); var at=document.createElement('span'); at.textContent=' Active'; active.appendChild(at);
+        var save=document.createElement('button'); save.className='um-btn'; save.textContent='Save';
+        save.onclick=function(){
+          save.disabled=true; save.textContent='Saving…';
+          userApi('/api/users/'+u.id,{method:'PATCH',body:JSON.stringify({role:role.value,name:name.value.trim(),is_active:cb.checked})})
+          .then(function(){ serverFlash('Saved '+u.email+'.',true); serverRenderUsers(); })
+          .catch(function(e){ serverFlash(serverErrorMessage(e),false); save.disabled=false; save.textContent='Save'; });
+        };
+        var pw=document.createElement('input'); pw.type='password'; pw.className='um-pwin'; pw.placeholder='new password (optional)';
+        var pwBtn=document.createElement('button'); pwBtn.className='um-btn'; pwBtn.textContent='Set password';
+        pwBtn.onclick=function(){ var v=pw.value||''; if(v.length<8){serverFlash('Password must be at least 8 characters.',false);return;} pwBtn.disabled=true; pwBtn.textContent='Saving…'; userApi('/api/users/'+u.id,{method:'PATCH',body:JSON.stringify({password:v})}).then(function(){pw.value='';pwBtn.disabled=false;pwBtn.textContent='Set password';serverFlash('Password updated for '+u.email+'.',true);}).catch(function(e){pwBtn.disabled=false;pwBtn.textContent='Set password';serverFlash(serverErrorMessage(e),false);}); };
+        var del=document.createElement('button'); del.className='um-btn um-del'; del.textContent='Delete';
+        del.onclick=function(){ if(del.dataset.armed!=='1'){del.dataset.armed='1';del.textContent='Sure?';setTimeout(function(){if(del.dataset.armed==='1'){del.dataset.armed='';del.textContent='Delete';}},3500);return;} del.disabled=true; userApi('/api/users/'+u.id,{method:'DELETE'}).then(function(){serverFlash('Deleted '+u.email+'.',true);serverRenderUsers();}).catch(function(e){del.disabled=false;del.dataset.armed='';del.textContent='Delete';serverFlash(serverErrorMessage(e),false);}); };
+        head.appendChild(role); head.appendChild(del); row.appendChild(head);
+        var details=document.createElement('div'); details.className='um-pw'; details.appendChild(name); details.appendChild(active); details.appendChild(save); row.appendChild(details);
+        if(u.role==='employee'){
+          var hint=document.createElement('div'); hint.className='um-note'; hint.textContent='Employee view: '+(u.name||'No employee assigned'); row.appendChild(hint);
+        } else { var hint2=document.createElement('div'); hint2.className='um-alltabs'; hint2.textContent='Admin — full attendance access + user management'; row.appendChild(hint2); }
+        var pwr=document.createElement('div'); pwr.className='um-pw'; pwr.appendChild(pw); pwr.appendChild(pwBtn); row.appendChild(pwr);
+        list.appendChild(row);
+      });
+    }).catch(function(e){ list.innerHTML=''; serverFlash(serverErrorMessage(e),false); });
+  }
+  function serverAddUser(){
+    var email=(document.getElementById('umNewUser').value||'').trim().toLowerCase();
+    var pass=document.getElementById('umNewPass').value||'';
+    var role=(document.getElementById('umNewRole').value==='admin')?'admin':'employee';
+    var name=(document.getElementById('umNewAttEmp').value||'').trim();
+    if(!email) return serverFlash('Enter a work email.',false);
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return serverFlash('Enter a valid work email.',false);
+    if(pass.length<8) return serverFlash('Password must be at least 8 characters.',false);
+    if(role==='employee' && !name) return serverFlash('Enter the employee name for this account.',false);
+    serverFlash('Creating…',true);
+    userApi('/api/users',{method:'POST',body:JSON.stringify({email:email,password:pass,name:name||'Admin',role:role})}).then(function(){
+      document.getElementById('umNewUser').value=''; document.getElementById('umNewPass').value=''; document.getElementById('umNewAttEmp').value='';
+      serverRenderUsers(); serverFlash('✓ '+email+' created.',true);
+    }).catch(function(e){serverFlash(serverErrorMessage(e),false);});
+  }
+  function serverOpenUsers(){
+    if(!window.HWAuth || !window.HWAuth.user || window.HWAuth.user.role!=='admin') return;
+    var modal=document.getElementById('usersModal'); if(!modal) return;
+    var role=document.getElementById('umNewRole'), emp=document.getElementById('umNewAttEmp');
+    function toggle(){ if(role && emp){ emp.style.display=role.value==='employee'?'':'none'; emp.placeholder=role.value==='employee'?'Employee name exactly as shown in Attendance':'Not required for admin'; } }
+    if(role && !role.dataset.bound){role.dataset.bound='1';role.addEventListener('change',toggle);} toggle();
+    serverRenderUsers(); modal.style.display='flex';
+  }
+  /* Override the browser-local Users panel functions. */
+  openUsers = serverOpenUsers;
+  addUser = serverAddUser;
+  renderUsers = serverRenderUsers;
+
   initLoginGate(function(first){
     show(first);
     /* Tell every frame straight away. Warmed frames asked for the session

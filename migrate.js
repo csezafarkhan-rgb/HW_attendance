@@ -41,6 +41,10 @@ const pool = new Pool({
     orgId = orgs[0].id;
   }
 
+  // Older builds used viewer/editor for non-admin accounts. Normalize them
+  // to the current two-role model before the app starts using the Users panel.
+  await pool.query("UPDATE users SET role = 'employee' WHERE org_id = $1 AND role IN ('viewer','editor')", [orgId]);
+
   const { rows: existing } = await pool.query('SELECT count(*)::int AS n FROM users WHERE org_id = $1', [orgId]);
   if (existing[0].n > 0) {
     console.log('users already exist (' + existing[0].n + ') - skipping admin bootstrap');
