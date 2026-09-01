@@ -40,6 +40,24 @@ const pool = new Pool({
 });
 
 const app = express();
+
+/* Express 4 does not catch rejections from `async` route handlers, and Node
+   exits on an unhandled rejection - so one database error killed the whole
+   server and the browser saw a 502. Wrap every handler so async errors reach
+   the error handler and return a clean 500 instead. */
+['get', 'post', 'put', 'patch', 'delete'].forEach(function (method) {
+  const original = app[method].bind(app);
+  app[method] = function (path) {
+    const handlers = Array.prototype.slice.call(arguments, 1).map(function (h) {
+      if (typeof h !== 'function' || h.length === 4) return h;
+      return function (req, res, next) {
+        try { Promise.resolve(h(req, res, next)).catch(next); }
+        catch (e) { next(e); }
+      };
+    });
+    return original.apply(null, [path].concat(handlers));
+  };
+});
 app.set('trust proxy', 1); // Render terminates TLS at its proxy
 app.use(compression());
 app.use(helmet({
@@ -180,7 +198,7 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
       `INSERT INTO users (org_id, email, password_hash, name, role)
        VALUES ($1,$2,$3,$4,$5)
        RETURNING id, email, name, role, is_active, last_login_at, created_at`,
-      [req.session.orgId, e, n || 'Admin', r]
+      [req.session.orgId, e, hash, n || 'Admin', r]   // hash was missing: 5 placeholders, 4 values
     );
     res.json({ user: rows[0] });
   } catch (err) {
@@ -488,6 +506,13 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'server_error' });
+});
+
+pool.on('error', function (err) {
+  console.error('pg pool error (recovering):', err && err.message);
+});
+process.on('unhandledRejection', function (err) {
+  console.error('unhandled rejection (kept alive):', err && err.message);
 });
 
 if (require.main === module) {
