@@ -2622,21 +2622,27 @@ input:focus,select:focus,textarea:focus,.search:focus{
   }
   function applySavedJson(v){ if(!v) return false; try{ var d = JSON.parse(v); if(d && d.employees && d.records){ applyDataset(d); return true; } }catch(e){} return false; }
   function loadCustomDataset(){
+    var withDeadline = function(p, ms, fallback){
+      return new Promise(function(resolve){
+        var done = false;
+        function finish(v){ if(done) return; done=true; resolve(v); }
+        var timer = setTimeout(function(){ finish(fallback); }, ms);
+        Promise.resolve(p).then(function(v){ clearTimeout(timer); finish(v); })
+          .catch(function(){ clearTimeout(timer); finish(fallback); });
+      });
+    };
     var localLoad = function(){
-      return idbData('get').then(function(v){
+      /* Browser storage is a fallback only. Never let a locked/hung IndexedDB
+         request prevent the attendance grid from becoming interactive. */
+      return withDeadline(idbData('get'), 1200, null).then(function(v){
         if(applySavedJson(v)) return true;
-        return storage.get('customDataset', true).then(function(res){
+        return withDeadline(storage.get('customDataset', true), 1800, null).then(function(res){
           if(res && res.value && applySavedJson(res.value)){
             idbData('set', res.value).catch(function(){});
             return true;
           }
           return false;
-        }).catch(function(){ return false; });
-      }).catch(function(){
-        return storage.get('customDataset', true).then(function(res){
-          if(res && res.value) return applySavedJson(res.value);
-          return false;
-        }).catch(function(){ return false; });
+        });
       });
     };
 
@@ -2664,7 +2670,10 @@ input:focus,select:focus,textarea:focus,.search:focus{
         // once. If there is no local copy, the bundled empty dataset still lets
         // the dashboard render normally instead of hanging.
         return localLoad().then(function(hadLocal){
-          if(hadLocal && remote !== null) return persistDataset().then(function(){ return true; });
+          if(hadLocal && remote !== null){
+            /* Do not block first paint on a database write. Sync in background. */
+            persistDataset().catch(function(e){ console.warn('initial dataset sync failed', e); });
+          }
           return !!hadLocal;
         });
       }).catch(function(){ return localLoad(); });

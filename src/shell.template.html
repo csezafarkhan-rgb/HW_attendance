@@ -409,8 +409,16 @@
      wins, because it is the one that cannot have been refused. */
   var LS_DB = '__ls';
   var lsOverlay = {};
-  var lsOverlayReady = bridgeReadDb(LS_DB).then(function(data){ lsOverlay = (data && data.kv) || {}; })
-                                          .catch(function(){ lsOverlay = {}; });
+  /* IndexedDB is only an optimization. It must never block the actual app.
+     * Some browsers/privacy modes can leave an IndexedDB request pending forever.
+     * Give it a short deadline, then let the dashboard load with normal storage. */
+  var lsOverlayReady = new Promise(function(resolve){
+    var finished = false;
+    function finish(data){ if(finished) return; finished=true; lsOverlay=(data && data.kv)||{}; resolve(); }
+    var timer = setTimeout(function(){ finish({}); }, 1200);
+    bridgeReadDb(LS_DB).then(function(data){ clearTimeout(timer); finish(data); })
+      .catch(function(){ clearTimeout(timer); finish({}); });
+  });
   function bridgeReadDb(db){
     return bridgeDB().then(function(d){ return new Promise(function(res, rej){
       var out = {}, tx = d.transaction('kv','readonly'), st = tx.objectStore('kv');
@@ -519,7 +527,7 @@
     }
     if(!loaded[id]){
       loaded[id] = true; splash.style.display = 'flex'; splashText.textContent = 'Loading ' + (NAMES[id] || id) + '\u2026';
-      lsOverlayReady.then(function(){ setTimeout(function(){
+      Promise.race([lsOverlayReady, new Promise(function(resolve){ setTimeout(resolve, 1400); })]).then(function(){ setTimeout(function(){
         var fr = document.createElement('iframe');
         fr.setAttribute('data-id', id); fr.setAttribute('title', NAMES[id] || id); fr.setAttribute('allow', 'clipboard-write; clipboard-read');
         fr.addEventListener('load', function(){ splash.style.display = 'none'; });
