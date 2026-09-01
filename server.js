@@ -18,17 +18,21 @@ const compression = require('compression');
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-if (!process.env.SESSION_SECRET && isProd) {
+if (isProd && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production.');
+  process.exit(1);
+}
+
+if (isProd && !process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL must be set in production.');
+  console.error('       Add the Render PostgreSQL connection string as the DATABASE_URL environment variable.');
   process.exit(1);
 }
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Render's managed Postgres requires TLS; local dev does not.
-  ssl: /render\.com|amazonaws/.test(process.env.DATABASE_URL || '')
-    ? { rejectUnauthorized: false }
-    : false,
+  // Render PostgreSQL supports TLS. Local development stays non-TLS.
+  ssl: isProd ? { rejectUnauthorized: false } : false,
   max: 10
 });
 

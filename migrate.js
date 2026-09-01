@@ -24,7 +24,7 @@ const pool = new Pool({
     process.exit(1);
   }
 
-  const sql = fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8');
+  const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await pool.query(sql);
   console.log('schema ready');
 

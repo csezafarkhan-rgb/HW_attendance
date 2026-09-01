@@ -3,9 +3,13 @@
    role: admin | editor | viewer   (default admin for the first user) */
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL is not set.');
+  process.exit(1);
+}
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: /render\.com|amazonaws/.test(process.env.DATABASE_URL || '') ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 (async () => {
   const [email, password, role = 'admin', name = null] = process.argv.slice(2);

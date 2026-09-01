@@ -12,20 +12,42 @@ old client-side gate (password hash embedded in the HTML) is gone.
 
 ## Deploying to Render
 
-1. Push this repo to GitHub (**private** — see Security below).
-2. In Render: **New > Blueprint**, point it at the repo. `render.yaml` creates
-   the web service and the Postgres instance together.
-3. First deploy runs `npm run migrate`, which creates the tables and a default org.
-4. Create your first admin from the Render shell:
+### Recommended: Render Blueprint
 
-       node scripts/create-user.js you@company.com 'a-strong-password' admin 'Your Name'
+1. Push this repo to GitHub (**private**).
+2. In Render, choose **New > Blueprint** and point it at the repo.
+3. `render.yaml` creates both the `hw-attendance` web service and the `hw-attendance-db` PostgreSQL database.
+4. Render injects the database connection into `DATABASE_URL` and generates `SESSION_SECRET`.
+5. Add `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the Render dashboard.
+6. The first deploy runs `npm run migrate && npm start`, creates the schema, and bootstraps the first admin when the users table is empty.
 
-5. Add everyone else from the Users screen, or with the same script:
+### If the web service already exists
 
-       node scripts/create-user.js person@company.com 'their-password' editor 'Their Name'
+If the service was created directly from **Web Service > GitHub** instead of from the Blueprint, `render.yaml` does **not** retroactively create/connect the database for that existing service. In that case:
 
-Roles: `admin` (everything incl. user management), `editor` (edit attendance),
-`viewer` (read-only; can still save their own UI preferences).
+1. Create a Render PostgreSQL database named `hw-attendance-db` (or use an existing Render PostgreSQL database).
+2. Open **hw-attendance > Environment**.
+3. Add `DATABASE_URL` and set its value to the database's **Internal Database URL**. Do not use `localhost` or `127.0.0.1`.
+4. Keep `NODE_ENV=production` and `SESSION_SECRET` set.
+5. Add `ADMIN_EMAIL` and `ADMIN_PASSWORD` if you want the first admin to be created automatically.
+6. Save and redeploy.
+
+The application now fails fast with a clear message if `DATABASE_URL` is missing in production instead of silently trying `127.0.0.1:5432`.
+
+## Environment variables
+
+Required on Render:
+
+- `NODE_ENV=production`
+- `SESSION_SECRET=<strong random secret>`
+- `DATABASE_URL=<Render PostgreSQL Internal Database URL>`
+
+For automatic first-admin creation:
+
+- `ADMIN_EMAIL=<admin email>`
+- `ADMIN_PASSWORD=<password, 8+ characters>`
+- `ADMIN_NAME=<optional display name>`
+- `ORG_NAME=<optional organization name>`
 
 ## Local development
 
