@@ -2641,6 +2641,18 @@ function _initLoginGateReal(startWorkspace){
     if(role && !role.dataset.bound){role.dataset.bound='1';role.addEventListener('change',toggle);} toggle();
     serverRenderUsers(); modal.style.display='flex';
   }
+
+  /* The legacy login initializer is no longer executed in production; therefore
+     its old Users-button wiring is unreachable. Bind the live Users controls
+     here, after the server-backed handler has been defined. */
+  if (usersBtn) usersBtn.addEventListener('click', function(ev){
+    if (ev && ev.preventDefault) ev.preventDefault();
+    serverOpenUsers();
+  });
+  var serverUmClose = document.getElementById('umClose');
+  if (serverUmClose) serverUmClose.addEventListener('click', closeUsers);
+  var serverUmAdd = document.getElementById('umAdd');
+  if (serverUmAdd) serverUmAdd.addEventListener('click', serverAddUser);
   /* Override the browser-local Users panel functions. */
   openUsers = serverOpenUsers;
   addUser = serverAddUser;
