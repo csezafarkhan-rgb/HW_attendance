@@ -3113,20 +3113,32 @@ function forgetImportFolder(){
     bkStatus('Stopped watching that folder.');
   });
 }
+/* The punch file is replaced in place each day under this name, so it wins over
+   anything else in the folder - otherwise an Excel backup saved into the same
+   folder could be newer and get imported instead. */
+var PUNCH_FILE_BASENAME = 'dailyattendancelogsdetails';
+function isPunchFileName(name){
+  return name.replace(/\.(csv|xlsx|xls)$/i, '').trim().toLowerCase() === PUNCH_FILE_BASENAME;
+}
 /* The newest file that looks like an export, ignoring temporary files a
-   spreadsheet leaves behind while it is open. */
+   spreadsheet leaves behind while it is open. The named punch file is preferred;
+   the newest of anything else is the fallback. */
 function newestImportFile(dir){
-  var best = null;
+  var best = null, named = null;
   var it = dir.values();
   var step = function(){
     return it.next().then(function(r){
-      if(r.done) return best;
+      if(r.done) return named || best;
       var h = r.value;
       if(h.kind !== 'file') return step();
       if(!/\.(csv|xlsx|xls)$/i.test(h.name)) return step();
       if(/^[~$.]/.test(h.name)) return step();       // Excel lock files
       return h.getFile().then(function(f){
-        if(!best || f.lastModified > best.file.lastModified) best = { handle:h, file:f };
+        if(isPunchFileName(f.name)){
+          if(!named || f.lastModified > named.file.lastModified) named = { handle:h, file:f };
+        } else if(!best || f.lastModified > best.file.lastModified){
+          best = { handle:h, file:f };
+        }
         return step();
       }).catch(step);
     });
