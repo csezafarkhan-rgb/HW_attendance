@@ -1,0 +1,24 @@
+{
+  "name": "hw-attendance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Homeweavers Attendance - multi-user attendance dashboard with Postgres sync",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "migrate": "node scripts/migrate.js",
+    "create-user": "node scripts/create-user.js",
+    "test:api": "node test/api.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "connect-pg-simple": "^10.0.0",
+    "pg": "^8.13.1",
+    "bcryptjs": "^2.4.3",
+    "helmet": "^8.0.0",
+    "express-rate-limit": "^7.5.0",
+    "compression": "^1.7.5"
+  }
+}
