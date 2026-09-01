@@ -2947,8 +2947,16 @@ function _initLoginGateReal(startWorkspace){
     if (ev && ev.preventDefault) ev.preventDefault();
     serverOpenUsers();
   });
+  /* closeUsers is declared inside the legacy login initializer, which this
+     build renames and never calls - so the name does not exist out here and
+     referencing it threw a ReferenceError that killed the rest of this script
+     (leaving the app stuck on "Loading..."). Define it locally instead. */
+  function serverCloseUsers(){
+    var m = document.getElementById('usersModal');
+    if (m) m.style.display = 'none';
+  }
   var serverUmClose = document.getElementById('umClose');
-  if (serverUmClose) serverUmClose.addEventListener('click', closeUsers);
+  if (serverUmClose) serverUmClose.addEventListener('click', serverCloseUsers);
   var serverUmAdd = document.getElementById('umAdd');
   if (serverUmAdd) serverUmAdd.addEventListener('click', serverAddUser);
   /* Override the browser-local Users panel functions. */
