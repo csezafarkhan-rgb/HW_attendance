@@ -33,7 +33,10 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   // Render PostgreSQL supports TLS. Local development stays non-TLS.
   ssl: isProd ? { rejectUnauthorized: false } : false,
-  max: 10
+  max: 10,
+  connectionTimeoutMillis: 8000,
+  statement_timeout: 10000,
+  idle_in_transaction_session_timeout: 15000
 });
 
 const app = express();

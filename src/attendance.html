@@ -2641,16 +2641,31 @@ input:focus,select:focus,textarea:focus,.search:focus{
     };
 
     if(window.HWSync && window.HWSync.hydrateDataset){
-      return window.HWSync.hydrateDataset().then(function(remote){
+      /* Never make the whole attendance screen wait indefinitely for Postgres.
+         A slow/waking Render database used to leave the toolbar at
+         "Loading…" forever because this promise had no deadline. The UI can
+         render from the local/imported copy first; when the server responds,
+         its dataset remains authoritative and replaces that copy. */
+      var remoteLoad = window.HWSync.hydrateDataset();
+      var remoteTimed = new Promise(function(resolve){
+        var done = false;
+        var finish = function(v){ if(done) return; done = true; resolve(v); };
+        var timer = setTimeout(function(){ finish(null); }, 5000);
+        Promise.resolve(remoteLoad).then(function(v){ clearTimeout(timer); finish(v); })
+          .catch(function(){ clearTimeout(timer); finish(null); });
+      });
+      return remoteTimed.then(function(remote){
         if(remote && (remote.employees.length || remote.records.length)){
           applyDataset(remote);
           // The database is authoritative once it has data.
           return true;
         }
-        // Empty DB: recover an existing browser import and push it once.
+        // Empty/unreachable DB: recover an existing browser import and push it
+        // once. If there is no local copy, the bundled empty dataset still lets
+        // the dashboard render normally instead of hanging.
         return localLoad().then(function(hadLocal){
-          if(hadLocal) return persistDataset().then(function(){ return true; });
-          return false;
+          if(hadLocal && remote !== null) return persistDataset().then(function(){ return true; });
+          return !!hadLocal;
         });
       }).catch(function(){ return localLoad(); });
     }

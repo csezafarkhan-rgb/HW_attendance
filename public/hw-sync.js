@@ -17,15 +17,18 @@
   var hydrated = false;
 
   function api(method, url, body) {
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function(){ controller.abort(); }, 8000) : null;
     return fetch(url, {
       method: method,
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller ? controller.signal : undefined
     }).then(function (res) {
       if (res.status === 401) { window.HWAuth && window.HWAuth.onExpired(); throw new Error('not_authenticated'); }
       return res.json().catch(function () { return null; });
-    });
+    }).finally(function(){ if(timer) clearTimeout(timer); });
   }
 
   window.HWSync = {
