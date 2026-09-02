@@ -1625,9 +1625,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .dof-sign{ display:block; max-height:46px; max-width:230px; margin:0 0 -6px 4px; }
 .dof-signby{ margin:2px 0 0 178px; font:11.5px/1.4 Arial,Helvetica,sans-serif; color:#333; }
 .dof-sig{ margin-top:30px; font:12px/1.5 Arial,Helvetica,sans-serif; }
-/* Room to sign between "Sincerely," and the company name, set as a measured
-   gap rather than a run of <br> - three line breaks printed as dead rows. */
-.dof-sig-gap{ display:block; height:34px; }
+/* The company name sits straight under "Sincerely," - no signing gap, and no
+   run of <br>, both of which printed as empty rows. */
 .dof-sig-co{ display:block; }
 .dof-ref{ margin-top:34px; font:9.5px/1.4 Arial,Helvetica,sans-serif; color:#777;
   border-top:1px solid #ddd; padding-top:5px; }
@@ -1659,15 +1658,14 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .dof-rule{ margin:4px 0 10px; }
   .dof-ttl{ font-size:15px; margin-bottom:11px; }
   .dof-row{ margin:0 0 12px; padding-left:14px; }
-  .dof-lab{ font-size:15.5px; }
+  .dof-lab{ font-size:17px; }
   .dof-line, .dof-blank{ font-size:15px; line-height:1.4; }
-  .dof-sec{ margin:12px 0 7px; font-size:15.5px; }
+  .dof-sec{ margin:12px 0 7px; font-size:17px; }
   .dof-blank{ height:22px; margin:0 0 9px; }
   .dof-note{ margin:9px 0 11px; font-size:14px; }
   .dof-sign{ max-height:40px; }
   .dof-signby{ font-size:11px; }
   .dof-sig{ margin-top:10px; font-size:13px; line-height:1.3; }
-  .dof-sig-gap{ height:26px; }
   .dof-ref{ margin-top:8px; font-size:10px; padding-top:4px; }
   .dof-eg{ font-size:12.5px; }
   /* Full sheet, proportions kept. */
@@ -7870,9 +7868,7 @@ function buildExcelBackup(){
          had no line for it, and it is the one signature that matters most. */
       + '<div class="dof-sec">Employee Signature:</div>'
       + '<div class="dof-row" style="padding-left:0;">'
-      +   '<span class="dof-line" style="flex:0 0 300px;"></span>'
-      +   '<span class="dof-lab" style="margin-left:22px;">Date:</span>'
-      +   '<span class="dof-line" style="flex:0 0 150px;"></span></div>'
+      +   '<span class="dof-line" style="flex:0 0 300px;"></span></div>'
       + '<div class="dof-sec">Notes:</div>'
       + '<div class="dof-note">Except in emergency cases, requests must be submitted '
       +   'ten (10) days prior to start date.</div>'
@@ -7891,7 +7887,6 @@ function buildExcelBackup(){
             + ((sg && sg.by) ? '<div class="dof-signby">' + shotEsc(sg.by) + '</div>' : '');
         })()
       + '<div class="dof-sig">Sincerely,'
-      +   '<span class="dof-sig-gap"></span>'
       +   '<span class="dof-sig-co">' + shotEsc(coName || '') + '</span></div>'
       + '<div class="dof-ref">Raised in the attendance system \u00b7 reference '
       +   shotEsc(req.id || '') + '</div>'
