@@ -1622,31 +1622,31 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
     overflow:visible; height:auto !important; }
   #dofOverlay .dof-bar{ display:none !important; }
 
-  /* ---- Fit on one A4 sheet ----
-     The screen version is set loose and airy. On paper the same spacing runs
-     past the bottom and throws a second, nearly empty page, so the vertical
-     rhythm is compressed here and here only. Nothing is dropped: every row the
-     form carries still prints, just tighter. */
+  /* ---- One A4 sheet, filled ----
+     Sized to use the page rather than merely fit on it: the first pass at this
+     squeezed everything to 12px and left a third of the sheet empty. These
+     values were measured against A4 at 96dpi (1123px) and land near 1080px. */
   .dof-sheet{ box-shadow:none; margin:0; width:auto; max-width:none;
-    min-height:0; height:auto; padding:10mm 14mm;
-    font:12px/1.42 'Times New Roman',Times,serif;
+    min-height:0; height:auto; padding:13mm 15mm;
+    font:15px/1.72 'Times New Roman',Times,serif;
     page-break-inside:avoid; page-break-after:avoid; break-inside:avoid; }
   .dof-sheet:last-child{ page-break-after:auto; }
-  .dof-hd img{ max-height:64px; margin:0 auto 3px; }
-  .dof-co{ font-size:16px; }
-  .dof-addr{ font-size:11px; margin-top:4px; }
-  .dof-rule{ margin:4px 0 12px; border-bottom-width:2px; }
-  .dof-ttl{ font-size:12.5px; margin-bottom:12px; }
-  .dof-row{ margin:0 0 10px; padding-left:20px; }
-  .dof-line, .dof-blank{ font-size:12px; line-height:1.35; }
-  .dof-sec{ margin:11px 0 7px; }
-  .dof-blank{ height:17px; margin:0 0 9px; }
-  .dof-note{ margin:9px 0 11px; }
-  .dof-sign{ max-height:38px; }
-  .dof-sig{ margin-top:14px; font-size:11px; }
-  .dof-ref{ margin-top:14px; font-size:9px; padding-top:4px; }
-  /* The watermark scales with the sheet rather than sitting at a fixed size. */
-  .dof-wm{ width:250px; height:250px; }
+  .dof-hd img{ max-height:84px; margin:0 auto 5px; }
+  .dof-co{ font-size:21px; }
+  .dof-addr{ font-size:12.5px; margin-top:7px; }
+  .dof-rule{ margin:6px 0 19px; }
+  .dof-ttl{ font-size:14.5px; margin-bottom:19px; }
+  .dof-row{ margin:0 0 16px; padding-left:26px; }
+  .dof-line, .dof-blank{ font-size:14.5px; line-height:1.6; }
+  .dof-lab{ font-size:14.5px; }
+  .dof-sec{ margin:17px 0 10px; font-size:14.5px; }
+  .dof-blank{ height:21px; margin:0 0 14px; }
+  .dof-note{ margin:16px 0 18px; }
+  .dof-sign{ max-height:46px; }
+  .dof-sig{ margin-top:19px; font-size:12.5px; }
+  .dof-ref{ margin-top:18px; font-size:10px; padding-top:5px; }
+  .dof-eg{ font-size:12.5px; }
+  .dof-wm{ width:300px; height:300px; }
 }
 .ews{ padding:14px 20px 4px; }
 .ews-head{ font-weight:800; font-size:13px; margin-bottom:8px; }
