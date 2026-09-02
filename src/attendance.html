@@ -2334,6 +2334,7 @@ input:focus,select:focus,textarea:focus,.search:focus{
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <div id="signPreview" style="width:150px;height:52px;border:1px dashed var(--line-dk);border-radius:8px;background:#fff center/contain no-repeat;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--ink-dim);">none set</div>
       <button class="btn" id="signPick" style="width:auto;padding:8px 14px;">🖼 Choose image…</button>
+      <button class="btn" id="signMake" style="width:auto;padding:8px 14px;">✍ Generate from name</button>
       <button class="btn" id="signClear" style="width:auto;padding:8px 14px;display:none;">Remove</button>
       <input type="file" id="signUpload" accept="image/*" style="display:none;"/>
       <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">
@@ -3285,7 +3286,12 @@ function renderSignSetting(){
     var by = document.getElementById('signBy');
     if(by && document.activeElement !== by) by.value = (mine && mine.by) || '';
     var who = document.getElementById('signWho');
-    if(who) who.textContent = mySignKey() || 'not signed in';
+    if(who){
+      /* Show the person, not the key: the account's own name where the server
+         knows one, otherwise whatever they signed in with. */
+      who.textContent = (viewRole && (viewRole.name || viewRole.username))
+        || mySignKey() || 'not signed in';
+    }
     /* Say who else has one, so it is clear this is per person. */
     var others = document.getElementById('signOthers');
     if(others){
@@ -3321,6 +3327,62 @@ function renderSignSetting(){
         rd.readAsDataURL(f);
       });
     }
+    /* Draw a signature from a typed name, for an admin who has no scan of one.
+       A transparent PNG so it sits on the form the same way an uploaded image
+       does, and produced at 3x then held at CSS size so it stays sharp in
+       print. Script faces are listed by name and fall back to the generic
+       cursive keyword, so this still draws something on a machine without
+       Segoe Script. */
+    function signatureFromName(name){
+      var text = String(name || '').trim();
+      if(!text) return null;
+      var SCALE = 3, PAD = 14 * SCALE, SIZE = 42 * SCALE;
+      var face = '"Segoe Script","Bradley Hand","Brush Script MT","Lucida Handwriting",cursive';
+      var c = document.createElement('canvas');
+      var ctx = c.getContext('2d');
+      ctx.font = 'italic ' + SIZE + 'px ' + face;
+      var w = Math.ceil(ctx.measureText(text).width) + PAD * 2;
+      c.width = w;
+      c.height = Math.ceil(SIZE * 1.9);
+      ctx = c.getContext('2d');
+      // measuring reset the context, so set the face again on the sized canvas
+      ctx.font = 'italic ' + SIZE + 'px ' + face;
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = '#1B2E5B';                 // dark ink blue, not pure black
+      ctx.fillText(text, PAD, SIZE * 1.15);
+      // the underline every signed line has
+      ctx.strokeStyle = '#1B2E5B';
+      ctx.lineWidth = Math.max(1, Math.round(SCALE * 0.7));
+      ctx.beginPath();
+      ctx.moveTo(PAD * 0.5, SIZE * 1.45);
+      ctx.lineTo(w - PAD * 0.5, SIZE * 1.45);
+      ctx.stroke();
+      return c.toDataURL('image/png');
+    }
+    var mk = document.getElementById('signMake');
+    if(mk) mk.addEventListener('click', function(){
+      var k = mySignKey();
+      if(!k){ showUploadStatus('Sign in before setting a signature.', true); return; }
+      var byEl = document.getElementById('signBy');
+      /* The name beneath the signature is the obvious source. Fall back to the
+         account name so the button still does something on a fresh setup. */
+      var name = ((byEl && byEl.value) || '').trim()
+              || (viewRole && (viewRole.name || viewRole.username)) || '';
+      name = String(name).split(',')[0].trim();   // drop ", Managing Director"
+      if(!name){
+        showUploadStatus('Type the name beneath the signature first.', true);
+        return;
+      }
+      var data = signatureFromName(name);
+      if(!data){ showUploadStatus('Could not draw that name.', true); return; }
+      SIGNS[k] = SIGNS[k] || {};
+      SIGNS[k].data = data;
+      SIGNS[k].at = Date.now();
+      if(byEl && byEl.value.trim()) SIGNS[k].by = byEl.value.trim();
+      renderSignSetting();
+      saveSigns();
+      showUploadStatus('Signature generated for "' + name + '". Replace it with a scan any time.');
+    });
     var clr = document.getElementById('signClear');
     if(clr) clr.addEventListener('click', function(){
       var k = mySignKey();
@@ -10573,7 +10635,7 @@ function buildExcelBackup(){
     if(!DATA_READY){ PENDING_SESSION = msg; return; }
     SESSION_APPLIED = sig;
     if(att.role === 'admin'){
-      enterAdminView(msg.user);
+      enterAdminView(msg.user, msg.name);
     } else {
       // An employee sees their own record and nothing else, under the name the
       // admin set against the account.
@@ -10611,8 +10673,11 @@ function buildExcelBackup(){
     }
   }, 2500);
 
-  function enterAdminView(username){
-    viewRole = {role:'admin', username:username};
+  function enterAdminView(username, displayName){
+    /* displayName is what the account is actually called. Keep it beside the
+       username so the signature panel can say "Zafar Khan" rather than the
+       local part of an email address. */
+    viewRole = {role:'admin', username:username, name:(displayName || '').trim()};
     saveViewRole();
     hideGate();
     document.getElementById('employeeView').style.display = 'none';

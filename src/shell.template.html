@@ -1528,6 +1528,9 @@
     return {
       type:'hw-session',
       user:u.email,
+      /* The display name, so the dashboard can greet an admin by name rather
+         than by the local part of their email. */
+      name:u.name || '',
       role:u.role || 'viewer',
       tabs:isAdmin ? ['attendance'] : ['attendance'],
       att:{ role:isAdmin ? 'admin' : 'employee', emp:isAdmin ? '' : empName }
