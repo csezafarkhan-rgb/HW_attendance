@@ -1589,17 +1589,25 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   background-repeat:no-repeat; opacity:.07; }
 .dof-pg{ position:relative; z-index:1; }
 .dof-hd{ text-align:center; }
-.dof-hd img{ max-height:70px; display:block; margin:0 auto 4px; }
+.dof-hd img{ max-height:104px; display:block; margin:0 auto 6px; }
 .dof-co{ font:700 20px/1.2 Arial,Helvetica,sans-serif; letter-spacing:.06em; }
 .dof-addr{ font:700 12.5px/1.4 Arial,Helvetica,sans-serif; margin-top:8px; }
 .dof-rule{ border-bottom:2.5px solid #000; margin:6px 0 26px; }
 .dof-ttl{ text-align:center; font-weight:700; font-size:13.5px; line-height:1.35; margin-bottom:26px; }
 .dof-row{ display:flex; align-items:baseline; margin:0 0 17px; padding-left:26px; }
 .dof-lab{ white-space:nowrap; margin-right:6px; }
-.dof-line{ flex:1; border-bottom:1px solid #000; padding:0 6px 1px; min-height:17px; }
-.dof-eg{ white-space:nowrap; margin-left:10px; }
+/* The form itself is set in Times. Everything filled in - names, dates,
+   reasons - is set in a typewriter face, as if the form were rolled into a
+   machine and the answers typed in. Courier New is on every Windows and Mac,
+   so the printed sheet looks the same everywhere. */
+.dof-line{ flex:1; border-bottom:1px solid #000; padding:0 6px 1px; min-height:17px;
+  font:13.5px/1.55 'Courier New',Courier,monospace; letter-spacing:.2px; }
+/* The bracketed examples are guidance for whoever fills the form in by hand,
+   not content - grey keeps them from competing with the answers. */
+.dof-eg{ white-space:nowrap; margin-left:10px; color:#777; font-size:12.5px; }
 .dof-sec{ font-weight:700; margin:20px 0 12px; }
-.dof-blank{ border-bottom:1px solid #000; height:20px; margin:0 0 16px; padding:0 6px 1px; }
+.dof-blank{ border-bottom:1px solid #000; height:20px; margin:0 0 16px; padding:0 6px 1px;
+  font:13.5px/1.55 'Courier New',Courier,monospace; letter-spacing:.2px; }
 .dof-note{ margin:16px 0 20px; }
 .dof-sign{ display:block; max-height:46px; max-width:230px; margin:0 0 -6px 4px; }
 .dof-signby{ margin:2px 0 0 178px; font:11.5px/1.4 Arial,Helvetica,sans-serif; color:#333; }
