@@ -7804,6 +7804,11 @@ function buildExcelBackup(){
       + '<div class="dof-ttl" style="top:136.6pt">Day Off/Vacation Request Form</div>'
       + '<div class="dof-ttl" style="top:150.4pt">' + shotEsc(coName || '') + '</div>'
 
+      + row(191.8, '', field('Name', dispName(req.empName), 258)
+          + '<span class="dof-lab" style="margin-left:10pt">Employee #</span>'
+          + '<span class="dof-fill" style="width:96pt">' + shotEsc(getEmpCode(req.empName)) + '</span>')
+      + row(219.4, '', field('Today\u2019s Date', longDate(todayISO_full), 380))
+
       + row(247.0, 'b', 'Start:')
       + row(274.6, '', field('Day of the Week', dayName(req.dateFrom), 228, '(Example: Monday)'))
       + row(302.2, '', field('Date;', longDate(req.dateFrom), 288, '(Example March 5, 2002)'))
@@ -7860,8 +7865,9 @@ function buildExcelBackup(){
     }
     ov.innerHTML =
         '<div class="dof-bar">'
-      + '<span>Check the details, then print. Anything blank is meant to be signed by hand.</span>'
+      + '<span>Check the details, then print or save. Anything blank is meant to be signed by hand.</span>'
       + '<button class="btn primary" id="dofPrint">🖨️ Print</button>'
+      + '<button class="btn" id="dofPdf">📄 Save PDF</button>'
       + '<button class="btn" id="dofClose">Close</button>'
       + '</div>' + sheet;
     ov.style.display = 'block';
@@ -7870,6 +7876,18 @@ function buildExcelBackup(){
       /* Printing the frame prints only this overlay - everything else is hidden
          by the print stylesheet below. */
       window.print();
+    };
+    /* Save PDF goes through the same print dialog, because that is what makes
+       a real PDF: the text stays selectable and the page stays vector at any
+       zoom. Rasterising the sheet to an image instead would look worse and
+       could not be searched. The only difference is the reminder about which
+       destination to choose. */
+    document.getElementById('dofPdf').onclick = function(){
+      var note = document.querySelector('#dofOverlay .dof-bar span');
+      var was = note ? note.textContent : '';
+      if(note) note.textContent = 'In the dialog, set Destination to \u201cSave as PDF\u201d.';
+      window.print();
+      if(note) setTimeout(function(){ note.textContent = was; }, 4000);
     };
   }
   /* Leave taken before this system, or marked straight into the grid, still
