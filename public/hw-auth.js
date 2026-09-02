@@ -72,8 +72,10 @@
       uEl.setAttribute('autocapitalize', 'none');
       uEl.setAttribute('spellcheck', 'false');
     }
-    var fp = document.getElementById('lgFpLink');
-    if (fp) { fp.textContent = 'Forgot password? Ask an admin'; fp.removeAttribute('href'); fp.style.cursor = 'default'; }
+    /* The gate carries a plain note now - self-service reset does not exist, and
+       changing a password is done from inside the app, not from the sign-in card. */
+    var fp = document.getElementById('lgFpNote');
+    if (fp) fp.textContent = 'Forgot password? Contact Admin';
 
     function showError(message) {
       if (errEl) { errEl.textContent = message; errEl.style.display = 'block'; }
