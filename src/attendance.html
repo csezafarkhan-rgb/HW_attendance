@@ -1688,7 +1688,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .emp-cal-cell .s{ font-size:10px; line-height:1.2; }
   .emp-cal-cell .t{ display:none; }          /* punch times live in the day drill */
   .ec-marks{ top:2px; right:3px; gap:2px; }
-  .ec-m{ min-width:11px; height:11px; line-height:11px; font-size:10px; padding:0 2px; }
+  .ec-m{ min-width:16px; height:16px; line-height:16px; font-size:11px; padding:0 3px; }
   .emp-view-header{ flex-wrap:wrap; gap:8px; }
   .emp-cal-nav{ margin-left:0; }
 
@@ -1742,8 +1742,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .emp-cal-grid.compact .emp-cal-cell .d{ font-size:11.5px; }
 .emp-cal-grid.compact .ec-marks{ top:2px; right:3px; gap:2px; }
-.emp-cal-grid.compact .ec-m{ min-width:11px; height:11px; line-height:11px;
-  font-size:10px; padding:0 2px; }
+.emp-cal-grid.compact .ec-m{ min-width:16px; height:16px; line-height:16px;
+  font-size:11px; padding:0 3px; }
 .emp-cal-cell{
   min-height:76px;border-radius:8px;border:1px solid var(--line);background:var(--panel);
   padding:7px 8px;cursor:pointer;display:flex;flex-direction:column;
@@ -1799,11 +1799,13 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell{position:relative;}
 .emp-cal-cell.is-late{box-shadow:inset 3px 0 0 #C9A227;}
 .ec-marks{display:flex;gap:3px;position:absolute;top:4px;right:5px;}
-.ec-m{display:inline-block;min-width:14px;height:14px;line-height:14px;text-align:center;
-  border-radius:3px;font-size:10px;font-weight:800;padding:0 3px;}
-.ec-m.late{background:#9A7B0A;color:#fff;}
-.ec-m.early{background:#8F4A12;color:#fff;}
-.ec-m.ok{background:#2F6FB5;color:#fff;}
+.ec-m{display:inline-block;min-width:19px;height:19px;line-height:19px;text-align:center;
+  border-radius:4px;font-size:12px;font-weight:800;padding:0 4px;}
+/* Amber where it still counts against the person, green once an admin has
+   excused it - the same reading the attendance grid uses. */
+.ec-m.late{background:#F2C230;color:#4A3800;}
+.ec-m.early{background:#F0A85C;color:#4A2A00;}
+.ec-m.ok{background:#3E9C6B;color:#fff;}
 .ec-m.mp{background:#7A1B24;color:#fff;}
 .ec-m.hd{background:#6B3E94;color:#fff;}
 
@@ -10943,9 +10945,12 @@ function buildExcelBackup(){
   // ---------- employee calendar (read-only personal view) ----------
   var empCalMonth = null;
 
+  /* Blank cells before the 1st, counted from Monday: getDay() calls Sunday 0,
+     so Sunday needs six blanks ahead of it, not none. */
   function firstWeekdayOfMonth(ym){
     var p = ym.split('-'), y=parseInt(p[0],10), m=parseInt(p[1],10);
-    return new Date(y, m-1, 1).getDay();
+    var dow = new Date(y, m-1, 1).getDay();
+    return (dow + 6) % 7;
   }
 
   function renderEmployeeLeaveStrip(name){
@@ -11127,11 +11132,13 @@ function buildExcelBackup(){
 
     var pad = firstWeekdayOfMonth(empCalMonth);
     var dates = eachDateInMonth(empCalMonth);
-    var dows = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    /* The working week reads Monday to Sunday, so the week off lands at the end
+       of the row instead of splitting it open at the start. */
+    var dows = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
     var grid = document.getElementById('empCalGrid');
     var html = '';
     dows.forEach(function(d, di){
-      html += '<div class="emp-cal-dow'+(di === 0 ? ' is-sunday' : '')+'">'+d+'</div>';
+      html += '<div class="emp-cal-dow'+(di === 6 ? ' is-sunday' : '')+'">'+d+'</div>';
     });
     for(var i=0;i<pad;i++){ html += '<div class="emp-cal-cell empty"></div>'; }
     dates.forEach(function(dateStr){
