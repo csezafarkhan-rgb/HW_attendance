@@ -7560,11 +7560,16 @@ function buildExcelBackup(){
   }
   /* The day they are back at work is the day after the last day off - which is
      what the form asks for, and the thing people most often get wrong. */
+  /* The day after the last day off. Built from the local calendar fields, not
+     toISOString() - that converts to UTC, and east of Greenwich local midnight
+     is the previous day there, so a one-day leave came back with the same date
+     it started on. */
   function returnDate(lastOffISO){
     var d = new Date(lastOffISO + 'T00:00:00');
     if(isNaN(d)) return '';
     d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0,10);
+    var pad = function(n){ return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
   function printDayOffForm(req){
     var coName = '', coAddr = '', coLogo = '';
