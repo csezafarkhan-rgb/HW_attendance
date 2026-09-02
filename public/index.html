@@ -318,7 +318,8 @@
 
     if (passField) passField.style.display = '';
     if (backBtn) backBtn.style.display = 'none';
-    if (rememberRow) rememberRow.style.display = 'none';
+    if (rememberRow) rememberRow.style.display = '';
+    var remEl = document.getElementById('lgRemember');
     if (btn) btn.textContent = 'Sign in';
     if (sub) sub.textContent = 'Sign in to open your dashboards';
     if (lbl) lbl.textContent = 'Username or email';
@@ -370,9 +371,10 @@
       if (!username || !password) return showError('Enter your username/email and password.');
       clearError();
       if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+      var remember = !!(remEl && remEl.checked);
       apiJson('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ email: username, password: password })
+        body: JSON.stringify({ email: username, password: password, remember: remember })
       }).then(function (body) {
         if (!body || !body.user) throw new Error('invalid_login_response');
         enter(body.user);

@@ -16,6 +16,7 @@ const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 
 const PORT = process.env.PORT || 3000;
+const REMEMBER_MS = 1000 * 60 * 60 * 24 * 30;   // "keep me signed in" window
 const isProd = process.env.NODE_ENV === 'production';
 
 if (isProd && !process.env.SESSION_SECRET) {
@@ -78,7 +79,7 @@ app.use(session({
     httpOnly: true,
     sameSite: 'lax',
     secure: isProd,               // HTTPS-only cookie once deployed
-    maxAge: 1000 * 60 * 60 * 24 * 30
+    maxAge: REMEMBER_MS          // overridden per login by "keep me signed in"
   }
 }));
 
@@ -143,6 +144,15 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   req.session.userId = u.id;
   req.session.orgId = u.org_id;
   req.session.role = u.role;
+  /* "Keep me signed in" decides how long the cookie outlives the browser.
+     Unchecked means a browser-session cookie, so a shared machine does not stay
+     signed in after the window is closed. The password is never stored either
+     way - this only extends the server session. */
+  if (req.body && req.body.remember) {
+    req.session.cookie.maxAge = REMEMBER_MS;
+  } else {
+    req.session.cookie.expires = false;
+  }
   await pool.query('UPDATE users SET last_login_at = now() WHERE id = $1', [u.id]);
   res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name, role: u.role } });
 });
