@@ -1669,6 +1669,16 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .dof-wm{ inset:0; width:100%; height:100%; object-fit:contain; opacity:.06; }
 }
 .ews{ padding:14px 20px 4px; }
+/* In the side column it is one of the figure groups, so it loses the band
+   padding and its cells stack to the column width. */
+.emp-split-side .ews{ padding:14px 0 0; }
+.emp-split-side .ews-grid{ grid-template-columns:1fr 1fr; gap:8px; }
+.emp-split-side .ews-cell{ padding:8px 10px; }
+.emp-split-side .ews-v{ font-size:14px; }
+.emp-split-side .ews-w{ font-size:9.5px; }
+.emp-split-side .ews-k{ font-size:9.5px; }
+.emp-split-side .ews-head{ font-size:12px; margin-bottom:6px; }
+.emp-split-side .ews-head span{ font-size:10.5px; }
 .ews-head{ font-weight:800; font-size:13px; margin-bottom:8px; }
 .ews-head span{ display:block; font-weight:500; font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
 .hol-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
@@ -1702,17 +1712,17 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-split{ display:grid; grid-template-columns:296px minmax(0,1fr);
   gap:18px; padding:10px 20px 24px; align-items:start; }
 .emp-split-side{ order:1; min-width:0; position:sticky; top:10px; }
-/* The grid is capped rather than stretched: on a wide screen a square cell
-   would otherwise grow past 170px and the month would read as a wall of
-   near-empty boxes. 116px keeps a day legible without dominating. */
-.emp-split-main{ order:2; min-width:0; max-width:calc(7 * 116px + 6 * 6px); }
+/* The calendar takes the whole column. Capping its width instead left a dead
+   band down the right of the page while the sections below ran full width. */
+.emp-split-main{ order:2; min-width:0; }
 .emp-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:0;}
 /* Square day cells: a month reads as a grid, not as a stack of wide bars. */
-/* border-box, or the 1px border is added outside the square and the cell comes
-   out 2px taller than it is wide. */
-.emp-cal-grid .emp-cal-cell{ aspect-ratio:1 / 1; min-height:0; overflow:hidden;
+/* A fixed row height rather than a square: the cell is as wide as the column
+   allows, so forcing it square made every day a huge near-empty box on a wide
+   screen. Height is what keeps the month tidy; width can look after itself. */
+.emp-cal-grid .emp-cal-cell{ height:112px; min-height:0; overflow:hidden;
   box-sizing:border-box; }
-.emp-cal-grid .emp-cal-cell.empty{ aspect-ratio:1 / 1; }
+.emp-cal-grid .emp-cal-cell.empty{ height:112px; }
 
 /* The summary is reference material here, so it is set a step down from the
    calendar rather than competing with it. */
@@ -1729,7 +1739,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 @media (max-width: 1180px){
   .emp-split{ grid-template-columns:1fr; }
   .emp-split-side{ position:static; }             /* figures already come first */
-  .emp-split-main{ max-width:none; }
+  .emp-cal-grid .emp-cal-cell,
+  .emp-cal-grid .emp-cal-cell.empty{ height:96px; }
   .emp-split-side .els-cards{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
 }
 /* Sunday reads as a week boundary at a glance. The same pink the grid uses for
@@ -2528,9 +2539,14 @@ input:focus,select:focus,textarea:focus,.search:focus{
   </div>
   <div class="emp-split">
     <div class="emp-split-main"><div class="emp-cal-grid" id="empCalGrid"></div></div>
-    <aside class="emp-split-side"><div class="emp-leave-strip" id="empLeaveStrip"></div></aside>
+    <aside class="emp-split-side">
+      <div class="emp-leave-strip" id="empLeaveStrip"></div>
+      <!-- Weekly hours sits with the other figures, not in a band of its own:
+           it is the same kind of reading, and it keeps this column from ending
+           well short of the calendar beside it. -->
+      <div class="ews" id="empWeekStatus"></div>
+    </aside>
   </div>
-  <div class="ews" id="empWeekStatus"></div>
   <div class="ews" id="empHolidays"></div>
   <div style="padding:6px 20px 30px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
