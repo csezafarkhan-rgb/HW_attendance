@@ -2474,7 +2474,6 @@ input:focus,select:focus,textarea:focus,.search:focus{
           <option value="Sick">Sick Leave (SL)</option>
           <option value="SHORT">Short leave (¼ day)</option>
           <option value="HALF">Half day</option>
-          <option value="THREEQ">Three-quarter day</option>
           <option value="WFH">Work from home</option>
           <option value="VISIT">Off-site visit</option>
           <option value="Other">Other</option>
@@ -7571,6 +7570,21 @@ function buildExcelBackup(){
     var pad = function(n){ return (n < 10 ? '0' : '') + n; };
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
+  /* How much leave the form is for, written the way a person would say it:
+     "1 day", "3 days", or the fraction a part-day actually costs. */
+  function leaveDayCount(req){
+    if(isPartDay(req.leaveType)){
+      var part = req.leaveType === 'HALF' ? '½ day'
+               : req.leaveType === 'THREEQ' ? '¾ day'
+               : '¼ day';
+      return part + (req.half === 'AM' ? ' (morning)' : req.half === 'PM' ? ' (afternoon)' : '');
+    }
+    var a = new Date(req.dateFrom + 'T00:00:00'), b = new Date((req.dateTo || req.dateFrom) + 'T00:00:00');
+    if(isNaN(a) || isNaN(b)) return '';
+    var n = Math.round((b - a) / 86400000) + 1;
+    if(n < 1) n = 1;
+    return n + (n === 1 ? ' day' : ' days');
+  }
   function printDayOffForm(req){
     var coName = '', coAddr = '', coLogo = '';
     try{
@@ -7581,7 +7595,14 @@ function buildExcelBackup(){
       if(lg && lg.style.backgroundImage) coLogo = lg.style.backgroundImage.slice(5,-2);
     }catch(e){}
 
-    var ret = req.returnOn || returnDate(req.dateTo);
+    /* Requests saved before the timezone fix stored a return date equal to the
+       last day off. Trust a stored value only when it is genuinely after that
+       day, so old forms print correctly without touching the saved record. */
+    var due = returnDate(req.dateTo);
+    var ret = (req.returnOn && req.returnOn > req.dateTo) ? req.returnOn : due;
+    /* Calendar days covered, inclusive. A part-day counts as the fraction the
+       leave type deducts, because that is what the person is actually taking. */
+    var days = leaveDayCount(req);
     var fld = function(label, value, hint){
       return '<div class="dof-row">'
            + '<span class="dof-lab">' + label + '</span>'
@@ -7611,6 +7632,7 @@ function buildExcelBackup(){
       + '<div class="dof-sec">Start:</div>'
       + fld('Day of the Week', dayName(req.dateFrom), '(Example: Monday)')
       + fld('Date;', longDate(req.dateFrom), '(Example March 5, 2002)')
+      + fld('Number of days', days)
       + '<div class="dof-sec">Will Return to Work:</div>'
       + fld('Day of the Week', dayName(ret), '(Example: Monday)')
       + fld('Date;', longDate(ret), '(Example March 5, 2002)')
