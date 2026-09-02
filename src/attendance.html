@@ -5661,7 +5661,7 @@ function buildExcelBackup(){
       id: 'req_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
       empName: item.empName,
       dateFrom: item.dateFrom, dateTo: item.dateTo,
-      returnOn: returnDate(item.dateTo),
+      returnOn: returnDate(item.dateTo, item.empName),
       leaveType: item.type, half: item.half || '',
       message: item.note || 'Taken without a request',
       status: decision,
@@ -6037,7 +6037,7 @@ function buildExcelBackup(){
     document.getElementById('reqDateTo').value = todayISO_full;
     document.getElementById('reqMessage').value = '';
     var rr = document.getElementById('reqReturn');
-    if(rr){ rr.dataset.touched = ''; rr.value = returnDate(todayISO_full); }
+    if(rr){ rr.dataset.touched = ''; rr.value = returnDate(todayISO_full, viewRole && viewRole.name); }
     document.getElementById('reqErr').classList.remove('show');
     requestModalOverlay.classList.add('open');
   });
@@ -6063,7 +6063,7 @@ function buildExcelBackup(){
     var syncReturn = function(){
       if(!retEl || retEl.dataset.touched === '1') return;
       var last = toEl && toEl.value ? toEl.value : (fromEl ? fromEl.value : '');
-      if(last) retEl.value = returnDate(last);
+      if(last) retEl.value = returnDate(last, viewRole && viewRole.name);
     };
     if(retEl) retEl.addEventListener('change', function(){ retEl.dataset.touched = '1'; });
     if(toEl) toEl.addEventListener('change', syncReturn);
@@ -7590,16 +7590,39 @@ function buildExcelBackup(){
   }
   /* The day they are back at work is the day after the last day off - which is
      what the form asks for, and the thing people most often get wrong. */
-  /* The day after the last day off. Built from the local calendar fields, not
-     toISOString() - that converts to UTC, and east of Greenwich local midnight
-     is the previous day there, so a one-day leave came back with the same date
-     it started on. */
-  function returnDate(lastOffISO){
+  function isoOf(d){
+    var pad = function(n){ return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  /* Is this a day the person would normally be at work? Sundays are off for
+     everyone, Saturdays follow that person's own policy, and a company holiday
+     is off regardless. Without an employee name only the calendar is known, so
+     Saturday is assumed to be worked. */
+  function isWorkingDay(iso, emp){
+    if(getOfficialLeave(iso)) return false;
+    var dow = new Date(iso + 'T00:00:00').getDay();
+    if(dow === 0) return false;                       // Sunday
+    if(dow === 6 && emp && getSatPolicy(emp).mode === 'OFF') return false;
+    return true;
+  }
+  /* The first working day after the last day off. Nobody returns on a holiday
+     or a weekly off, so those are stepped over - a Friday leave with Saturday
+     a holiday and Sunday off means the person is back on Monday.
+     Built from the local calendar fields, not toISOString(): that converts to
+     UTC, and east of Greenwich local midnight is the previous day there, so a
+     one-day leave used to come back with the date it started on. */
+  function returnDate(lastOffISO, emp){
     var d = new Date(lastOffISO + 'T00:00:00');
     if(isNaN(d)) return '';
     d.setDate(d.getDate() + 1);
-    var pad = function(n){ return (n < 10 ? '0' : '') + n; };
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    /* A month of closure is already implausible; the cap only stops a bad
+       holiday list from spinning here forever. */
+    for(var i = 0; i < 31; i++){
+      var iso = isoOf(d);
+      if(isWorkingDay(iso, emp)) return iso;
+      d.setDate(d.getDate() + 1);
+    }
+    return isoOf(d);
   }
   /* How much leave the form is for, written the way a person would say it:
      "1 day", "3 days", or the fraction a part-day actually costs. */
@@ -7629,7 +7652,7 @@ function buildExcelBackup(){
     /* Requests saved before the timezone fix stored a return date equal to the
        last day off. Trust a stored value only when it is genuinely after that
        day, so old forms print correctly without touching the saved record. */
-    var due = returnDate(req.dateTo);
+    var due = returnDate(req.dateTo, req.empName);
     var ret = (req.returnOn && req.returnOn > req.dateTo) ? req.returnOn : due;
     /* Calendar days covered, inclusive. A part-day counts as the fraction the
        leave type deducts, because that is what the person is actually taking. */
@@ -7734,7 +7757,7 @@ function buildExcelBackup(){
       var r = $$('pfReturn'), t = $$('pfTo'), f = $$('pfFrom');
       if(!r || r.dataset.touched === '1') return;
       var last = (t && t.value) || (f && f.value) || '';
-      if(last) r.value = returnDate(last);
+      if(last) r.value = returnDate(last, ($$('pfEmp') || {}).value);
     };
     open.addEventListener('click', function(){
       var sel = $$('pfEmp');
@@ -7745,7 +7768,7 @@ function buildExcelBackup(){
         }).join('');
       }
       ['pfFrom','pfTo'].forEach(function(id){ if($$(id)) $$(id).value = todayISO_full; });
-      if($$('pfReturn')){ $$('pfReturn').dataset.touched = ''; $$('pfReturn').value = returnDate(todayISO_full); }
+      if($$('pfReturn')){ $$('pfReturn').dataset.touched = ''; $$('pfReturn').value = returnDate(todayISO_full, ($$('pfEmp') || {}).value); }
       if($$('pfReason')) $$('pfReason').value = '';
       if($$('pfApprover')) $$('pfApprover').value = (viewRole && viewRole.username) || '';
       if($$('pfErr')) $$('pfErr').classList.remove('show');
