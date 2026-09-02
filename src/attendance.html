@@ -9200,7 +9200,7 @@ function buildExcelBackup(){
     emps.forEach(function(emp){ weeklyInfoByEmp[emp.name] = computeWeeklyShortHours(emp.name, dates); });
 
     var prevWeekMonday = null;
-    dates.forEach(function(dateStr){
+    dates.forEach(function(dateStr, dateIdx){
       var dow = new Date(dateStr+'T00:00:00').getDay();
       var thisWeekMonday = mondayOf(dateStr);
       var isWeekStart = thisWeekMonday !== prevWeekMonday;
@@ -9286,7 +9286,10 @@ function buildExcelBackup(){
 
       prevWeekMonday = thisWeekMonday;
       var rowDow = new Date(dateStr+'T00:00:00').getDay();
-      if(rowDow === 0 && state.showWeekStatus){ // Sunday — close out this week with a summary row
+      /* Sunday closes a week. The month's last week usually ends mid-week, so
+         close it on the final date too or that week never gets a status row. */
+      var isLastDate = dateIdx === dates.length - 1;
+      if((rowDow === 0 || isLastDate) && state.showWeekStatus){
         var wk = mondayOf(dateStr);
         html += '<tr class="week-summary-row"><td class="date-col">Week status</td>';
         emps.forEach(function(emp){
