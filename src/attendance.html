@@ -2294,7 +2294,7 @@ body.is-view-only #bkExportAll,
 body.is-view-only .req-actions,
 body.is-view-only #reqBulk,
 /* holidays */
-body.is-view-only #holAdd,
+body.is-view-only #holAddForm,
 body.is-view-only [data-del-hol],
 /* the day editor's write controls */
 body.is-view-only #manSave,
@@ -2470,7 +2470,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 
 <div class="page" id="page-holidays">
   <div style="padding:14px 18px 6px;font-weight:800;font-size:14px;">Official Leave Dates (company holidays) — shown as holidays on the attendance grid for everyone; they don't count as absences or against weekly hours.</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:8px 18px 14px;">
+  <div id="holAddForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:8px 18px 14px;">
     <div><label style="font-size:11px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;">Date</label><input type="date" id="holDate" style="padding:9px 12px;border-radius:8px;border:1.5px solid var(--line-dk);font-size:13px;font-family:'Inter',sans-serif;"/></div>
     <div style="flex:1;min-width:200px;"><label style="font-size:11px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;">Occasion / name</label><input type="text" id="holName" placeholder="e.g. Independence Day" style="width:100%;padding:9px 12px;border-radius:8px;border:1.5px solid var(--line-dk);font-size:13px;font-family:'Inter',sans-serif;"/></div>
     <div style="flex:1;min-width:180px;"><label style="font-size:11px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;">Note (office open / closed)</label><input type="text" id="holNote" placeholder="e.g. Office closed" style="width:100%;padding:9px 12px;border-radius:8px;border:1.5px solid var(--line-dk);font-size:13px;font-family:'Inter',sans-serif;"/></div>
@@ -8039,10 +8039,14 @@ function buildExcelBackup(){
       return '<div class="req-card">'+
         '<div class="req-top">'+
           '<div><div class="req-emp">'+h.name.replace(/</g,'&lt;')+'</div><div class="req-dates">'+pretty+'</div></div>'+
-          '<div style="display:flex;gap:8px;flex-shrink:0;">'+
-            '<button class="btn ghost" data-edit-hol="'+d+'" style="width:auto;padding:7px 14px;font-size:12px;">Edit</button>'+
-            '<button class="btn ghost" data-del-hol="'+d+'" style="width:auto;padding:7px 14px;font-size:12px;">Remove</button>'+
-          '</div>'+
+          /* Edit and Remove change the company calendar, so a view admin gets
+             the list without them rather than buttons that refuse. */
+          (canEdit()
+            ? ('<div style="display:flex;gap:8px;flex-shrink:0;">'+
+                 '<button class="btn ghost" data-edit-hol="'+d+'" style="width:auto;padding:7px 14px;font-size:12px;">Edit</button>'+
+                 '<button class="btn ghost" data-del-hol="'+d+'" style="width:auto;padding:7px 14px;font-size:12px;">Remove</button>'+
+               '</div>')
+            : '')+
         '</div>'+ noteHtml +
       '</div>';
     }).join('');
@@ -10605,6 +10609,19 @@ function buildExcelBackup(){
       '</div>';
     }
 
+    /* A view admin gets the day as a record, not as a form. statusHtml and
+       punchHtml are the read-only half; everything after them - the off-site
+       marks, manual entry, shift, part-day and the excuse blocks - exists only
+       to change the day, so none of it is built. Returning here rather than
+       hiding pieces means there is nothing left to click, and no handler below
+       is wired to a control that does not exist. */
+    if(!canEdit()){
+      modalBody.innerHTML = statusHtml + punchHtml
+        + '<div class="save-note" style="margin-top:14px;">'
+        + 'View only — this day cannot be changed from your account.'
+        + '</div>';
+      return;
+    }
     modalBody.innerHTML = statusHtml + punchHtml +
       '<label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:8px;">Mark as off-site (optional)</label>'+
       catRowHtml+
