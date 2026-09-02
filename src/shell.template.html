@@ -234,7 +234,7 @@
         <div class="um-addrow">
           <input id="umNewUser" type="email" placeholder="work email" spellcheck="false" autocapitalize="none" autocorrect="off">
           <input id="umNewPass" type="password" placeholder="password (8+ chars)">
-          <select id="umNewRole"><option value="employee">Employee</option><option value="admin">Admin</option></select>
+          <select id="umNewRole"><option value="employee">Employee</option><option value="admin_view">View Admin — read only</option><option value="admin">Super Admin — full access</option></select>
           <button id="umAdd" class="um-btn um-add">+ Add user</button>
         </div>
         <div id="umNewTabs" class="um-tabs"></div>
@@ -1523,7 +1523,11 @@
     var u = null;
     try{ u = window.HWAuth && window.HWAuth.user; }catch(e){}
     if (!u || !u.email) return null;
-    var isAdmin = u.role === 'admin';
+    /* A view admin sees the whole admin side; only writing is withheld, and the
+       server is what enforces that. Both admin tiers therefore enter the same
+       view, and the exact role travels with the message so the dashboard can
+       hide the controls a viewer cannot use. */
+    var isAdmin = u.role === 'admin' || u.role === 'admin_view';
     var empName = u.name || u.email;
     return {
       type:'hw-session',
@@ -1533,7 +1537,9 @@
       name:u.name || '',
       role:u.role || 'viewer',
       tabs:isAdmin ? ['attendance'] : ['attendance'],
-      att:{ role:isAdmin ? 'admin' : 'employee', emp:isAdmin ? '' : empName }
+      att:{ role:isAdmin ? 'admin' : 'employee', emp:isAdmin ? '' : empName,
+            /* 'admin' | 'admin_view' | 'employee' - the real one */
+            tier:u.role || 'employee' }
     };
   }
   function broadcastSession(){
@@ -2604,8 +2610,9 @@ function _initLoginGateReal(startWorkspace){
         if(window.HWAuth && window.HWAuth.user && window.HWAuth.user.id===u.id){ var you=document.createElement('span'); you.className='um-you'; you.textContent='you'; head.appendChild(you); }
         var stat=document.createElement('span'); stat.className='um-rec'; stat.textContent=(u.is_active?'Active':'Disabled'); head.appendChild(stat);
         var role=document.createElement('select'); role.className='um-role';
-        [['employee','Employee'],['admin','Admin']].forEach(function(x){ var o=document.createElement('option'); o.value=x[0]; o.textContent=x[1]; if(u.role===x[0]) o.selected=true; role.appendChild(o); });
-        var name=document.createElement('input'); name.type='text'; name.className='um-pwin'; name.placeholder=u.role==='admin'?'Admin display name':'Employee name'; name.value=u.name||'';
+        [['employee','Employee'],['admin_view','View Admin — read only'],['admin','Super Admin — full access']]
+          .forEach(function(x){ var o=document.createElement('option'); o.value=x[0]; o.textContent=x[1]; if(u.role===x[0]) o.selected=true; role.appendChild(o); });
+        var name=document.createElement('input'); name.type='text'; name.className='um-pwin'; name.placeholder=(u.role==='employee')?'Employee name':'Display name'; name.value=u.name||'';
         var active=document.createElement('label'); active.className='um-tab';
         var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!!u.is_active; active.appendChild(cb); var at=document.createElement('span'); at.textContent=' Active'; active.appendChild(at);
         var save=document.createElement('button'); save.className='um-btn'; save.textContent='Save';
@@ -2633,7 +2640,8 @@ function _initLoginGateReal(startWorkspace){
   function serverAddUser(){
     var email=(document.getElementById('umNewUser').value||'').trim().toLowerCase();
     var pass=document.getElementById('umNewPass').value||'';
-    var role=(document.getElementById('umNewRole').value==='admin')?'admin':'employee';
+    var chosen=document.getElementById('umNewRole').value;
+    var role=(['admin','admin_view','employee'].indexOf(chosen)>-1)?chosen:'employee';
     var name=(document.getElementById('umNewAttEmp').value||'').trim();
     if(!email) return serverFlash('Enter a work email.',false);
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return serverFlash('Enter a valid work email.',false);

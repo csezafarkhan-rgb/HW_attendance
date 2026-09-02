@@ -2278,6 +2278,22 @@ input:focus,select:focus,textarea:focus,.search:focus{
 }
 #tabs button.on .pill{ background:rgba(255,255,255,.26) !important; border-color:rgba(255,255,255,.42) !important; color:#fff !important; }
 
+/* ---- View-only admin ----
+   Everything readable stays; the controls that write are removed. A rule here
+   rather than a hunt through the markup means a control added later is covered
+   without anyone remembering to. */
+.view-only-bar{
+  margin:10px 20px 0; padding:9px 14px; border-radius:10px;
+  background:#FFF6D6; border:1px solid #E8D07A; color:#7A5008;
+  font-size:12.5px; font-weight:600;
+}
+body.is-view-only #updAttBtn,
+body.is-view-only .page-tab[data-page="backup"],
+body.is-view-only #bkExportAll,
+body.is-view-only #addEmpBtn{ display:none !important; }
+/* Day cells stop being edit targets. */
+body.is-view-only table.att td.att-cell{ cursor:default !important; }
+
 /* ---- Printed leave form: exempt from the app-wide font ----
    The glass theme sets `*{font-family: Inter !important}` for the dashboard.
    The Day Off form is a paper document, not app chrome: it is set in Times,
@@ -10828,7 +10844,7 @@ function buildExcelBackup(){
     if(!DATA_READY){ PENDING_SESSION = msg; return; }
     SESSION_APPLIED = sig;
     if(att.role === 'admin'){
-      enterAdminView(msg.user, msg.name);
+      enterAdminView(msg.user, msg.name, (msg.att && msg.att.tier) || 'admin');
     } else {
       // An employee sees their own record and nothing else, under the name the
       // admin set against the account.
@@ -10866,11 +10882,15 @@ function buildExcelBackup(){
     }
   }, 2500);
 
-  function enterAdminView(username, displayName){
+  function enterAdminView(username, displayName, tier){
     /* displayName is what the account is actually called. Keep it beside the
        username so the signature panel can say "Zafar Khan" rather than the
-       local part of an email address. */
-    viewRole = {role:'admin', username:username, name:(displayName || '').trim()};
+       local part of an email address.
+       tier separates the two admin levels: 'admin' may change things,
+       'admin_view' may only look. The server enforces this either way; hiding
+       the controls just stops a viewer clicking things that will only 403. */
+    viewRole = {role:'admin', username:username, name:(displayName || '').trim(),
+                tier:(tier === 'admin_view' ? 'admin_view' : 'admin')};
     saveViewRole();
     hideGate();
     document.getElementById('employeeView').style.display = 'none';
@@ -10883,6 +10903,9 @@ function buildExcelBackup(){
   }
   /* What an employee may open. Everything that reports on other people stays
      out of reach - not merely hidden, since the tab is never activated. */
+  /* May this account change anything? A view admin sees every page and every
+     figure, and can still raise their own leave request - nothing else. */
+  function canEdit(){ return !viewRole || viewRole.tier !== 'admin_view'; }
   function applyRoleVisibility(){
     var isAdmin = !viewRole || viewRole.role === 'admin';
     var adminOnly = ['dashboard','leave','salary','holidays','backup'];
@@ -10891,6 +10914,35 @@ function buildExcelBackup(){
       if(adminOnly.indexOf(id) > -1) t.style.display = isAdmin ? '' : 'none';
     });
     if(!isAdmin && adminOnly.indexOf(currentPage) > -1) currentPage = 'attendance';
+    applyViewOnlyChrome();
+  }
+
+  /* A view admin keeps every page and every figure. What goes is the ability to
+     put data in or change what is there: the punch-file import, the backup and
+     restore tab, and the editing the grid does on click. A banner says so,
+     rather than leaving controls that silently do nothing. */
+  function applyViewOnlyChrome(){
+    var viewOnly = !canEdit();
+    document.body.classList.toggle('is-view-only', viewOnly);
+    /* Backup & Restore is entirely about writing - importing a punch file,
+       restoring a backup, clearing data - so the tab itself goes. */
+    var bkTab = document.querySelector('.page-tab[data-page="backup"]');
+    if(bkTab && viewOnly){
+      bkTab.style.display = 'none';
+      if(currentPage === 'backup') currentPage = 'attendance';
+    }
+    var bar = document.getElementById('viewOnlyBar');
+    if(viewOnly && !bar){
+      bar = document.createElement('div');
+      bar.id = 'viewOnlyBar';
+      bar.className = 'view-only-bar';
+      bar.innerHTML = '\u{1F441} <b>View only.</b> You can see everything here, '
+        + 'but changes are made by a super admin.';
+      var host = document.querySelector('.att-content') || document.body;
+      host.insertBefore(bar, host.firstChild);
+    } else if(!viewOnly && bar){
+      bar.remove();
+    }
   }
   /* Inside the workspace the shell owns accounts and sessions, so this
      dashboard's own user list and sign-out would be a second, competing set of

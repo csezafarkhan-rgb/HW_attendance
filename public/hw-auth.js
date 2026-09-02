@@ -86,8 +86,12 @@
     }
     function enter(user) {
       window.HWAuth.user = user;
-      if (who) who.textContent = '👤 ' + (user.name || user.email) + (user.role === 'admin' ? ' · Admin' : '');
+      var tierLabel = user.role === 'admin' ? ' · Super Admin'
+                    : user.role === 'admin_view' ? ' · View Admin' : '';
+      if (who) who.textContent = '👤 ' + (user.name || user.email) + tierLabel;
       if (outBtn) outBtn.style.display = '';
+      /* Managing accounts and taking a whole-project backup are changes, so they
+         belong to the super admin alone - a view admin gets neither button. */
       if (usersBtn) usersBtn.style.display = user.role === 'admin' ? '' : 'none';
       if (pbBtn) pbBtn.style.display = user.role === 'admin' ? '' : 'none';
 
