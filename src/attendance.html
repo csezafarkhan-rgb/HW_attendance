@@ -1559,8 +1559,15 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-nav{display:flex;align-items:center;gap:10px;margin-left:auto;}
 .emp-cal-nav button{border:1.5px solid var(--line-dk);background:var(--panel);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:14px;}
 .emp-cal-nav .lbl{font-weight:800;font-size:13px;min-width:130px;text-align:center;}
-.emp-leave-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 20px;}
-.emp-leave-strip{ flex-wrap:wrap; }
+/* Three labelled groups rather than one row of eight figures: what is left,
+   how it adds up, and how the month went. */
+.emp-leave-strip{ display:flex; flex-direction:column; gap:16px; padding:14px 20px; }
+.els-group{ display:flex; flex-direction:column; gap:8px; }
+.els-title{ margin:0; display:flex; align-items:baseline; gap:8px;
+  font-size:12px; font-weight:800; letter-spacing:.02em; color:var(--ink); }
+.els-title span{ font-weight:600; font-size:10.5px; color:var(--ink-dim);
+  text-transform:uppercase; letter-spacing:.06em; }
+.els-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:10px; }
 .emp-leave-strip .card{ position:relative; }
 .emp-leave-strip .card .x{ margin-top:3px; font-size:10px; color:var(--ink-dim);
   font-weight:600; line-height:1.3; }
@@ -1728,7 +1735,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .ews-v{ font-size:14px; }
 
   /* the leave-balance strip stops being a single wide row */
-  .emp-leave-strip{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .els-cards{ grid-template-columns:1fr 1fr; gap:8px; }
 
   /* request lists: the toolbar wraps, the cards stack */
   .req-bar{ gap:6px; }
@@ -1761,7 +1768,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .emp-cal-cell{ min-height:46px; }
   .emp-cal-cell .s{ display:none; }          /* the colour already says which kind */
   .ews-grid, .hol-grid{ grid-template-columns:1fr 1fr; }
-  .emp-leave-strip{ grid-template-columns:1fr; }
+  .els-cards{ grid-template-columns:1fr; }
   .req-tab{ padding:5px 9px; font-size:11.5px; }
   .rk{ font-size:10px; padding:1px 7px; }
   .dof-sheet{ margin:8px; padding:12px 12px; font-size:12.5px; }
@@ -11023,53 +11030,74 @@ function buildExcelBackup(){
         + (note ? '<div class="x">' + note + '</div>' : '')
         + '</div>';
     };
+    /* Eight figures in one undifferentiated row read as a wall of numbers.
+       They answer three separate questions, so they are shown as three: what
+       is left, where it came from and what it cost, and how the month went for
+       timekeeping. */
+    var group = function(title, sub, cards){
+      if(!cards) return '';
+      return '<section class="els-group">'
+        + '<h4 class="els-title">' + title
+        +   (sub ? '<span>' + sub + '</span>' : '')
+        + '</h4>'
+        + '<div class="els-cards">' + cards + '</div>'
+        + '</section>';
+    };
+
     var left = r2(m.afterDed);
-    el.innerHTML =
-        card(r2(m.clRem).toFixed(2), 'Casual left',
+    var monthName = monthLabelShort(empCalMonth || defaultMonth).split(' ')[0];
+
+    var balance =
+        card(left.toFixed(2), 'Leave left',
+             left < 0 ? 'var(--alert)' : 'var(--visit)',
+             left < 0 ? 'overdrawn' : 'after deductions')
+      + card(r2(m.clRem).toFixed(2), 'Casual left',
              left < 0 ? 'var(--alert)' : 'var(--ok-dk)',
              r2(m.clTaken)+' of '+r2(m.clAssign)+' used')
       + card(r2(m.slRem).toFixed(2), 'Sick left',
              'var(--visit)',
              r2(m.slTaken)+' of '+r2(m.slAssign)+' used')
-      + card(r2(m.clAssign + m.slAssign).toFixed(2), 'Accrued so far', '',
-             'earned to ' + monthLabel(leaveAsOfMonth))
-      + card(r2(m.totalDed).toFixed(2), 'Charged to salary',
-             m.totalDed > 0 ? 'var(--alert)' : '',
-             m.totalDed > 0 ? 'days beyond the balance' : 'nothing so far')
-      + card(left.toFixed(2), 'Leave left after deductions',
-             left < 0 ? 'var(--alert)' : 'var(--visit)',
-             left < 0 ? 'overdrawn' : 'available')
       + (m.pendTotal > 0
           ? card(r2(m.pendTotal).toFixed(2), 'Awaiting confirmation', '#B26B00',
                  'not yet deducted')
+          : '');
+
+    var earned =
+        card(r2(m.clAssign + m.slAssign).toFixed(2), 'Accrued so far', '',
+             'earned to ' + monthLabel(leaveAsOfMonth))
+      + card(r2(m.totalDed).toFixed(2), 'Charged to salary',
+             m.totalDed > 0 ? 'var(--alert)' : '',
+             m.totalDed > 0 ? 'days beyond the balance' : 'nothing so far');
+
+    /* Punctuality is the other half of the picture. An employee looking at this
+       page wants to know the same things the office sees: how much lateness has
+       been counted against them, and how much was forgiven.
+       The month they are looking at, not the admin toolbar's selection - an
+       employee has no control over that and would see figures that did not
+       match the calendar below. */
+    var st = computeEmployeeStats(name, eachDateInMonth(empCalMonth || defaultMonth));
+    var timing =
+        card(st.lateDays ? fmtMin(st.totalLateMin) : '—', 'Late',
+             st.lateDays ? '#9A7B0A' : '',
+             st.lateDays ? (st.lateDays + ' day' + (st.lateDays===1?'':'s') + ' counted') : 'nothing counted')
+      + card(st.earlyDays ? fmtMin(st.totalEarlyMin) : '—', 'Left early',
+             st.earlyDays ? '#8F4A12' : '',
+             st.earlyDays ? (st.earlyDays + ' day' + (st.earlyDays===1?'':'s') + ' counted') : 'nothing counted')
+      + ((st.excusedMin > 0 || st.excusedTotal > 0)
+          ? card(fmtMin(st.excusedMin), 'Excused', '#2F6FB5',
+                 [ st.excusedLate ? (st.excusedLate+' late') : '',
+                   st.excusedEarly ? (st.excusedEarly+' early') : '' ]
+                   .filter(Boolean).join(' · ') + ' — not counted against you')
           : '')
-      + (function(){
-          /* Punctuality is the other half of the picture. An employee looking at
-             this page wants to know the same things the office sees: how much
-             lateness has been counted against them, and how much was forgiven. */
-          // The month they are looking at, not the admin toolbar's selection -
-          // an employee has no control over that and would see figures that
-          // did not match the calendar below.
-          var st = computeEmployeeStats(name, eachDateInMonth(empCalMonth || defaultMonth));
-          var out = '';
-          out += card(st.lateDays ? fmtMin(st.totalLateMin) : '\u2014', 'Late in ' + monthLabelShort(empCalMonth || defaultMonth).split(' ')[0] + ',',
-                      st.lateDays ? '#9A7B0A' : '',
-                      st.lateDays ? (st.lateDays + ' day' + (st.lateDays===1?'':'s') + ' counted') : 'nothing counted');
-          out += card(st.earlyDays ? fmtMin(st.totalEarlyMin) : '\u2014', 'Left early',
-                      st.earlyDays ? '#8F4A12' : '',
-                      st.earlyDays ? (st.earlyDays + ' day' + (st.earlyDays===1?'':'s') + ' counted') : 'nothing counted');
-          if(st.excusedMin > 0 || st.excusedTotal > 0){
-            out += card(fmtMin(st.excusedMin), 'Excused', '#2F6FB5',
-                        [ st.excusedLate ? (st.excusedLate+' late') : '',
-                          st.excusedEarly ? (st.excusedEarly+' early') : '' ]
-                          .filter(Boolean).join(' \u00b7 ') + ' \u2014 not counted against you');
-          }
-          if(st.extraDays > 0){
-            out += card(fmtMin(st.extraMin), 'Worked on days off', 'var(--visit)',
-                        st.extraDays + ' day' + (st.extraDays===1?'':'s'));
-          }
-          return out;
-        })();
+      + (st.extraDays > 0
+          ? card(fmtMin(st.extraMin), 'Worked on days off', 'var(--visit)',
+                 st.extraDays + ' day' + (st.extraDays===1?'':'s'))
+          : '');
+
+    el.innerHTML =
+        group('Leave you can still take', 'balance today', balance)
+      + group('How it adds up', 'earned and charged', earned)
+      + group('Timekeeping in ' + monthName, 'this month only', timing);
   }
 
   /* The weekly hours position, the same figure the grid's week rows show.
