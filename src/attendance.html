@@ -1698,10 +1698,14 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* Calendar on the left, the month's figures beside it on the right. The month
    is the thing being read; the numbers are reference, so they take the narrow
    column and the calendar gets whatever is left. */
-.emp-split{ display:grid; grid-template-columns:minmax(0,1fr) 296px;
+/* Figures on the left, the month beside them on the right. */
+.emp-split{ display:grid; grid-template-columns:296px minmax(0,1fr);
   gap:18px; padding:10px 20px 24px; align-items:start; }
-.emp-split-main{ min-width:0; }
-.emp-split-side{ min-width:0; position:sticky; top:10px; }
+.emp-split-side{ order:1; min-width:0; position:sticky; top:10px; }
+/* The grid is capped rather than stretched: on a wide screen a square cell
+   would otherwise grow past 170px and the month would read as a wall of
+   near-empty boxes. 116px keeps a day legible without dominating. */
+.emp-split-main{ order:2; min-width:0; max-width:calc(7 * 116px + 6 * 6px); }
 .emp-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:0;}
 /* Square day cells: a month reads as a grid, not as a stack of wide bars. */
 /* border-box, or the 1px border is added outside the square and the cell comes
@@ -1724,7 +1728,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 
 @media (max-width: 1180px){
   .emp-split{ grid-template-columns:1fr; }
-  .emp-split-side{ position:static; order:-1; }   /* figures first when stacked */
+  .emp-split-side{ position:static; }             /* figures already come first */
+  .emp-split-main{ max-width:none; }
   .emp-split-side .els-cards{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
 }
 /* Sunday reads as a week boundary at a glance. The same pink the grid uses for
