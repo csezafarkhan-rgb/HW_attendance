@@ -2183,6 +2183,27 @@ input:focus,select:focus,textarea:focus,.search:focus{
 }
 #tabs button.on .pill{ background:rgba(255,255,255,.26) !important; border-color:rgba(255,255,255,.42) !important; color:#fff !important; }
 
+/* ---- Printed leave form: exempt from the app-wide font ----
+   The glass theme sets `*{font-family: Inter !important}` for the dashboard.
+   The Day Off form is a paper document, not app chrome: it is set in Times,
+   with the letterhead in Arial and everything filled in on a typewriter face.
+   Those faces have to be restated with !important here or the universal rule
+   above flattens the whole sheet back to Inter. */
+.dof-sheet, .dof-sheet .dof-lab, .dof-sheet .dof-sec,
+.dof-sheet .dof-ttl, .dof-sheet .dof-note{
+  font-family:'Times New Roman',Times,serif !important;
+}
+.dof-sheet .dof-co, .dof-sheet .dof-addr,
+.dof-sheet .dof-sig, .dof-sheet .dof-signby, .dof-sheet .dof-ref{
+  font-family:Arial,Helvetica,sans-serif !important;
+}
+/* The answers: name, dates, number of days, reason. */
+.dof-sheet .dof-line, .dof-sheet .dof-blank{
+  font-family:'Courier New',Courier,monospace !important;
+}
+/* Guidance for a hand-filled form, so it stays out of the way. */
+.dof-sheet .dof-eg{ color:#777 !important; }
+
 </style>
 </head>
 <body>
