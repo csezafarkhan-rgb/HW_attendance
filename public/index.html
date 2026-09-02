@@ -389,6 +389,17 @@
       });
     }
 
+    /* Show/hide password. The markup's own handler sits in the legacy gate the
+       build renames out, so the button is inert unless it is wired here. */
+    var eye = document.getElementById('lgEye');
+    if (eye && pEl) eye.addEventListener('click', function () {
+      var showing = pEl.type === 'text';
+      pEl.type = showing ? 'password' : 'text';
+      eye.classList.toggle('on', !showing);
+      eye.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      try { pEl.focus(); } catch (e) {}
+    });
+
     if (btn) btn.addEventListener('click', submit);
     if (form) form.addEventListener('submit', submit);
     if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
