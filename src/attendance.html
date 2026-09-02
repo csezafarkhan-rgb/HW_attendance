@@ -2290,7 +2290,22 @@ input:focus,select:focus,textarea:focus,.search:focus{
 body.is-view-only #updAttBtn,
 body.is-view-only .page-tab[data-page="backup"],
 body.is-view-only #bkExportAll,
-body.is-view-only #addEmpBtn{ display:none !important; }
+/* leave decisions */
+body.is-view-only .req-actions,
+body.is-view-only #reqBulk,
+/* holidays */
+body.is-view-only #holAdd,
+body.is-view-only [data-del-hol],
+/* the day editor's write controls */
+body.is-view-only #manSave,
+body.is-view-only #ovSave,
+body.is-view-only #ovClear,
+body.is-view-only #shiftApply{ display:none !important; }
+/* Figures a viewer may read but not retype. */
+body.is-view-only #leaveTable input.ded-input{
+  pointer-events:none !important; background:transparent !important;
+  border-bottom-style:dotted !important; opacity:.75;
+}
 /* Day cells stop being edit targets. */
 body.is-view-only table.att td.att-cell{ cursor:default !important; }
 
@@ -2713,6 +2728,40 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
           resolve({keys:keys, prefix:prefix, shared:!!shared});
         });
       }
+    };
+  })();
+  /* ---- View-only admin: one gate, not a hunt for buttons ----
+     Every setting this dashboard changes - a day's override, a salary
+     deduction, a leave decision, a holiday, a shift - is written through
+     storage.set/delete with shared=true. Guarding that single path covers all
+     of them, including any added later, which hiding individual controls does
+     not. The server refuses these writes too; this is so a viewer is told
+     plainly instead of watching a change appear and then vanish on reload. */
+  (function(){
+    var realSet = storage.set, realDelete = storage.delete;
+    var warned = 0;
+    function refuse(){
+      var now = Date.now();
+      if(now - warned > 1500){                 // one message per action, not per key
+        warned = now;
+        try{
+          if(typeof showUploadStatus === 'function'){
+            showUploadStatus('View only \u2014 that change was not saved. Ask a super admin.', true);
+          }
+        }catch(e){}
+      }
+      return Promise.reject(new Error('view_only'));
+    }
+    function blocked(shared){
+      return shared !== false && typeof canEdit === 'function' && !canEdit();
+    }
+    storage.set = function(key, value, shared){
+      if(blocked(shared)) return refuse();
+      return realSet.apply(storage, arguments);
+    };
+    storage.delete = function(key, shared){
+      if(blocked(shared)) return refuse();
+      return realDelete.apply(storage, arguments);
     };
   })();
 

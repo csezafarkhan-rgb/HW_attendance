@@ -106,9 +106,16 @@ const ROLES = ['admin', 'admin_view', 'employee'];
 function isAdminArea(role) { return role === 'admin' || role === 'admin_view'; }
 function canWrite(role) { return role === 'admin'; }
 
-// Shared keys a non-writer may still write: an employee raises leave requests,
-// and a view-only admin must be able to act on their own the same way.
+/* Shared keys a non-writer may still write. This is for employees raising their
+   own leave request and nobody else: the whole array is written at once, so a
+   view-only admin allowed through here could set status:'approved' and approve
+   leave. They have no reason to touch it - they raise nothing from the admin
+   view - so the exception is theirs alone. */
 const EMPLOYEE_WRITABLE = ['leaveRequests'];
+function mayWriteSharedKey(role, key) {
+  if (canWrite(role)) return true;
+  return role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) > -1;
+}
 
 // Mirrors the key rules the dashboard's own storage shim enforced.
 function validKey(k) {
@@ -307,7 +314,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   // their own UI preferences, which are personal rows.
   // Leave requests are the exception: employees raise them, so they have to be
   // able to write that shared key or the request never reaches an admin.
-  if (shared && !canWrite(req.session.role) && EMPLOYEE_WRITABLE.indexOf(key) === -1) {
+  if (shared && !mayWriteSharedKey(req.session.role, key)) {
     return res.status(403).json({ error: 'read_only' });
   }
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
