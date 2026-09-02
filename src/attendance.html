@@ -1609,7 +1609,9 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   padding:0 3pt 1pt; font:11pt/1.1 'Courier New',Courier,monospace;
   letter-spacing:.2pt; overflow:hidden; text-overflow:ellipsis; }
 .dof-fill.wide{ flex:1 1 auto; margin-left:0; }
-.dof-eg{ flex:0 0 auto; margin-left:8pt; font-size:12pt; }
+/* Guidance for whoever fills the form in by hand, not content - grey keeps
+   them from competing with the answers. */
+.dof-eg{ flex:0 0 auto; margin-left:8pt; font-size:12pt; color:#777; }
 .dof-sigln{ position:absolute; left:84pt; font:11.04pt/1 Arial,Helvetica,sans-serif; }
 .dof-sigln.big{ font-size:12pt; }
 /* An approver's signature sits on its own line, where one would be signed. */
@@ -2276,6 +2278,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 .dof-sheet .dof-ttl, .dof-sheet .dof-eg{
   font-family:'Times New Roman',Times,serif !important;
 }
+.dof-sheet .dof-eg{ color:#777 !important; }
 .dof-sheet .dof-sigln{ font-family:Arial,Helvetica,sans-serif !important; }
 /* The answers: name, dates, reason, approver. */
 .dof-sheet .dof-fill{ font-family:'Courier New',Courier,monospace !important; }
@@ -3388,6 +3391,38 @@ function offerImportFile(file, stamp){
      and the form prints the one belonging to the person who actually approved
      it, not whoever happens to be looking at it.
      ------------------------------------------------------------------ */
+  /* Draw a signature from a typed name. Used both by the admin signature
+     setting and by the printed form, which signs the employee's line from the
+     name on the request. A transparent PNG so it sits on the form the way an
+     uploaded scan does, drawn at 3x and held at CSS size so it stays sharp in
+     print. Script faces are named individually and fall back to the generic
+     cursive keyword, so it still draws on a machine without Segoe Script. */
+  function signatureFromName(name){
+    var text = String(name || '').trim();
+    if(!text) return null;
+    var SCALE = 3, PAD = 14 * SCALE, SIZE = 42 * SCALE;
+    var face = '"Segoe Script","Bradley Hand","Brush Script MT","Lucida Handwriting",cursive';
+    var c = document.createElement('canvas');
+    var ctx = c.getContext('2d');
+    ctx.font = 'italic ' + SIZE + 'px ' + face;
+    var w = Math.ceil(ctx.measureText(text).width) + PAD * 2;
+    c.width = w;
+    c.height = Math.ceil(SIZE * 1.9);
+    ctx = c.getContext('2d');
+    // measuring reset the context, so set the face again on the sized canvas
+    ctx.font = 'italic ' + SIZE + 'px ' + face;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#1B2E5B';                 // dark ink blue, not pure black
+    ctx.fillText(text, PAD, SIZE * 1.15);
+    // the underline every signed line has
+    ctx.strokeStyle = '#1B2E5B';
+    ctx.lineWidth = Math.max(1, Math.round(SCALE * 0.7));
+    ctx.beginPath();
+    ctx.moveTo(PAD * 0.5, SIZE * 1.45);
+    ctx.lineTo(w - PAD * 0.5, SIZE * 1.45);
+    ctx.stroke();
+    return c.toDataURL('image/png');
+  }
   var SIGNS = {};                       // { username: {data, by, at} }
   function signKeyFor(name){ return String(name || '').trim().toLowerCase(); }
   function mySignKey(){
@@ -3471,38 +3506,6 @@ function renderSignSetting(){
         };
         rd.readAsDataURL(f);
       });
-    }
-    /* Draw a signature from a typed name, for an admin who has no scan of one.
-       A transparent PNG so it sits on the form the same way an uploaded image
-       does, and produced at 3x then held at CSS size so it stays sharp in
-       print. Script faces are listed by name and fall back to the generic
-       cursive keyword, so this still draws something on a machine without
-       Segoe Script. */
-    function signatureFromName(name){
-      var text = String(name || '').trim();
-      if(!text) return null;
-      var SCALE = 3, PAD = 14 * SCALE, SIZE = 42 * SCALE;
-      var face = '"Segoe Script","Bradley Hand","Brush Script MT","Lucida Handwriting",cursive';
-      var c = document.createElement('canvas');
-      var ctx = c.getContext('2d');
-      ctx.font = 'italic ' + SIZE + 'px ' + face;
-      var w = Math.ceil(ctx.measureText(text).width) + PAD * 2;
-      c.width = w;
-      c.height = Math.ceil(SIZE * 1.9);
-      ctx = c.getContext('2d');
-      // measuring reset the context, so set the face again on the sized canvas
-      ctx.font = 'italic ' + SIZE + 'px ' + face;
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = '#1B2E5B';                 // dark ink blue, not pure black
-      ctx.fillText(text, PAD, SIZE * 1.15);
-      // the underline every signed line has
-      ctx.strokeStyle = '#1B2E5B';
-      ctx.lineWidth = Math.max(1, Math.round(SCALE * 0.7));
-      ctx.beginPath();
-      ctx.moveTo(PAD * 0.5, SIZE * 1.45);
-      ctx.lineTo(w - PAD * 0.5, SIZE * 1.45);
-      ctx.stroke();
-      return c.toDataURL('image/png');
     }
     var mk = document.getElementById('signMake');
     if(mk) mk.addEventListener('click', function(){
@@ -7821,6 +7824,13 @@ function buildExcelBackup(){
          the sheet then reads in the order it is filled in. */
       + row(550.6, 'b', '<span class="dof-lab">Employee Signature:</span>'
           + '<span class="dof-fill" style="width:205pt"></span>')
+      /* Signed from the name on the request, so the form leaves already signed
+         and nobody has to print it, sign it and scan it back. A picture of a
+         signature, not a secure one - the same as the approver's. */
+      + (function(){
+          var es = signatureFromName(dispName(req.empName));
+          return es ? '<img class="dof-sign" src="' + es + '" style="left:180pt;top:' + (550.6 - 22) + 'pt">' : '';
+        })()
 
       + row(578.2, 'b', 'Notes:')
       + row(605.9, '', 'Except in emergency cases, requests must be submitted '
