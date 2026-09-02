@@ -11121,6 +11121,11 @@ function buildExcelBackup(){
   // ---------- admin init (runs once admin view is entered) ----------
   var adminInitDone = false;
   function runAdminInit(){
+    /* The signature panel is keyed on the signed-in admin, but loadSigns() runs
+       while the data loads - before the shell has reported who that is. Draw it
+       again here, where viewRole is finally known, or it keeps reading
+       "not signed in" and shows no signature after every refresh. */
+    try{ renderSignSetting(); }catch(e){ console.error('signature panel', e); }
     if(adminInitDone){ renderTable(); if(currentPage==='leave') renderLeavePage(); if(currentPage==='requests') renderRequestsPage(); renderReqBadge(); return; }
     adminInitDone = true;
     renderMonthLabel();
