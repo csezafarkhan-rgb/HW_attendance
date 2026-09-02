@@ -3386,9 +3386,18 @@ function renderSignSetting(){
     var clr = document.getElementById('signClear');
     if(clr) clr.addEventListener('click', function(){
       var k = mySignKey();
-      if(k && SIGNS[k]) delete SIGNS[k].data;
+      if(!k || !SIGNS[k] || !SIGNS[k].data) return;
+      /* Removing is not undoable and a scan may be the only copy, so ask. Name
+         the person, because the panel is per admin and this only ever removes
+         the signature of whoever is signed in. */
+      var whose = (viewRole && (viewRole.name || viewRole.username)) || k;
+      if(!confirm('Remove the signature for ' + whose + '?\n\n'
+                  + 'Forms you approve from now on will print without it. '
+                  + 'You can upload it again or generate one from your name.')) return;
+      delete SIGNS[k].data;
       renderSignSetting();
       saveSigns();
+      showUploadStatus('Signature removed for ' + whose + '.');
     });
     var by = document.getElementById('signBy');
     if(by) by.addEventListener('change', function(){
