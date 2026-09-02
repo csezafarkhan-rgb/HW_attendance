@@ -3407,20 +3407,16 @@ function offerImportFile(file, stamp){
     ctx.font = 'italic ' + SIZE + 'px ' + face;
     var w = Math.ceil(ctx.measureText(text).width) + PAD * 2;
     c.width = w;
-    c.height = Math.ceil(SIZE * 1.9);
+    /* Just enough height for the script face and its descenders. There is no
+       rule drawn under the name: the form already prints its own line, and a
+       second one under the signature read as a double underline. */
+    c.height = Math.ceil(SIZE * 1.4);
     ctx = c.getContext('2d');
     // measuring reset the context, so set the face again on the sized canvas
     ctx.font = 'italic ' + SIZE + 'px ' + face;
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#1B2E5B';                 // dark ink blue, not pure black
-    ctx.fillText(text, PAD, SIZE * 1.15);
-    // the underline every signed line has
-    ctx.strokeStyle = '#1B2E5B';
-    ctx.lineWidth = Math.max(1, Math.round(SCALE * 0.7));
-    ctx.beginPath();
-    ctx.moveTo(PAD * 0.5, SIZE * 1.45);
-    ctx.lineTo(w - PAD * 0.5, SIZE * 1.45);
-    ctx.stroke();
+    ctx.fillText(text, PAD, SIZE * 1.05);
     return c.toDataURL('image/png');
   }
   var SIGNS = {};                       // { username: {data, by, at} }
