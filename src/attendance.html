@@ -1585,8 +1585,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   min-height:297mm; margin:22px auto; padding:14mm 15mm; box-shadow:0 18px 50px rgba(0,0,0,.35);
   font:13.5px/1.75 'Times New Roman',Times,serif; }
 .dof-wm{ position:absolute; top:34%; left:50%; transform:translate(-50%,-50%);
-  width:300px; height:300px; background-position:center; background-size:contain;
-  background-repeat:no-repeat; opacity:.07; }
+  width:300px; height:300px; object-fit:contain; opacity:.07; pointer-events:none; }
 .dof-pg{ position:relative; z-index:1; }
 .dof-hd{ text-align:center; }
 .dof-hd img{ max-height:104px; display:block; margin:0 auto 6px; }
@@ -1623,30 +1622,35 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   #dofOverlay .dof-bar{ display:none !important; }
 
   /* ---- One A4 sheet, filled ----
-     Sized to use the page rather than merely fit on it: the first pass at this
-     squeezed everything to 12px and left a third of the sheet empty. These
-     values were measured against A4 at 96dpi (1123px) and land near 1080px. */
+     Measured against A4 at 96dpi (1123px) with every row the form carries:
+     header, eight fields, three reason lines, both signature blocks, the notes,
+     the approval and the footer. */
   .dof-sheet{ box-shadow:none; margin:0; width:auto; max-width:none;
-    min-height:0; height:auto; padding:13mm 15mm;
-    font:15px/1.72 'Times New Roman',Times,serif;
-    page-break-inside:avoid; page-break-after:avoid; break-inside:avoid; }
+    min-height:0; height:auto; padding:9mm 15mm;
+    font:14.5px/1.5 'Times New Roman',Times,serif;
+    page-break-inside:avoid; page-break-after:avoid; break-inside:avoid;
+    /* keep the faint watermark and the signature from being dropped */
+    -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .dof-sheet:last-child{ page-break-after:auto; }
-  .dof-hd img{ max-height:84px; margin:0 auto 5px; }
-  .dof-co{ font-size:21px; }
-  .dof-addr{ font-size:12.5px; margin-top:7px; }
-  .dof-rule{ margin:6px 0 19px; }
-  .dof-ttl{ font-size:14.5px; margin-bottom:19px; }
-  .dof-row{ margin:0 0 16px; padding-left:26px; }
-  .dof-line, .dof-blank{ font-size:14.5px; line-height:1.6; }
-  .dof-lab{ font-size:14.5px; }
-  .dof-sec{ margin:17px 0 10px; font-size:14.5px; }
-  .dof-blank{ height:21px; margin:0 0 14px; }
-  .dof-note{ margin:16px 0 18px; }
-  .dof-sign{ max-height:46px; }
-  .dof-sig{ margin-top:19px; font-size:12.5px; }
-  .dof-ref{ margin-top:18px; font-size:10px; padding-top:5px; }
-  .dof-eg{ font-size:12.5px; }
-  .dof-wm{ width:300px; height:300px; }
+  /* height, not max-height: the stored logo is small, and max-height alone
+     leaves it printing at its own tiny natural size. */
+  .dof-hd img:not(.dof-wm){ height:84px; width:auto; max-height:none; margin:0 auto 4px; }
+  .dof-co{ font-size:19px; }
+  .dof-addr{ font-size:11.5px; margin-top:5px; }
+  .dof-rule{ margin:5px 0 13px; }
+  .dof-ttl{ font-size:13.5px; margin-bottom:13px; }
+  .dof-row{ margin:0 0 12px; padding-left:24px; }
+  .dof-lab{ font-size:14px; }
+  .dof-line, .dof-blank{ font-size:14px; line-height:1.5; }
+  .dof-sec{ margin:13px 0 8px; font-size:14px; }
+  .dof-blank{ height:20px; margin:0 0 10px; }
+  .dof-note{ margin:9px 0 11px; font-size:13px; }
+  .dof-sign{ max-height:40px; }
+  .dof-signby{ font-size:11px; }
+  .dof-sig{ margin-top:12px; font-size:12px; line-height:1.35; }
+  .dof-ref{ margin-top:10px; font-size:9.5px; padding-top:4px; }
+  .dof-eg{ font-size:11.5px; }
+  .dof-wm{ width:280px; height:280px; opacity:.09; }
 }
 .ews{ padding:14px 20px 4px; }
 .ews-head{ font-weight:800; font-size:13px; margin-bottom:8px; }
@@ -7695,7 +7699,10 @@ function buildExcelBackup(){
 
     var sheet =
         '<div class="dof-sheet" id="dofSheet">'
-      + (coLogo ? '<div class="dof-wm" style="background-image:url(\'' + coLogo + '\')"></div>' : '')
+      /* An <img>, not a CSS background: printers drop background images unless
+         "Background graphics" is ticked, so the watermark never reached paper.
+         As content it always prints. */
+      + (coLogo ? '<img class="dof-wm" src="' + coLogo + '" alt="">' : '')
       + '<div class="dof-pg">'
       + '<div class="dof-hd">'
       +   (coLogo ? '<img src="' + coLogo + '" alt="">' : '')
@@ -7718,7 +7725,7 @@ function buildExcelBackup(){
       + fld('Date;', longDate(ret), '(Example March 5, 2002)')
       + '<div class="dof-sec">Reason:</div>'
       + '<div class="dof-blank">' + shotEsc(reason) + '</div>'
-      + '<div class="dof-blank"></div><div class="dof-blank"></div><div class="dof-blank"></div>'
+      + '<div class="dof-blank"></div><div class="dof-blank"></div>'
       /* The person asking signs before it goes for approval - the paper form
          had no line for it, and it is the one signature that matters most. */
       + '<div class="dof-sec">Employee Signature:</div>'
