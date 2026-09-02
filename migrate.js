@@ -47,10 +47,11 @@ const pool = new Pool({
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE');
   await pool.query("UPDATE users SET role = 'employee' WHERE org_id = $1 AND role IN ('viewer','editor')", [orgId]);
 
-  // Older builds may have had a role constraint that still allowed viewer/editor.
-  // Replace it so the current two-role model is enforced consistently.
+  /* Widen the constraint to the three-role model. Existing 'admin' rows are
+     left alone: 'admin' still means full access, and the new read-only tier is
+     a separate value, so nobody is silently demoted by this migration. */
   await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_chk");
-  await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_chk CHECK (role IN ('admin','employee'))");
+  await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_chk CHECK (role IN ('admin','admin_view','employee'))");
 
   const { rows: existing } = await pool.query('SELECT count(*)::int AS n FROM users WHERE org_id = $1', [orgId]);
   if (existing[0].n > 0) {

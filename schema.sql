@@ -14,8 +14,11 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL,
   password_hash TEXT NOT NULL,          -- bcrypt, never plaintext
   name          TEXT,
-  role          TEXT NOT NULL DEFAULT 'employee',  -- 'admin' | 'employee'
-  CONSTRAINT users_role_chk CHECK (role IN ('admin','employee')),
+  -- 'admin'      = super admin, full access including user management
+  -- 'admin_view'  = sees the admin panel but cannot change anything
+  -- 'employee'    = own record only
+  role          TEXT NOT NULL DEFAULT 'employee',
+  CONSTRAINT users_role_chk CHECK (role IN ('admin','admin_view','employee')),
   is_active     BOOLEAN NOT NULL DEFAULT TRUE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_login_at TIMESTAMPTZ,

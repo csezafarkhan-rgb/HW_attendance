@@ -96,8 +96,18 @@ function requireRole(...roles) {
     next();
   };
 }
-// Shared keys an employee is allowed to write. Everything else org-wide stays
-// admin-only.
+/* Three tiers of access:
+     'admin'      super admin - everything, including managing accounts
+     'admin_view' sees the whole admin side but cannot change any of it
+     'employee'   own record only
+   Read access is the same for both admin tiers; only writing separates them,
+   so the checks below gate on canWrite rather than on the role name. */
+const ROLES = ['admin', 'admin_view', 'employee'];
+function isAdminArea(role) { return role === 'admin' || role === 'admin_view'; }
+function canWrite(role) { return role === 'admin'; }
+
+// Shared keys a non-writer may still write: an employee raises leave requests,
+// and a view-only admin must be able to act on their own the same way.
 const EMPLOYEE_WRITABLE = ['leaveRequests'];
 
 // Mirrors the key rules the dashboard's own storage shim enforced.
@@ -189,7 +199,7 @@ app.post('/api/change-password', requireAuth, async (req, res) => {
 
 /* ---------------- user admin ---------------- */
 
-app.get('/api/users', requireRole('admin'), async (req, res) => {
+app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, email, name, role, is_active, last_login_at, created_at
        FROM users WHERE org_id = $1 ORDER BY email`,
@@ -201,7 +211,7 @@ app.get('/api/users', requireRole('admin'), async (req, res) => {
 app.post('/api/users', requireRole('admin'), async (req, res) => {
   const { email, password, name, role } = req.body || {};
   const e = String(email || '').trim().toLowerCase();
-  const r = role === 'admin' ? 'admin' : 'employee';
+  const r = ROLES.indexOf(role) > -1 ? role : 'employee';
   const n = String(name || '').trim();
   if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return res.status(400).json({ error: 'invalid_email' });
   if (!password || String(password).length < 8) return res.status(400).json({ error: 'password_too_short' });
@@ -229,18 +239,19 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
   if (!currentQ.rows[0]) return res.status(404).json({ error: 'not_found' });
   if (id === req.session.userId && role !== undefined && role !== 'admin') return res.status(400).json({ error: 'cannot_remove_own_admin' });
   if (id === req.session.userId && is_active === false) return res.status(400).json({ error: 'cannot_disable_self' });
-  if (currentQ.rows[0].role === 'admin' && role === 'employee') {
+  if (currentQ.rows[0].role === 'admin' && role !== undefined && role !== 'admin') {
     const admins = await pool.query("SELECT count(*)::int AS n FROM users WHERE org_id = $1 AND role = 'admin' AND is_active = TRUE", [req.session.orgId]);
     if (admins.rows[0].n <= 1) return res.status(400).json({ error: 'last_admin' });
   }
   const sets = [], vals = [];
   if (role !== undefined) {
-    if (!['admin','employee'].includes(role)) return res.status(400).json({ error: 'invalid_role' });
+    if (!ROLES.includes(role)) return res.status(400).json({ error: 'invalid_role' });
     vals.push(role); sets.push(`role = $${vals.length}`);
   }
   if (name !== undefined) {
     const n = String(name || '').trim();
-    if (!n && role !== 'admin') return res.status(400).json({ error: 'employee_name_required' });
+    var finalRole = (role !== undefined) ? role : currentQ.rows[0].role;
+    if (!n && finalRole === 'employee') return res.status(400).json({ error: 'employee_name_required' });
     vals.push(n || 'Admin'); sets.push(`name = $${vals.length}`);
   }
   if (typeof is_active === 'boolean') { vals.push(is_active); sets.push(`is_active = $${vals.length}`); }
@@ -296,7 +307,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   // their own UI preferences, which are personal rows.
   // Leave requests are the exception: employees raise them, so they have to be
   // able to write that shared key or the request never reaches an admin.
-  if (shared && req.session.role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) === -1) {
+  if (shared && !canWrite(req.session.role) && EMPLOYEE_WRITABLE.indexOf(key) === -1) {
     return res.status(403).json({ error: 'read_only' });
   }
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
@@ -329,7 +340,7 @@ app.delete('/api/kv/:key', requireAuth, async (req, res) => {
   const key = req.params.key;
   if (!validKey(key)) return res.status(400).json({ error: 'bad_key' });
   const shared = req.query.shared !== 'false';
-  if (shared && req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
+  if (shared && !canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   await pool.query(
     shared
       ? 'DELETE FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL'
@@ -394,7 +405,7 @@ app.get('/api/dataset', requireAuth, async (req, res) => {
    rows another user has just added. The browser uses this after an import and
    whenever the attendance dataset is changed locally. */
 app.put('/api/dataset', requireAuth, async (req, res) => {
-  if (req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
+  if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const employees = Array.isArray(req.body && req.body.employees) ? req.body.employees : [];
   const records = Array.isArray(req.body && req.body.records) ? req.body.records : [];
   const client = await pool.connect();
@@ -438,7 +449,7 @@ app.put('/api/dataset', requireAuth, async (req, res) => {
    Per-row upsert (not replace-all) so concurrent editors don't wipe each
    other's work. */
 app.post('/api/records', requireAuth, async (req, res) => {
-  if (req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
+  if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const records = (req.body && req.body.records) || [];
   if (!Array.isArray(records)) return res.status(400).json({ error: 'records_must_be_array' });
   const client = await pool.connect();
@@ -464,7 +475,7 @@ app.post('/api/records', requireAuth, async (req, res) => {
 });
 
 app.post('/api/employees', requireAuth, async (req, res) => {
-  if (req.session.role === 'employee') return res.status(403).json({ error: 'read_only' });
+  if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const employees = (req.body && req.body.employees) || [];
   const client = await pool.connect();
   let n = 0;
