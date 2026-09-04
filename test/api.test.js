@@ -1,5 +1,21 @@
 'use strict';
-/* Exercises the real server against the real database. */
+/* Exercises the real server against the real database.
+
+   It writes: it creates employees and attendance rows. Pointed at a live
+   database by accident that puts test data into the real record, so it
+   refuses rather than relying on whoever runs it to check DATABASE_URL. */
+if (process.env.NODE_ENV === 'production') {
+  console.error('REFUSING TO RUN: NODE_ENV=production. This suite writes to the database.');
+  process.exit(1);
+}
+if (/render[.]com|amazonaws/.test(process.env.DATABASE_URL || '')
+    && process.env.ALLOW_REMOTE_TEST_DB !== '1') {
+  console.error('REFUSING TO RUN: DATABASE_URL points at a hosted database.');
+  console.error('  ' + (process.env.DATABASE_URL || '').replace(/:[^:@]*@/, ':***@'));
+  console.error('  Set ALLOW_REMOTE_TEST_DB=1 if it really is a throwaway copy.');
+  process.exit(1);
+}
+
 const { app, pool } = require('../server');
 
 let server, base;
@@ -112,6 +128,47 @@ function client() {
   const r2 = r.body.records.find(x => x.e === 'Rahul Mishra' && x.d === '2026-07-01');
   ok(z2.in === '9:31', 'edited day updated', z2);
   ok(r2 && r2.in === '9:39', 'OTHER employee untouched by that edit (no clobber)', r2);
+
+  console.log('\n-- view-only admin --');
+  /* The tier exists so somebody can see the whole admin side without changing
+     it. Reading is the easy half; these assert the refusals - including leave
+     requests, the one shared key an employee is allowed to write. */
+  const va = client();
+  r = await alice('POST', '/api/users', {
+    email: 'viewadmin@allyconnect.test', password: 'viewadmin1',
+    name: 'View Admin', role: 'admin_view'
+  });
+  ok(r.status === 200 || r.status === 409, 'view admin account exists', r.body);
+
+  r = await va('POST', '/api/login', { email: 'viewadmin@allyconnect.test', password: 'viewadmin1' });
+  ok(r.status === 200 && r.body.user.role === 'admin_view', 'view admin logs in', r.body);
+
+  r = await va('GET', '/api/dataset');
+  ok(r.status === 200 && Array.isArray(r.body.records), 'view admin READS the whole dataset', r.status);
+  r = await va('GET', '/api/users');
+  ok(r.status === 200, 'view admin reads the user list', r.status);
+
+  r = await va('PUT', '/api/kv/companyInfo', { value: 'view-admin-tried', shared: true });
+  ok(r.status === 403, 'view admin cannot write a shared setting', r.body);
+  r = await va('PUT', '/api/kv/leaveRequests', { value: '[]', shared: true });
+  ok(r.status === 403, 'view admin cannot write leave requests (no self-approval)', r.body);
+  r = await va('POST', '/api/records', { records: [{ e: 'Zafar Khan', d: '2026-07-01', in: '1:00' }] });
+  ok(r.status === 403, 'view admin cannot write attendance', r.body);
+  r = await va('POST', '/api/employees', { employees: [{ name: 'Nobody' }] });
+  ok(r.status === 403, 'view admin cannot add employees', r.body);
+  r = await va('POST', '/api/users', { email: 'x@y.test', password: 'password1', role: 'admin' });
+  ok(r.status === 403, 'view admin cannot create accounts', r.body);
+
+  r = await alice('GET', '/api/kv/companyInfo?shared=true');
+  ok(r.body.value === val, 'none of the view admin writes landed', r.body);
+
+  console.log('\n-- an employee may still raise a leave request --');
+  r = await bob('PUT', '/api/kv/leaveRequests', { value: '[{"id":"t1","status":"pending"}]', shared: true });
+  ok(r.status === 200, 'employee CAN write leave requests', r.body);
+
+  console.log('\n-- unknown api paths --');
+  r = await alice('GET', '/api/no-such-endpoint');
+  ok(r.status === 404, 'unknown /api path returns 404 JSON, not the app HTML', r.status);
 
   console.log('\n-- change feed --');
   r = await alice('GET', '/api/changes?since=0');

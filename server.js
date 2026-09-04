@@ -67,7 +67,18 @@ app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false
 }));
-app.use(express.json({ limit: '25mb' })); // imports can be large
+/* Small bodies everywhere by default, so an unauthenticated request cannot make
+   the server buffer 25MB. The import routes genuinely need the large limit, and
+   they are skipped here rather than parsed twice: express.json marks the request
+   once it has read it, so a second parser would be a no-op and the small limit
+   would reject the import before it ever reached the route. */
+const IMPORT_PATHS = ['/api/dataset', '/api/records', '/api/employees'];
+const smallJson = express.json({ limit: '200kb' });
+const bigJson = express.json({ limit: '25mb' });
+app.use(function (req, res, next) {
+  if (IMPORT_PATHS.indexOf(req.path) > -1) return next();
+  return smallJson(req, res, next);
+});
 
 app.use(session({
   store: new PgSession({ pool, tableName: 'session', createTableIfMissing: false }),
@@ -148,7 +159,13 @@ app.post('/api/login', loginLimiter, async (req, res) => {
        FROM users
       WHERE lower(email) = $1
          OR lower(split_part(email, '@', 1)) = $1
-         OR lower(COALESCE(name, '')) = $1
+         /* users.name has no unique constraint and defaults to 'Admin', so a
+            name is only accepted as a handle when exactly one account answers
+            to it. Otherwise two people share a login and the lower id wins. */
+         OR (lower(COALESCE(name, '')) = $1 AND (
+               SELECT count(*) FROM users u2
+                WHERE lower(COALESCE(u2.name, '')) = $1 AND u2.is_active
+             ) = 1)
       ORDER BY CASE WHEN lower(email) = $1 THEN 0 ELSE 1 END, id
       LIMIT 1`,
     [email]
@@ -229,7 +246,7 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
       `INSERT INTO users (org_id, email, password_hash, name, role)
        VALUES ($1,$2,$3,$4,$5)
        RETURNING id, email, name, role, is_active, last_login_at, created_at`,
-      [req.session.orgId, e, hash, n || 'Admin', r]   // hash was missing: 5 placeholders, 4 values
+      [req.session.orgId, e, hash, n || 'Admin', r]
     );
     res.json({ user: rows[0] });
   } catch (err) {
@@ -411,7 +428,7 @@ app.get('/api/dataset', requireAuth, async (req, res) => {
    rather than a replace-all: concurrent users can import/edit without deleting
    rows another user has just added. The browser uses this after an import and
    whenever the attendance dataset is changed locally. */
-app.put('/api/dataset', requireAuth, async (req, res) => {
+app.put('/api/dataset', requireAuth, bigJson, async (req, res) => {
   if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const employees = Array.isArray(req.body && req.body.employees) ? req.body.employees : [];
   const records = Array.isArray(req.body && req.body.records) ? req.body.records : [];
@@ -455,7 +472,7 @@ app.put('/api/dataset', requireAuth, async (req, res) => {
 /* Upsert a batch of records — used by the Excel import and by day edits.
    Per-row upsert (not replace-all) so concurrent editors don't wipe each
    other's work. */
-app.post('/api/records', requireAuth, async (req, res) => {
+app.post('/api/records', requireAuth, bigJson, async (req, res) => {
   if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const records = (req.body && req.body.records) || [];
   if (!Array.isArray(records)) return res.status(400).json({ error: 'records_must_be_array' });
@@ -481,7 +498,7 @@ app.post('/api/records', requireAuth, async (req, res) => {
   res.json({ ok: true, upserted: n });
 });
 
-app.post('/api/employees', requireAuth, async (req, res) => {
+app.post('/api/employees', requireAuth, bigJson, async (req, res) => {
   if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const employees = (req.body && req.body.employees) || [];
   const client = await pool.connect();
@@ -537,9 +554,22 @@ app.use(express.static(path.join(__dirname, 'public'), {
     if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-store, max-age=0');
   }
 }));
+/* The SPA catch-all must not swallow the API: without this an unknown
+   /api/... path returned the dashboard HTML with status 200, so client code
+   saw success and failed further along. */
+app.use('/api', (req, res) => res.status(404).json({ error: 'not_found' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((err, req, res, next) => {
+  /* A body that is too large, or malformed JSON, is the caller's mistake, not a
+     server fault. Returning 500 for those hid the real cause and filled the log
+     with stack traces for something entirely expected. */
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'payload_too_large', limit: err.limit });
+  }
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'invalid_json' });
+  }
   console.error(err);
   res.status(500).json({ error: 'server_error' });
 });
