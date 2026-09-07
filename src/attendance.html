@@ -217,19 +217,21 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
        but the viewport, and the column it used to occupy is held open by
        padding on the layout instead.
 
-       The toolbar is sticky at the top of the content and about 51px tall, so
-       the sidebar parks below it. That height comes from --hw-tb-h, which JS
-       keeps in step with the toolbar's real height - a hardcoded value drifts
-       the moment the toolbar wraps. --hw-side-x follows the layout's left edge
-       and --hw-side-w is the width, which the seam handle sets. */
-    top:var(--hw-tb-h, 51px) !important;
+       It used to park below the toolbar, but the toolbar only spans the
+       content column - there is nothing above the sidebar for it to clear, so
+       that left a band of empty space down the left. It starts where the layout
+       starts instead: --hw-side-y is the layout's top edge, which JS follows,
+       falling to 0 once the page has scrolled past it so the sidebar runs the
+       full height. --hw-side-x is the left edge and --hw-side-w the width,
+       which the seam handle sets. */
+    top:var(--hw-side-y, 0px) !important;
     left:var(--hw-side-x, 21px) !important;
     width:var(--hw-side-w, 210px) !important;
     min-width:0 !important;
     max-width:none !important;
     flex:none !important;
     align-self:auto !important;
-    height:calc(100vh - var(--hw-tb-h, 51px) - 8px) !important;
+    height:calc(100vh - var(--hw-side-y, 0px) - 8px) !important;
     min-height:0 !important;
     max-height:none !important;
     overflow-x:hidden !important;   /* labels still clip while collapsing */
@@ -245,9 +247,9 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
      6px target is the difference between resizing and missing. */
   #sideResizer{
     position:fixed; z-index:210;
-    top:var(--hw-tb-h, 51px);
+    top:var(--hw-side-y, 0px);
     left:calc(var(--hw-side-x, 21px) + var(--hw-side-w, 210px) - 3px);
-    width:6px; height:calc(100vh - var(--hw-tb-h, 51px) - 8px);
+    width:6px; height:calc(100vh - var(--hw-side-y, 0px) - 8px);
     cursor:col-resize; background:transparent;
     transition:background .15s;
   }
@@ -7701,10 +7703,25 @@ function buildExcelBackup(){
       root.style.setProperty('--hw-side-w', (collapsed ? RAIL : width) + 'px');
     }
     /* Where the layout starts. Fixed positioning knows nothing about the page's
-       margins, so the left edge has to be measured and published. */
-    function syncLeft(){
+       margins, so both edges have to be measured and published. The top falls
+       to 0 once the page has scrolled past the layout, which is what lets the
+       sidebar reach the full height of the window without ever depending on how
+       tall the page happens to be - the thing that used to move it. */
+    function syncEdges(){
       var r = layout.getBoundingClientRect();
       root.style.setProperty('--hw-side-x', Math.round(r.left + 1) + 'px');
+      root.style.setProperty('--hw-side-y', Math.max(0, Math.round(r.top)) + 'px');
+    }
+    /* This runs on every scroll event, so it is throttled - but by the clock,
+       not by a flag waiting on a frame callback. A flag cleared inside
+       requestAnimationFrame latches on forever anywhere that callback does not
+       arrive, and the sidebar would stop following the page for good. */
+    var lastEdgeSync = 0;
+    function queueEdges(){
+      var now = Date.now();
+      if(now - lastEdgeSync < 16) return;
+      lastEdgeSync = now;
+      syncEdges();
     }
 
     function applyCollapsed(next){
@@ -7718,12 +7735,13 @@ function buildExcelBackup(){
     }
 
     applyCollapsed(collapsed);
-    syncLeft();
+    syncEdges();
     if(tog) tog.onclick = function(){ applyCollapsed(!collapsed); };
 
-    window.addEventListener('resize', syncLeft);
+    window.addEventListener('resize', queueEdges);
+    window.addEventListener('scroll', queueEdges, true);
     if(window.ResizeObserver){
-      try{ new ResizeObserver(syncLeft).observe(layout); }catch(e){}
+      try{ new ResizeObserver(queueEdges).observe(layout); }catch(e){}
     }
 
     /* Dragging the seam. Pointer capture keeps the drag alive when the cursor
