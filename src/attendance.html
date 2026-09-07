@@ -335,6 +335,22 @@ body{
 }
 .page-tab.active{background:var(--ink);color:#fff;}
 
+/* Sub-tabs within a page. Smaller than the sidebar's, since they divide one
+   page rather than choose between them. */
+.subtabs{display:flex;gap:5px;flex-wrap:wrap;padding:12px 18px 2px;}
+.subtab{
+  font-family:'Inter',sans-serif;font-size:12px;font-weight:700;
+  padding:7px 14px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg);color:var(--ink-soft);
+}
+.subtab:hover{background:var(--panel-2);color:var(--ink);}
+.subtab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
+.bk-panel{display:none;}
+.bk-panel.active{display:block;}
+/* The first block in a panel has nothing above it to be ruled off from - the
+   dividers were drawn to separate sections sharing one scroll. */
+.bk-panel > div:first-child{border-top:0 !important;margin-top:0 !important;}
+
 /* ===== Left sidebar tab layout ===== */
 .att-layout{display:flex; gap:20px; align-items:stretch;}
 .page-tabs.side-tabs{flex:0 0 210px; display:flex; flex-direction:column; gap:5px; padding:10px; border-radius:16px; background:rgba(255,255,255,.62);
@@ -2485,38 +2501,19 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 <div class="page" id="page-backup">
   <div style="padding:14px 18px 4px;font-weight:800;font-size:14px;">Backup &amp; Restore <span id="buildStamp" style="font-weight:600;font-size:11px;color:#2F6F52;background:#E4F0E9;border-radius:6px;padding:2px 8px;margin-left:8px;vertical-align:middle;">build 2026-07-29 · manual-safe</span> <span style="font-weight:600;color:var(--ink-soft);">— save a complete copy of everything (all employees, attendance, WFH/Leave/Visit marks, manual entries, shifts, display order, holidays, requests &amp; settings) to a file, or restore from one.</span></div>
 
+  <!-- Six sections down one scroll put the folder watched every day below the
+       signature set up once. Each has a tab of its own now. The panels are only
+       hidden, never removed, so every renderer that writes into them by id goes
+       on working whichever tab is on screen. -->
+  <div class="subtabs" id="bkSubtabs">
+    <button type="button" class="subtab active" data-bk="in">📥 Bring data in</button>
+    <button type="button" class="subtab" data-bk="history">🕓 Import history</button>
+    <button type="button" class="subtab" data-bk="out">📤 Take data out</button>
+    <button type="button" class="subtab" data-bk="sign">✍️ Signature</button>
+  </div>
+
+  <div class="bk-panel active" data-bk="in">
     <div style="padding:16px 18px 2px;"><div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Bringing data in</div><div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">Load the punch file, or put back a backup you saved earlier.</div></div>
-
-  <div style="padding:16px 18px 2px;border-top:1px solid var(--line);margin-top:14px;">
-    <div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Import history</div>
-    <div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">
-      Roll back to how things were just before any of these imports. The most recent
-      few are kept; older ones drop off as new imports arrive. These live in this
-      browser only &mdash; <b>Export All Data</b> is still the backup to keep elsewhere.
-    </div>
-  </div>
-  <div id="importHistory" class="ih"></div>
-<div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
-    <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Your signature for approved leave forms <span style="font-weight:500;text-transform:none;">— signed in as <b id="signWho">—</b></span></label>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <div id="signPreview" style="width:150px;height:52px;border:1px dashed var(--line-dk);border-radius:8px;background:#fff center/contain no-repeat;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--ink-dim);">none set</div>
-      <button class="btn" id="signPick" style="width:auto;padding:8px 14px;">🖼 Choose image…</button>
-      <button class="btn" id="signMake" style="width:auto;padding:8px 14px;">✍ Generate from name</button>
-      <button class="btn" id="signClear" style="width:auto;padding:8px 14px;display:none;">Remove</button>
-      <input type="file" id="signUpload" accept="image/*" style="display:none;"/>
-      <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">
-        Name beneath it <input type="text" id="signBy" placeholder="e.g. A. Sharma, Managing Director" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px;min-width:230px;"/>
-      </label>
-    </div>
-    <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">
-      Printed above the approval line on requests <b>you</b> approve — each admin has their own.
-      This is a picture of a signature,
-      not a secure one — anyone who can open this dashboard can print a form carrying it.
-      A PNG with a transparent background looks best.
-      <div id="signOthers" style="margin-top:4px;"></div>
-    </div>
-  </div>
-
   <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Watch a folder for the punch file</label>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -2537,8 +2534,21 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <input type="file" id="bkImportInput" accept=".json,.xlsx,.csv" style="font-size:13px;"/>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">Accepts an <b>Excel (.xlsx)</b> or <b>.csv</b> export (restores that attendance), or a <b>backup (.json)</b> — a full backup or a daily snapshot (restores everything and reloads). The file is identified by its contents, so a renamed extension is fine.</div>
   </div>
+  </div>
 
+  <div class="bk-panel" data-bk="history">
+  <div style="padding:16px 18px 2px;border-top:1px solid var(--line);margin-top:14px;">
+    <div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Import history</div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">
+      Roll back to how things were just before any of these imports. The most recent
+      few are kept; older ones drop off as new imports arrive. These live in this
+      browser only &mdash; <b>Export All Data</b> is still the backup to keep elsewhere.
+    </div>
+  </div>
+  <div id="importHistory" class="ih"></div>
+  </div>
 
+  <div class="bk-panel" data-bk="out">
     <div style="padding:16px 18px 2px;"><div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Taking data out</div><div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">Save everything, either as a backup file or as an editable spreadsheet.</div></div>
 <div style="padding:14px 18px 6px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Full backup — all data</label>
@@ -2561,6 +2571,31 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   </div>
 
   <div style="padding:10px 18px 18px;"><a href="javascript:void(0)" id="bkSeed" style="font-size:11.5px;color:var(--ink-soft);text-decoration:underline;cursor:pointer;">↺ Re-apply the marks saved inside this dashboard file</a></div>
+  </div>
+
+  <div class="bk-panel" data-bk="sign">
+  <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
+    <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Your signature for approved leave forms <span style="font-weight:500;text-transform:none;">— signed in as <b id="signWho">—</b></span></label>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <div id="signPreview" style="width:150px;height:52px;border:1px dashed var(--line-dk);border-radius:8px;background:#fff center/contain no-repeat;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--ink-dim);">none set</div>
+      <button class="btn" id="signPick" style="width:auto;padding:8px 14px;">🖼 Choose image…</button>
+      <button class="btn" id="signMake" style="width:auto;padding:8px 14px;">✍ Generate from name</button>
+      <button class="btn" id="signClear" style="width:auto;padding:8px 14px;display:none;">Remove</button>
+      <input type="file" id="signUpload" accept="image/*" style="display:none;"/>
+      <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">
+        Name beneath it <input type="text" id="signBy" placeholder="e.g. A. Sharma, Managing Director" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px;min-width:230px;"/>
+      </label>
+    </div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">
+      Printed above the approval line on requests <b>you</b> approve — each admin has their own.
+      This is a picture of a signature,
+      not a secure one — anyone who can open this dashboard can print a form carrying it.
+      A PNG with a transparent background looks best.
+      <div id="signOthers" style="margin-top:4px;"></div>
+    </div>
+  </div>
+  </div>
+
   <div id="bkStatus" style="margin:0 18px 20px;font-size:12px;font-weight:600;display:none;padding:8px 12px;border-radius:8px;"></div>
 </div>
 </div>
@@ -3178,6 +3213,29 @@ function showUploadStatus(msg, isError){
     /* Confirmations clear themselves; errors wait to be read and closed. */
     if(!isErr) setTimeout(function(){ el.style.display='none'; }, 6000);
   }
+  /* Sub-tabs on the Backup page. Which one is showing is left as the reader put
+     it, so stepping away to the grid and back does not lose their place. */
+  function showBackupSection(key){
+    var bar = document.getElementById('bkSubtabs');
+    if(!bar) return;
+    bar.querySelectorAll('.subtab').forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-bk') === key);
+    });
+    document.querySelectorAll('#page-backup .bk-panel').forEach(function(p){
+      p.classList.toggle('active', p.getAttribute('data-bk') === key);
+    });
+    // The status line reports on the panel that was open; it says nothing about this one.
+    var st = document.getElementById('bkStatus');
+    if(st) st.style.display = 'none';
+  }
+  (function(){
+    var bar = document.getElementById('bkSubtabs');
+    if(!bar) return;
+    bar.addEventListener('click', function(e){
+      var b = e.target.closest && e.target.closest('.subtab');
+      if(b) showBackupSection(b.getAttribute('data-bk'));
+    });
+  })();
   function renderBackupPage(){
     var sel=document.getElementById('bkEmp'); if(!sel)return;
     var cur=sel.value;
