@@ -554,6 +554,17 @@ body{
 .month-dropdown .mrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12.5px;}
 .month-dropdown .mrow:hover{background:var(--bg);}
 .month-dropdown .mrow input{accent-color:var(--ink);}
+/* The settings menu. A checkbox row reads left to right; a row with a figure in
+   it puts the name on the left and the box on the right, so the three numbers
+   line up down the edge of the menu instead of wandering with the label width. */
+#viewOptsDropdown .mrow{ cursor:pointer; }
+#viewOptsDropdown .mrow.num{ justify-content:space-between; cursor:default; }
+#viewOptsDropdown .mrow.num span:last-child{ display:flex; align-items:center; gap:5px; color:var(--ink-soft); }
+/* The unit is given a width of its own, otherwise "min/wk" being wider than
+   "min" pushed its box left and the three boxes no longer shared an edge. */
+#viewOptsDropdown .mrow.num .u{ font-style:normal; display:inline-block; min-width:44px; }
+#viewOptsDropdown .mrow.num input{ width:52px; padding:3px 5px; border:1px solid var(--line-dk); border-radius:6px; font-size:12px; }
+#viewOptsDropdown .opt-sep{ border-top:1px solid var(--line); margin:6px 2px; }
 .month-dropdown .actions{display:flex;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);}
 .month-dropdown .actions button{flex:1;font-size:10.5px;font-weight:700;padding:6px;border-radius:6px;border:1px solid var(--line-dk);background:var(--bg);color:var(--ink);cursor:pointer;}
 .month-dropdown .actions button.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
@@ -2371,13 +2382,23 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div class="month-dropdown" id="usersDropdown" style="min-width:300px;"></div>
   </div>
   <div class="legend-toggle" id="legendToggle">Legend ▾</div>
-  <label class="legend-toggle" id="weekStatusToggleLabel" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="weekStatusToggle" checked style="accent-color:var(--ink);cursor:pointer;margin:0;"/>Week status row</label>
-  <label class="legend-toggle" id="hideSundayToggleLabel" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="hideSundayToggle" style="accent-color:var(--ink);cursor:pointer;margin:0;"/>Hide Sunday</label>
-  <label class="legend-toggle" style="display:flex;align-items:center;gap:5px;">Late ≥ <input type="number" id="lateThreshInput" min="0" max="180" value="10" style="width:46px;padding:3px 5px;border:1px solid var(--line-dk);border-radius:6px;font-size:12px;"/> min</label>
-  <label class="legend-toggle" style="display:flex;align-items:center;gap:5px;" title="Grace before an early departure is marked">Early ≥ <input type="number" id="earlyThreshInput" min="0" max="180" value="10" style="width:46px;padding:3px 5px;border:1px solid var(--line-dk);border-radius:6px;font-size:12px;"/> min</label>
-  <label class="legend-toggle" style="display:flex;align-items:center;gap:5px;">Leverage <input type="number" id="leverageInput" min="0" max="600" value="30" style="width:50px;padding:3px 5px;border:1px solid var(--line-dk);border-radius:6px;font-size:12px;"/> min/wk</label>
+  <!-- Set once and left alone, so they sit behind one button rather than across
+       the toolbar. There were enough controls in the row to push the export
+       button off the right-hand edge of the window. -->
+  <div class="month-picker">
+    <button class="month-btn" id="viewOptsBtn">⚙ Options ▾</button>
+    <div class="month-dropdown" id="viewOptsDropdown" style="min-width:240px;">
+      <label class="mrow" id="weekStatusToggleLabel"><input type="checkbox" id="weekStatusToggle" checked/>Week status row</label>
+      <label class="mrow" id="hideSundayToggleLabel"><input type="checkbox" id="hideSundayToggle"/>Hide Sunday</label>
+      <div class="opt-sep"></div>
+      <label class="mrow num"><span>Late ≥</span><span><input type="number" id="lateThreshInput" min="0" max="180" value="10"/><i class="u">min</i></span></label>
+      <label class="mrow num" title="Grace before an early departure is marked"><span>Early ≥</span><span><input type="number" id="earlyThreshInput" min="0" max="180" value="10"/><i class="u">min</i></span></label>
+      <label class="mrow num"><span>Leverage</span><span><input type="number" id="leverageInput" min="0" max="600" value="30"/><i class="u">min/wk</i></span></label>
+      <div class="opt-sep"></div>
+      <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
+    </div>
+  </div>
   <button class="month-btn" id="screenshotBtn">📸 HD Screenshot</button>
-  <button class="btn ghost" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
 </div>
 <div id="impFound" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 18px;background:#EAF3FF;border-bottom:1px solid #B9D4F5;font-size:12.5px;"></div>
@@ -6871,9 +6892,29 @@ function buildExcelBackup(){
       if(adminInitDone) renderTable();
     }
   }).catch(function(){});
+  /* The settings menu. Same behaviour as the other pickers: one open at a time,
+     and a click anywhere else closes it. Clicks inside are left alone, since
+     every row in here is a control being used rather than a choice being made. */
+  (function(){
+    var btn = document.getElementById('viewOptsBtn');
+    var dd  = document.getElementById('viewOptsDropdown');
+    if(!btn || !dd) return;
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var opening = !dd.classList.contains('open');
+      document.querySelectorAll('.month-dropdown.open').forEach(function(x){ x.classList.remove('open'); });
+      if(opening){ dd.classList.add('open'); positionDropdown(btn, dd); }
+    });
+    document.addEventListener('click', function(e){
+      if(!dd.contains(e.target) && e.target !== btn) dd.classList.remove('open');
+    });
+  })();
   (function(){
     var gx = document.getElementById('gridXlBtn');
     if(gx) gx.addEventListener('click', function(){
+      // The menu has served its purpose once the export starts.
+      var dd = document.getElementById('viewOptsDropdown');
+      if(dd) dd.classList.remove('open');
       if(currentPage === 'leave') exportLeaveExcel(); else exportGridExcel();
     });
     var lt = document.getElementById('lateThreshInput');
