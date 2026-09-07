@@ -1187,6 +1187,28 @@ tr.emp-header-row th{ cursor:default; }
   background:var(--lv-amber-bg) !important; border:1px solid #F0DCB8 !important;
   border-radius:10px !important; color:#7A4A00 !important; box-shadow:none !important;
 }
+/* The page name, with the rules folded away behind it. */
+#page-leave .lv-head-line{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
+#page-leave .lv-head-line b{font-size:15px; font-weight:800; color:var(--lv-ink);}
+#page-leave .lv-rules{margin-top:7px; max-width:760px;}
+/* A word, not a button - it is a footnote you can open, and a button-shaped
+   control here competes with the month pickers beside it. */
+#page-leave .lv-more{
+  font:inherit; font-size:11.5px; font-weight:700; color:var(--lv-plum);
+  background:none; border:0; padding:0; cursor:pointer; text-decoration:underline;
+  text-underline-offset:2px;
+}
+#page-leave .lv-more:hover{color:var(--lv-ink);}
+#page-leave .lv-more::after{content:" ▾";}
+#page-leave .lv-more[aria-expanded="true"]::after{content:" ▴";}
+/* The standing notes: one line, the detail underneath on request. Anything
+   needing action keeps its colour so it still reads as a flag when folded. */
+#leaveHint .lv-sum{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;}
+#leaveHint .lv-sum span{white-space:nowrap;}
+#leaveHint .lv-sum .sep{color:#C6A96A;}
+#leaveHint .lv-warn{color:#8A5A00; font-weight:700;}
+#leaveHint .lv-detail{margin-top:7px; padding-top:7px; border-top:1px solid #F0DCB8;}
+#leaveHint .lv-more{color:#7A4A00;}
 #page-leave .month-btn{
   background:var(--lv-paper); border:1px solid var(--lv-rule); border-radius:9px;
   box-shadow:none; font-weight:600; color:var(--lv-ink);
@@ -2521,7 +2543,20 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 </div>
 <div class="page lv-glass" id="page-leave">
   <div style="display:flex;align-items:center;gap:12px;padding:14px 18px 6px;flex-wrap:wrap;">
-    <div style="font-weight:800;font-size:14px;">Leave Record — CL &amp; SL accrue 10 each per year (0.83/month). The grid shows leave taken per month; when total leave exceeds the accrued balance it becomes a Salary Deduction and is added back to the remaining balance. Absent = 1 CL, Half-day = 0.5 CL; holidays &amp; WFH/Visit don't count. Salary-deduction cells are editable — the after-deductions total updates from them.</div>
+    <!-- The rules are worth stating but not worth four lines above the grid on
+         every visit. The name, then the rules on request. -->
+    <div class="lv-head">
+      <div class="lv-head-line">
+        <b>Leave Record</b>
+        <button type="button" class="lv-more" id="leaveRulesBtn" aria-expanded="false">How it works</button>
+      </div>
+      <div class="lv-rules" id="leaveRules" hidden>
+        CL &amp; SL accrue 10 each per year (0.83/month). The grid shows leave taken per month; when total
+        leave exceeds the accrued balance it becomes a Salary Deduction and is added back to the remaining
+        balance. Absent = 1 CL, Half-day = 0.5 CL; holidays &amp; WFH/Visit don't count. Salary-deduction
+        cells are editable — the after-deductions total updates from them.
+      </div>
+    </div>
     <div class="month-picker">
       <button class="month-btn" id="leaveYearBtn">Year: —</button>
       <div class="month-dropdown" id="leaveYearDropdown"></div>
@@ -7004,6 +7039,19 @@ function buildExcelBackup(){
   document.getElementById('legendToggle').addEventListener('click', function(){
     document.getElementById('legendRow').classList.toggle('open');
   });
+  /* The two folded notes on the Leave Record. Delegated, because the standing
+     notes are rewritten on every render and a handler bound to the button would
+     go with them. */
+  document.addEventListener('click', function(e){
+    var b = e.target.closest && e.target.closest('#leaveRulesBtn, #leaveNotesBtn');
+    if(!b) return;
+    var panel = document.getElementById(b.id === 'leaveRulesBtn' ? 'leaveRules' : 'leaveNotes');
+    if(!panel) return;
+    var open = panel.hidden;
+    panel.hidden = !open;
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if(b.id === 'leaveNotesBtn') b.textContent = open ? 'Less' : 'Details';
+  });
   document.getElementById('weekStatusToggle').addEventListener('change', function(e){
     state.showWeekStatus = e.target.checked;
     storage.set('showWeekStatus', String(e.target.checked), false).catch(function(){});
@@ -10844,36 +10892,58 @@ function buildExcelBackup(){
     }
     var hintEl = document.getElementById('leaveHint');
     if(hintEl){
-      hintEl.innerHTML = editable.length
-        ? ('\u270e Months with no attendance data are typed in by hand: <b>'+editable.join(', ')+'</b>. '
-           + 'Click a boxed cell in those rows and enter the days taken \u2014 it saves as you leave the box.')
-        : 'All months in view are calculated from the attendance records.';
-      hintEl.innerHTML += '<div style="margin-top:6px;color:var(--ink-soft);">Balances stated as at <b>'
-        + monthLabel(leaveAsOfMonth) + '</b>'
-        + (Object.keys(leaveHiddenMonths).length
-            ? ', counting only the months ticked in <b>Months</b>.'
-            : ', counting every month.') + '</div>';
-      // Say plainly which joining dates are in force. If a date is set but days
-      // before it still appear, that is visible here rather than left to guess.
+      /* These notes stand for the whole page and seldom change, so they read as
+         one line with the wording underneath on request. The counts stay on the
+         summary: folding hides the explanation of something needing attention,
+         never the fact of it. */
       var joined = emps.filter(function(e){ return !!getJoinDate(e.name); })
         .map(function(e){ return shotEsc(e.name)+' '+normJoin(getJoinDate(e.name)); });
       var noJoin = emps.filter(function(e){ return !getJoinDate(e.name); })
         .map(function(e){ return shotEsc(e.name); });
+      var pendAll = emps.reduce(function(a,e){ return a + (mtx[e.name].pendTotal||0); }, 0);
+
+      var sum = [], detail = '';
+
+      sum.push(editable.length
+        ? '<span>✎ <b>'+editable.length+'</b> month'+(editable.length===1?'':'s')+' typed by hand</span>'
+        : '<span>All months from attendance</span>');
+      detail += '<div>' + (editable.length
+        ? ('✎ Months with no attendance data are typed in by hand: <b>'+editable.join(', ')+'</b>. '
+           + 'Click a boxed cell in those rows and enter the days taken — it saves as you leave the box.')
+        : 'All months in view are calculated from the attendance records.') + '</div>';
+
+      sum.push('<span>as at <b>'+monthLabel(leaveAsOfMonth)+'</b>'
+        + (Object.keys(leaveHiddenMonths).length ? ', ticked months' : '') + '</span>');
+      detail += '<div style="margin-top:6px;">Balances stated as at <b>' + monthLabel(leaveAsOfMonth) + '</b>'
+        + (Object.keys(leaveHiddenMonths).length
+            ? ', counting only the months ticked in <b>Months</b>.'
+            : ', counting every month.') + '</div>';
+
+      // Say plainly which joining dates are in force. If a date is set but days
+      // before it still appear, that is visible here rather than left to guess.
       if(joined.length){
-        hintEl.innerHTML += '<div style="margin-top:6px;color:var(--ink-soft);">Excluding anything before: <b>'
+        sum.push('<span><b>'+joined.length+'</b> joining date'+(joined.length===1?'':'s')+'</span>');
+        detail += '<div style="margin-top:6px;">Excluding anything before: <b>'
           + joined.join('</b>, <b>') + '</b></div>';
       }
       if(noJoin.length){
-        hintEl.innerHTML += '<div style="margin-top:6px;color:#8A5A00;">\u26a0 <b>No joining date for '
+        sum.push('<span class="lv-warn">⚠ '+noJoin.length+' without a joining date</span>');
+        detail += '<div style="margin-top:6px;color:#8A5A00;">⚠ <b>No joining date for '
           + noJoin.join(', ') + '.</b> Days from 1 January count until one is set '
-          + '(<b>Shifts \u2192 Joined</b>).</div>';
+          + '(<b>Shifts → Joined</b>).</div>';
       }
-      var pendAll = emps.reduce(function(a,e){ return a + (mtx[e.name].pendTotal||0); }, 0);
       if(pendAll > 0){
-        hintEl.innerHTML += '<div style="margin-top:6px;color:#8A5A00;">\u26a0 <b>'+num(pendAll)+' day(s) awaiting confirmation.</b> '
+        sum.push('<span class="lv-warn">⚠ '+num(pendAll)+' day(s) awaiting confirmation</span>');
+        detail += '<div style="margin-top:6px;color:#8A5A00;">⚠ <b>'+num(pendAll)+' day(s) awaiting confirmation.</b> '
           + 'Absent and half days from the punch file are not deducted until you mark the leave on the '
           + '<b>Attendance Record</b> tab.</div>';
       }
+
+      hintEl.innerHTML =
+        '<div class="lv-sum">' + sum.join('<span class="sep">·</span>')
+          + '<button type="button" class="lv-more" id="leaveNotesBtn" aria-expanded="false">Details</button>'
+        + '</div>'
+        + '<div class="lv-detail" id="leaveNotes" hidden>' + detail + '</div>';
     }
 
     // Colours inline, so they survive a paste into Excel and the screenshot
