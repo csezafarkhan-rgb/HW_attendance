@@ -1903,6 +1903,32 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dash-rank.top{color:#B8860B;}
 .dash-score{font-family:'IBM Plex Mono',monospace;font-weight:800;font-size:15px;}
 .dash-net.pos{color:#1B7A3D;font-weight:700;} .dash-net.neg{color:var(--alert);font-weight:700;}
+/* ---- Import history: a restore point per recent import ---- */
+.ih{ padding:6px 18px 20px; }
+.ih-bar{ display:flex; align-items:center; gap:10px; padding:4px 0 10px; flex-wrap:wrap; }
+.ih-count{ margin-left:auto; font-size:10.5px; color:var(--ink-dim);
+  font-family:'IBM Plex Mono',monospace; }
+.ih-bar .btn{ width:auto; padding:7px 13px; font-size:11.5px; }
+.ih-empty{ font-size:11.5px; color:var(--ink-soft); padding:6px 0 4px; }
+.ih-row{ display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:center;
+  padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+  background:var(--panel); margin-bottom:7px; }
+.ih-row.is-latest{ border-color:#BFD5F2; background:#F4F8FF; }
+.ih-pin{ font-family:'IBM Plex Mono',monospace; font-size:10px; font-weight:700;
+  letter-spacing:.05em; text-transform:uppercase; padding:3px 7px; border-radius:5px;
+  background:#E4EEFB; color:#27456F; white-space:nowrap; }
+.ih-pin.old{ background:var(--panel-2); color:var(--ink-soft); }
+.ih-main{ min-width:0; }
+.ih-file{ display:block; font-size:12.5px; font-weight:700; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.ih-meta{ display:block; font-size:10.5px; color:var(--ink-soft);
+  font-family:'IBM Plex Mono',monospace; }
+.ih-act{ display:flex; gap:6px; }
+.ih-act .btn{ width:auto; padding:6px 11px; font-size:11px; }
+@media (max-width: 700px){
+  .ih-row{ grid-template-columns:auto 1fr; }
+  .ih-act{ grid-column:1 / -1; }
+}
 .undo-import{display:flex;align-items:center;gap:10px;margin:6px 18px 10px;padding:9px 13px;
   border:1px solid #BBD8F5;background:#EFF6FF;color:#1B4C86;border-radius:10px;font-size:12.5px;line-height:1.45}
 .undo-import .ui-i{font-size:15px;line-height:1}
@@ -2439,6 +2465,16 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <div style="padding:14px 18px 4px;font-weight:800;font-size:14px;">Backup &amp; Restore <span id="buildStamp" style="font-weight:600;font-size:11px;color:#2F6F52;background:#E4F0E9;border-radius:6px;padding:2px 8px;margin-left:8px;vertical-align:middle;">build 2026-07-29 · manual-safe</span> <span style="font-weight:600;color:var(--ink-soft);">— save a complete copy of everything (all employees, attendance, WFH/Leave/Visit marks, manual entries, shifts, display order, holidays, requests &amp; settings) to a file, or restore from one.</span></div>
 
     <div style="padding:16px 18px 2px;"><div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Bringing data in</div><div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">Load the punch file, or put back a backup you saved earlier.</div></div>
+
+  <div style="padding:16px 18px 2px;border-top:1px solid var(--line);margin-top:14px;">
+    <div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Import history</div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">
+      Roll back to how things were just before any of these imports. The most recent
+      few are kept; older ones drop off as new imports arrive. These live in this
+      browser only &mdash; <b>Export All Data</b> is still the backup to keep elsewhere.
+    </div>
+  </div>
+  <div id="importHistory" class="ih"></div>
 <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Your signature for approved leave forms <span style="font-weight:500;text-transform:none;">— signed in as <b id="signWho">—</b></span></label>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
@@ -3383,7 +3419,7 @@ function offerImportFile(file, stamp){
   }).catch(function(){});
   /* Show the undo offer on load, so a bad import can still be reversed after a
      refresh or on the next visit. */
-  try{ setTimeout(function(){ try{ renderUndoImport(); }catch(e){} }, 400); }catch(e){}
+  try{ setTimeout(function(){ try{ renderUndoImport(); }catch(e){} try{ renderImportHistory(); }catch(e){} }, 400); }catch(e){}
 })();
   /* ------------------------------------------------------------------
      Signatures, one per admin.
@@ -4605,7 +4641,84 @@ function buildExcelBackup(){
      the wrong file therefore does a lot of damage at once and there was no way
      back. Keep an automatic restore point in the browser, taken immediately
      before every import, so it can be undone. */
-  var PRE_IMPORT_KEY = 'attDashboard_preImportRestore';
+  var PRE_IMPORT_KEY = 'attDashboard_preImportRestore';   // legacy single slot
+  var IMPORT_LOG_KEY = 'attDashboard_importLog';
+  var MAX_RESTORE_POINTS = 5;
+
+  /* The snapshots live in IndexedDB, beside the dataset: each is a few MB and
+     localStorage caps out around five, which is why the old single point had a
+     memory-only fallback for when it would not fit. Only the index - name,
+     time, counts - is small enough for localStorage. */
+  function idbPoint(method, id, val){
+    return new Promise(function(res, rej){
+      var o;
+      try{ o = indexedDB.open('att_data', 1); }catch(e){ return rej(e); }
+      o.onupgradeneeded = function(){ try{ o.result.createObjectStore('kv'); }catch(e){} };
+      o.onsuccess = function(){
+        try{
+          var db = o.result,
+              tx = db.transaction('kv', method === 'get' ? 'readonly' : 'readwrite'),
+              st = tx.objectStore('kv'),
+              key = 'restore:' + id;
+          var rq = method === 'get' ? st.get(key)
+                 : (method === 'set' ? st.put(val, key) : st['delete'](key));
+          rq.onsuccess = function(){ res(rq.result); };
+          rq.onerror = function(){ rej(rq.error); };
+        }catch(e){ rej(e); }
+      };
+      o.onerror = function(){ rej(o.error); };
+    });
+  }
+  function readImportLog(){
+    var log = [];
+    try{ log = JSON.parse(localStorage.getItem(IMPORT_LOG_KEY) || '[]') || []; }catch(e){ log = []; }
+    if(!Array.isArray(log)) log = [];
+    /* Carry the old single restore point in as the first entry so an undo that
+       was available before an update is still available after it. */
+    if(!log.length){
+      var legacy = null;
+      try{ var raw = localStorage.getItem(PRE_IMPORT_KEY); if(raw) legacy = JSON.parse(raw); }catch(e){}
+      if(!legacy) legacy = window.__attPreImport || null;
+      if(legacy && legacy._preImport){
+        var c = legacy._counts || {};
+        log = [{ id:'legacy', file:legacy._preImport.file || '(file)',
+                 at:legacy._preImport.at, records:c.records, employees:c.employees,
+                 legacy:true }];
+      }
+    }
+    return log;
+  }
+  function writeImportLog(log){
+    try{ localStorage.setItem(IMPORT_LOG_KEY, JSON.stringify(log)); }catch(e){}
+  }
+  function getRestoreSnapshot(entry){
+    if(!entry) return Promise.resolve(null);
+    if(entry.legacy) return Promise.resolve(getPreImportPoint());
+    return idbPoint('get', entry.id).then(function(v){
+      if(!v) return null;
+      try{ return typeof v === 'string' ? JSON.parse(v) : v; }catch(e){ return null; }
+    }).catch(function(){ return null; });
+  }
+  function dropRestorePoint(entry){
+    if(!entry) return Promise.resolve();
+    if(entry.legacy){
+      try{ localStorage.removeItem(PRE_IMPORT_KEY); }catch(e){}
+      window.__attPreImport = null;
+      return Promise.resolve();
+    }
+    return idbPoint('del', entry.id).catch(function(){});
+  }
+  function clearImportLog(){
+    var log = readImportLog();
+    return Promise.all(log.map(dropRestorePoint)).then(function(){
+      try{ localStorage.removeItem(IMPORT_LOG_KEY); }catch(e){}
+      try{ localStorage.removeItem(PRE_IMPORT_KEY); }catch(e){}
+      window.__attPreImport = null;
+      renderUndoImport();
+      renderImportHistory();
+    });
+  }
+
   function savePreImportPoint(fname){
     return buildRestoreSnapshot().then(function(obj){
       obj = obj || {};
@@ -4621,12 +4734,44 @@ function buildExcelBackup(){
             JSON.stringify({ employees: EMPLOYEES, records: RECORDS });
         }
       }catch(e){ console.error('pre-import dataset', e); }
-      try{ localStorage.setItem(PRE_IMPORT_KEY, JSON.stringify(obj)); }catch(e){
-        /* too big for localStorage - keep it in memory for this session at least */
-        window.__attPreImport = obj;
-      }
-      renderUndoImport();
-      return true;
+      var c = obj._counts || {};
+      var entry = {
+        id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6),
+        file: fname || '(file)',
+        at: obj._preImport.at,
+        records: c.records,
+        employees: c.employees
+      };
+      /* Keep the newest first, and let go of anything past the limit - each
+         snapshot is a few MB and there is no reason to hold a year of them. */
+      var log = readImportLog();
+      log.unshift(entry);
+      var dropped = log.slice(MAX_RESTORE_POINTS);
+      log = log.slice(0, MAX_RESTORE_POINTS);
+
+      return idbPoint('set', entry.id, JSON.stringify(obj)).then(function(){
+        return Promise.all(dropped.map(dropRestorePoint));
+      }).then(function(){
+        writeImportLog(log);
+        /* The banner still reads the single slot, so keep it pointing at the
+           newest point. */
+        try{ localStorage.setItem(PRE_IMPORT_KEY, JSON.stringify(obj)); }catch(e){
+          window.__attPreImport = obj;
+        }
+        renderUndoImport();
+        renderImportHistory();
+        return true;
+      }).catch(function(e){
+        console.error('restore point', e);
+        /* IndexedDB refused - fall back to the old single slot so there is at
+           least one way back. */
+        try{ localStorage.setItem(PRE_IMPORT_KEY, JSON.stringify(obj)); }catch(_){
+          window.__attPreImport = obj;
+        }
+        renderUndoImport();
+        renderImportHistory();
+        return true;
+      });
     }).catch(function(e){ console.error('pre-import restore point', e); return false; });
   }
   function getPreImportPoint(){
@@ -4670,6 +4815,83 @@ function buildExcelBackup(){
       renderUndoImport();
     };
   }
+  /* The banner is the quick undo straight after an import. This is the longer
+     memory behind it: every recent import, with the way back to each. */
+  function renderImportHistory(){
+    var box = document.getElementById('importHistory');
+    if(!box) return;
+    var log = readImportLog();
+    if(!log.length){
+      box.innerHTML = '<div class="ih-empty">No imports recorded yet. '
+        + 'A restore point is kept automatically each time you bring a file in.</div>';
+      return;
+    }
+    var when = function(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso || ''; } };
+    var rows = log.map(function(e, i){
+      var counts = [];
+      if(e.records != null) counts.push(Number(e.records).toLocaleString() + ' records');
+      if(e.employees != null) counts.push(e.employees + ' employees');
+      return '<div class="ih-row' + (i === 0 ? ' is-latest' : '') + '">'
+        + '<span class="ih-pin' + (i === 0 ? '' : ' old') + '">' + (i === 0 ? 'Latest' : ('#' + (i + 1))) + '</span>'
+        + '<span class="ih-main"><span class="ih-file">' + escapeHtml(e.file || '(file)') + '</span>'
+        + '<span class="ih-meta">' + escapeHtml(when(e.at))
+        + (counts.length ? (' \u00b7 ' + counts.join(' \u00b7 ')) : '') + '</span></span>'
+        + '<span class="ih-act">'
+        +   '<button type="button" class="btn" data-ih-restore="' + escapeHtml(e.id) + '">Restore</button>'
+        +   '<button type="button" class="btn" data-ih-drop="' + escapeHtml(e.id) + '">Remove</button>'
+        + '</span></div>';
+    }).join('');
+    box.innerHTML = '<div class="ih-bar">'
+      + '<button type="button" class="btn" id="ihClear">Clear import log</button>'
+      + '<span class="ih-count">' + log.length + ' of ' + MAX_RESTORE_POINTS + ' restore points kept</span>'
+      + '</div>' + rows;
+
+    var byId = function(id){ for(var i=0;i<log.length;i++) if(log[i].id === id) return log[i]; return null; };
+
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ih-restore]'), function(b){
+      b.onclick = function(){
+        var e = byId(b.getAttribute('data-ih-restore'));
+        if(!e) return;
+        if(!confirmish('Go back to how things were just before importing "'
+          + (e.file || 'that file') + '"?\n\nAnything changed since will be lost.')) return;
+        b.disabled = true; b.textContent = 'Restoring\u2026';
+        getRestoreSnapshot(e).then(function(snap){
+          if(!snap){
+            b.disabled = false; b.textContent = 'Restore';
+            showUploadStatus('That restore point is no longer stored in this browser.', true);
+            return;
+          }
+          restoreFullBackup(snap);
+          showUploadStatus('Restored \u2014 reloading\u2026', false);
+          setTimeout(function(){ location.reload(); }, 900);
+        });
+      };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ih-drop]'), function(b){
+      b.onclick = function(){
+        var id = b.getAttribute('data-ih-drop');
+        var e = byId(id);
+        if(!e) return;
+        if(!confirmish('Remove the restore point for "' + (e.file || 'that file') + '"?\n\n'
+          + 'The attendance data stays as it is; only the way back is discarded.')) return;
+        dropRestorePoint(e).then(function(){
+          writeImportLog(readImportLog().filter(function(x){ return x.id !== id; }));
+          renderImportHistory();
+          renderUndoImport();
+        });
+      };
+    });
+    var clr = document.getElementById('ihClear');
+    if(clr) clr.onclick = function(){
+      if(!confirmish('Clear the import log?\n\nAll ' + log.length + ' restore point(s) are '
+        + 'discarded and the space is freed. Your attendance data is not touched, but '
+        + 'imports made before now can no longer be undone.')) return;
+      clearImportLog().then(function(){
+        showUploadStatus('Import log cleared.', false);
+      });
+    };
+  }
+
   function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function confirmish(msg){ try{ return window.confirm(msg); }catch(e){ return true; } }
