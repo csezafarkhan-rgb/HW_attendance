@@ -192,10 +192,10 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
   padding:10px !important; box-sizing:border-box !important;
   overflow:hidden !important;   /* labels clip cleanly while collapsing */
 }
+/* Collapsed keeps only the padding here; the width is --hw-side-w, which the
+   collapse toggle sets so the reserved column narrows with it. */
 .side-collapsed .side-tabs,.side-collapsed #sideNav,
 .layout.side-collapsed #tabs{
-  flex:0 0 54px !important; flex-basis:54px !important;
-  width:54px !important; min-width:54px !important; max-width:54px !important;
   padding:8px 6px !important;
 }
 .side-content,.att-content{ flex:1 1 auto !important; min-width:0 !important; }
@@ -207,25 +207,60 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
    Only on wide screens: below 900px it becomes a row above the content. */
 @media (min-width:901px){
   .att-layout > .side-tabs, .layout > #sideNav{
-    position:sticky !important;
-    /* The toolbar is sticky at top:0 and ~51px tall, so a sidebar pinned to 0
-       had its first 51px (Collapse + part of tab 1) hidden underneath it.
-       Park it below the toolbar instead, and take that height off max-height
-       so the sidebar can still scroll its own content. */
-    /* Offset comes from --hw-tb-h, which JS keeps in sync with the toolbar's
-       real height. A hardcoded value drifts the moment the toolbar changes
-       height (longer month label, wrapping), which made the sidebar jump
-       when months were selected. Falls back to 51px before JS runs. */
+    position:fixed !important;
+    /* Fixed, not sticky. Sticky could only offset the sidebar where its
+       containing block had room to spare: on a long page (the grid) it was
+       pushed the toolbar's height down and pinned there, but on a short one
+       (the dashboard) the layout was no taller than the sidebar itself, so the
+       offset could not apply and the tabs sat 57px higher. Switching between
+       the two moved them every time. Taken out of flow it answers to nothing
+       but the viewport, and the column it used to occupy is held open by
+       padding on the layout instead.
+
+       The toolbar is sticky at the top of the content and about 51px tall, so
+       the sidebar parks below it. That height comes from --hw-tb-h, which JS
+       keeps in step with the toolbar's real height - a hardcoded value drifts
+       the moment the toolbar wraps. --hw-side-x follows the layout's left edge
+       and --hw-side-w is the width, which the seam handle sets. */
     top:var(--hw-tb-h, 51px) !important;
-    align-self:flex-start !important;
-    /* flex-start (required for sticky) drops the base rule's align-self:stretch,
-       so the panel shrank to its content and read as a small floating box.
-       Fill the column below the toolbar instead, leaving an 8px bottom gap. */
-    min-height:calc(100vh - var(--hw-tb-h, 51px) - 8px) !important;
-    max-height:calc(100vh - var(--hw-tb-h, 51px)) !important;
+    left:var(--hw-side-x, 21px) !important;
+    width:var(--hw-side-w, 210px) !important;
+    min-width:0 !important;
+    max-width:none !important;
+    flex:none !important;
+    align-self:auto !important;
+    height:calc(100vh - var(--hw-tb-h, 51px) - 8px) !important;
+    min-height:0 !important;
+    max-height:none !important;
     overflow-x:hidden !important;   /* labels still clip while collapsing */
     overflow-y:auto !important;
   }
+  /* The column the sidebar no longer occupies. */
+  .att-layout, .layout{ padding-left:var(--hw-side-w, 210px) !important; }
+  /* A short page should still fill the window, or the card ends mid-screen with
+     the sidebar running past it. */
+  .att-layout{ min-height:calc(100vh - 18px) !important; }
+
+  /* The seam, and the grip on it. Its own element rather than a border, since a
+     6px target is the difference between resizing and missing. */
+  #sideResizer{
+    position:fixed; z-index:210;
+    top:var(--hw-tb-h, 51px);
+    left:calc(var(--hw-side-x, 21px) + var(--hw-side-w, 210px) - 3px);
+    width:6px; height:calc(100vh - var(--hw-tb-h, 51px) - 8px);
+    cursor:col-resize; background:transparent;
+    transition:background .15s;
+  }
+  #sideResizer:hover, #sideResizer.dragging{ background:rgba(59,125,245,.30); }
+  /* Collapsed it is a rail, not a width anyone is choosing. */
+  .att-layout.side-collapsed #sideResizer{ display:none; }
+  /* Nothing should be selected or hovered while a drag is in progress. */
+  body.hw-side-dragging{ user-select:none; cursor:col-resize; }
+}
+@media (max-width:900px){
+  /* Stacked, so there is no seam to drag. */
+  #sideResizer{ display:none; }
+  .att-layout, .layout{ padding-left:0 !important; }
 }
 
 /* One frame, not two. The sidebar sat in its own rounded, shadowed panel with a
@@ -2394,6 +2429,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button class="page-tab" data-page="holidays"><span class="ico">🏖️</span><span class="lbl">Official Leaves</span></button>
     <button class="page-tab" data-page="backup"><span class="ico">💾</span><span class="lbl">Backup &amp; Restore</span></button>
   </div>
+  <!-- Drag the seam to set how wide the sidebar is. -->
+  <div id="sideResizer" title="Drag to resize the sidebar"></div>
   <div class="att-content">
 <div class="toolbar">
   <input class="search-box" id="searchBox" placeholder="Filter employee…"/>
@@ -7636,19 +7673,93 @@ function buildExcelBackup(){
 
   // ---------- page tabs ----------
   var currentPage = 'attendance';
-  /* Sidebar collapse/expand — remembered across sessions. */
+  /* The sidebar: how wide it is, where it is, and whether it is collapsed.
+
+     It is fixed to the viewport, so two things have to be told to the CSS: the
+     width (which the seam sets and which also reserves the column in the
+     layout) and the left edge (which follows the layout, since the page has a
+     margin either side). Both are remembered. */
   (function(){
-    var layout=document.querySelector('.att-layout'), tog=document.getElementById('sideToggle');
-    if(!layout||!tog) return;
-    function apply(collapsed){
-      layout.classList.toggle('side-collapsed', collapsed);
-      var ico=tog.querySelector('.ico'); if(ico) ico.textContent = collapsed ? '⮞' : '⮜';
-      tog.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-      try{ localStorage.setItem('hw_side_collapsed', collapsed?'1':'0'); }catch(e){}
+    var layout = document.querySelector('.att-layout');
+    var tog    = document.getElementById('sideToggle');
+    var grip   = document.getElementById('sideResizer');
+    if(!layout) return;
+
+    var MIN = 150, MAX = 420, RAIL = 54, DEFAULT = 210;
+    var root = document.documentElement;
+
+    function savedWidth(){
+      var v = 0;
+      try{ v = parseInt(localStorage.getItem('hw_side_w'), 10); }catch(e){}
+      if(!v || isNaN(v)) v = DEFAULT;
+      return Math.min(MAX, Math.max(MIN, v));
     }
-    var start=false; try{ start = localStorage.getItem('hw_side_collapsed')==='1'; }catch(e){}
-    apply(start);
-    tog.onclick=function(){ apply(!layout.classList.contains('side-collapsed')); };
+    var width = savedWidth();
+    var collapsed = false;
+    try{ collapsed = localStorage.getItem('hw_side_collapsed') === '1'; }catch(e){}
+
+    function applyWidth(){
+      root.style.setProperty('--hw-side-w', (collapsed ? RAIL : width) + 'px');
+    }
+    /* Where the layout starts. Fixed positioning knows nothing about the page's
+       margins, so the left edge has to be measured and published. */
+    function syncLeft(){
+      var r = layout.getBoundingClientRect();
+      root.style.setProperty('--hw-side-x', Math.round(r.left + 1) + 'px');
+    }
+
+    function applyCollapsed(next){
+      collapsed = next;
+      layout.classList.toggle('side-collapsed', collapsed);
+      var ico = tog && tog.querySelector('.ico');
+      if(ico) ico.textContent = collapsed ? '⮞' : '⮜';
+      if(tog) tog.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      try{ localStorage.setItem('hw_side_collapsed', collapsed ? '1' : '0'); }catch(e){}
+      applyWidth();
+    }
+
+    applyCollapsed(collapsed);
+    syncLeft();
+    if(tog) tog.onclick = function(){ applyCollapsed(!collapsed); };
+
+    window.addEventListener('resize', syncLeft);
+    if(window.ResizeObserver){
+      try{ new ResizeObserver(syncLeft).observe(layout); }catch(e){}
+    }
+
+    /* Dragging the seam. Pointer capture keeps the drag alive when the cursor
+       outruns the 6px strip, which it will. */
+    if(grip){
+      grip.addEventListener('pointerdown', function(e){
+        if(collapsed) return;
+        e.preventDefault();
+        var startX = e.clientX, startW = width;
+        grip.classList.add('dragging');
+        document.body.classList.add('hw-side-dragging');
+        try{ grip.setPointerCapture(e.pointerId); }catch(_){}
+
+        function move(ev){
+          width = Math.min(MAX, Math.max(MIN, startW + (ev.clientX - startX)));
+          applyWidth();
+        }
+        function up(){
+          grip.removeEventListener('pointermove', move);
+          grip.removeEventListener('pointerup', up);
+          grip.removeEventListener('pointercancel', up);
+          grip.classList.remove('dragging');
+          document.body.classList.remove('hw-side-dragging');
+          try{ localStorage.setItem('hw_side_w', String(width)); }catch(_){}
+        }
+        grip.addEventListener('pointermove', move);
+        grip.addEventListener('pointerup', up);
+        grip.addEventListener('pointercancel', up);
+      });
+      // Back to the default width, for a drag that got away from you.
+      grip.addEventListener('dblclick', function(){
+        width = DEFAULT; applyWidth();
+        try{ localStorage.setItem('hw_side_w', String(width)); }catch(_){}
+      });
+    }
   })();
   Array.prototype.forEach.call(document.querySelectorAll('.page-tab'), function(tab){
     tab.addEventListener('click', function(){
