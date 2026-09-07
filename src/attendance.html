@@ -435,6 +435,10 @@ body{
   padding:6px 8px; cursor:pointer; display:flex; align-items:center; gap:7px; margin-bottom:3px; transition:background .15s, color .15s}
 .side-toggle:hover{color:var(--ink); background:rgba(0,0,0,.04)}
 .side-toggle .ico{font-size:15px; line-height:1; flex:0 0 auto}
+/* Full width of the sidebar, and gone when it is a rail - there is no room to
+   type in 54px, and the tabs are icons by then anyway. */
+.side-tabs .search-box{width:100%; box-sizing:border-box; flex:0 0 auto; margin-bottom:4px;}
+.att-layout.side-collapsed .side-tabs .search-box{display:none;}
 .att-layout.side-collapsed .page-tabs.side-tabs{flex:0 0 54px; flex-basis:54px; padding:8px 6px}
 .att-layout.side-collapsed .side-tabs .page-tab{justify-content:center; padding:11px 0; gap:0}
 .att-layout.side-collapsed .side-tabs .page-tab .lbl{display:none}
@@ -2423,6 +2427,9 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 <div class="att-layout">
   <div class="page-tabs side-tabs" id="pageTabs">
     <button type="button" class="side-toggle" id="sideToggle" title="Collapse sidebar"><span class="ico">⮜</span><span class="lbl">Collapse</span></button>
+    <!-- The filter belongs with the pages it filters, not in the attendance
+         toolbar it used to sit in - it applies to whichever tab is open. -->
+    <input class="search-box" id="searchBox" placeholder="Filter employee…"/>
     <button class="page-tab active" data-page="attendance"><span class="ico">🗓️</span><span class="lbl">Attendance Record</span></button>
     <button class="page-tab" data-page="dashboard"><span class="ico">📊</span><span class="lbl">Dashboard</span></button>
     <button class="page-tab" data-page="leave"><span class="ico">🌴</span><span class="lbl">Leave Record</span></button>
@@ -2435,7 +2442,6 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <div id="sideResizer" title="Drag to resize the sidebar"></div>
   <div class="att-content">
 <div class="toolbar">
-  <input class="search-box" id="searchBox" placeholder="Filter employee…"/>
   <div class="month-picker">
     <button class="month-btn" id="empBtn"><span id="empBtnLabel">Loading…</span> ▾</button>
     <div class="month-dropdown" id="empDropdown"></div>
@@ -5889,10 +5895,17 @@ function buildExcelBackup(){
   var REQ_COMPACT = (function(){
     try{ return localStorage.getItem('hw_req_compact') === '1'; }catch(e){ return false; }
   })();
+  /* Who this page is showing, before any status tab is applied: the sidebar's
+     employee filter and the page's own name dropdown. The counts and the list
+     both go through here, so a tab can never claim a number the list does not
+     show. */
+  function reqInScope(r){
+    if(state.search && String(r.empName || '').toLowerCase().indexOf(state.search) === -1) return false;
+    if(REQ_EMP && r.empName !== REQ_EMP) return false;
+    return true;
+  }
   function reqCounts(all){
-    /* Count within the chosen person, so the tab numbers match what is listed
-       rather than the whole company. */
-    if(REQ_EMP) all = all.filter(function(r){ return r.empName === REQ_EMP; });
+    all = all.filter(reqInScope);
     var live = all.filter(function(r){ return !reqIsArchived(r); });
     return {
       all:      live.length,
@@ -5903,7 +5916,7 @@ function buildExcelBackup(){
     };
   }
   function reqMatchesView(r){
-    if(REQ_EMP && r.empName !== REQ_EMP) return false;
+    if(!reqInScope(r)) return false;
     if(REQ_VIEW === 'arch')     return reqIsArchived(r);
     if(reqIsArchived(r))        return false;
     if(REQ_VIEW === 'live')     return r.status === 'pending' || r.status === 'query';
@@ -6334,7 +6347,7 @@ function buildExcelBackup(){
     var list = document.getElementById('requestsList');
     if(!list) return;
     var all = leaveRequests.slice().sort(function(a,b){ return (b.updatedAt||'').localeCompare(a.updatedAt||''); });
-    var archivedCount = all.filter(reqIsArchived).length;
+    var archivedCount = all.filter(reqInScope).filter(reqIsArchived).length;
     var bar = reqBarHtml(all);
     var sorted = all.filter(reqMatchesView);
     var emptyWord = { live:'Nothing waiting on a decision.', approved:'Nothing approved yet.',
@@ -6983,7 +6996,10 @@ function buildExcelBackup(){
   });
   document.getElementById('searchBox').addEventListener('input', function(e){
     state.search = e.target.value.trim().toLowerCase();
-    renderTable();
+    /* Every page that lists people reads the same filter, but only the grid was
+       being redrawn - so typing while looking at the dashboard or payroll
+       appeared to do nothing until you switched away and back. */
+    refreshActivePage();
   });
   document.getElementById('legendToggle').addEventListener('click', function(){
     document.getElementById('legendRow').classList.toggle('open');
@@ -7803,6 +7819,7 @@ function buildExcelBackup(){
     if(currentPage === 'requests') renderRequestsPage();
     if(currentPage === 'holidays') renderHolidaysPage();
     if(currentPage === 'salary') renderSalaryPage();
+    if(currentPage === 'dashboard') renderDashboardPage();
     renderReqBadge();
   }
 
