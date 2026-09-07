@@ -228,9 +228,38 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
   }
 }
 
+/* One frame, not two. The sidebar sat in its own rounded, shadowed panel with a
+   20px channel between it and the grid, so the tabs read as a widget parked
+   beside the page rather than part of it. The surface belongs to the layout now;
+   the sidebar is a column within it, marked off by a hairline. */
+.layout,.att-layout{
+  gap:0 !important;
+  background:rgba(255,255,255,.62) !important;
+  border:1px solid rgba(255,255,255,.7) !important;
+  border-radius:16px !important;
+  box-shadow:0 6px 22px rgba(26,40,72,.08) !important;
+  /* No overflow:hidden here - it would cancel the sticky pinning below. */
+}
+.side-tabs,#sideNav{
+  background:transparent !important;
+  -webkit-backdrop-filter:none !important; backdrop-filter:none !important;
+  border:0 !important;
+  border-right:1px solid rgba(150,170,210,.26) !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+}
+/* The channel used to do this spacing. */
+.side-content,.att-content{ padding-left:14px !important; }
+
 /* Narrow screens: the sidebar becomes a wrapping row above the content, so
    the pinned widths above must not apply. */
 @media (max-width:900px){
+  /* Stacked, so the seam runs underneath and the indent belongs on top. */
+  .side-tabs,#sideNav{
+    border-right:0 !important;
+    border-bottom:1px solid rgba(150,170,210,.26) !important;
+  }
+  .side-content,.att-content{ padding-left:0 !important; padding-top:10px !important; }
   .layout,.att-layout{ flex-direction:column !important; }
   .side-tabs,#sideNav,
   .side-collapsed .side-tabs,.side-collapsed #sideNav{
