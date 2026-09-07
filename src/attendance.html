@@ -2501,6 +2501,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <button class="btn" id="impDirPick" style="width:auto;padding:8px 14px;">📁 Choose folder</button>
       <button class="btn" id="impDirCheck" style="width:auto;padding:8px 14px;display:none;">Check now</button>
+      <button class="btn" id="impDirReconnect" style="width:auto;padding:8px 14px;display:none;">🔓 Reconnect</button>
       <span style="font-size:11.5px;color:var(--ink-soft);">Watching: <b id="impDirName">none chosen</b></span>
       <button class="btn" id="impDirForget" style="width:auto;padding:8px 14px;display:none;margin-left:auto;">Stop watching</button>
     </div>
@@ -2531,6 +2532,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Auto Excel backup on HD Screenshot</label>
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
       <button class="btn" id="bkChooseFolder" style="width:auto;padding:10px 20px;">📁 Choose backup folder…</button>
+      <button class="btn" id="bkReconnect" style="width:auto;padding:10px 20px;display:none;">🔓 Reconnect folder</button>
       <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);cursor:pointer;"><input type="checkbox" id="bkAutoToggle" checked> Save an Excel backup every time I take an HD Screenshot</label>
       <button class="btn" id="bkForgetFolder" style="width:auto;padding:8px 14px;display:none;">Forget folder</button>
     </div>
@@ -3238,7 +3240,7 @@ function showUploadStatus(msg, isError){
   function idbDir(method, val){
     return new Promise(function(res, rej){
       var o=indexedDB.open('att_fs',1);
-      o.onupgradeneeded=function(){ o.result.createObjectStore('kv'); };
+      o.onupgradeneeded=function(){ try{ o.result.createObjectStore('kv'); }catch(e){} };
       o.onsuccess=function(){ try{ var db=o.result, tx=db.transaction('kv', method==='get'?'readonly':'readwrite'), st=tx.objectStore('kv');
         var rq = method==='get'? st.get('dir') : (method==='set'? st.put(val,'dir') : st.delete('dir'));
         rq.onsuccess=function(){ res(rq.result); }; rq.onerror=function(){ rej(rq.error); };
@@ -3259,6 +3261,7 @@ function showUploadStatus(msg, isError){
    Nothing runs overnight - manual upload remains the fallback.
    ------------------------------------------------------------------ */
 var IMPDIR_KEY = 'hw_att_impdir_seen';     // newest file already imported
+var IMPORT_DIR_PERM = 'granted';           // 'granted' once the browser lets us read the folder
 function idbImpDir(method, val){
   return new Promise(function(res, rej){
     var o = indexedDB.open('att_fs', 1);
@@ -3285,6 +3288,7 @@ function chooseImportFolder(){
   }
   window.showDirectoryPicker({ mode:'read' }).then(function(dir){
     IMPORT_DIR = dir;
+    IMPORT_DIR_PERM = 'granted';                 // just picked, so it is allowed
     return idbImpDir('set', dir).then(function(){
       renderImportFolder();
       bkStatus('Watching "' + dir.name + '". Newest file will be offered on open.');
@@ -3334,11 +3338,18 @@ function newestImportFile(dir){
 }
 function checkImportFolder(quiet){
   if(!IMPORT_DIR) return Promise.resolve(null);
-  return ensureDirPerm(IMPORT_DIR).then(function(ok){
+  /* A quiet check is the one that runs by itself on load, with no click to ask
+     permission on. It may only look; if permission has lapsed it says so on
+     screen and leaves the asking to the Reconnect button. */
+  return ensureDirPerm(IMPORT_DIR, !quiet).then(function(ok){
     if(!ok){
+      IMPORT_DIR_PERM = 'prompt';
+      renderImportFolder();
       if(!quiet) bkStatus('Permission for that folder was not granted.', true);
       return null;
     }
+    IMPORT_DIR_PERM = 'granted';
+    renderImportFolder();
     return newestImportFile(IMPORT_DIR).then(function(found){
       if(!found){
         if(!quiet) bkStatus('No .csv or .xlsx file in that folder yet.', true);
@@ -3405,6 +3416,8 @@ function offerImportFile(file, stamp){
   });
   var b = document.getElementById('impDirPick');
   if(b) b.addEventListener('click', chooseImportFolder);
+  var rc = document.getElementById('impDirReconnect');
+  if(rc) rc.addEventListener('click', reconnectImportFolder);
   var c = document.getElementById('impDirCheck');
   if(c) c.addEventListener('click', function(){ checkImportFolder(false); });
   var f = document.getElementById('impDirForget');
@@ -3414,8 +3427,12 @@ function offerImportFile(file, stamp){
   idbImpDir('get').then(function(dir){
     if(!dir) return;
     IMPORT_DIR = dir;
-    renderImportFolder();
-    setTimeout(function(){ checkImportFolder(true); }, 1500);
+    return dirPermState(dir).then(function(p){
+      IMPORT_DIR_PERM = p;
+      renderImportFolder();
+      // Only worth looking if we are allowed to; otherwise the Reconnect button has it.
+      if(p === 'granted') setTimeout(function(){ checkImportFolder(true); }, 1500);
+    });
   }).catch(function(){});
   /* Show the undo offer on load, so a bad import can still be reversed after a
      refresh or on the next visit. */
@@ -3591,52 +3608,84 @@ function renderSignSetting(){
     });
   })();
 function renderImportFolder(){
+  var lapsed = !!IMPORT_DIR && IMPORT_DIR_PERM === 'prompt';
   var fnote = document.getElementById('updFolderNote');
-  if(fnote) fnote.textContent = IMPORT_DIR
-    ? ('Watching \u201c' + IMPORT_DIR.name + '\u201d')
-    : 'No folder set \u2014 choose one on the Backup tab.';
+  if(fnote) fnote.textContent = !IMPORT_DIR
+    ? 'No folder set \u2014 choose one on the Backup tab.'
+    : (lapsed ? ('Watching \u201c' + IMPORT_DIR.name + '\u201d \u2014 press Reconnect to let the browser read it again')
+              : ('Watching \u201c' + IMPORT_DIR.name + '\u201d'));
   var el = document.getElementById('impDirName');
-  if(el) el.textContent = IMPORT_DIR ? IMPORT_DIR.name : 'none chosen';
+  if(el) el.textContent = IMPORT_DIR ? (IMPORT_DIR.name + (lapsed ? ' (needs reconnecting)' : '')) : 'none chosen';
+  var rc = document.getElementById('impDirReconnect');
+  if(rc) rc.style.display = lapsed ? '' : 'none';
   var f = document.getElementById('impDirForget');
   if(f) f.style.display = IMPORT_DIR ? '' : 'none';
   var c = document.getElementById('impDirCheck');
   if(c) c.style.display = IMPORT_DIR ? '' : 'none';
 }
+function reconnectImportFolder(){
+  if(!IMPORT_DIR) return;
+  ensureDirPerm(IMPORT_DIR, true).then(function(ok){          // a click, so the browser will ask
+    IMPORT_DIR_PERM = ok ? 'granted' : 'prompt';
+    renderImportFolder();
+    if(ok) checkImportFolder(false);
+    else bkStatus('Permission for that folder was not granted.', true);
+  });
+}
 
-function ensureDirPerm(dir){
-    if(!dir || !dir.queryPermission) return Promise.resolve(true);
-    return dir.queryPermission({mode:'readwrite'}).then(function(p){
-      if(p==='granted') return true;
-      if(!dir.requestPermission) return false;
-      return dir.requestPermission({mode:'readwrite'}).then(function(p2){ return p2==='granted'; }).catch(function(){ return false; });
-    }).catch(function(){ return true; });
-  }
+/* The folder is remembered; permission to use it is not. Chrome puts a saved
+   handle back at "prompt" on every page load and will only raise the question
+   off a genuine click - a request with no gesture behind it is refused out of
+   hand, and that refusal used to be read as "no folder chosen", which is why
+   the folder seemed to need picking again after every refresh.
+
+   So the two are separated: anything running on its own asks what the state
+   is, and only a button asks for the permission itself. */
+function dirPermState(dir){
+  if(!dir || !dir.queryPermission) return Promise.resolve('granted');   // no permission model here
+  return dir.queryPermission({mode:'readwrite'})
+    .then(function(p){ return p || 'prompt'; })
+    .catch(function(){ return 'granted'; });
+}
+function ensureDirPerm(dir, byClick){
+  if(!dir) return Promise.resolve(false);
+  return dirPermState(dir).then(function(p){
+    if(p === 'granted') return true;
+    if(!byClick || !dir.requestPermission) return false;   // never spend the ask on a page load
+    return dir.requestPermission({mode:'readwrite'})
+      .then(function(p2){ return p2 === 'granted'; })
+      .catch(function(){ return false; });
+  });
+}
   // Called from the HD Screenshot click: hand over an Excel backup of all data.
   // If a folder was chosen it's written there silently; otherwise it just downloads.
   function autoExcelBackup(){
     if(!autoBackupOn()) return;
     var b=buildExcelBackup();
     if(!b){ return; }  // nothing to back up yet
-    if(localStorage.getItem('attDashboard_hasBackupDir')==='1'){
-      idbDir('get').then(function(dir){
-        if(!dir){ downloadBlob(b.blob, b.fname); return; }
-        ensureDirPerm(dir).then(function(ok){
-          if(!ok){ downloadBlob(b.blob, b.fname); return; }
-          dir.getFileHandle(b.fname, {create:true})
-            .then(function(fh){ return fh.createWritable(); })
-            .then(function(w){ return Promise.resolve(w.write(b.blob)).then(function(){ return w.close(); }); })
-            .then(function(){ showUploadStatus('✓ Excel backup ('+b.sheets+' employees, '+b.rows+' rows) saved to your folder "'+dir.name+'": '+b.fname, false); })
-            .catch(function(){ downloadBlob(b.blob, b.fname); });
+    /* The handle decides whether a folder is set, not a flag kept beside it -
+       the same reason the Backup page stopped consulting one. */
+    idbDir('get').then(function(dir){
+      if(!dir){
+        // Nowhere chosen — offer a "Save As" so the backup can go anywhere
+        // (Chrome/Edge); failing that it lands in Downloads.
+        saveBlob(b.blob, b.fname, function(ok){
+          if(ok) showUploadStatus('✓ Excel backup ('+b.sheets+' employees, '+b.rows+' rows) saved: '+b.fname, false);
+          else showUploadStatus('Backup save cancelled.', true);
         });
-      }).catch(function(){ downloadBlob(b.blob, b.fname); });
-    } else {
-      // No folder chosen — open a "Save As" dialog so you can choose where to keep the backup
-      // (Chrome/Edge). If that's unavailable, it falls back to your Downloads.
-      saveBlob(b.blob, b.fname, function(ok){
-        if(ok) showUploadStatus('✓ Excel backup ('+b.sheets+' employees, '+b.rows+' rows) saved: '+b.fname, false);
-        else showUploadStatus('Backup save cancelled.', true);
+        return;
+      }
+      /* This runs from the HD Screenshot click, so there is a gesture to ask on
+         the back of if permission lapsed over a refresh. */
+      ensureDirPerm(dir, true).then(function(ok){
+        if(!ok){ downloadBlob(b.blob, b.fname); return; }
+        dir.getFileHandle(b.fname, {create:true})
+          .then(function(fh){ return fh.createWritable(); })
+          .then(function(w){ return Promise.resolve(w.write(b.blob)).then(function(){ return w.close(); }); })
+          .then(function(){ showUploadStatus('✓ Excel backup ('+b.sheets+' employees, '+b.rows+' rows) saved to your folder "'+dir.name+'": '+b.fname, false); })
+          .catch(function(){ downloadBlob(b.blob, b.fname); });
       });
-    }
+    }).catch(function(){ downloadBlob(b.blob, b.fname); });
   }
   // Chrome refuses to open a file/folder picker inside a CROSS-ORIGIN sub-frame.
   // When the Workspace file is opened straight off the disk (file://), the parent
@@ -3676,11 +3725,16 @@ function ensureDirPerm(dir){
       bkStatus('Could not set the folder: '+msg, true);
     });
   }
-  function renderAutoBackupUI(dir){
+  function renderAutoBackupUI(dir, perm){
     var st=document.getElementById('bkFolderStatus'); var tog=document.getElementById('bkAutoToggle'); var forget=document.getElementById('bkForgetFolder');
+    var recon=document.getElementById('bkReconnect');
     if(tog) tog.checked = autoBackupOn();
+    if(recon) recon.style.display = (dir && perm && perm !== 'granted') ? '' : 'none';
     if(dir){
-      if(st) st.innerHTML='Backup folder: <b>'+ (dir.name||'(chosen folder)') +'</b>. An <b>Excel (.xlsx)</b> backup of all data is saved here automatically on every <b>📸 HD Screenshot</b>.';
+      if(st) st.innerHTML = (perm && perm !== 'granted')
+        ? 'Backup folder: <b>'+ (dir.name||'(chosen folder)') +'</b> — still remembered, but the browser drops permission to write to it each time the page reloads. '
+          + 'Press <b>Reconnect folder</b>, or just take an <b>📸 HD Screenshot</b> and allow it when asked. There is no need to choose the folder again.'
+        : 'Backup folder: <b>'+ (dir.name||'(chosen folder)') +'</b>. An <b>Excel (.xlsx)</b> backup of all data is saved here automatically on every <b>📸 HD Screenshot</b>.';
       if(forget) forget.style.display='';
     } else {
       if(st) st.innerHTML='Each <b>📸 HD Screenshot</b> also saves an <b>Excel (.xlsx)</b> backup of all data to your <b>Downloads</b>. To send it straight to a specific folder instead (no download), pick one here (Chrome/Edge).'
@@ -3689,11 +3743,16 @@ function ensureDirPerm(dir){
     }
   }
   function initAutoBackupUI(){
-    if(localStorage.getItem('attDashboard_hasBackupDir')==='1'){
-      idbDir('get').then(function(dir){ renderAutoBackupUI(dir||null); }).catch(function(){ renderAutoBackupUI(null); });
-    } else {
-      renderAutoBackupUI(null);
-    }
+    /* Ask the store, not a flag beside it. The flag lives in localStorage,
+       which is itself a bridge to the shell in here, and when the two fell out
+       of step the remembered folder was never even looked for. The handle is
+       the only thing that decides whether a folder is set. */
+    idbDir('get')
+      .then(function(dir){
+        if(!dir){ renderAutoBackupUI(null); return; }
+        return dirPermState(dir).then(function(p){ renderAutoBackupUI(dir, p); });
+      })
+      .catch(function(){ renderAutoBackupUI(null); });
   }
   // Restore writes back through `storage` so it lands where the dashboard reads
   // from. Keys present in the file replace what's there; keys absent are left
@@ -5080,7 +5139,19 @@ function buildExcelBackup(){
   (function(){ var b=document.getElementById('bkExportAll'); if(b) b.addEventListener('click', exportAllData); })();
   (function(){ var b=document.getElementById('bkExportXlsx'); if(b) b.addEventListener('click', exportExcel); })();
   (function(){ var b=document.getElementById('bkChooseFolder'); if(b) b.addEventListener('click', chooseBackupFolder); })();
-  (function(){ var t=document.getElementById('bkAutoToggle'); if(t) t.addEventListener('change', function(){ localStorage.setItem('attDashboard_autoBackupShot', t.checked?'1':'0'); idbDir('get').then(function(d){ renderAutoBackupUI(d||null); }).catch(function(){}); }); })();
+  (function(){ var t=document.getElementById('bkAutoToggle'); if(t) t.addEventListener('change', function(){ localStorage.setItem('attDashboard_autoBackupShot', t.checked?'1':'0'); initAutoBackupUI(); }); })();
+  (function(){ var b=document.getElementById('bkReconnect'); if(b) b.addEventListener('click', function(){
+    idbDir('get').then(function(dir){
+      if(!dir){ renderAutoBackupUI(null); return; }
+      return ensureDirPerm(dir, true).then(function(ok){       // a click, so the browser will ask
+        return dirPermState(dir).then(function(p){
+          renderAutoBackupUI(dir, p);
+          bkStatus(ok ? ('Reconnected to “'+dir.name+'”. Backups will be written there again.')
+                      : 'Permission for that folder was not granted, so backups will go to your Downloads.', !ok);
+        });
+      });
+    }).catch(function(){});
+  }); })();
   (function(){ var b=document.getElementById('bkForgetFolder'); if(b) b.addEventListener('click', function(){ idbDir('del').then(function(){ localStorage.removeItem('attDashboard_hasBackupDir'); renderAutoBackupUI(null); bkStatus('Backup folder forgotten. The Excel backup will now go to your Downloads on each screenshot.', false); }).catch(function(){}); }); })();
   document.getElementById('bkImportInput').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
