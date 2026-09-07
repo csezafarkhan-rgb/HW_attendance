@@ -23,7 +23,7 @@
 #lgErr{display:none;margin:0 0 12px;padding:9px 12px;border-radius:11px;background:rgba(255,90,110,.14);border:1px solid rgba(255,90,110,.35);color:#B22A3E;font-size:12px;font-weight:600;text-align:center;}
 .lg-shake{animation:lgshake .4s ease;}
 @keyframes lgshake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(4px)}}
-#whoami{margin-left:auto;font-size:12.5px;font-weight:700;color:#1B2330;padding:0 4px;}
+#whoami{font-size:12.5px;font-weight:700;color:#1B2330;padding:0 4px;white-space:nowrap;}
 #logoutBtn{padding:7px 13px;font-size:12px;}
 
 .lg-pwwrap{position:relative;}
@@ -71,8 +71,7 @@
 .um-row.um-hi{animation:umhi 2.6s ease;border-color:rgba(59,125,245,.55);box-shadow:0 8px 22px rgba(59,125,245,.28);}
 @keyframes umhi{0%,15%{background:rgba(59,125,245,.22);}100%{background:rgba(255,255,255,.6);}}
 #lgOk{display:none;margin:0 0 12px;padding:9px 12px;border-radius:11px;background:rgba(46,190,120,.14);border:1px solid rgba(46,190,120,.4);color:#177A4B;font-size:12px;font-weight:600;text-align:center;}
-#usersBtn{margin-left:auto;}
-#whoami{margin-left:0;}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:7px;flex:0 0 auto;}
 #usersModal{display:none;position:fixed;inset:0;z-index:900;align-items:center;justify-content:center;background:rgba(26,40,72,.35);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);}
 .um-card{width:min(94vw,680px);max-height:86vh;overflow:auto;padding:22px 24px;border-radius:20px;background:rgba(255,255,255,.9);-webkit-backdrop-filter:blur(26px) saturate(185%);backdrop-filter:blur(26px) saturate(185%);border:1px solid rgba(255,255,255,.8);box-shadow:0 24px 70px rgba(26,40,72,.3);}
 .um-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
@@ -260,9 +259,15 @@
         <span class="hw-co-addr" id="hwCoAddr" title="Click to edit"></span>
       </div>
       <span class="hw-month-badge" id="hwMonthBadge" style="display:none"></span>
-      <button class="navbtn" id="usersBtn" style="display:none">👥 Users</button>
-      <span id="whoami"></span>
-      <button class="navbtn" id="logoutBtn" style="display:none">🚪 Logout</button>
+      <!-- One group so the alignment does not depend on the Users button being
+           visible: employees do not have it, and a display:none element takes
+           part in no layout, so its margin pushed nothing and their name and
+           Logout stayed on the left. -->
+      <div class="topbar-right">
+        <button class="navbtn" id="usersBtn" style="display:none">👥 Users</button>
+        <span id="whoami"></span>
+        <button class="navbtn" id="logoutBtn" style="display:none">🚪 Logout</button>
+      </div>
   </div>
   <div id="frames">
     <div id="splash"><div class="spin"></div><span id="splashText">Loading…</span></div>
