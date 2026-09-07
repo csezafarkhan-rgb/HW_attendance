@@ -4021,7 +4021,8 @@ function ensureDirPerm(dir, byClick){
         if(ov){
           var cat = OV_CATS[ov.cat] || OV_CATS.OTHER;
           var fill = ov.cat==='LEAVE' ? 'leave' : (ov.cat==='WFH' ? 'wfh' : (ov.cat==='VISIT' ? 'visit' : 'leave'));
-          row.push({v:cat.tag(ov.detail)+(ov.duration?(' \u00b7 '+ov.duration):''), s:fill});
+          var ovDur = wfhCellDuration(emp.name, dateStr, ov);
+          row.push({v:cat.tag(ov.detail)+(ovDur?(' \u00b7 '+ovDur):''), s:fill});
           for(var k2=1;k2<COLS;k2++) row.push({v:'', s:fill});
           return;
         }
@@ -5478,6 +5479,21 @@ function buildExcelBackup(){
       return full;
     }
     return full;
+  }
+  /* What a WFH cell should say it is worth. A Saturday worked from home is owed
+     the hours that person's Saturday policy sets - four by default - and the
+     totals have always credited them. The cell showed only "WFH", so the day
+     read as counting for nothing next to the weekdays beside it. An explicitly
+     logged duration still wins; this only fills the silence. */
+  function wfhCellDuration(emp, dateStr, ov){
+    if(!ov) return '';
+    if(ov.duration) return ov.duration;
+    if(ov.cat !== 'WFH') return '';
+    if(new Date(dateStr+'T00:00:00').getDay() !== 6) return '';
+    var sp = getSatPolicy(emp);
+    if(sp.mode !== 'WFH') return '';
+    var m = Math.round((sp.hours||0) * 60);
+    return m > 0 ? fmtMin(m) : '';
   }
 
   function loadOverrides(){
@@ -9845,7 +9861,8 @@ function buildExcelBackup(){
           html += '<td class="att-cell holiday-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(holiday.name+(holiday.note?' — '+holiday.note:'')).replace(/"/g,'&quot;')+'">'+holiday.name+(holiday.note?(' · '+holiday.note):'')+'</td>';
         } else if(ov){
           var cat = OV_CATS[ov.cat] || OV_CATS.OTHER;
-          var tag = cat.tag(ov.detail) + (ov.duration ? ' · '+ov.duration : '');
+          var ovDur = wfhCellDuration(emp.name, dateStr, ov);
+          var tag = cat.tag(ov.detail) + (ovDur ? ' · '+ovDur : '');
           var fdBadge = (ov.cat === 'LEAVE') ? ' <span class="hd-pill full" title="Full day">'+hdMark('FULL')+'</span>' : '';
           html += '<td class="ov-cell '+cat.cls+' emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(ov.reason?ov.reason.replace(/"/g,'&quot;'):'')+'">'+tag+fdBadge+'</td>';
         } else if(rec && rec.st === 'WO'){
@@ -9882,7 +9899,10 @@ function buildExcelBackup(){
           html += '<td class="att-cell dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(durs.outMin!==null?fmtMin(durs.outMin):'—')+'</td>';
           html += '<td class="att-cell punches-cell" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.manual?'—':(rec.c||0))+'</td>';
         } else {
-          html += '<td class="att-cell nodata-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">No record</td>';
+          /* A dash, like every other empty cell in the row. Whole months ahead
+             are days with nothing in them yet, and "No record" repeated down
+             the sheet read as a finding rather than an empty space. */
+          html += '<td class="att-cell nodata-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">—</td>';
         }
       });
       html += '</tr>';
