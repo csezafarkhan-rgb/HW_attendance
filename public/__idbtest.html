@@ -1,0 +1,62 @@
+<!doctype html><meta charset="utf-8"><body style="font:13px monospace;padding:16px">
+<div id="out">running…</div>
+<script>
+/* Reproduce the child shim: replace indexedDB with something lossy, then check
+   whether a nested blank iframe hands back the real one. */
+var lost = [];
+var fakeIDB = { open: function(){ lost.push('shim used'); var r={}; setTimeout(function(){ r.onerror && r.onerror(); },0); return r; } };
+try { Object.defineProperty(window,'indexedDB',{configurable:true,get:function(){ return fakeIDB; }}); } catch(e){}
+
+function nativeIndexedDB(){
+  try{
+    if(window.__nativeIDB) return window.__nativeIDB;
+    var f = document.createElement('iframe');
+    f.setAttribute('aria-hidden','true');
+    f.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
+    (document.body || document.documentElement).appendChild(f);
+    var idb = f.contentWindow && f.contentWindow.indexedDB;
+    if(idb){ window.__nativeIDBFrame = f; window.__nativeIDB = idb; return idb; }
+    f.remove();
+  }catch(e){}
+  return window.indexedDB;
+}
+function put(idb, key, val){
+  return new Promise(function(res,rej){
+    var o = idb.open('probe_db',1);
+    o.onupgradeneeded=function(){ try{ o.result.createObjectStore('kv'); }catch(e){} };
+    o.onsuccess=function(){ try{ var tx=o.result.transaction('kv','readwrite');
+      var rq=tx.objectStore('kv').put(val,key); rq.onsuccess=function(){res(true)}; rq.onerror=function(){rej(rq.error)};
+    }catch(e){rej(e)} };
+    o.onerror=function(){ rej(o.error||new Error('open failed')); };
+  });
+}
+function get(idb, key){
+  return new Promise(function(res,rej){
+    var o = idb.open('probe_db',1);
+    o.onupgradeneeded=function(){ try{ o.result.createObjectStore('kv'); }catch(e){} };
+    o.onsuccess=function(){ try{ var tx=o.result.transaction('kv','readonly');
+      var rq=tx.objectStore('kv').get(key); rq.onsuccess=function(){res(rq.result)}; rq.onerror=function(){rej(rq.error)};
+    }catch(e){rej(e)} };
+    o.onerror=function(){ rej(o.error||new Error('open failed')); };
+  });
+}
+(async function(){
+  var r = { shimIsInPlace: window.indexedDB === fakeIDB };
+  var native = nativeIndexedDB();
+  r.nativeIsDifferent = native !== fakeIDB;
+  var marker = location.hash.slice(1);
+  try{
+    if(!marker){
+      await put(native, 'probe', { when: Date.now(), note: 'written via native idb' });
+      r.wrote = true;
+      r.next = 'reload with #check to read it back';
+    } else {
+      r.readBack = await get(native, 'probe');
+      r.survivedReload = !!(r.readBack && r.readBack.note);
+    }
+  }catch(e){ r.error = String(e); }
+  r.shimNeverTouched = lost.length === 0;
+  window.__result = r;
+  document.getElementById('out').textContent = JSON.stringify(r,null,2);
+})();
+</script></body>
