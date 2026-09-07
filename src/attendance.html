@@ -1428,6 +1428,8 @@ tr:not(.week-spacer):not(.week-start):not(.week-summary-row) td:last-child{borde
 td.week-summary-cell.ok{background:var(--ok-soft);color:#1B4B31;}
 td.week-summary-cell.leverage{background:var(--late);color:#5B4200;}
 td.week-summary-cell.over{background:var(--alert);color:#fff;}
+/* A week that has not finished yet: stated, not judged. */
+td.week-summary-cell.running{background:var(--panel-3);color:var(--ink-soft);}
 td.in-cell.manual-entry, td.out-cell.manual-entry{background:#E6ECF7;font-style:italic;}
 /* A hand-entered day is still late or early if the times say so. The manual
    tint is declared after those rules, so it was winning on equal specificity
@@ -3960,12 +3962,18 @@ function ensureDirPerm(dir){
           var info = weekInfo[emp.name];
           var net  = (info && info.weekTotals[wk]) || 0;
           var days = (info && info.weekDays[wk]) || 0;
+          var open = !!(info && info.weekOpen && info.weekOpen[wk]);
           var fill, text;
-          if(days===0 || net===0){ fill='ok'; text='Completed \u2014 full hours'; }
-          else if(net>0){ fill='ok'; text='Completed \u2014 '+net+'m extra worked'; }
+          /* Same reading as the grid, so an export never states a verdict the
+             screen has not reached. */
+          var lead = open ? 'So far \u2014 ' : 'Completed \u2014 ';
+          var tail = open ? (' over '+days+' day'+(days===1?'':'s')) : '';
+          if(open && days===0){ fill='warn'; text='Week in progress \u2014 no completed days yet'; }
+          else if(days===0 || net===0){ fill='ok'; text=lead+'full hours'+tail; }
+          else if(net>0){ fill='ok'; text=lead+net+'m extra worked'+tail; }
           else {
             var shortMin=-net, lev=Math.round(weeklyLeverageMin/5*days);
-            if(shortMin<=lev){ fill='warn'; text='Completed \u2014 '+shortMin+'m short of '+lev+'m leverage'; }
+            if(shortMin<=lev || open){ fill='warn'; text=lead+shortMin+'m short of '+lev+'m leverage'+tail; }
             else { fill='bad'; text='Not completed \u2014 '+shortMin+'m short (leverage exceeded by '+(shortMin-lev)+'m)'; }
           }
           wrow.push({v:text, s:fill});
@@ -6317,10 +6325,16 @@ function buildExcelBackup(){
       if(!weeks[wk]) weeks[wk] = [];
       weeks[wk].push(dateStr);
     });
-    var weekTotals = {}, weekDays = {};
+    var weekTotals = {}, weekDays = {}, weekOpen = {};
     Object.keys(weeks).forEach(function(wk){
-      var net = 0, counted = 0;
+      var net = 0, counted = 0, open = false;
       weeks[wk].slice().sort().forEach(function(dateStr){
+        /* A day is only measurable once its closing out time is in, which
+           arrives with the next import. Until then the punches are partial: a
+           two-minute step out reads as a one-minute day and takes almost a
+           whole shift off the week. Leave today and anything later out, and
+           mark the week as still running. */
+        if(dateStr >= todayISO_full){ open = true; return; }
         var sh = parseShift(getShift(empName, dateStr));
         var required = sh.endMin - sh.startMin; // shift length in minutes (e.g. 9:00 = 540)
         var delta = null;
@@ -6371,8 +6385,9 @@ function buildExcelBackup(){
       });
       weekTotals[wk] = net;
       weekDays[wk] = counted;
+      weekOpen[wk] = open;
     });
-    return {weekTotals:weekTotals, weekDays:weekDays};
+    return {weekTotals:weekTotals, weekDays:weekDays, weekOpen:weekOpen};
   }
   function computeDurations(rec){
     // Total Duration: full span from first in-punch to last out-punch, computed
@@ -9591,16 +9606,26 @@ function buildExcelBackup(){
           var info = weeklyInfoByEmp[emp.name];
           var net = (info && info.weekTotals[wk]) || 0;
           var days = (info && info.weekDays[wk]) || 0;
+          var open = !!(info && info.weekOpen && info.weekOpen[wk]);
           var cls, text;
-          if(days === 0 || net === 0){
-            cls = 'ok'; text = 'Completed — full hours';
+          /* A week still running says so. "Completed" on a week with days left
+             in it read as a verdict, and the figure beside it looked final. */
+          var lead = open ? 'So far — ' : 'Completed — ';
+          var tail = open ? (' over ' + days + ' day' + (days === 1 ? '' : 's')) : '';
+          if(open && days === 0){
+            cls = 'running'; text = 'Week in progress — no completed days yet';
+          } else if(days === 0 || net === 0){
+            cls = 'ok'; text = lead + 'full hours' + tail;
           } else if(net > 0){
-            cls = 'ok'; text = 'Completed — ' + net + 'm extra worked';
+            cls = 'ok'; text = lead + net + 'm extra worked' + tail;
           } else {
             var shortMin = -net;
             var leverage = Math.round(weeklyLeverageMin/5 * days);
             if(shortMin <= leverage){
-              cls = 'leverage'; text = 'Completed — ' + shortMin + 'm short of ' + leverage + 'm leverage';
+              cls = 'leverage'; text = lead + shortMin + 'm short of ' + leverage + 'm leverage' + tail;
+            } else if(open){
+              /* Still running, so it is behind rather than failed. */
+              cls = 'leverage'; text = lead + shortMin + 'm short of ' + leverage + 'm leverage' + tail;
             } else {
               cls = 'over'; text = 'Not completed — ' + shortMin + 'm short (leverage exceeded by ' + (shortMin - leverage) + 'm)';
             }
