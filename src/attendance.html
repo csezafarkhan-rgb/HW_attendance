@@ -7043,8 +7043,15 @@ function buildExcelBackup(){
      notes are rewritten on every render and a handler bound to the button would
      go with them. */
   document.addEventListener('click', function(e){
-    var b = e.target.closest && e.target.closest('#leaveRulesBtn, #leaveNotesBtn');
+    var b = e.target.closest && e.target.closest('#leaveRulesBtn, #leaveNotesBtn, #leavePendBtn');
     if(!b) return;
+    if(b.id === 'leavePendBtn'){
+      // Every unconfirmed day behind the count, in one list, each confirmable here.
+      lvPinned = { emp:'*', ym:'ALL', kind:'PEND' };
+      renderLeaveDrill();
+      try{ document.getElementById('leaveDrill').scrollIntoView({behavior:'smooth', block:'nearest'}); }catch(_){}
+      return;
+    }
     var panel = document.getElementById(b.id === 'leaveRulesBtn' ? 'leaveRules' : 'leaveNotes');
     if(!panel) return;
     var open = panel.hidden;
@@ -10703,32 +10710,73 @@ function buildExcelBackup(){
     var box = document.getElementById('leaveDrill');
     if(!box) return;
     if(!lvPinned){ box.style.display='none'; box.innerHTML=''; return; }
-    var mtx = computeLeaveMatrix(lvPinned.emp);
-    var all = (mtx.detail||[]).filter(function(r){
-      if(lvPinned.ym !== 'ALL') return r.d.slice(0,7) === lvPinned.ym;
-      return leaveMonthShown(parseInt(r.d.slice(5,7),10)-1);
-    }).sort(function(a,b){ return a.d < b.d ? -1 : (a.d > b.d ? 1 : 0); });
+    /* An employee of '*' means everyone: the unconfirmed days behind the count
+       in the notes, which belong to no one person. Every row carries its own
+       name from here on, so the confirm buttons work the same either way. */
+    var everyone = lvPinned.emp === '*';
+    var copyRow = function(r, who){
+      var out = {};
+      for(var k in r){ if(Object.prototype.hasOwnProperty.call(r, k)) out[k] = r[k]; }
+      out.emp = who;
+      return out;
+    };
+    var all = [];
+    if(everyone){
+      visibleEmployees().forEach(function(e){
+        (computeLeaveMatrix(e.name).detail||[]).forEach(function(r){
+          if(r.type !== 'pending') return;
+          if(!leaveMonthShown(parseInt(r.d.slice(5,7),10)-1)) return;
+          all.push(copyRow(r, e.name));
+        });
+      });
+      all.sort(function(a,b){
+        if(a.d !== b.d) return a.d < b.d ? -1 : 1;
+        return a.emp < b.emp ? -1 : (a.emp > b.emp ? 1 : 0);
+      });
+    } else {
+      all = (computeLeaveMatrix(lvPinned.emp).detail||[]).filter(function(r){
+        if(lvPinned.ym !== 'ALL') return r.d.slice(0,7) === lvPinned.ym;
+        return leaveMonthShown(parseInt(r.d.slice(5,7),10)-1);
+      }).sort(function(a,b){ return a.d < b.d ? -1 : (a.d > b.d ? 1 : 0); })
+        .map(function(r){ return copyRow(r, lvPinned.emp); });
+    }
     var r2 = function(v){ return Math.round(v*100)/100; };
     var cl = all.filter(function(r){ return r.type==='leave' && r.kind==='CL'; }).reduce(function(a,r){ return a+r.days; },0);
     var sl = all.filter(function(r){ return r.type==='leave' && r.kind==='SL'; }).reduce(function(a,r){ return a+r.days; },0);
     var pd = all.filter(function(r){ return r.type==='pending'; }).reduce(function(a,r){ return a+r.days; },0);
     box.style.display='';
+    var people = 0;
+    if(everyone){
+      var seenEmp = {};
+      all.forEach(function(r){ if(!seenEmp[r.emp]){ seenEmp[r.emp] = 1; people++; } });
+    }
     box.innerHTML =
-      '<div class="lv-drill-head"><b>'+shotEsc(dispName(lvPinned.emp))+' \u2014 '
-      +   (lvPinned.kind === 'ALL' ? 'every leave day on show'
-            : (lvPinned.ym === 'ALL' ? 'all months on show' : monthLabel(lvPinned.ym)))+'</b>'
-      +   (normJoin(getJoinDate(lvPinned.emp))
-            ? ('<span class="lv-join">joined '+normJoin(getJoinDate(lvPinned.emp))+'</span>')
-            : '<span class="lv-join warn">no joining date set</span>')
-      + '<span>Casual '+r2(cl)+' \u00b7 Sick '+r2(sl)+(pd?(' \u00b7 awaiting confirmation '+r2(pd)):'')+'</span>'
+      '<div class="lv-drill-head"><b>'
+      +   (everyone
+            ? ('Awaiting confirmation \u2014 '+r2(pd)+' day'+(r2(pd)===1?'':'s')
+               + ' across '+people+' '+(people===1?'person':'people'))
+            : (shotEsc(dispName(lvPinned.emp))+' \u2014 '
+               + (lvPinned.kind === 'ALL' ? 'every leave day on show'
+                  : (lvPinned.ym === 'ALL' ? 'all months on show' : monthLabel(lvPinned.ym)))))
+      + '</b>'
+      +   (everyone
+            ? '<span class="lv-join">all months on show</span>'
+            : (normJoin(getJoinDate(lvPinned.emp))
+                ? ('<span class="lv-join">joined '+normJoin(getJoinDate(lvPinned.emp))+'</span>')
+                : '<span class="lv-join warn">no joining date set</span>'))
+      +   (everyone
+            ? '<span>Confirm any of them here, or on the Attendance Record</span>'
+            : ('<span>Casual '+r2(cl)+' \u00b7 Sick '+r2(sl)+(pd?(' \u00b7 awaiting confirmation '+r2(pd)):'')+'</span>'))
       + '<button type="button" id="lvDrillClose">Close</button></div>'
-      + '<table class="lv-drill-tbl"><thead><tr><th>Date</th><th>Day</th><th>Month</th><th>Type</th><th>Days</th><th>Note</th><th>Confirm as</th></tr></thead><tbody>'
+      + '<table class="lv-drill-tbl"><thead><tr>'
+      +   (everyone ? '<th>Employee</th>' : '')
+      +   '<th>Date</th><th>Day</th><th>Month</th><th>Type</th><th>Days</th><th>Note</th><th>Confirm as</th></tr></thead><tbody>'
       + (all.length ? all.map(function(r){
           var dt = new Date(r.d+'T00:00:00');
           // An unconfirmed day can be settled here rather than hunting for it on
           // the Attendance Record - it is the same decision either way.
           var act = (r.type === 'pending')
-            ? ('<div class="lv-conf" data-emp="'+shotEsc(lvPinned.emp)+'" data-date="'+r.d+'">'
+            ? ('<div class="lv-conf" data-emp="'+shotEsc(r.emp)+'" data-date="'+r.d+'">'
                + '<button type="button" data-as="CL" title="Full day, casual leave">Casual</button>'
                + '<button type="button" data-as="SL" title="Full day, sick leave">Sick</button>'
                + '<button type="button" data-as="HALF" title="Half day \u2014 0.5 deducted">\u00bd day</button>'
@@ -10738,15 +10786,17 @@ function buildExcelBackup(){
                + '<button type="button" data-as="VISIT" title="Off-site visit \u2014 a working day, no leave deducted">Visit</button>'
                + '<button type="button" data-as="APPROVED" title="Approved absence \u2014 paid, and not charged to the casual or sick balance">Approved</button></div>')
             : '<span class="lv-done">\u2713 confirmed</span>';
-          var pre = beforeJoining(lvPinned.emp, r.d);
+          var pre = beforeJoining(r.emp, r.d);
           return '<tr'+(pre ? ' class="lv-prejoin"' : (r.type==='pending'?' class="lv-pend"':''))+'>'
+               + (everyone ? ('<td><b>'+shotEsc(dispName(r.emp))+'</b></td>') : '')
                + '<td>'+(isNaN(dt)?shotEsc(r.d):dt.getDate())+(pre?' \u26a0':'')+'</td>'
                + '<td>'+shotEsc(weekdayName(r.d))+'</td>'
                + '<td>'+shotEsc(monthLabelShort(r.d.slice(0,7)))+'</td>'
                + '<td>'+shotEsc(lvTypeLabel(r))+'</td>'
                + '<td>'+(r.days===0.5?'0.5':r.days)+'</td><td>'+shotEsc(r.note||'')+'</td>'
                + '<td class="lv-act">'+act+'</td></tr>';
-        }).join('') : '<tr><td colspan="7" style="color:var(--ink-soft)">No leave recorded here.</td></tr>')
+        }).join('') : ('<tr><td colspan="'+(everyone?8:7)+'" style="color:var(--ink-soft)">'
+            + (everyone ? 'Nothing awaiting confirmation.' : 'No leave recorded here.') + '</td></tr>'))
       + '</tbody></table>';
     var cb = document.getElementById('lvDrillClose');
     if(cb) cb.addEventListener('click', function(){ lvPinned = null; renderLeaveDrill(); });
@@ -10933,7 +10983,8 @@ function buildExcelBackup(){
           + '(<b>Shifts → Joined</b>).</div>';
       }
       if(pendAll > 0){
-        sum.push('<span class="lv-warn">⚠ '+num(pendAll)+' day(s) awaiting confirmation</span>');
+        sum.push('<span class="lv-warn">⚠ '+num(pendAll)+' day(s) awaiting confirmation</span>'
+          + '<button type="button" class="lv-more" id="leavePendBtn">Show them</button>');
         detail += '<div style="margin-top:6px;color:#8A5A00;">⚠ <b>'+num(pendAll)+' day(s) awaiting confirmation.</b> '
           + 'Absent and half days from the punch file are not deducted until you mark the leave on the '
           + '<b>Attendance Record</b> tab.</div>';
