@@ -6864,9 +6864,15 @@ function buildExcelBackup(){
           if(!rec['in']) return;                         // nothing decided about the day yet
           /* Today is judged on the arrival alone, for the reason above. The
              same measure the excused-late case below uses: minutes early count
-             for them, minutes late against. */
+             for them, minutes late against.
+
+             Unless the late arrival has been excused, in which case it is
+             forgiven exactly as it would be on a finished day. There the day is
+             then judged on when they left; today has no out time yet, so there
+             is nothing left to hold against it and it contributes nothing. It
+             still counts as a day being worked, so it earns its leverage. */
           if(isToday){
-            net += sh.startMin - toMin(rec['in']);
+            net += getLateExcuse(empName, dateStr) ? 0 : (sh.startMin - toMin(rec['in']));
             counted++;
             return;
           }
