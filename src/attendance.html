@@ -2461,6 +2461,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button class="page-tab" data-page="requests"><span class="ico">📨</span><span class="lbl">Requests</span> <span class="req-badge" id="reqBadge" style="display:none;">0</span></button>
     <button class="page-tab" data-page="salary"><span class="ico">💰</span><span class="lbl">Payroll</span></button>
     <button class="page-tab" data-page="holidays"><span class="ico">🏖️</span><span class="lbl">Official Leaves</span></button>
+    <!-- User management lives in the Workspace shell, not in here, so this tab
+         asks the shell to open it rather than switching page. Hidden until the
+         signed-in account is known to be a full admin. -->
+    <button class="page-tab" id="usersTab" data-page="users" style="display:none"><span class="ico">👥</span><span class="lbl">Users</span></button>
     <button class="page-tab" data-page="backup"><span class="ico">💾</span><span class="lbl">Backup &amp; Restore</span></button>
   </div>
   <!-- Drag the seam to set how wide the sidebar is. -->
@@ -7877,6 +7881,13 @@ function buildExcelBackup(){
   })();
   Array.prototype.forEach.call(document.querySelectorAll('.page-tab'), function(tab){
     tab.addEventListener('click', function(){
+      /* Users is a door to the shell's own panel, not a page in here. Ask for it
+         and leave the grid where it was, so closing the panel puts them back
+         where they were rather than on an empty tab. */
+      if(tab.getAttribute('data-page') === 'users'){
+        try{ parent.postMessage({__hwb:1, op:'open-users'}, '*'); }catch(e){}
+        return;
+      }
       currentPage = tab.getAttribute('data-page');
       Array.prototype.forEach.call(document.querySelectorAll('.page-tab'), function(t){ t.classList.toggle('active', t===tab); });
       document.getElementById('page-attendance').classList.toggle('active', currentPage==='attendance');
@@ -11700,6 +11711,12 @@ function buildExcelBackup(){
     viewRole = {role:'admin', username:username, name:(displayName || '').trim(),
                 tier:(tier === 'admin_view' ? 'admin_view' : 'admin')};
     saveViewRole();
+    /* Only a full admin may manage accounts, and only the shell can - so the
+       tab appears for them alone, and only when there is a shell to ask. */
+    try{
+      var ut = document.getElementById('usersTab');
+      if(ut) ut.style.display = (IN_WORKSPACE && viewRole.tier === 'admin') ? '' : 'none';
+    }catch(e){}
     hideGate();
     document.getElementById('employeeView').style.display = 'none';
     document.getElementById('adminView').style.display = 'block';

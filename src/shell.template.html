@@ -264,7 +264,11 @@
            part in no layout, so its margin pushed nothing and their name and
            Logout stayed on the left. -->
       <div class="topbar-right">
-        <button class="navbtn" id="usersBtn" style="display:none">👥 Users</button>
+        <!-- Users now sits in the dashboard's own sidebar, above Backup &
+             Restore, so it is not repeated up here. Kept in the page because
+             the existing wiring hangs off it and the attendance tab asks the
+             shell to open the same panel. -->
+        <button class="navbtn" id="usersBtn" style="display:none" hidden>👥 Users</button>
         <span id="whoami"></span>
         <button class="navbtn" id="logoutBtn" style="display:none">🚪 Logout</button>
       </div>
@@ -458,6 +462,16 @@
       case 'goto':
         // a dashboard asking the workspace to switch to another tab
         try{ show(m.id); }catch(_){}
+        break;
+      case 'open-users':
+        /* The Users tab in a dashboard's sidebar. Accounts are the shell's
+           business, so the tab asks rather than does.
+
+           It clicks the real button rather than calling the handler, which
+           keeps this working wherever in the file that handler ends up living,
+           and means the panel opens by exactly the path it always has - role
+           check included, so a frame asking for it does not get it. */
+        try{ var ub0 = document.getElementById('usersBtn'); if(ub0) ub0.click(); }catch(_){}
         break;
       case 'download':
         // Saving on behalf of an embedded tab (see the shim's download bridge).
