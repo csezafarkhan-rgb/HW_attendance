@@ -6835,12 +6835,19 @@ function buildExcelBackup(){
     Object.keys(weeks).forEach(function(wk){
       var net = 0, counted = 0, open = false;
       weeks[wk].slice().sort().forEach(function(dateStr){
-        /* A day is only measurable once its closing out time is in, which
-           arrives with the next import. Until then the punches are partial: a
-           two-minute step out reads as a one-minute day and takes almost a
-           whole shift off the week. Leave today and anything later out, and
-           mark the week as still running. */
-        if(dateStr >= todayISO_full){ open = true; return; }
+        /* Today counts, but only for the one thing that is settled about it:
+           when they arrived. Its duration is not usable - the closing punch has
+           not happened, so a two-minute step out would read as a one-minute day
+           and take almost a whole shift off the week. Arrival against the shift
+           start is decided the moment they walk in, early crediting and late
+           costing, so the day joins the reckoning on that alone and its hours
+           are settled tomorrow when the out time arrives.
+
+           A date still to come is left out entirely. Either way the week is
+           marked as still running. */
+        var isToday = dateStr === todayISO_full;
+        if(dateStr > todayISO_full){ open = true; return; }
+        if(isToday) open = true;
         var sh = parseShift(getShift(empName, dateStr));
         var required = sh.endMin - sh.startMin; // shift length in minutes (e.g. 9:00 = 540)
         var delta = null;
@@ -6854,7 +6861,16 @@ function buildExcelBackup(){
           var rec = getRecord(empName, dateStr);
           if(!rec) return;
           if(rec.st === 'WO' || rec.st === 'AB') return; // weekly-off / absent — skip
-          if(!rec['in'] || !rec.out) return;             // no full in+out pair — can't measure duration
+          if(!rec['in']) return;                         // nothing decided about the day yet
+          /* Today is judged on the arrival alone, for the reason above. The
+             same measure the excused-late case below uses: minutes early count
+             for them, minutes late against. */
+          if(isToday){
+            net += sh.startMin - toMin(rec['in']);
+            counted++;
+            return;
+          }
+          if(!rec.out) return;                           // no full in+out pair — can't measure duration
           // A half day is half a day's leave: only half the shift is owed, so
           // measuring it against the full shift showed a shortfall for someone
           // who was on approved leave for the rest of it.
