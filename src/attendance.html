@@ -1476,6 +1476,9 @@ td.in-cell.late{background:var(--late);}
 .late-excused{background:var(--late-exc) !important;}
 /* Early departure mirrors late, in a distinct amber so the two read apart. */
 td.out-cell.early{background:var(--early);}
+/* A day still running: the out-time is the last punch so far, so it is shown
+   rather than marked. No early-departure colour until the day has closed. */
+td.out-cell.provisional{background:transparent;color:var(--ink-dim);}
 /* Confirmed part-day leave, so it reads at a glance rather than only on hover. */
 /* The fraction is the whole message here, so it needs to be readable at a
    glance rather than a decorative speck. Larger, with real padding, and
@@ -10206,7 +10209,16 @@ function buildExcelBackup(){
           var wasEarly = isEarly(emp.name, rec);
           var ex = getEarlyExcuse(emp.name, dateStr);
           var actuallyEarly = wasEarly && !ex;
-          var outCls = 'out-cell'+(actuallyEarly?' early':'')+((wasEarly&&ex)?' early-excused':'')
+          /* Today's out-time is the last punch so far, not the time anyone
+             left - somebody stepping out for five minutes has an "out" against
+             their name all afternoon. Flagging that as an early departure reads
+             as a verdict on a day still being worked, so until tomorrow brings
+             the closing punch it is stated in grey and not judged. The same
+             reasoning already keeps isAlert quiet on today. */
+          var dayStillOpen = dateStr >= todayISO_full;
+          var outCls = 'out-cell'
+            +(dayStillOpen ? ' provisional'
+              : ((actuallyEarly?' early':'')+((wasEarly&&ex)?' early-excused':'')))
             +(isAlert(rec,dateStr)&&!mp?' alert':'')+(mp?' mispunch':'')+(rec.manual?' manual-entry':'');
           var durs = computeDurations(rec);
           var hdFlag = getHalfDay(emp.name, dateStr);
@@ -10217,7 +10229,8 @@ function buildExcelBackup(){
           if(hdFlag) inTitle = (inTitle?inTitle+' · ':'')+hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note):'');
           html += '<td class="att-cell '+inCls+' emp-block-start" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')+'</td>';
           var outTitle = mp&&mp.note ? ('Mispunch: '+mp.note)
-            : (wasEarly ? (ex ? ('Left early — excused: '+(ex.note||'')) : ('Left early by '+getLateEarly(emp.name,rec).early+' min')) : '');
+            : (dayStillOpen ? 'Last punch so far today — not necessarily the time they left'
+              : (wasEarly ? (ex ? ('Left early — excused: '+(ex.note||'')) : ('Left early by '+getLateEarly(emp.name,rec).early+' min')) : ''));
           html += '<td class="att-cell '+outCls+'" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+outTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec.out)+(mp?' ⚑':'')+((wasEarly&&ex)?' ✓':'')+'</td>';
           html += '<td class="att-cell '+durCls+' dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(durs.totalMin!==null?fmtMin(durs.totalMin):'—')+(rec.st==='HD'?' ½':'')
             +(hdFlag?('<span class="hd-pill '+hdCls(hdFlag.kind)+'" title="'
