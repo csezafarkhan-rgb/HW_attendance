@@ -4259,7 +4259,8 @@ function ensureDirPerm(dir, byClick){
           else if(net>0){ fill='ok'; text=lead+net+'m extra worked'+tail; }
           else {
             var shortMin=-net, lev=Math.round(weeklyLeverageMin/5*days);
-            if(shortMin<=lev || open){ fill='warn'; text=lead+shortMin+'m short of '+lev+'m leverage'+tail; }
+            if(shortMin<=lev){ fill='warn'; text=lead+shortMin+'m short of '+lev+'m leverage'+tail; }
+            else if(open){ fill='bad'; text=lead+shortMin+'m short, '+lev+'m leverage exceeded by '+(shortMin-lev)+'m'+tail; }
             else { fill='bad'; text='Not completed \u2014 '+shortMin+'m short (leverage exceeded by '+(shortMin-lev)+'m)'; }
           }
           wrow.push({v:text, s:fill});
@@ -10300,8 +10301,11 @@ function buildExcelBackup(){
             if(shortMin <= leverage){
               cls = 'leverage'; text = lead + shortMin + 'm short of ' + leverage + 'm leverage' + tail;
             } else if(open){
-              /* Still running, so it is behind rather than failed. */
-              cls = 'leverage'; text = lead + shortMin + 'm short of ' + leverage + 'm leverage' + tail;
+              /* Past the leverage is past the leverage, finished week or not. It
+                 was amber here, which read as still inside the allowance when it
+                 no longer was. Red, but worded as a running total rather than a
+                 verdict, since there are days left to make it back. */
+              cls = 'over'; text = lead + shortMin + 'm short, ' + leverage + 'm leverage exceeded by ' + (shortMin - leverage) + 'm' + tail;
             } else {
               cls = 'over'; text = 'Not completed — ' + shortMin + 'm short (leverage exceeded by ' + (shortMin - leverage) + 'm)';
             }
