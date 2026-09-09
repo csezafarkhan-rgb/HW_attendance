@@ -3601,19 +3601,48 @@ function offerImportFile(file, stamp){
      Sync could only re-read whatever file was last written, which is why it
      kept reporting nothing newer while the readers had plenty. */
   var SYNC_HELPER = 'http://127.0.0.1:8765';
-  function askHelperToFetch(){
-    /* Reading both readers takes about a minute, so the wait is generous - but
-       bounded, so a helper that has wedged does not hang the button. */
+
+  /* Chrome asks before a web page may talk to anything on the local network,
+     and while that question is unanswered the request neither succeeds nor
+     fails - it simply hangs. Worth knowing which state we are in, so the button
+     can say "answer the prompt" rather than "not running". */
+  function helperPermission(){
+    try{
+      if(!navigator.permissions || !navigator.permissions.query) return Promise.resolve('unknown');
+      return navigator.permissions.query({name:'local-network-access'})
+        .then(function(p){ return p.state; })
+        .catch(function(){ return 'unknown'; });
+    }catch(e){ return Promise.resolve('unknown'); }
+  }
+
+  function withTimeout(p, ms, onTimeout){
     return new Promise(function(resolve){
-      var done = false;
-      var give = function(v){ if(!done){ done = true; resolve(v); } };
-      setTimeout(function(){ give({ok:false, reason:'timeout'}); }, 180000);
-      fetch(SYNC_HELPER + '/sync', {cache:'no-store'})
-        .then(function(r){ return r.json(); })
-        .then(function(j){ give(j && j.ok ? j : {ok:false, reason:'failed', detail:(j&&j.error)||''}); })
-        /* Not running, or this browser is not on that PC. Either way the folder
-           still has whatever the scheduled rebuild last left there. */
-        .catch(function(){ give({ok:false, reason:'unreachable'}); });
+      var done = false, give = function(v){ if(!done){ done = true; resolve(v); } };
+      setTimeout(function(){ give(onTimeout); }, ms);
+      p.then(give, function(){ give(onTimeout); });
+    });
+  }
+
+  function askHelperToFetch(){
+    /* Knock first. Reading the readers takes about a minute and is worth
+       waiting for, but only once we know something is there to answer - a
+       blocked or absent helper otherwise leaves the button frozen for the whole
+       of that minute with nothing to show for it. */
+    return withTimeout(
+      fetch(SYNC_HELPER + '/ping', {cache:'no-store'}).then(function(r){ return r.json(); }),
+      6000, null
+    ).then(function(pong){
+      if(!pong || !pong.ok){
+        return helperPermission().then(function(state){
+          return {ok:false, reason: (state === 'granted' || state === 'unknown') ? 'unreachable' : 'permission', permission:state};
+        });
+      }
+      return withTimeout(
+        fetch(SYNC_HELPER + '/sync', {cache:'no-store'}).then(function(r){ return r.json(); }),
+        180000, {ok:false, reason:'timeout'}
+      ).then(function(j){
+        return (j && j.ok) ? j : {ok:false, reason:(j && j.reason) || 'failed', detail:(j && j.error) || ''};
+      });
     });
   }
 
@@ -3640,6 +3669,10 @@ function offerImportFile(file, stamp){
         if(pull.ok){
           showUploadStatus('Read the punch readers just now \u2014 nothing new to import. '
             + 'Everything on them is already here.');
+        } else if(pull.reason === 'permission'){
+          showUploadStatus('Chrome is waiting for your permission to reach the office PC. '
+            + 'Choose Allow on its prompt (or the icon at the left of the address bar), then press Sync again. '
+            + 'Until then this shows only what the last scheduled rebuild left.', true);
         } else if(pull.reason === 'unreachable'){
           showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". The sync helper on the '
             + 'office PC is not answering, so the readers were not checked \u2014 this is only '
