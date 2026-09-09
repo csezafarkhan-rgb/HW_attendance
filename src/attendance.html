@@ -3596,6 +3596,27 @@ function offerImportFile(file, stamp){
      by both the menu item and the toolbar's Sync button, so the two can never
      drift apart. `btn` is whichever was pressed - it is disabled while the
      folder is read, so a second click cannot start a second look. */
+  /* The helper on the office PC. A web page cannot read a punch reader on the
+     office network, so a small service there does it and this asks. Without it
+     Sync could only re-read whatever file was last written, which is why it
+     kept reporting nothing newer while the readers had plenty. */
+  var SYNC_HELPER = 'http://127.0.0.1:8765';
+  function askHelperToFetch(){
+    /* Reading both readers takes about a minute, so the wait is generous - but
+       bounded, so a helper that has wedged does not hang the button. */
+    return new Promise(function(resolve){
+      var done = false;
+      var give = function(v){ if(!done){ done = true; resolve(v); } };
+      setTimeout(function(){ give({ok:false, reason:'timeout'}); }, 180000);
+      fetch(SYNC_HELPER + '/sync', {cache:'no-store'})
+        .then(function(r){ return r.json(); })
+        .then(function(j){ give(j && j.ok ? j : {ok:false, reason:'failed', detail:(j&&j.error)||''}); })
+        /* Not running, or this browser is not on that PC. Either way the folder
+           still has whatever the scheduled rebuild last left there. */
+        .catch(function(){ give({ok:false, reason:'unreachable'}); });
+    });
+  }
+
   function runFolderSync(btn){
     var dd = document.getElementById('updAttDropdown');
     if(dd) dd.classList.remove('open');
@@ -3604,13 +3625,30 @@ function offerImportFile(file, stamp){
       return;
     }
     var was = btn ? btn.textContent : '';
-    if(btn){ btn.disabled = true; btn.textContent = 'Looking\u2026'; }
+    var say = function(t){ if(btn) btn.textContent = t; };
+    if(btn){ btn.disabled = true; }
     var restore = function(){ if(btn){ btn.disabled = false; btn.textContent = was; } };
-    Promise.resolve(checkImportFolder(false)).then(function(found){
-      restore();
-      /* checkImportFolder raises the found-file bar itself; say something only
-         when there was nothing to find, so the click never looks ignored. */
-      if(!found) showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '".');
+
+    say('Reading the readers\u2026');
+    askHelperToFetch().then(function(pull){
+      say('Looking\u2026');
+      return Promise.resolve(checkImportFolder(false)).then(function(found){
+        restore();
+        if(found) return;                    // checkImportFolder raises its own bar
+        /* Nothing to import. Which is a different thing depending on whether
+           the readers were actually consulted, so say which. */
+        if(pull.ok){
+          showUploadStatus('Read the punch readers just now \u2014 nothing new to import. '
+            + 'Everything on them is already here.');
+        } else if(pull.reason === 'unreachable'){
+          showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". The sync helper on the '
+            + 'office PC is not answering, so the readers were not checked \u2014 this is only '
+            + 'as fresh as the last scheduled rebuild.', true);
+        } else {
+          showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". The sync helper could not '
+            + 'read the readers' + (pull.detail ? (': ' + pull.detail) : '.'), true);
+        }
+      });
     }).catch(restore);
   }
   var fb = document.getElementById('updFolderOpt');
