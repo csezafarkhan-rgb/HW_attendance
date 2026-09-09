@@ -9,3 +9,13 @@ npm-debug.log*
 # build.py leaves these behind
 __pycache__/
 *.pyc
+
+# Attendance data must never be committed - names and times are personal data,
+# and this repo is private but not a place for it. The sync scripts under
+# scripts/attendance-sync write all of these to a data folder outside the repo;
+# these lines are a second line of defence in case one is ever run in place.
+device-punches.csv
+build-log.txt
+health-log.txt
+DailyAttendanceLogsDetails*.csv
+attendance_backup_*.xlsx
