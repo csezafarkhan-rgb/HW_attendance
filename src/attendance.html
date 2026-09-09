@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <style id="hw-shared-theme">
@@ -2496,6 +2496,9 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     </div>
     <input type="file" id="uploadInput" accept=".csv,.xlsx" style="display:none;"/>
   </div>
+  <!-- Checking the watched folder was two clicks inside a menu, which is a lot
+       for the thing done most often. Here it is on its own. -->
+  <button class="month-btn" id="syncNowBtn" title="Look in the watched folder for a newer punch file and offer it">↻ Sync</button>
   <div class="month-picker">
     <button class="month-btn" id="usersBtn">Users ▾</button>
     <div class="month-dropdown" id="usersDropdown" style="min-width:300px;"></div>
@@ -3589,25 +3592,31 @@ function offerImportFile(file, stamp){
 (function(){
   /* The same folder check as on the Backup tab, put where the punch file is
      actually loaded. Choosing the folder still happens once, on Backup. */
-  var fb = document.getElementById('updFolderOpt');
-  if(fb) fb.addEventListener('click', function(){
+  /* Look in the watched folder and offer anything newer. Written once and used
+     by both the menu item and the toolbar's Sync button, so the two can never
+     drift apart. `btn` is whichever was pressed - it is disabled while the
+     folder is read, so a second click cannot start a second look. */
+  function runFolderSync(btn){
     var dd = document.getElementById('updAttDropdown');
     if(dd) dd.classList.remove('open');
     if(!IMPORT_DIR){
       showUploadStatus('No folder is being watched yet \u2014 choose one on the Backup tab first.', true);
       return;
     }
-    var was = fb.textContent;
-    fb.disabled = true; fb.textContent = 'Looking\u2026';
+    var was = btn ? btn.textContent : '';
+    if(btn){ btn.disabled = true; btn.textContent = 'Looking\u2026'; }
+    var restore = function(){ if(btn){ btn.disabled = false; btn.textContent = was; } };
     Promise.resolve(checkImportFolder(false)).then(function(found){
-      fb.disabled = false; fb.textContent = was;
+      restore();
       /* checkImportFolder raises the found-file bar itself; say something only
          when there was nothing to find, so the click never looks ignored. */
       if(!found) showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '".');
-    }).catch(function(){
-      fb.disabled = false; fb.textContent = was;
-    });
-  });
+    }).catch(restore);
+  }
+  var fb = document.getElementById('updFolderOpt');
+  if(fb) fb.addEventListener('click', function(){ runFolderSync(fb); });
+  var sb = document.getElementById('syncNowBtn');
+  if(sb) sb.addEventListener('click', function(){ runFolderSync(sb); });
   var b = document.getElementById('impDirPick');
   if(b) b.addEventListener('click', chooseImportFolder);
   var rc = document.getElementById('impDirReconnect');
