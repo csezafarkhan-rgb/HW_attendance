@@ -4360,16 +4360,16 @@ function ensureDirPerm(dir, byClick){
           var fill, text;
           /* Same reading as the grid, so an export never states a verdict the
              screen has not reached. */
-          var lead = open ? 'So far \u2014 ' : 'Completed \u2014 ';
-          var tail = open ? (' over '+days+' day'+(days===1?'':'s')) : '';
-          if(open && days===0){ fill='warn'; text='Week in progress \u2014 no completed days yet'; }
-          else if(days===0 || net===0){ fill='ok'; text=lead+'full hours'+tail; }
-          else if(net>0){ fill='ok'; text=lead+net+'m extra worked'+tail; }
+          // Word for word what the grid says, so a sheet never reads differently.
+          var lead = open ? 'So far \u00b7 ' : 'Completed \u00b7 ';
+          if(open && days===0){ fill='warn'; text='Week in progress'; }
+          else if(days===0 || net===0){ fill='ok'; text=lead+'full hours'; }
+          else if(net>0){ fill='ok'; text=lead+net+'m extra'; }
           else {
             var shortMin=-net, lev=Math.round(weeklyLeverageMin/5*days);
-            if(shortMin<=lev){ fill='warn'; text=lead+shortMin+'m short of '+lev+'m leverage'+tail; }
-            else if(open){ fill='bad'; text=lead+shortMin+'m short, '+lev+'m leverage exceeded by '+(shortMin-lev)+'m'+tail; }
-            else { fill='bad'; text='Not completed \u2014 '+shortMin+'m short (leverage exceeded by '+(shortMin-lev)+'m)'; }
+            if(shortMin<=lev){ fill='warn'; text=lead+shortMin+'m short \u00b7 within '+lev+'m leverage'; }
+            else if(open){ fill='bad'; text=lead+shortMin+'m short \u00b7 '+(shortMin-lev)+'m over leverage'; }
+            else { fill='bad'; text='Not completed \u00b7 '+shortMin+'m short \u00b7 '+(shortMin-lev)+'m over leverage'; }
           }
           wrow.push({v:text, s:fill});
           for(var k5=1;k5<COLS;k5++) wrow.push({v:'', s:fill});
@@ -10402,27 +10402,31 @@ function buildExcelBackup(){
           var cls, text;
           /* A week still running says so. "Completed" on a week with days left
              in it read as a verdict, and the figure beside it looked final. */
-          var lead = open ? 'So far — ' : 'Completed — ';
-          var tail = open ? (' over ' + days + ' day' + (days === 1 ? '' : 's')) : '';
+          /* Three facts at most, separated by dots: where the week stands, how
+             far short, and whether that is still inside the allowance. It used
+             to run to a sentence - "29m short, 18m leverage exceeded by 11m
+             over 3 days" - which is a lot to read in a cell you pass over for
+             every person, every week. */
+          var lead = open ? 'So far · ' : 'Completed · ';
           if(open && days === 0){
-            cls = 'running'; text = 'Week in progress — no completed days yet';
+            cls = 'running'; text = 'Week in progress';
           } else if(days === 0 || net === 0){
-            cls = 'ok'; text = lead + 'full hours' + tail;
+            cls = 'ok'; text = lead + 'full hours';
           } else if(net > 0){
-            cls = 'ok'; text = lead + net + 'm extra worked' + tail;
+            cls = 'ok'; text = lead + net + 'm extra';
           } else {
             var shortMin = -net;
             var leverage = Math.round(weeklyLeverageMin/5 * days);
             if(shortMin <= leverage){
-              cls = 'leverage'; text = lead + shortMin + 'm short of ' + leverage + 'm leverage' + tail;
+              cls = 'leverage'; text = lead + shortMin + 'm short · within ' + leverage + 'm leverage';
             } else if(open){
               /* Past the leverage is past the leverage, finished week or not. It
                  was amber here, which read as still inside the allowance when it
-                 no longer was. Red, but worded as a running total rather than a
-                 verdict, since there are days left to make it back. */
-              cls = 'over'; text = lead + shortMin + 'm short, ' + leverage + 'm leverage exceeded by ' + (shortMin - leverage) + 'm' + tail;
+                 no longer was. Red, but still "So far", since there are days
+                 left to make it back. */
+              cls = 'over'; text = lead + shortMin + 'm short · ' + (shortMin - leverage) + 'm over leverage';
             } else {
-              cls = 'over'; text = 'Not completed — ' + shortMin + 'm short (leverage exceeded by ' + (shortMin - leverage) + 'm)';
+              cls = 'over'; text = 'Not completed · ' + shortMin + 'm short · ' + (shortMin - leverage) + 'm over leverage';
             }
           }
           html += '<td colspan="6" class="week-summary-cell '+cls+' emp-block-start">'+text+'</td>';
