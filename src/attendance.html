@@ -1196,6 +1196,17 @@ tr.emp-header-row th{ cursor:default; }
   line-height:1.45; max-width:760px;
 }
 #page-leave .table-scroll{ background:transparent; padding:18px 22px 0; }
+/*  The Live Sync bar. Reading both readers takes about a minute and the request
+    reports no progress of its own, so the fill is driven by elapsed time against
+    that expectation - and deliberately stops short of the end, because claiming
+    to be finished before the answer arrives is worse than saying nothing. */
+#syncProgress{padding:10px 18px;background:#EAF3FF;border-bottom:1px solid #B9D4F5;}
+#syncProgress .sync-line{display:flex;justify-content:space-between;align-items:baseline;
+  font-size:12.5px;font-weight:600;color:#1B4A7A;margin-bottom:6px;}
+#syncProgress #syncClock{font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:#4A7AA8;}
+#syncProgress .sync-track{height:6px;border-radius:999px;background:#C9DEF5;overflow:hidden;}
+#syncProgress .sync-fill{height:100%;width:0;border-radius:999px;
+  background:linear-gradient(90deg,#5b9bff,#3B7DF5);transition:width .3s linear;}
 #leaveHint{
   background:var(--lv-amber-bg) !important; border:1px solid #F0DCB8 !important;
   border-radius:10px !important; color:#7A4A00 !important; box-shadow:none !important;
@@ -2536,6 +2547,13 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <button class="month-btn" id="screenshotBtn">📸 HD Screenshot</button>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
 </div>
+<!-- Live Sync closes the menu it was clicked in, so the button's own label was
+     hidden for the whole minute the readers take. This says what is happening
+     where it can actually be seen. -->
+<div id="syncProgress" style="display:none;">
+  <div class="sync-line"><span id="syncStage">Reading the punch readers…</span><span id="syncClock">0s</span></div>
+  <div class="sync-track"><div class="sync-fill" id="syncFill"></div></div>
+</div>
 <div id="impFound" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 18px;background:#EAF3FF;border-bottom:1px solid #B9D4F5;font-size:12.5px;"></div>
 <div id="uploadStatus" style="display:none;padding:8px 18px;font-size:12px;font-weight:600;"></div>
 <!-- Offers a way back after an import. Shown only when a restore point exists. -->
@@ -3664,6 +3682,46 @@ function offerImportFile(file, stamp){
      what is already on disk, which is what the scheduled rebuild left. Sharing
      one function with a flag keeps the second half - the looking, the messages,
      the button state - written once. */
+  /*  The bar for Live Sync.
+
+      There is no progress to report: it is one request that takes about a
+      minute and says nothing until it answers. So the fill is drawn against
+      that expectation and eased so it slows as it approaches the end, and it is
+      capped short of full - a bar sitting at 100% while nothing has happened
+      reads as stuck, where one still creeping reads as working. It only reaches
+      the end when the answer actually arrives. */
+  var SYNC_EXPECTED_MS = 65000;
+  var syncTimer = null;
+  function syncProgress(stage){
+    var box = document.getElementById('syncProgress');
+    if(!box) return;
+    var fill = document.getElementById('syncFill');
+    var lbl  = document.getElementById('syncStage');
+    var clk  = document.getElementById('syncClock');
+    var started = Date.now();
+    box.style.display = '';
+    if(lbl) lbl.textContent = stage;
+    if(fill) fill.style.width = '2%';
+    if(clk) clk.textContent = '0s';
+    clearInterval(syncTimer);
+    syncTimer = setInterval(function(){
+      var elapsed = Date.now() - started;
+      // Approaches the cap without reaching it, however long it takes.
+      var pct = 92 * (1 - Math.exp(-elapsed / (SYNC_EXPECTED_MS / 2)));
+      if(fill) fill.style.width = Math.max(2, pct).toFixed(1) + '%';
+      if(clk) clk.textContent = Math.round(elapsed / 1000) + 's';
+    }, 300);
+    return {
+      stage: function(t){ if(lbl) lbl.textContent = t; },
+      done: function(){
+        clearInterval(syncTimer); syncTimer = null;
+        if(fill) fill.style.width = '100%';
+        // Long enough to register as finished, not long enough to be in the way.
+        setTimeout(function(){ box.style.display = 'none'; if(fill) fill.style.width = '0'; }, 600);
+      }
+    };
+  }
+
   function runFolderSync(btn, live){
     var dd = document.getElementById('updAttDropdown');
     if(dd) dd.classList.remove('open');
@@ -3677,10 +3735,13 @@ function offerImportFile(file, stamp){
     var restore = function(){ if(btn){ btn.disabled = false; btn.textContent = was; } };
 
     say(live ? 'Reading the readers\u2026' : 'Looking\u2026');
+    var bar = live ? syncProgress('Reading the punch readers\u2026') : null;
     var step = live ? askHelperToFetch() : Promise.resolve({ok:false, reason:'skipped'});
     step.then(function(pull){
       say('Looking\u2026');
+      if(bar) bar.stage('Looking for new punches\u2026');
       return Promise.resolve(checkImportFolder(false)).then(function(found){
+        if(bar) bar.done();
         restore();
         if(found) return;                    // checkImportFolder raises its own bar
         /* Nothing to import. Which is a different thing depending on whether
@@ -3706,7 +3767,7 @@ function offerImportFile(file, stamp){
             + 'read the readers' + (pull.detail ? (': ' + pull.detail) : '.'), true);
         }
       });
-    }).catch(restore);
+    }).catch(function(){ if(bar) bar.done(); restore(); });
   }
   var fb = document.getElementById('updFolderOpt');
   if(fb) fb.addEventListener('click', function(){ runFolderSync(fb, false); });   // folder only
