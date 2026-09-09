@@ -106,6 +106,18 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ ok: false, error: 'not found' }));
 });
 
+/*  Another copy is already up. That is the normal case for a task that gets
+    re-run every few minutes to make sure the helper is alive, so it is not an
+    error - step aside quietly and let the running one carry on. */
+server.on('error', err => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.log('already running on ' + PORT + '; nothing to do');
+    process.exit(0);
+  }
+  console.error('could not listen on ' + PORT + ':', err && err.message);
+  process.exit(1);
+});
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log('attendance sync helper listening on http://127.0.0.1:' + PORT);
 });
