@@ -2490,15 +2490,15 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <div class="month-picker">
     <button class="month-btn" id="updAttBtn">⭱ Update Attendance ▾</button>
     <div class="month-dropdown" id="updAttDropdown">
+      <!-- First, because it is the one that actually goes and gets the punches.
+           The two below only look at what is already on disk. -->
+      <button class="month-option" id="syncNowBtn" title="Fetch from the punch readers now, then bring in anything new">↻ Live Sync</button>
       <button class="month-option" id="updUploadOpt">⭱ Upload a file…</button>
       <button class="month-option" id="updFolderOpt">📁 Check the watched folder</button>
       <div id="updFolderNote" style="font-size:10.5px;color:var(--ink-soft);padding:4px 10px 2px;line-height:1.4;"></div>
     </div>
     <input type="file" id="uploadInput" accept=".csv,.xlsx" style="display:none;"/>
   </div>
-  <!-- Checking the watched folder was two clicks inside a menu, which is a lot
-       for the thing done most often. Here it is on its own. -->
-  <button class="month-btn" id="syncNowBtn" title="Look in the watched folder for a newer punch file and offer it">↻ Sync</button>
   <div class="month-picker">
     <button class="month-btn" id="usersBtn">Users ▾</button>
     <div class="month-dropdown" id="usersDropdown" style="min-width:300px;"></div>
@@ -3646,7 +3646,12 @@ function offerImportFile(file, stamp){
     });
   }
 
-  function runFolderSync(btn){
+  /* Two ways in, and they are not the same thing. Live Sync goes and fetches
+     from the punch readers before looking; Check the watched folder only reads
+     what is already on disk, which is what the scheduled rebuild left. Sharing
+     one function with a flag keeps the second half - the looking, the messages,
+     the button state - written once. */
+  function runFolderSync(btn, live){
     var dd = document.getElementById('updAttDropdown');
     if(dd) dd.classList.remove('open');
     if(!IMPORT_DIR){
@@ -3658,15 +3663,21 @@ function offerImportFile(file, stamp){
     if(btn){ btn.disabled = true; }
     var restore = function(){ if(btn){ btn.disabled = false; btn.textContent = was; } };
 
-    say('Reading the readers\u2026');
-    askHelperToFetch().then(function(pull){
+    say(live ? 'Reading the readers\u2026' : 'Looking\u2026');
+    var step = live ? askHelperToFetch() : Promise.resolve({ok:false, reason:'skipped'});
+    step.then(function(pull){
       say('Looking\u2026');
       return Promise.resolve(checkImportFolder(false)).then(function(found){
         restore();
         if(found) return;                    // checkImportFolder raises its own bar
         /* Nothing to import. Which is a different thing depending on whether
            the readers were actually consulted, so say which. */
-        if(pull.ok){
+        if(pull.reason === 'skipped'){
+          /* Plain text: showUploadStatus writes with textContent, so markup here
+             would be shown rather than rendered. */
+          showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". This only reads the folder \u2014 '
+            + 'use Live Sync to fetch from the punch readers first.');
+        } else if(pull.ok){
           showUploadStatus('Read the punch readers just now \u2014 nothing new to import. '
             + 'Everything on them is already here.');
         } else if(pull.reason === 'permission'){
@@ -3685,9 +3696,9 @@ function offerImportFile(file, stamp){
     }).catch(restore);
   }
   var fb = document.getElementById('updFolderOpt');
-  if(fb) fb.addEventListener('click', function(){ runFolderSync(fb); });
+  if(fb) fb.addEventListener('click', function(){ runFolderSync(fb, false); });   // folder only
   var sb = document.getElementById('syncNowBtn');
-  if(sb) sb.addEventListener('click', function(){ runFolderSync(sb); });
+  if(sb) sb.addEventListener('click', function(){ runFolderSync(sb, true); });    // readers first
   var b = document.getElementById('impDirPick');
   if(b) b.addEventListener('click', chooseImportFolder);
   var rc = document.getElementById('impDirReconnect');
