@@ -547,7 +547,12 @@
       loaded[id] = true; splash.style.display = 'flex'; splashText.textContent = 'Loading ' + (NAMES[id] || id) + '\u2026';
       Promise.race([lsOverlayReady, new Promise(function(resolve){ setTimeout(resolve, 1400); })]).then(function(){ setTimeout(function(){
         var fr = document.createElement('iframe');
-        fr.setAttribute('data-id', id); fr.setAttribute('title', NAMES[id] || id); fr.setAttribute('allow', 'clipboard-write; clipboard-read');
+        /*  local-network-access is delegated on purpose. The dashboard's Live
+            Sync asks a helper on the office PC's loopback address to fetch from
+            the punch readers, and a permission the person has granted to this
+            page does not reach a frame unless it is passed down - the call
+            failed outright from in there while working fine from out here. */
+        fr.setAttribute('data-id', id); fr.setAttribute('title', NAMES[id] || id); fr.setAttribute('allow', 'clipboard-write; clipboard-read; local-network-access');
         fr.addEventListener('load', function(){ splash.style.display = 'none'; });
         var html;
         try { html = childHtml(id); }                       // with storage bridge
@@ -1603,7 +1608,7 @@
     var fr = document.createElement('iframe');
     fr.setAttribute('data-id', 'attendance');
     fr.setAttribute('title', NAMES['attendance'] || 'attendance');
-    fr.setAttribute('allow', 'clipboard-write; clipboard-read');
+    fr.setAttribute('allow', 'clipboard-write; clipboard-read; local-network-access');
     var html;
     try { html = childHtml('attendance'); }
     catch(e){ try { html = rawHtml('attendance'); } catch(_){ return; } }
