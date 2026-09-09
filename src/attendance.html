@@ -618,7 +618,11 @@ body{
 .month-btn{cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;}
 .month-btn:hover{border-color:var(--ink);}
 .month-picker{position:relative;z-index:200;}
-#shiftDropdown{ min-width:700px; }
+/*  A row needs about 740px: name, shift time, the Saturday arrangement and a
+    joining date. At 700 it did not fit, and the squeeze landed on the shift
+    time. Wider, so each person stays on one line - below 900px the rule further
+    down takes over and rows wrap instead. */
+#shiftDropdown{ min-width:780px; }
 /* Rows inside a dropdown. The other dropdowns hold checkbox labels, so there
    was no button rule to inherit and these fell back to the browser's default
    bordered button - a box inside a box. */
@@ -681,7 +685,7 @@ body{
 .month-dropdown, .emp-dropdown, .order-dropdown, .users-dropdown{position:absolute;}
 .month-dropdown .ord-hint, .month-dropdown > div:first-child{padding-right:28px;}
 .shf-list{max-height:420px;overflow-y:auto;padding:2px;}
-.shf-sat{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);margin-left:auto;}
+.shf-sat{display:flex;flex:0 0 auto;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);margin-left:auto;}
 .shf-satlbl{font-weight:700;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;font-size:10px;}
 .shf-sat select{flex:0 0 auto;min-width:142px;font-size:11px;padding:5px 24px 5px 8px;
   border-radius:7px;border:1px solid var(--line-dk);background:#fff;}
@@ -689,14 +693,23 @@ body{
 .shf-sat input[type=date]{ width:132px; font-size:11px; padding:4px 6px; border-radius:7px;
   border:1px solid var(--line-dk); background:#fff; }
 .shf-sat em{font-style:normal;font-size:10.5px;color:var(--ink-dim);}
-.shf-row{display:flex;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid var(--line);}
+/*  Wrap rather than squeeze. A row wants about 710px and the panel gives 682,
+    so something had to give - and the only child that could shrink was the
+    Saturday group, which pushed the shift time into an ellipsis: "8:30-...".
+    Nothing shrinks now; a row too wide for the panel takes a second line, which
+    is legible where a cropped time is not. */
+.shf-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 8px;border-bottom:1px solid var(--line);}
 .shf-row:last-of-type{border-bottom:none;}
 .shf-rename{ border:1px solid transparent; border-radius:6px; background:transparent;
   font:inherit; padding:3px 6px; width:100%; }
 .shf-rename:hover{ border-color:var(--line); background:#fff; }
 .shf-rename:focus{ outline:none; border-color:#2F8F5B; background:#fff; }
 .shf-row .shf-name{flex:0 0 124px;font-size:12.5px;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.shf-row > select{flex:0 0 auto;min-width:132px;font-size:11.5px;padding:5px 24px 5px 8px;
+/*  Wide enough for "9:30-6:30" at the size the select is actually drawn at.
+    The 11.5px asked for here never applied - the glass layer sets every input
+    and select to 13px with !important - so the box was sized for text narrower
+    than the text it had to hold. */
+.shf-row > select{flex:0 0 auto;min-width:150px;font-size:11.5px;padding:5px 24px 5px 8px;
   border-radius:7px;border:1px solid #9AA3B0;background:#fff;}
 .legend-toggle{
   font-size:11px;font-weight:600;color:var(--ink-soft);cursor:pointer;
