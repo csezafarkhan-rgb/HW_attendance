@@ -4367,9 +4367,9 @@ function ensureDirPerm(dir, byClick){
           else if(net>0){ fill='ok'; text=lead+net+'m extra'; }
           else {
             var shortMin=-net, lev=Math.round(weeklyLeverageMin/5*days);
-            if(shortMin<=lev){ fill='warn'; text=lead+shortMin+'m short \u00b7 within '+lev+'m leverage'; }
-            else if(open){ fill='bad'; text=lead+shortMin+'m short \u00b7 '+(shortMin-lev)+'m over leverage'; }
-            else { fill='bad'; text='Not completed \u00b7 '+shortMin+'m short \u00b7 '+(shortMin-lev)+'m over leverage'; }
+            if(shortMin<=lev){ fill='warn'; text=lead+'within leverage of '+lev+'m, total '+shortMin+'m short'; }
+            else if(open){ fill='bad'; text=lead+(shortMin-lev)+'m over leverage of '+lev+'m, total '+shortMin+'m short'; }
+            else { fill='bad'; text='Not completed \u00b7 '+(shortMin-lev)+'m over leverage of '+lev+'m, total '+shortMin+'m short'; }
           }
           wrow.push({v:text, s:fill});
           for(var k5=1;k5<COLS;k5++) wrow.push({v:'', s:fill});
@@ -10417,16 +10417,19 @@ function buildExcelBackup(){
           } else {
             var shortMin = -net;
             var leverage = Math.round(weeklyLeverageMin/5 * days);
+            /* How far past the allowance comes first, because that is the bit
+               that decides anything; the allowance itself is stated so the
+               number means something, and the raw shortfall follows. */
             if(shortMin <= leverage){
-              cls = 'leverage'; text = lead + shortMin + 'm short · within ' + leverage + 'm leverage';
+              cls = 'leverage'; text = lead + 'within leverage of ' + leverage + 'm, total ' + shortMin + 'm short';
             } else if(open){
               /* Past the leverage is past the leverage, finished week or not. It
                  was amber here, which read as still inside the allowance when it
                  no longer was. Red, but still "So far", since there are days
                  left to make it back. */
-              cls = 'over'; text = lead + shortMin + 'm short · ' + (shortMin - leverage) + 'm over leverage';
+              cls = 'over'; text = lead + (shortMin - leverage) + 'm over leverage of ' + leverage + 'm, total ' + shortMin + 'm short';
             } else {
-              cls = 'over'; text = 'Not completed · ' + shortMin + 'm short · ' + (shortMin - leverage) + 'm over leverage';
+              cls = 'over'; text = 'Not completed · ' + (shortMin - leverage) + 'm over leverage of ' + leverage + 'm, total ' + shortMin + 'm short';
             }
           }
           html += '<td colspan="6" class="week-summary-cell '+cls+' emp-block-start">'+text+'</td>';
