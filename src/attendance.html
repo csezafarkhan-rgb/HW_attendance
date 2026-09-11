@@ -712,9 +712,17 @@ body{
 /*  Wide enough for "9:30-6:30" at the size the select is actually drawn at.
     The 11.5px asked for here never applied - the glass layer sets every input
     and select to 13px with !important - so the box was sized for text narrower
-    than the text it had to hold. */
-.shf-row > select{flex:0 0 auto;min-width:150px;font-size:11.5px;padding:5px 24px 5px 8px;
+    than the text it had to hold.
+    The dropdown upgrade then wraps the select in span.selx and sizes that span
+    from the hidden select inside it. A rule for "select directly in the row"
+    stopped matching once it was wrapped, so the width was lost and the time
+    showed as "8:30...". Both forms are named here.
+    120px holds "10:00-7:00" whole; wider only pushed the Work-from-home rows
+    onto a second line. */
+.shf-row > select,
+.shf-row > .selx > select{flex:0 0 auto;min-width:120px;font-size:11.5px;padding:5px 24px 5px 8px;
   border-radius:7px;border:1px solid #9AA3B0;background:#fff;}
+.shf-row > .selx{flex:0 0 auto;}
 .legend-toggle{
   font-size:11px;font-weight:600;color:var(--ink-soft);cursor:pointer;
   padding:8px 10px;border-radius:7px;border:1.5px solid var(--line-dk);background:var(--panel);
