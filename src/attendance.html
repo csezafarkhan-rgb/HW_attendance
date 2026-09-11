@@ -1715,6 +1715,26 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .btn.ghost{background:none;color:var(--ink-soft);border-color:var(--line-dk);}
 .btn.ghost:hover{border-color:var(--alert);color:var(--alert);}
 .save-note{font-size:10.5px;color:var(--ink-dim);margin-top:6px;text-align:center;}
+/* The reconfirm popup in front of every bulk change. Above the dropdown panels
+   and the select popups (9000), so it cannot open underneath what it is about. */
+.hwc-overlay{position:fixed;inset:0;z-index:10050;display:flex;align-items:center;justify-content:center;
+  padding:20px;background:rgba(20,28,40,.38);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  animation:hwcFade .12s ease-out;}
+.hwc-box{width:100%;max-width:440px;background:#fff;border-radius:16px;padding:20px 22px 18px;
+  border:1px solid #E3E8F0;box-shadow:0 24px 60px rgba(20,28,40,.28);
+  font-family:'Inter',-apple-system,sans-serif;animation:hwcPop .14s ease-out;}
+.hwc-title{font-size:15px;font-weight:800;color:#141A24;margin-bottom:6px;}
+.hwc-msg{font-size:13px;line-height:1.5;color:#4A5568;}
+.hwc-list{margin:10px 0 0;padding:8px 12px 8px 28px;background:#F5F7FA;border-radius:10px;
+  font-size:12.5px;line-height:1.45;color:#1C232C;max-height:180px;overflow:auto;}
+.hwc-list li{margin:2px 0;}
+.hwc-list .hwc-more{list-style:none;margin-left:-16px;color:#8891A0;}
+.hwc-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;}
+.hwc-actions .btn{flex:0 0 auto;width:auto;padding:8px 16px;}
+.hwc-actions .btn.hwc-danger{background:linear-gradient(180deg,#EF5A56,#D93A35) !important;
+  box-shadow:0 6px 18px rgba(217,58,53,.3) !important;}
+@keyframes hwcFade{from{opacity:0}to{opacity:1}}
+@keyframes hwcPop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
 
 /* ---------- login gate ---------- */
 .gate-overlay{
@@ -5404,6 +5424,66 @@ function buildExcelBackup(){
   function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function confirmish(msg){ try{ return window.confirm(msg); }catch(e){ return true; } }
+  /* Ask again before anything that changes many records at once.
+     Not window.confirm: inside the dashboard's frame the browser can suppress
+     dialogs, and confirm() then returns false without ever asking - which is
+     how the employee ✕ and the bulk Reject once looked dead. This is drawn in
+     the page, so it always appears. It resolves true only when the confirm
+     button is pressed; Cancel, Escape and a click outside all mean no.
+       o.title, o.message   what is about to happen, in words
+       o.items              the things it touches - the first six are listed
+       o.confirmLabel       the button's own verb, e.g. "Apply to all"
+       o.danger             red button, and Cancel takes the focus */
+  function hwConfirm(o){
+    o = o || {};
+    return new Promise(function(resolve){
+      var ov = document.createElement('div');
+      ov.className = 'hwc-overlay';
+      ov.innerHTML = '<div class="hwc-box" role="alertdialog" aria-modal="true" aria-labelledby="hwcTitle" aria-describedby="hwcMsg">'
+        + '<div class="hwc-title" id="hwcTitle"></div>'
+        + '<div class="hwc-msg" id="hwcMsg"></div>'
+        + '<ul class="hwc-list"></ul>'
+        + '<div class="hwc-actions"><button type="button" class="btn ghost hwc-no">Cancel</button>'
+        + '<button type="button" class="btn primary hwc-yes"></button></div></div>';
+      ov.querySelector('.hwc-title').textContent = o.title || 'Are you sure?';
+      ov.querySelector('.hwc-msg').textContent = o.message || '';
+      var ul = ov.querySelector('.hwc-list');
+      var items = o.items || [];
+      if(items.length){
+        items.slice(0, 6).forEach(function(t){
+          var li = document.createElement('li'); li.textContent = t; ul.appendChild(li);
+        });
+        if(items.length > 6){
+          var more = document.createElement('li'); more.className = 'hwc-more';
+          more.textContent = '…and ' + (items.length - 6) + ' more'; ul.appendChild(more);
+        }
+      } else {
+        ul.style.display = 'none';
+      }
+      var yes = ov.querySelector('.hwc-yes'), no = ov.querySelector('.hwc-no');
+      yes.textContent = o.confirmLabel || 'Confirm';
+      if(o.danger) yes.classList.add('hwc-danger');
+      var settled = false;
+      var onKey = function(e){
+        if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); close(false); }
+      };
+      var close = function(v){
+        if(settled) return; settled = true;
+        document.removeEventListener('keydown', onKey, true);
+        if(ov.parentNode) ov.parentNode.removeChild(ov);
+        resolve(v);
+      };
+      /* Clicks stop here, so the panel the action came from stays open behind
+         the popup rather than closing as an "outside" click. */
+      ov.addEventListener('click', function(e){ e.stopPropagation(); if(e.target === ov) close(false); });
+      ov.addEventListener('mousedown', function(e){ e.stopPropagation(); });
+      yes.addEventListener('click', function(){ close(true); });
+      no.addEventListener('click', function(){ close(false); });
+      document.addEventListener('keydown', onKey, true);
+      document.body.appendChild(ov);
+      try{ (o.danger ? no : yes).focus(); }catch(e){}
+    });
+  }
 
   /* Does this workbook hold attendance? Judged on the columns the parser
      actually needs, so a stock sheet, a PO export or a product list is turned
@@ -6194,16 +6274,28 @@ function buildExcelBackup(){
     });
     var az = document.getElementById('reqArchiveSettled');
     if(az) az.addEventListener('click', function(){
-      var n = 0;
-      leaveRequests.forEach(function(r){
-        if(!r.archived && (r.status === 'approved' || r.status === 'rejected')){
-          r.archived = new Date().toISOString(); n++;
-        }
+      // Work out what would move first, and change nothing until it is confirmed.
+      var settled = leaveRequests.filter(function(r){
+        return !r.archived && (r.status === 'approved' || r.status === 'rejected');
       });
+      var n = settled.length;
       if(!n){ showUploadStatus('Nothing settled to archive.', true); return; }
-      saveLeaveRequests().then(function(){
-        showUploadStatus('Archived ' + n + ' settled request' + (n===1?'':'s') + '.');
-        renderRequestsPage();
+      hwConfirm({
+        title: 'Archive ' + n + ' settled request' + (n===1?'':'s') + '?',
+        message: 'Every approved or rejected request moves into the Archive tab. Decisions and the '
+          + 'attendance record stay as they are, and Restore brings any of them back.',
+        items: settled.map(function(r){
+          return r.empName + ' · ' + fmtDateRange(r.dateFrom, r.dateTo) + ' · ' + r.status;
+        }),
+        confirmLabel: 'Archive ' + n
+      }).then(function(ok){
+        if(!ok) return;
+        var stamp = new Date().toISOString();
+        settled.forEach(function(r){ r.archived = stamp; });
+        saveLeaveRequests().then(function(){
+          showUploadStatus('Archived ' + n + ' settled request' + (n===1?'':'s') + '.');
+          renderRequestsPage();
+        });
       });
     });
   }
@@ -6355,47 +6447,50 @@ function buildExcelBackup(){
         var act = b.getAttribute('data-bulk');
         var picked = selectedRequests();
         if(!picked.length) return;
-        /* Rejecting many at once is worth confirming - on the button, since a
-           browser that has suppressed dialogs makes window.confirm return false
-           and the click does nothing at all. */
-        if(act === 'reject' && b.dataset.armed !== '1'){
-          b.dataset.armed = '1';
-          b.dataset.was = b.textContent;
-          b.textContent = 'Reject ' + picked.length + '? Press again';
-          b.classList.add('req-armed');
-          setTimeout(function(){
-            if(b.dataset.armed === '1'){
-              b.dataset.armed = '';
-              b.textContent = b.dataset.was || 'Reject';
-              b.classList.remove('req-armed');
+        /* Every bulk action asks first, naming what it will touch - approving
+           writes days into the record, and a slip of the Select-all box can
+           take in far more than was meant. */
+        var n = picked.length;
+        var verb = {approve:'Approve', reject:'Reject', archive:'Archive', unarchive:'Restore'}[act] || act;
+        hwConfirm({
+          title: verb + ' ' + n + ' request' + (n === 1 ? '' : 's') + '?',
+          message: {
+            approve:   'Their days are written into the attendance record.',
+            reject:    'Each is marked rejected, and the person sees that decision.',
+            archive:   'They move out of this list into the Archive tab. Their decisions stay as they are.',
+            unarchive: 'They come back out of the archive into the list.'
+          }[act] || '',
+          items: picked.map(function(r){
+            return r.empName + ' · ' + fmtDateRange(r.dateFrom, r.dateTo) + (r.leaveType ? (' · ' + r.leaveType) : '');
+          }),
+          confirmLabel: verb + ' ' + n,
+          danger: act === 'reject'
+        }).then(function(ok){
+          if(!ok) return;
+          b.disabled = true;
+          var jobs = [];
+          picked.forEach(function(req){
+            if(act === 'approve'){
+              if(req.status === 'approved') return;
+              req.status = 'approved';
+              req.approvedBy = (viewRole && viewRole.username) || '';
+              req.updatedAt = new Date().toISOString();
+              jobs.push(applyApprovedRequestToAttendance(req));
+            } else if(act === 'reject'){
+              req.status = 'rejected';
+              req.updatedAt = new Date().toISOString();
+            } else if(act === 'archive'){
+              req.archived = new Date().toISOString();
+            } else if(act === 'unarchive'){
+              delete req.archived;
             }
-          }, 5000);
-          return;
-        }
-        b.dataset.armed = '';
-        b.disabled = true;
-        var jobs = [];
-        picked.forEach(function(req){
-          if(act === 'approve'){
-            if(req.status === 'approved') return;
-            req.status = 'approved';
-            req.approvedBy = (viewRole && viewRole.username) || '';
-            req.updatedAt = new Date().toISOString();
-            jobs.push(applyApprovedRequestToAttendance(req));
-          } else if(act === 'reject'){
-            req.status = 'rejected';
-            req.updatedAt = new Date().toISOString();
-          } else if(act === 'archive'){
-            req.archived = new Date().toISOString();
-          } else if(act === 'unarchive'){
-            delete req.archived;
-          }
-        });
-        Promise.all(jobs).then(saveLeaveRequests).then(function(){
-          showUploadStatus(picked.length + ' request' + (picked.length === 1 ? '' : 's')
-            + ' ' + (act === 'unarchive' ? 'restored' : act + 'd') + '.');
-          renderRequestsPage();
-          refreshActivePage();
+          });
+          Promise.all(jobs).then(saveLeaveRequests).then(function(){
+            showUploadStatus(n + ' request' + (n === 1 ? '' : 's')
+              + ' ' + (act === 'unarchive' ? 'restored' : act + 'd') + '.');
+            renderRequestsPage();
+            refreshActivePage();
+          });
         });
       });
     });
@@ -9309,20 +9404,36 @@ function buildExcelBackup(){
       ev.stopPropagation();
       var v = document.getElementById('shfAllSel').value;
       if(!v) return;
-      // apply AND save, like the per-person picker - staging it into
-      // shiftWorking alone meant the change vanished unless "Save shifts"
-      // happened to be pressed afterwards
-      EMPLOYEES.forEach(function(e){
-        shiftWorking[e.name] = v;
-        shiftAssignments[e.name] = v;
-      });
-      saveShiftAssignments();
-      renderTable();
-      Array.prototype.forEach.call(shiftDropdown.querySelectorAll('select[data-shift-emp]'), function(sl){
-        if(Array.prototype.some.call(sl.options, function(o){ return o.value===v; })) sl.value = v;
-      });
+      var curOf = function(n){ return (shiftWorking && shiftWorking[n]) || shiftBaseDefault(n); };
+      var changing = EMPLOYEES.filter(function(e){ return curOf(e.name) !== v; });
       var b2 = document.getElementById('shfAllBtn');
-      if(b2){ b2.textContent = '\u2713 Applied'; setTimeout(function(){ if(b2) b2.textContent = 'Apply to all'; }, 1200); }
+      if(!changing.length){
+        if(b2){ b2.textContent = '\u2713 Already set'; setTimeout(function(){ if(b2) b2.textContent = 'Apply to all'; }, 1200); }
+        return;
+      }
+      // One pick rewrites everybody's shift, and with it their late and short hours.
+      hwConfirm({
+        title: 'Apply ' + v + ' to all ' + EMPLOYEES.length + ' employees?',
+        message: changing.length + ' shift' + (changing.length === 1 ? '' : 's') + ' will change. It is saved '
+          + 'straight away, and late and short hours are recalculated from the new times.',
+        items: changing.map(function(e){ return dispName(e.name) + ' \u2014 ' + curOf(e.name) + ' \u2192 ' + v; }),
+        confirmLabel: 'Apply to all'
+      }).then(function(ok){
+        if(!ok) return;
+        // apply AND save, like the per-person picker - staging it into
+        // shiftWorking alone meant the change vanished unless "Save shifts"
+        // happened to be pressed afterwards
+        EMPLOYEES.forEach(function(e){
+          shiftWorking[e.name] = v;
+          shiftAssignments[e.name] = v;
+        });
+        saveShiftAssignments();
+        renderTable();
+        Array.prototype.forEach.call(shiftDropdown.querySelectorAll('select[data-shift-emp]'), function(sl){
+          if(Array.prototype.some.call(sl.options, function(o){ return o.value===v; })) sl.value = v;
+        });
+        if(b2){ b2.textContent = '\u2713 Applied'; setTimeout(function(){ if(b2) b2.textContent = 'Apply to all'; }, 1200); }
+      });
     });
     // per-employee select
     Array.prototype.forEach.call(shiftDropdown.querySelectorAll('select[data-shift-emp]'), function(sel){
@@ -9419,11 +9530,24 @@ function buildExcelBackup(){
     var resetBtn = shiftDropdown.querySelector('button[data-act="reset"]');
     if(resetBtn) resetBtn.addEventListener('click', function(ev){
       ev.stopPropagation();
-      shiftAssignments = {};
-      saveShiftAssignments();
-      shiftWorking = null;
-      renderTable();
-      renderShiftDropdown();
+      var saved = Object.keys(shiftAssignments || {});
+      hwConfirm({
+        title: 'Reset every shift to the default?',
+        message: saved.length
+          ? ('The ' + saved.length + ' shift' + (saved.length === 1 ? '' : 's') + ' set here are cleared and '
+             + 'everyone goes back to their default slot. Late and short hours are recalculated.')
+          : 'No shift has been changed from the default, so this only discards unsaved edits in this panel.',
+        items: saved.map(function(n){ return dispName(n) + ' — ' + shiftAssignments[n]; }),
+        confirmLabel: 'Reset shifts',
+        danger: true
+      }).then(function(ok){
+        if(!ok) return;
+        shiftAssignments = {};
+        saveShiftAssignments();
+        shiftWorking = null;
+        renderTable();
+        renderShiftDropdown();
+      });
     });
   }
   shiftBtn.addEventListener('click', function(e){ e.stopPropagation(); var opening = !shiftDropdown.classList.contains('open'); shiftDropdown.classList.toggle('open'); if(opening){ shiftWorking = null; renderShiftDropdown(); } positionDropdown(shiftBtn, shiftDropdown); });
@@ -9503,11 +9627,19 @@ function buildExcelBackup(){
     var resetBtn = orderDropdown.querySelector('button[data-act="reset"]');
     if(resetBtn) resetBtn.addEventListener('click', function(e){
       e.stopPropagation();
-      employeeOrder = null;
-      saveEmployeeOrder();
-      orderWorking = EMPLOYEES.map(function(emp){ return emp.name; });
-      renderTable();
-      renderOrderDropdown();
+      hwConfirm({
+        title: 'Reset the employee order?',
+        message: 'The order set here is cleared for all ' + EMPLOYEES.length + ' employees, and the grid, '
+          + 'screenshots and exports go back to the default order.',
+        confirmLabel: 'Reset order'
+      }).then(function(ok){
+        if(!ok) return;
+        employeeOrder = null;
+        saveEmployeeOrder();
+        orderWorking = EMPLOYEES.map(function(emp){ return emp.name; });
+        renderTable();
+        renderOrderDropdown();
+      });
     });
   }
   orderBtn.addEventListener('click', function(e){ e.stopPropagation(); var opening = !orderDropdown.classList.contains('open'); orderDropdown.classList.toggle('open'); if(opening){ orderWorking = orderedEmployees().map(function(emp){ return emp.name; }); renderOrderDropdown(); } positionDropdown(orderBtn, orderDropdown); });
