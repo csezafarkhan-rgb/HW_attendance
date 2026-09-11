@@ -7783,6 +7783,37 @@ function buildExcelBackup(){
     return box;
   }
 
+  /*  The HD Screenshot is the record of this month, whatever happens to be
+      picked on screen. It copies the live grid, so on the attendance page the
+      grid is switched to the current month just before the copy is taken and
+      put back straight after - all in one go, before the browser paints, so
+      the view never visibly changes.
+
+      Returns the function that puts the view back, or null when nothing needed
+      switching: already on this month alone, on the Leave Record (a year by
+      design), or no data for this month yet. Putting it back is safe to call
+      twice, which is what lets a safety net call it too. */
+  function pinCurrentMonthForShot(){
+    if(currentPage === 'leave') return null;
+    var now = new Date();
+    var thisMonth = now.getFullYear() + '-' + (now.getMonth()+1 < 10 ? '0' : '') + (now.getMonth()+1);
+    if(ALL_MONTHS.indexOf(thisMonth) === -1) return null;
+    if(state.selectedMonths.length === 1 && state.selectedMonths[0] === thisMonth) return null;
+    var before = state.selectedMonths.slice();
+    state.selectedMonths = [thisMonth];
+    renderMonthLabel(); renderTable();
+    var restored = false;
+    var restore = function(){
+      if(restored) return;
+      restored = true;
+      state.selectedMonths = before;
+      renderMonthLabel(); renderTable();
+    };
+    // If anything throws between here and the copy, the view still comes back.
+    setTimeout(restore, 0);
+    return restore;
+  }
+
   function captureScreenshot(){
     // A screenshot is a daily habit here, so it is a good moment to make sure a
     // same-day restorable copy exists. Once per day, and never blocking.
@@ -7800,6 +7831,8 @@ function buildExcelBackup(){
       // Sticky positioning is flattened via the .shot-clone CSS class — a
       // static image has nothing to scroll, so a "frozen" header serves no
       // purpose there anyway.
+      // This month only, whatever is picked on screen - see pinCurrentMonthForShot.
+      var restoreView = pinCurrentMonthForShot();
       var source = (currentPage === 'leave') ? document.getElementById('leaveTable') : document.getElementById('attTable');
       var toolbar = document.querySelector('.toolbar');
       var letterhead = document.querySelector('.letterhead');
@@ -7856,6 +7889,7 @@ function buildExcelBackup(){
         paint('.leave-assign', '#E9EBEF', '#1C232C', '600');
       })();
       wrap.appendChild(tableClone);
+      if(restoreView) restoreView();   // every copy is taken; put the view back
       document.body.appendChild(wrap);
 
       renderNodeToCanvas(wrap, 2.5).then(function(canvas){
