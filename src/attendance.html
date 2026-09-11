@@ -1200,13 +1200,54 @@ tr.emp-header-row th{ cursor:default; }
     reports no progress of its own, so the fill is driven by elapsed time against
     that expectation - and deliberately stops short of the end, because claiming
     to be finished before the answer arrives is worse than saying nothing. */
-#syncProgress{padding:10px 18px;background:#EAF3FF;border-bottom:1px solid #B9D4F5;}
-#syncProgress .sync-line{display:flex;justify-content:space-between;align-items:baseline;
-  font-size:12.5px;font-weight:600;color:#1B4A7A;margin-bottom:6px;}
-#syncProgress #syncClock{font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:#4A7AA8;}
-#syncProgress .sync-track{height:6px;border-radius:999px;background:#C9DEF5;overflow:hidden;}
-#syncProgress .sync-fill{height:100%;width:0;border-radius:999px;
-  background:linear-gradient(90deg,#5b9bff,#3B7DF5);transition:width .3s linear;}
+#syncProgress{padding:10px 18px 12px;background:linear-gradient(180deg,#F5F9FF,#EDF3FE);
+  border-bottom:1px solid #D6E4FA;}
+#syncProgress .sync-card{padding:11px 14px 13px;border-radius:14px;background:#fff;border:1px solid #D9E6FB;
+  box-shadow:0 1px 2px rgba(20,40,90,.05),0 8px 20px -10px rgba(59,125,245,.45);}
+#syncProgress .sync-line{display:flex;align-items:center;gap:10px;margin-bottom:10px;
+  font-size:12.5px;font-weight:600;color:#1B3A66;}
+#syncProgress #syncStage{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* A beacon, so the card reads as live even in the seconds the fill barely moves. */
+#syncProgress .sync-pulse{position:relative;flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:#3B7DF5;}
+#syncProgress .sync-pulse::after{content:'';position:absolute;inset:-4px;border-radius:50%;
+  border:2px solid #3B7DF5;animation:syncPing 1.4s cubic-bezier(0,0,.2,1) infinite;}
+#syncProgress .sync-steps{display:flex;gap:4px;flex:0 0 auto;}
+#syncProgress .sync-step{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;
+  background:#EEF2F8;color:#8A94A6;transition:background .3s,color .3s;}
+#syncProgress .sync-step.on{background:#3B7DF5;color:#fff;}
+#syncProgress .sync-step.past{background:#DCE9FF;color:#2F64C9;}
+#syncProgress .sync-meta{display:flex;align-items:center;gap:6px;flex:0 0 auto;
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;}
+#syncProgress #syncPct{color:#1E5BD8;min-width:3.4em;text-align:right;}
+#syncProgress #syncClock{color:#5B7AA6;padding:2px 8px;border-radius:999px;background:#F1F5FC;}
+#syncProgress .sync-track{height:10px;border-radius:999px;background:#E6EEFA;overflow:hidden;
+  box-shadow:inset 0 1px 2px rgba(20,40,90,.14);}
+#syncProgress .sync-fill{position:relative;height:100%;width:0;border-radius:999px;overflow:hidden;
+  background:linear-gradient(90deg,#6FA8FF 0%,#3B7DF5 55%,#5B5CF0 100%);
+  box-shadow:0 0 10px rgba(59,125,245,.55);transition:width .35s ease-out;}
+/* Moving stripes and a passing sheen: motion that says "working" without
+   pretending to know how far along the request is. */
+#syncProgress .sync-fill::before{content:'';position:absolute;inset:0;background-size:16px 16px;
+  background-image:linear-gradient(45deg,rgba(255,255,255,.2) 25%,transparent 25%,transparent 50%,
+    rgba(255,255,255,.2) 50%,rgba(255,255,255,.2) 75%,transparent 75%,transparent);
+  animation:syncStripes .8s linear infinite;}
+#syncProgress .sync-fill::after{content:'';position:absolute;top:0;bottom:0;left:-40%;width:40%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);
+  animation:syncShine 1.8s ease-in-out infinite;}
+@keyframes syncPing{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.7);opacity:0}}
+@keyframes syncStripes{from{background-position:16px 0}to{background-position:0 0}}
+@keyframes syncShine{from{left:-40%}to{left:100%}}
+/* Green only when the readers were really read - a finish that fetched nothing
+   stays blue, and the message underneath says why. */
+#syncProgress.is-done .sync-fill{background:linear-gradient(90deg,#3DD68C,#16A34A);box-shadow:0 0 10px rgba(22,163,74,.5);}
+#syncProgress.is-done .sync-pulse{background:#16A34A;}
+#syncProgress.is-done .sync-step{background:#DCF5E6;color:#15803D;}
+#syncProgress.is-done #syncPct{color:#15803D;}
+#syncProgress.is-done .sync-fill::before,#syncProgress.is-done .sync-fill::after,
+#syncProgress.is-done .sync-pulse::after{animation:none;opacity:0;}
+@media (prefers-reduced-motion:reduce){
+  #syncProgress .sync-fill::before,#syncProgress .sync-fill::after,#syncProgress .sync-pulse::after{animation:none;}
+}
 #leaveHint{
   background:var(--lv-amber-bg) !important; border:1px solid #F0DCB8 !important;
   border-radius:10px !important; color:#7A4A00 !important; box-shadow:none !important;
@@ -2550,9 +2591,16 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 <!-- Live Sync closes the menu it was clicked in, so the button's own label was
      hidden for the whole minute the readers take. This says what is happening
      where it can actually be seen. -->
-<div id="syncProgress" style="display:none;">
-  <div class="sync-line"><span id="syncStage">Reading the punch readers…</span><span id="syncClock">0s</span></div>
-  <div class="sync-track"><div class="sync-fill" id="syncFill"></div></div>
+<div id="syncProgress" style="display:none;" role="status" aria-live="polite">
+  <div class="sync-card">
+    <div class="sync-line">
+      <span class="sync-pulse" aria-hidden="true"></span>
+      <span id="syncStage">Reading the punch readers…</span>
+      <span class="sync-steps" aria-hidden="true"><span class="sync-step">1 · Readers</span><span class="sync-step">2 · Import</span></span>
+      <span class="sync-meta"><span id="syncPct">0%</span><span id="syncClock">0s</span></span>
+    </div>
+    <div class="sync-track"><div class="sync-fill" id="syncFill"></div></div>
+  </div>
 </div>
 <div id="impFound" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 18px;background:#EAF3FF;border-bottom:1px solid #B9D4F5;font-size:12.5px;"></div>
 <div id="uploadStatus" style="display:none;padding:8px 18px;font-size:12px;font-weight:600;"></div>
@@ -3709,26 +3757,44 @@ function offerImportFile(file, stamp){
     var fill = document.getElementById('syncFill');
     var lbl  = document.getElementById('syncStage');
     var clk  = document.getElementById('syncClock');
+    var pctEl = document.getElementById('syncPct');
+    var steps = box.querySelectorAll('.sync-step');
+    // Chips before the current one are done, the current one is lit.
+    var setStep = function(n){
+      for(var i = 0; i < steps.length; i++){
+        steps[i].className = 'sync-step' + (i + 1 < n ? ' past' : (i + 1 === n ? ' on' : ''));
+      }
+    };
+    var show = function(p){
+      if(fill) fill.style.width = p.toFixed(1) + '%';
+      if(pctEl) pctEl.textContent = Math.floor(p) + '%';
+    };
     var started = Date.now();
+    box.classList.remove('is-done');
     box.style.display = '';
     if(lbl) lbl.textContent = stage;
-    if(fill) fill.style.width = '2%';
+    setStep(1);
+    show(2);
     if(clk) clk.textContent = '0s';
     clearInterval(syncTimer);
     syncTimer = setInterval(function(){
       var elapsed = Date.now() - started;
       // Approaches the cap without reaching it, however long it takes.
-      var pct = 92 * (1 - Math.exp(-elapsed / (SYNC_EXPECTED_MS / 2)));
-      if(fill) fill.style.width = Math.max(2, pct).toFixed(1) + '%';
+      show(Math.max(2, 92 * (1 - Math.exp(-elapsed / (SYNC_EXPECTED_MS / 2)))));
       if(clk) clk.textContent = Math.round(elapsed / 1000) + 's';
     }, 300);
     return {
-      stage: function(t){ if(lbl) lbl.textContent = t; },
-      done: function(){
+      stage: function(t){ if(lbl) lbl.textContent = t; setStep(2); },
+      done: function(ok){
         clearInterval(syncTimer); syncTimer = null;
-        if(fill) fill.style.width = '100%';
+        show(100);
+        setStep(steps.length + 1);
+        if(ok){ box.classList.add('is-done'); if(lbl) lbl.textContent = 'Done'; }
         // Long enough to register as finished, not long enough to be in the way.
-        setTimeout(function(){ box.style.display = 'none'; if(fill) fill.style.width = '0'; }, 600);
+        setTimeout(function(){
+          box.style.display = 'none'; box.classList.remove('is-done');
+          if(fill) fill.style.width = '0';
+        }, ok ? 1100 : 600);
       }
     };
   }
@@ -3752,7 +3818,7 @@ function offerImportFile(file, stamp){
       say('Looking\u2026');
       if(bar) bar.stage('Looking for new punches\u2026');
       return Promise.resolve(checkImportFolder(false)).then(function(found){
-        if(bar) bar.done();
+        if(bar) bar.done(pull.ok);
         restore();
         if(found) return;                    // checkImportFolder raises its own bar
         /* Nothing to import. Which is a different thing depending on whether
