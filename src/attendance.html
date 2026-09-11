@@ -12529,10 +12529,17 @@ function buildExcelBackup(){
         if(shortMin <= allow){ state = 'warn'; note = fmtMin(shortMin) + ' short, within allowance'; }
         else { state = 'bad'; note = fmtMin(shortMin - allow) + ' beyond allowance'; }
       }
-      var start = new Date(k+'T00:00:00');
-      var end = new Date(start.getTime() + 4*86400000);   // Monday to Friday
-      var lbl = start.getDate()+' '+monthLabelShort(k.slice(0,7)).split(' ')[0]
-              + ' \u2013 ' + end.getDate()+' '+monthLabelShort(end.toISOString().slice(0,7)).split(' ')[0];
+      /* The week as far as this month holds it. Its hours are counted only over
+         the month's own days, so a label running from Monday 31 Aug claimed a
+         day the figure never included - September's first week is 1-4 Sep.
+         Built from the date strings: toISOString() turns local midnight into
+         the day before in India, which named the wrong month at a boundary. */
+      var fri = new Date(k+'T00:00:00'); fri.setDate(fri.getDate() + 4);   // Monday to Friday
+      var friISO = fri.getFullYear() + '-' + ('0'+(fri.getMonth()+1)).slice(-2) + '-' + ('0'+fri.getDate()).slice(-2);
+      var from = k < dates[0] ? dates[0] : k;
+      var to   = friISO > dates[dates.length-1] ? dates[dates.length-1] : friISO;
+      var part = function(s){ return (+s.slice(8,10)) + ' ' + monthLabelShort(s.slice(0,7)).split(' ')[0]; };
+      var lbl  = from === to ? part(from) : (part(from) + ' \u2013 ' + part(to));
       return '<div class="ews-cell ews-'+state+'">'
         + '<div class="ews-w">'+lbl+'</div>'
         + '<div class="ews-v">'+(net>0?'+':'')+fmtMin(net)+'</div>'
