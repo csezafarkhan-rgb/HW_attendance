@@ -3386,10 +3386,21 @@ function showUploadStatus(msg, isError){
     });
   })();
   function renderBackupPage(){
-    var sel=document.getElementById('bkEmp'); if(!sel)return;
-    var cur=sel.value;
-    sel.innerHTML = EMPLOYEES.map(function(e){ var v=(e.name||'').replace(/"/g,'&quot;'); return '<option value="'+v+'">'+e.name+'</option>'; }).join('');
-    if(cur){ sel.value=cur; }
+    /* This used to open with "no bkEmp element? return" - a guard for an
+       employee dropdown that has since left the page. With it gone, every visit
+       to Backup & Restore returned on the first line, so the saved backup
+       folder was never looked up and the panel sat on its built-in "no folder"
+       text while the folder itself was stored and readable all along. That is
+       why it seemed to need choosing again after every refresh.
+
+       The dropdown is still filled if it ever comes back; nothing else waits
+       on it. */
+    var sel=document.getElementById('bkEmp');
+    if(sel){
+      var cur=sel.value;
+      sel.innerHTML = EMPLOYEES.map(function(e){ var v=(e.name||'').replace(/"/g,'&quot;'); return '<option value="'+v+'">'+e.name+'</option>'; }).join('');
+      if(cur){ sel.value=cur; }
+    }
     var st=document.getElementById('bkStatus'); if(st) st.style.display='none';
     initAutoBackupUI();
   }
