@@ -456,6 +456,10 @@ body{
   display:inline-block;background:var(--alert);color:#fff;border-radius:10px;
   padding:1px 7px;font-size:10px;font-weight:800;margin-left:5px;
 }
+/* Days taken without a request: amber and outlined, the colours of the panel
+   they open, so they read as "square this up", not as someone waiting. */
+.req-badge.untaken{ background:#FFF6D6; color:#8A5A00; border:1px solid #E8D07A;
+  padding:0 6px; margin-left:3px; }
 .req-card{
   background:var(--panel);border:1px solid var(--line);border-radius:10px;
   padding:14px 16px;margin-bottom:10px;
@@ -2523,7 +2527,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button class="page-tab active" data-page="attendance"><span class="ico">🗓️</span><span class="lbl">Attendance Record</span></button>
     <button class="page-tab" data-page="dashboard"><span class="ico">📊</span><span class="lbl">Dashboard</span></button>
     <button class="page-tab" data-page="leave"><span class="ico">🌴</span><span class="lbl">Leave Record</span></button>
-    <button class="page-tab" data-page="requests"><span class="ico">📨</span><span class="lbl">Requests</span> <span class="req-badge" id="reqBadge" style="display:none;">0</span></button>
+    <button class="page-tab" data-page="requests"><span class="ico">📨</span><span class="lbl">Requests</span> <span class="req-badge" id="reqBadge" style="display:none;" title="Waiting on a decision">0</span><span class="req-badge untaken" id="reqUntakenBadge" style="display:none;" title="Leave taken without a request">0</span></button>
     <button class="page-tab" data-page="salary"><span class="ico">💰</span><span class="lbl">Payroll</span></button>
     <button class="page-tab" data-page="holidays"><span class="ico">🏖️</span><span class="lbl">Official Leaves</span></button>
     <!-- User management lives in the Workspace shell, not in here, so this tab
@@ -5716,6 +5720,7 @@ function buildExcelBackup(){
     }).catch(function(){ halfDays = {}; });
   }
   function saveHalfDays(){
+    try{ renderReqBadge(); }catch(e){}      // part-days count towards it too
     return storage.set('halfDays', JSON.stringify(halfDays), true).catch(function(e){ console.error(e); });
   }
   function getHalfDay(emp, d){ return halfDays[emp+'|'+d] || null; }
@@ -5951,6 +5956,8 @@ function buildExcelBackup(){
     }).catch(function(){ overrides = {}; });
   }
   function saveOverrides(){
+    // A leave marked or cleared in the grid changes the "taken without a request" count.
+    try{ renderReqBadge(); }catch(e){}
     return storage.set('overrides', JSON.stringify(overrides), true).catch(function(e){ console.error(e); });
   }
   function loadShiftAssignments(){
@@ -6123,6 +6130,16 @@ function buildExcelBackup(){
       var n0 = pendingRequestCount();
       badge.textContent = n0;
       badge.style.display = n0>0 ? 'inline-block' : 'none';
+    }
+    /* Leave marked straight into the grid never waits on anyone, so it never
+       lit the badge above - and sat unnoticed until someone opened the tab. */
+    var ub = document.getElementById('reqUntakenBadge');
+    if(ub){
+      var n1 = 0;
+      try{ n1 = unrequestedLeave().length; }catch(e){}
+      ub.textContent = n1;
+      ub.title = n1 + ' leave ' + (n1 === 1 ? 'entry' : 'entries') + ' taken without a request';
+      ub.style.display = n1>0 ? 'inline-block' : 'none';
     }
     /* And on the workspace's own Attendance button, so a request waiting on
        someone is visible without opening the dashboard first. */
