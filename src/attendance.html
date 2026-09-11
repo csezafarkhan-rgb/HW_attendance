@@ -5448,12 +5448,24 @@ function buildExcelBackup(){
         }
 
         var afterMerge = function(){
-          var newMonths = {};
-          parsed.records.forEach(function(r){ newMonths[r.d.slice(0,7)] = true; });
-          Object.keys(newMonths).forEach(function(ym){
-            if(state.selectedMonths.indexOf(ym) === -1) state.selectedMonths.push(ym);
-          });
-          state.selectedMonths.sort();
+          /* Land on the current month, and only that. This used to add every
+             month the file touched to the view, which made sense when a file
+             was one month's export - but the daily file now covers the last
+             thirty days, so from the 11th onwards every sync widened the grid
+             to two months and left last month's weeks sitting above this one.
+
+             The other months are still merged and still in the month picker;
+             they just are not forced onto the screen. If the file has nothing
+             for this month (a restore of an old export, say), the view is left
+             as it was, falling back to the latest month with data only when
+             nothing selected exists. */
+          var nowD = new Date();
+          var thisMonth = nowD.getFullYear() + '-' + (nowD.getMonth()+1 < 10 ? '0' : '') + (nowD.getMonth()+1);
+          if(ALL_MONTHS.indexOf(thisMonth) > -1){
+            state.selectedMonths = [thisMonth];
+          } else if(!state.selectedMonths.some(function(ym){ return ALL_MONTHS.indexOf(ym) > -1; })){
+            if(ALL_MONTHS.length) state.selectedMonths = [ALL_MONTHS[ALL_MONTHS.length - 1]];
+          }
           if(!visibleEmpSet) visibleEmpSet = {};
           EMPLOYEES.forEach(function(emp){ if(!(emp.name in visibleEmpSet)) visibleEmpSet[emp.name] = true; });
           persistDataset();
