@@ -99,5 +99,32 @@ if ($reached -eq 0) {
     exit 1
 }
 
+<#  Add to what is already on file rather than replace it. A reader that could
+    not be reached this time, or a log read cut short, used to take its punches
+    out of the file - and that morning's in-times out of the dashboard - until
+    the next good run; on 11 September a run at 09:57 dropped four of the day's
+    rows that way. A punch does not change once made, so keeping the ones
+    already seen costs nothing. #>
+$carried = 0
+if (Test-Path -LiteralPath $OutFile) {
+    $known = @{}
+    foreach ($p in $rows) { $known['{0}|{1}|{2}' -f $p.UserId, $p.LogDate, $p.Device] = $true }
+    try {
+        foreach ($p in @(Import-Csv -LiteralPath $OutFile)) {
+            $when = $p.LogDate -as [datetime]
+            if (-not $when -or $when -lt $since) { continue }
+            $key = '{0}|{1}|{2}' -f $p.UserId, $p.LogDate, $p.Device
+            if ($known.ContainsKey($key)) { continue }
+            $known[$key] = $true
+            [void] $rows.Add([pscustomobject]@{
+                UserId = $p.UserId; LogDate = $p.LogDate; Device = $p.Device; InOut = $p.InOut
+            })
+            $carried++
+        }
+    } catch {
+        Write-Output ('previous file unreadable, starting afresh: ' + $_.Exception.Message)
+    }
+}
+
 $rows | Sort-Object LogDate | Export-Csv -LiteralPath $OutFile -NoTypeInformation -Encoding UTF8
-Write-Output ("written: {0} ({1} punches from {2} device(s))" -f $OutFile, $rows.Count, $reached)
+Write-Output ("written: {0} ({1} punches from {2} device(s), {3} kept from earlier runs)" -f $OutFile, $rows.Count, $reached, $carried)

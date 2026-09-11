@@ -59,7 +59,21 @@ Facts worth not rediscovering:
 | --- | --- |
 | `HW Attendance - Build CSV` | every 30 min 09:30–18:30, and at logon |
 | `HW Attendance - Daily Check` | 10:00 |
-| `HW Attendance - Sync Helper` | at logon, stays running |
+| `HW Attendance - Sync Helper` | at logon, and every 5 min 09:30–19:30 to restart it if it has stopped |
 
 The logon run matters: the PC sleeps around 18:45, about when people punch out,
 so the last punches of a day can only be collected the next morning.
+
+Both tasks start their program through `conhost.exe --headless`, for example
+`conhost.exe --headless "C:\Program Files\nodejs\node.exe" "...\sync-service.js"`.
+Started directly, each one opened a console window on the desktop, and closing
+that window ended the program with `0xC000013A`. On 11 September the helper
+was killed that way within seconds of every start, and two builds died before
+writing anything. With `--headless` there is no window to close.
+`-WindowStyle Hidden` did not help: it hides the window only after it has
+already appeared.
+
+`Pull-DeviceLogs.ps1` adds to `device-punches.csv` instead of replacing it. If
+a reader can't be reached, or a read stops partway, the punches from earlier
+runs stay in the file, so a bad run no longer takes the day's in-times out of
+the dashboard.
