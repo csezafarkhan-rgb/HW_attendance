@@ -17,6 +17,31 @@
     location.reload();
   };
 
+  /* This browser's copies of attendance data (see __hwClearLocalData in the
+     shell). Resolves either way - clearing is best effort, never a blocker. */
+  function clearLocalData() {
+    try {
+      if (typeof window.__hwClearLocalData === 'function') {
+        return Promise.resolve(window.__hwClearLocalData()).catch(function () {});
+      }
+    } catch (e) {}
+    return Promise.resolve();
+  }
+  var LAST_USER_KEY = 'hwLastUserId';
+  /* One sign-out for the top bar and for a dashboard asking: end the server
+     session, drop this browser's copies of the data, then start again. */
+  window.HWAuth.signOut = function () {
+    if (window.HWAuth.__reloading) return;
+    window.HWAuth.__reloading = true;
+    fetch('/api/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' })
+      .catch(function () {})
+      .then(clearLocalData)
+      .then(function () {
+        try { localStorage.removeItem(LAST_USER_KEY); } catch (e) {}
+        location.reload();
+      });
+  };
+
   function apiJson(url, options) {
     options = options || {};
     options.credentials = 'same-origin';
@@ -98,7 +123,13 @@
       var ready = (window.HWSync && typeof window.HWSync.hydrate === 'function')
         ? window.HWSync.hydrate()
         : Promise.resolve();
-      Promise.resolve(ready).catch(function () {}).then(function () {
+      /* Someone else signed in on this browser last: their copies go before
+         the dashboard is built, so nothing of theirs is seeded into this one. */
+      var prev = null;
+      try { prev = localStorage.getItem(LAST_USER_KEY); } catch (e) {}
+      var clean = (prev && prev !== String(user.id)) ? clearLocalData() : Promise.resolve();
+      try { localStorage.setItem(LAST_USER_KEY, String(user.id)); } catch (e) {}
+      Promise.all([Promise.resolve(ready).catch(function () {}), clean]).then(function () {
         gate.classList.add('lg-out');
         setTimeout(function () { gate.style.display = 'none'; }, 380);
         if (typeof startWorkspace === 'function') startWorkspace('attendance');
@@ -151,9 +182,7 @@
     if (form) form.addEventListener('submit', submit);
     if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
     if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
-    if (outBtn) outBtn.addEventListener('click', function () {
-      apiJson('/api/logout', { method: 'POST', body: '{}' }).finally(function () { location.reload(); });
-    });
+    if (outBtn) outBtn.addEventListener('click', function () { window.HWAuth.signOut(); });
 
     // Ask the server whether a valid session already exists.
     fetch('/api/me', { credentials: 'same-origin' })

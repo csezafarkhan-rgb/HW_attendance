@@ -328,6 +328,31 @@
     location.reload();
   };
 
+  /* This browser's copies of attendance data (see __hwClearLocalData in the
+     shell). Resolves either way - clearing is best effort, never a blocker. */
+  function clearLocalData() {
+    try {
+      if (typeof window.__hwClearLocalData === 'function') {
+        return Promise.resolve(window.__hwClearLocalData()).catch(function () {});
+      }
+    } catch (e) {}
+    return Promise.resolve();
+  }
+  var LAST_USER_KEY = 'hwLastUserId';
+  /* One sign-out for the top bar and for a dashboard asking: end the server
+     session, drop this browser's copies of the data, then start again. */
+  window.HWAuth.signOut = function () {
+    if (window.HWAuth.__reloading) return;
+    window.HWAuth.__reloading = true;
+    fetch('/api/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' })
+      .catch(function () {})
+      .then(clearLocalData)
+      .then(function () {
+        try { localStorage.removeItem(LAST_USER_KEY); } catch (e) {}
+        location.reload();
+      });
+  };
+
   function apiJson(url, options) {
     options = options || {};
     options.credentials = 'same-origin';
@@ -409,7 +434,13 @@
       var ready = (window.HWSync && typeof window.HWSync.hydrate === 'function')
         ? window.HWSync.hydrate()
         : Promise.resolve();
-      Promise.resolve(ready).catch(function () {}).then(function () {
+      /* Someone else signed in on this browser last: their copies go before
+         the dashboard is built, so nothing of theirs is seeded into this one. */
+      var prev = null;
+      try { prev = localStorage.getItem(LAST_USER_KEY); } catch (e) {}
+      var clean = (prev && prev !== String(user.id)) ? clearLocalData() : Promise.resolve();
+      try { localStorage.setItem(LAST_USER_KEY, String(user.id)); } catch (e) {}
+      Promise.all([Promise.resolve(ready).catch(function () {}), clean]).then(function () {
         gate.classList.add('lg-out');
         setTimeout(function () { gate.style.display = 'none'; }, 380);
         if (typeof startWorkspace === 'function') startWorkspace('attendance');
@@ -462,9 +493,7 @@
     if (form) form.addEventListener('submit', submit);
     if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
     if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
-    if (outBtn) outBtn.addEventListener('click', function () {
-      apiJson('/api/logout', { method: 'POST', body: '{}' }).finally(function () { location.reload(); });
-    });
+    if (outBtn) outBtn.addEventListener('click', function () { window.HWAuth.signOut(); });
 
     // Ask the server whether a valid session already exists.
     fetch('/api/me', { credentials: 'same-origin' })
@@ -665,6 +694,7 @@
     var rid=0, waiting={}, cache={}, loading={};
     window.addEventListener('message', function(e){
       var m=e.data; if(!m||!m.__hwb) return;
+      if(e.source !== window.parent) return;     // storage answers come from the workspace only
       if(m.rid && waiting[m.rid]){ waiting[m.rid](m); delete waiting[m.rid]; }
       else if(m.op==='idb-ext' && cache[m.db]){ var d=cache[m.db]._d; if(!d[m.store]) d[m.store]={}; if(m.del) delete d[m.store][m.key]; else if(m.clr) d[m.store]={}; else d[m.store][m.key]=m.value; }
       else if(m.op==='ls-ext'){ try{ if(m.del) delete mem[m.key]; else mem[m.key]=m.value; }catch(_){}
@@ -786,9 +816,49 @@
     var finished = false;
     function finish(data){ if(finished) return; finished=true; lsOverlay=(data && data.kv)||{}; resolve(); }
     var timer = setTimeout(function(){ finish({}); }, 1200);
-    bridgeReadDb(LS_DB).then(function(data){ clearTimeout(timer); finish(data); })
-      .catch(function(){ clearTimeout(timer); finish({}); });
+    bridgeReadDb(LS_DB).then(function(data){
+      clearTimeout(timer);
+      if(!finished){ finish(data); return; }
+      /* Arrived after the deadline. It used to be dropped, so the dashboard ran
+         on defaults and its next save overwrote the copy that had been kept -
+         the very loss this mirror exists to prevent. Take what nothing in this
+         session has set since, and hand it to the frames already open. */
+      var kv = (data && data.kv) || {};
+      Object.keys(kv).forEach(function(k){
+        if(Object.prototype.hasOwnProperty.call(lsOverlay, k)) return;
+        lsOverlay[k] = kv[k];
+        broadcast(null, {__hwb:1, op:'ls-ext', key:k, value:kv[k]});
+      });
+    }).catch(function(){ clearTimeout(timer); finish({}); });
   });
+
+  /* What this browser keeps of anyone's attendance: the dashboard's saved
+     settings and every mirror of them, the dataset and the restore points. None
+     of it is keyed by user, and none of it was cleared at sign-out - so the next
+     person on a shared PC had the last person's copy seeded into their frame,
+     and on a slow start could see it. Cleared at sign-out and whenever someone
+     different signs in. Display preferences and the chosen folders stay. */
+  var KEEP_LOCAL = /^attDashboard_(hasBackupDir|autoBackupShot|showWeekStatus|hideSunday)$/;
+  function isPersonalLocal(k){ return !!k && k.indexOf('attDashboard_') === 0 && !KEEP_LOCAL.test(k); }
+  window.__hwClearLocalData = function(){
+    return lsOverlayReady.then(function(){
+      try{
+        var drop = [];
+        for(var i=0;i<localStorage.length;i++){ var k = localStorage.key(i); if(isPersonalLocal(k)) drop.push(k); }
+        drop.forEach(function(k){ localStorage.removeItem(k); });
+      }catch(_){}
+      Object.keys(lsOverlay).forEach(function(k){ if(isPersonalLocal(k)) delete lsOverlay[k]; });
+      return Promise.all([
+        bridgeClrDb('att_data').catch(function(){}),
+        bridgeReadDb(LS_DB).then(function(data){
+          var kv = (data && data.kv) || {};
+          return Promise.all(Object.keys(kv).filter(isPersonalLocal).map(function(k){
+            return bridgeDel(LS_DB, 'kv', k).catch(function(){});
+          }));
+        }).catch(function(){})
+      ]);
+    });
+  };
   function bridgeReadDb(db){
     return bridgeDB().then(function(d){ return new Promise(function(res, rej){
       var out = {}, tx = d.transaction('kv','readonly'), st = tx.objectStore('kv');
@@ -809,8 +879,20 @@
   }
 
   /* ---------------- serve requests from the tabs ---------------- */
+  /* Only the dashboard frames this page created may use the bridge. Without the
+     check any window holding a reference to this one could read the whole
+     bridge (idb-open replies to whoever asked), plant settings, or trigger a
+     download - kept safe so far only by the headers that stop framing. */
+  function fromOurFrame(src){
+    if(!src) return false;
+    var ifr = document.querySelectorAll('#frames iframe');
+    for(var i=0;i<ifr.length;i++){ if(ifr[i].contentWindow === src) return true; }
+    return false;
+  }
+  window.__hwFromOurFrame = fromOurFrame;
   window.addEventListener('message', function(e){
     var m = e.data; if(!m || !m.__hwb) return;
+    if(!fromOurFrame(e.source)) return;
     var reply = function(extra){ if(m.rid && e.source){ try{ e.source.postMessage(Object.assign({__hwb:1, rid:m.rid}, extra||{}), '*'); }catch(_){} } };
     switch(m.op){
       case 'ls-set': try{ localStorage.setItem(m.key, m.value); }catch(_){} lsOverlay[m.key]=m.value; bridgePut(LS_DB,'kv',m.key,m.value).catch(function(){}); broadcast(e.source, {__hwb:1, op:'ls-ext', key:m.key, value:m.value}); break;
@@ -1715,7 +1797,8 @@
       }).catch(function(){});
     }
     sel.addEventListener('change', refreshDashStat);
-    refreshDashStat();
+    /* Not on load: it reads and encodes the whole cached dataset, before anyone
+       has signed in, for a panel that is only filled when it is opened. */
     var openBtn = document.getElementById('pbBtn');
     if(openBtn) openBtn.addEventListener('click', refreshDashStat);
 
@@ -1936,11 +2019,15 @@
     });
   }
   window.addEventListener('message', function(e){
+    if (!window.__hwFromOurFrame || !window.__hwFromOurFrame(e.source)) return;
     if (e && e.data && e.data.type === 'hw-session-req') broadcastSession();
     if (e && e.data && e.data.type === 'hw-logout'){
-      // a dashboard asked to sign out - the shell owns that
+      /* A dashboard asked to sign out - the shell owns that. Removing the old
+         client-side key and reloading left the server session alive, so the
+         reload signed straight back in. */
       try{ sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY); }catch(_){}
-      location.reload();
+      if (window.HWAuth && typeof window.HWAuth.signOut === 'function') window.HWAuth.signOut();
+      else location.reload();
     }
   });
   setInterval(broadcastSession, 4000);   // covers a frame created later
@@ -2007,6 +2094,7 @@
     });
   })();
   window.addEventListener('message', function(e){
+    if(!window.__hwFromOurFrame || !window.__hwFromOurFrame(e.source)) return;
     if(e && e.data === 'hw-back-to-console'){ /* no-op */ }
     if(e && e.data && e.data.type === 'hw-monthbar'){
       var mb = document.getElementById('hwMonthBadge');
