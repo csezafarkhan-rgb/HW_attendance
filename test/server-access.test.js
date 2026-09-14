@@ -229,6 +229,21 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('cannot raise a request for someone else', !by('req_fake'), stored.map(r => r.id));
   check('employee still cannot write salaries', (await asha('PUT', '/api/kv/salaries', { value: '{}', shared: true })).status === 403);
 
+  // --- forgot-to-punch requests ---
+  const punchReqs = [
+    { id: 'req_punch_ok', empName: 'Asha Test', dateFrom: '2026-09-12', dateTo: '2026-09-12', leaveType: 'PUNCH', punchIn: '', punchOut: '18:40', message: 'reader missed me', status: 'approved' },
+    { id: 'req_punch_range', empName: 'Asha Test', dateFrom: '2026-09-12', dateTo: '2026-09-13', leaveType: 'PUNCH', punchIn: '9:30', message: 'x' },
+    { id: 'req_punch_notime', empName: 'Asha Test', dateFrom: '2026-09-12', dateTo: '2026-09-12', leaveType: 'PUNCH', message: 'x' },
+    { id: 'req_punch_badtime', empName: 'Asha Test', dateFrom: '2026-09-11', dateTo: '2026-09-11', leaveType: 'PUNCH', punchIn: '9:30<script>', punchOut: '18:00', message: 'x' }
+  ];
+  await asha('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(punchReqs), shared: true });
+  const afterPunch = JSON.parse(db.kv.find(r => r.key === 'leaveRequests').value);
+  const pOk = afterPunch.find(r => r.id === 'req_punch_ok');
+  check('punch correction kept as pending with its time', pOk && pOk.status === 'pending' && pOk.punchOut === '18:40' && pOk.punchIn === '', pOk);
+  check('a punch correction over a range or with no time refused', !afterPunch.find(r => r.id === 'req_punch_range') && !afterPunch.find(r => r.id === 'req_punch_notime'));
+  const pBad = afterPunch.find(r => r.id === 'req_punch_badtime');
+  check('a malformed time is dropped, the valid one kept', pBad && pBad.punchIn === '' && pBad.punchOut === '18:00', pBad);
+
   // --- admin stale copy keeps the new request ---
   const staleAdmin = JSON.parse(bossAll.leaveRequests);
   staleAdmin[2].status = 'approved';

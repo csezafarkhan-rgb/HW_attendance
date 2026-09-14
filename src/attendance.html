@@ -2928,7 +2928,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div class="modal-body">
       <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/></div>
       <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/></div>
-      <div class="gate-field"><label>Leave type</label>
+      <div class="gate-field"><label>Request type</label>
         <select id="reqLeaveType">
           <option value="CL">Casual Leave (CL)</option>
           <option value="Sick">Sick Leave (SL)</option>
@@ -2937,7 +2937,18 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
           <option value="WFH">Work from home</option>
           <option value="VISIT">Off-site visit</option>
           <option value="Other">Other</option>
+          <option value="PUNCH">Forgot to punch (correct my time)</option>
         </select>
+      </div>
+      <div class="gate-field" id="reqPunchWrap" style="display:none;">
+        <label>The time you actually came in or left</label>
+        <div style="display:flex;gap:10px;">
+          <label style="flex:1;font-weight:600;font-size:11px;">In <input type="time" id="reqPunchIn" style="width:100%;"/></label>
+          <label style="flex:1;font-weight:600;font-size:11px;">Out <input type="time" id="reqPunchOut" style="width:100%;"/></label>
+        </div>
+        <div style="font-size:10.5px;color:var(--ink-soft);margin-top:3px;">
+          Fill in only the one you missed. The other is taken from the reader.
+        </div>
       </div>
       <div class="gate-field" id="reqHalfWrap" style="display:none;">
         <label>Which half</label>
@@ -2946,7 +2957,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
           <option value="PM">Second half (afternoon)</option>
         </select>
       </div>
-      <div class="gate-field">
+      <div class="gate-field" id="reqReturnWrap">
         <label>Returning to work on</label>
         <input type="date" id="reqReturn"/>
         <div style="font-size:10.5px;color:var(--ink-soft);margin-top:3px;">
@@ -6380,6 +6391,7 @@ function buildExcelBackup(){
       r.leaveType = String(r.leaveType || 'CL').replace(/[^A-Za-z]/g, '') || 'CL';
       ['dateFrom', 'dateTo'].forEach(function(k){ r[k] = String(r[k] || '').replace(/[^\d-]/g, ''); });
       if(r.returnOn && !/^\d{4}-\d{2}-\d{2}$/.test(r.returnOn)) r.returnOn = '';
+      ['punchIn', 'punchOut'].forEach(function(k){ if(r[k] && !/^\d{1,2}:\d{2}$/.test(r[k])) r[k] = ''; });
       if(REQ_STATUSES.indexOf(r.status) === -1) r.status = 'pending';
       return r;
     });
@@ -6409,7 +6421,25 @@ function buildExcelBackup(){
      was there - a visit set by hand became leave - and undoing the approval then
      deleted the day outright, so the visit was lost; with two requests covering
      one day, rejecting either cleared the day the other still granted. */
+  /* A forgotten punch, approved: a manual entry for that day, carrying the
+     corrected time and whatever the reader did record for the other one.
+     A manual entry already there by hand is left alone, as a mark is. */
+  function applyPunchCorrection(req){
+    var key = req.empName + '|' + req.dateFrom;
+    var cur = manualRecords[key];
+    if(cur && cur.reqId !== req.id){
+      showUploadStatus(dispName(req.empName) + '’s ' + req.dateFrom + ' already has a manual entry, so the punch '
+        + 'correction was not written over it. Change it on the Attendance Record if it should.');
+      return Promise.resolve();
+    }
+    var rec = recIndex[key] || null;               // what the readers recorded
+    var tin = req.punchIn || (rec && rec['in']) || '';
+    var tout = req.punchOut || (rec && rec.out) || '';
+    manualRecords[key] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB', reqId: req.id };
+    return saveManualRecords();
+  }
   function applyApprovedRequestToAttendance(req){
+    if(req.leaveType === 'PUNCH') return applyPunchCorrection(req);
     var dates = eachDateBetween(req.dateFrom, req.dateTo);
     var kept = 0;
     dates.forEach(function(dateStr){
@@ -6596,7 +6626,7 @@ function buildExcelBackup(){
           && String(r.updatedAt || '') >= cutoff;
     }).sort(function(a, b){ return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); })
       .slice(0, 12).map(function(r){
-        var what = reqTypeName(r.leaveType, r.half) + ' · ' + fmtDateRange(r.dateFrom, r.dateTo);
+        var what = reqTypeText(r) + ' · ' + fmtDateRange(r.dateFrom, r.dateTo);
         var t = r.status === 'approved' ? ('Approved: ' + what)
               : r.status === 'rejected' ? ('Not approved: ' + what)
               : ('A question about: ' + what);
@@ -6657,7 +6687,18 @@ function buildExcelBackup(){
   function isPartDay(t){ return t === 'HALF' || t === 'SHORT' || t === 'THREEQ'; }
   var REQ_TYPE_LABEL = {CL:'Casual leave', Sick:'Sick leave',
                         SHORT:'Short leave', HALF:'Half day', THREEQ:'Three-quarter day',
-                        WFH:'Work from home', VISIT:'Off-site visit', Other:'Other'};
+                        WFH:'Work from home', VISIT:'Off-site visit', Other:'Other', PUNCH:'Punch correction'};
+  /* The request's kind as a person reads it, with the corrected times for a punch correction. */
+  function reqTypeText(req){
+    var n = reqTypeName(req.leaveType, req.half);
+    if(req.leaveType === 'PUNCH'){
+      var bits = [];
+      if(req.punchIn) bits.push('in ' + req.punchIn);
+      if(req.punchOut) bits.push('out ' + req.punchOut);
+      if(bits.length) n += ' (' + bits.join(', ') + ')';
+    }
+    return n;
+  }
   function reqTypeName(t, half){
     var n = REQ_TYPE_LABEL[t] || t || 'Leave';
     if(isPartDay(t) && half) n += (half === 'PM' ? ' (second half)' : ' (first half)');
@@ -6927,6 +6968,11 @@ function buildExcelBackup(){
      still match what approval created are cleared - anything since changed by
      hand is left alone rather than silently discarded. */
   function revertApprovedRequest(req){
+    if(req.leaveType === 'PUNCH'){
+      var pk = req.empName + '|' + req.dateFrom, pm = manualRecords[pk];
+      if(pm && pm.reqId === req.id){ delete manualRecords[pk]; return saveManualRecords().then(function(){ return 0; }); }
+      return Promise.resolve(pm ? 1 : 0);
+    }
     var kept = 0;
     /* Only a mark this request wrote. Marks written before request ids were
        stamped have none, and fall back to matching the kind as before. */
@@ -6977,6 +7023,10 @@ function buildExcelBackup(){
   }
   function requestUnmarkedDays(req){
     if(!req || req.status !== 'approved') return [];
+    if(req.leaveType === 'PUNCH'){
+      var pm = manualRecords[req.empName + '|' + req.dateFrom];
+      return (pm && pm.reqId === req.id) ? [] : [req.dateFrom];
+    }
     var out = [];
     eachDateBetween(req.dateFrom, req.dateTo).forEach(function(d){
       var key = req.empName + '|' + d;
@@ -7021,7 +7071,7 @@ function buildExcelBackup(){
        everything on that date hid every part-day from this panel. */
     var coveredFull = {}, coveredPart = {};
     leaveRequests.forEach(function(r){
-      if(r.status === 'rejected') return;
+      if(r.status === 'rejected' || r.leaveType === 'PUNCH') return;   // a punch correction is not leave
       var part = isPartDay(r.leaveType);
       eachDateBetween(r.dateFrom, r.dateTo).forEach(function(d){
         var key = r.empName + '|' + d;
@@ -7223,7 +7273,7 @@ function buildExcelBackup(){
       }
       /* Once approved, the paper form can be printed straight from the request
          rather than filled in again by hand. */
-      actionsHtml += '<div class="req-actions">'
+      if(req.leaveType !== 'PUNCH') actionsHtml += '<div class="req-actions">'
         + '<button class="btn ghost" data-act="form" data-id="'+req.id+'">🖨 Print day-off form</button>'
         + '</div>';
       // Always offer to archive; offer to restore once it is in the archive.
@@ -7236,7 +7286,7 @@ function buildExcelBackup(){
       return '<div class="req-card">'+
         '<div class="req-top">'+
           '<label class="req-pick"><input type="checkbox" class="req-sel" value="'+req.id+'"></label>'+
-          '<div><div class="req-emp">'+escapeHtml(req.empName)+'</div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeName(req.leaveType, req.half))+'</span></div></div>'+
+          '<div><div class="req-emp">'+escapeHtml(req.empName)+'</div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeText(req))+'</span></div></div>'+
           '<span class="req-status '+statusCls+'">'+(REQ_STATUS_LABEL[req.status]||req.status)+'</span>'+
         '</div>'+
         (req.message ? '<div class="req-msg">'+req.message.replace(/</g,'&lt;')+'</div>' : '')+
@@ -7305,7 +7355,7 @@ function buildExcelBackup(){
         } else if(act === 'reject'){
           // In-page, not prompt(): a suppressed dialog returned null and Raise Query did nothing.
           hwConfirm({ title: 'Reject ' + dispName(req.empName) + '’s request?',
-                      message: fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeName(req.leaveType, req.half),
+                      message: fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req),
                       input: { placeholder: 'Reason for rejecting (optional)' },
                       confirmLabel: 'Reject', danger: true }).then(function(reason){
             if(reason === false) return;
@@ -7319,7 +7369,7 @@ function buildExcelBackup(){
           });
         } else if(act === 'query'){
           hwConfirm({ title: 'Ask ' + dispName(req.empName) + ' about this request',
-                      message: fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeName(req.leaveType, req.half),
+                      message: fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req),
                       input: { placeholder: 'What would you like to ask?', required: true },
                       confirmLabel: 'Send question' }).then(function(q){
             if(!q) return;
@@ -7420,15 +7470,16 @@ function buildExcelBackup(){
       }
       return '<div class="req-card">'+
         '<div class="req-top">'+
-          '<div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeName(req.leaveType, req.half))+'</span></div></div>'+
+          '<div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeText(req))+'</span></div></div>'+
           '<span class="req-status '+statusCls+'">'+(REQ_STATUS_LABEL[req.status]||req.status)+'</span>'+
         '</div>'+
         (req.message ? '<div class="req-msg">'+req.message.replace(/</g,'&lt;')+'</div>' : '')+
         noteHtml + replyHtml +
         /* Approved means the paper form can be printed and signed, filled from
            what was already agreed here. */
+        (req.leaveType === 'PUNCH' ? '' :
         '<div style="margin-top:10px;"><button class="btn ghost" data-print-form="'+req.id+'" '
-          + 'style="width:auto;padding:7px 14px;font-size:12px;">🖨 Print day-off form</button></div>'+
+          + 'style="width:auto;padding:7px 14px;font-size:12px;">🖨 Print day-off form</button></div>')+
       '</div>';
     }).join('');
 
@@ -7489,12 +7540,17 @@ function buildExcelBackup(){
     var sync = function(){
       /* Every part-day is part of one day, and each needs to say which part. */
       var isHalf = isPartDay(t.value);
+      var isPunch = t.value === 'PUNCH';
       w.style.display = isHalf ? '' : 'none';
+      // A punch correction is one day and two times, with no day off to return from.
+      var pw = document.getElementById('reqPunchWrap'), rw = document.getElementById('reqReturnWrap');
+      if(pw) pw.style.display = isPunch ? '' : 'none';
+      if(rw) rw.style.display = isPunch ? 'none' : '';
       /* Half of one day is the only sensible reading - a half day across a
          range would leave it unclear which days it applied to. */
       if(toEl){
-        toEl.disabled = isHalf;
-        if(isHalf && fromEl) toEl.value = fromEl.value;
+        toEl.disabled = isHalf || isPunch;
+        if((isHalf || isPunch) && fromEl) toEl.value = fromEl.value;
       }
     };
     t.addEventListener('change', sync);
@@ -7510,7 +7566,7 @@ function buildExcelBackup(){
     t.addEventListener('change', syncReturn);
     if(fromEl) fromEl.addEventListener('change', function(){
       // Every part-day kind is one day (the To box is disabled for all of them).
-      if(isPartDay(t.value) && toEl) toEl.value = fromEl.value;
+      if((isPartDay(t.value) || t.value === 'PUNCH') && toEl) toEl.value = fromEl.value;
     });
   })();
   document.getElementById('requestModalClose').addEventListener('click', function(){
@@ -7526,13 +7582,23 @@ function buildExcelBackup(){
     var err = document.getElementById('reqErr');
     if(!from || !to){ err.textContent = 'Please pick both dates.'; err.classList.add('show'); return; }
     if(to < from){ err.textContent = '"To" date must be on or after "From" date.'; err.classList.add('show'); return; }
+    var isPunch = type === 'PUNCH';
+    var pIn = isPunch ? (document.getElementById('reqPunchIn') || {}).value || '' : '';
+    var pOut = isPunch ? (document.getElementById('reqPunchOut') || {}).value || '' : '';
+    if(isPunch){
+      if(from > todayISO_full){ err.textContent = 'A punch can only be corrected for today or a day already gone.'; err.classList.add('show'); return; }
+      if(!pIn && !pOut){ err.textContent = 'Fill in the in time, the out time, or both.'; err.classList.add('show'); return; }
+      if(pIn && pOut && pOut <= pIn){ err.textContent = 'The out time must be after the in time.'; err.classList.add('show'); return; }
+      if(!msg){ err.textContent = 'Say briefly what happened, e.g. "reader did not take my thumb".'; err.classList.add('show'); return; }
+    }
     var req = {
       id: 'req_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
       empName: viewRole.name,
-      dateFrom: from, dateTo: to, leaveType: type, message: msg,
+      dateFrom: from, dateTo: isPunch ? from : to, leaveType: type, message: msg,
       half: (isPartDay(type) && document.getElementById('reqHalf'))
               ? document.getElementById('reqHalf').value : '',
-      returnOn: (document.getElementById('reqReturn') || {}).value || '',
+      returnOn: isPunch ? '' : ((document.getElementById('reqReturn') || {}).value || ''),
+      punchIn: pIn, punchOut: pOut,
       status: 'pending', adminNote:'', employeeReply:'',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
@@ -7542,8 +7608,8 @@ function buildExcelBackup(){
       renderMyRequests();
       /* The paper form is submitted with the request, not after it comes back
          approved - so offer to print it straight away, with the approval line
-         left for whoever signs it. */
-      printDayOffForm(req);
+         left for whoever signs it. A punch correction is not a day off. */
+      if(!isPunch) printDayOffForm(req);
     });
   });
 

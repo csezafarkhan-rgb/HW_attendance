@@ -230,12 +230,20 @@ function mergeEmployeeRequests(storedValue, incomingValue, name) {
       if (!/^req_[A-Za-z0-9_]{1,60}$/.test(r.id)) return;
       if (!DAY_RE.test(r.dateFrom) || !DAY_RE.test(r.dateTo) || r.dateTo < r.dateFrom) return;
       if (!/^[A-Za-z]{1,16}$/.test(String(r.leaveType || ''))) return;
+      const TIME_RE = /^\d{1,2}:\d{2}$/;
+      const punch = r.leaveType === 'PUNCH';
+      // A punch correction is one day, with at least one corrected time.
+      if (punch && (r.dateTo !== r.dateFrom || !(TIME_RE.test(r.punchIn || '') || TIME_RE.test(r.punchOut || '')))) return;
       const fresh = {
         id: r.id, empName: name, dateFrom: r.dateFrom, dateTo: r.dateTo,
         leaveType: r.leaveType, message: clip(r.message, 2000), half: clip(r.half, 20),
         returnOn: DAY_RE.test(r.returnOn || '') ? r.returnOn : '',
         status: 'pending', adminNote: '', employeeReply: '', createdAt: now, updatedAt: now
       };
+      if (punch) {
+        fresh.punchIn = TIME_RE.test(r.punchIn || '') ? r.punchIn : '';
+        fresh.punchOut = TIME_RE.test(r.punchOut || '') ? r.punchOut : '';
+      }
       out.push(fresh);
       byId[fresh.id] = fresh;
     } else if (cur.empName === name && cur.status === 'query'
