@@ -458,6 +458,19 @@ body{
 }
 /* Days taken without a request: amber and outlined, the colours of the panel
    they open, so they read as "square this up", not as someone waiting. */
+/* The alerts bell: amber for something to act on, blue for information,
+   green for a decision the employee has not seen yet. */
+.al-dropdown{ min-width:340px; max-width:min(92vw,420px); padding:8px; max-height:70vh; overflow-y:auto; }
+.al-head{ font-weight:800; font-size:12.5px; padding:4px 6px 8px; color:var(--ink); }
+.al-item{ border-radius:10px; padding:9px 11px; margin:0 0 6px; background:#F4F6FA; border-left:4px solid #9AA3B0; }
+.al-item.al-warn{ background:#FFF6E8; border-left-color:#E08A00; }
+.al-item.al-info{ background:#EEF4FF; border-left-color:#3B7DF5; }
+.al-item.al-fresh{ background:#EAF7EF; border-left-color:#1E9E5A; }
+.al-t{ font-weight:700; font-size:12.5px; color:var(--ink); line-height:1.35; }
+.al-d{ font-size:11.5px; color:var(--ink-soft); margin-top:3px; line-height:1.45; }
+.al-go{ margin-top:6px; font-size:11px; font-weight:700; padding:4px 10px; border-radius:7px;
+  border:1px solid var(--line-dk); background:#fff; color:var(--ink); cursor:pointer; }
+.al-empty{ font-size:12px; color:var(--ink-soft); padding:10px 6px; }
 .req-badge.untaken{ background:#FFF6D6; color:#8A5A00; border:1px solid #E8D07A;
   padding:0 6px; margin-left:3px; }
 .req-card{
@@ -2617,6 +2630,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
     </div>
   </div>
+  <div class="month-picker">
+    <button class="month-btn" id="alertsBtn" title="Nothing needs attention">🔔 Alerts <span class="req-badge" id="alertsCount" style="display:none;">0</span></button>
+    <div class="month-dropdown al-dropdown" id="alertsDropdown"></div>
+  </div>
   <button class="month-btn" id="screenshotBtn">📸 HD Screenshot</button>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
 </div>
@@ -2841,6 +2858,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <div class="lbl" id="empCalMonthLbl">—</div>
       <button id="empCalNext">›</button>
     <button id="empCalDensity" title="Switch between a dense month and full cells" style="width:auto;padding:0 12px;font-size:11.5px;font-weight:700;">⤢ Compact</button>
+    </div>
+    <div class="month-picker">
+      <button class="month-btn" id="empAlertsBtn" title="Decisions on your requests">🔔 <span class="req-badge" id="empAlertsCount" style="display:none;">0</span></button>
+      <div class="month-dropdown al-dropdown" id="empAlertsDropdown"></div>
     </div>
     <button class="btn primary" id="requestLeaveBtn" style="flex:none;width:auto;padding:9px 16px;">+ New Request</button>
     <div class="view-switch" id="viewSwitchBtnEmp">⇄ Log out</div>
@@ -6462,7 +6483,169 @@ function buildExcelBackup(){
                            count: pendingRequestCount(),
                            label: String(pendingRequestCount()) }, '*');
     }catch(e){}
+    try{ renderAlerts(); }catch(e){}
   }
+
+  /* ------------------------------------------------------------------
+     Alerts: what needs someone's attention, in one place.
+
+     Problems used to be noticed only by someone who went looking - a request
+     on a tab nobody opened, the office PC silently asleep, a day with no
+     out-punch found at payroll. Admins get a bell listing them; employees get
+     one listing decisions on their own requests. In-app only: nothing is
+     emailed, no password or paid service is involved.
+     ------------------------------------------------------------------ */
+  var DEVICE_STATUS = null, DEVICE_STATUS_LOADED = false;
+  function loadDeviceStatus(){
+    // Admins only: the server never sends deviceStatus to an employee.
+    return storage.get('deviceStatus', true).then(function(res){
+      try{ DEVICE_STATUS = (res && res.value) ? JSON.parse(res.value) : null; }catch(e){ DEVICE_STATUS = null; }
+      DEVICE_STATUS_LOADED = true;
+      renderAlerts();
+    }).catch(function(){});
+  }
+  function officeHoursNow(d){
+    var dow = d.getDay(), m = d.getHours() * 60 + d.getMinutes();
+    return dow >= 1 && dow <= 6 && m >= 600 && m <= 1110;          // Mon-Sat, 10:00-18:30
+  }
+  function adminAlerts(){
+    var out = [];
+    if(DEVICE_STATUS_LOADED){
+      if(!DEVICE_STATUS || !DEVICE_STATUS.at){
+        out.push({ level:'info', title:'The office PC is not sending attendance to the site yet',
+          detail:'Until it does, attendance arrives only when someone opens this dashboard with the folder connected. '
+            + 'Add SYNC_TOKEN in Render (scripts/attendance-sync/README.md) and it sends every 30 minutes.' });
+      } else {
+        var at = new Date(DEVICE_STATUS.at), now = new Date(), mins = Math.round((now - at) / 60000);
+        if(officeHoursNow(now) && mins > 90){
+          out.push({ level:'warn',
+            title:'No attendance from the office PC for ' + (mins >= 120 ? (Math.floor(mins / 60) + ' hours') : (mins + ' minutes')),
+            detail:'Last sent ' + at.toLocaleString() + '. The PC may be off or asleep, or its build failing — '
+              + 'push-log.txt and build-log.txt on that PC say which.' });
+        }
+      }
+    }
+    var pend = pendingRequestCount();
+    if(pend) out.push({ level:'warn', title: pend + ' leave request' + (pend === 1 ? '' : 's') + ' waiting for a decision',
+                        page:'requests', view:'live' });
+    var un = 0; try{ un = unrequestedLeave().length; }catch(e){}
+    if(un) out.push({ level:'warn', title: un + ' leave entr' + (un === 1 ? 'y' : 'ies') + ' taken without a request',
+                      detail:'Approve to accept each one, or reject it to remove the day.', page:'requests', view:'live' });
+    /* A finished day with an in-punch and no out-punch: usually the PC slept
+       before people left and the next build collects it. Two weeks back, and
+       only days nobody has already dealt with. */
+    var open = [];
+    var since = new Date(); since.setDate(since.getDate() - 14);
+    var sinceISO = since.getFullYear() + '-' + pad2(since.getMonth() + 1) + '-' + pad2(since.getDate());
+    (RECORDS || []).forEach(function(r){
+      if(!r || r.d < sinceISO || r.d >= todayISO_full || !r['in'] || r.out) return;
+      if(getOverride(r.e, r.d) || getMispunch(r.e, r.d) || getHalfDay(r.e, r.d)) return;
+      var rec = getRecord(r.e, r.d);
+      if(!rec || rec.out) return;                                     // a manual entry has it
+      open.push(dispName(r.e) + ' ' + (+r.d.slice(8)) + ' ' + monthLabelShort(r.d.slice(0, 7)).split(' ')[0]);
+    });
+    if(open.length) out.push({ level:'warn',
+      title: open.length + ' finished day' + (open.length === 1 ? '' : 's') + ' with no out-punch',
+      detail: open.slice(0, 6).join(', ') + (open.length > 6 ? (' and ' + (open.length - 6) + ' more') : '')
+        + '. If the next build does not collect them, flag a mispunch or add a manual entry.',
+      page:'attendance' });
+    return out;
+  }
+  function renderAlertList(dd, heading, items, empty, onGo){
+    dd.innerHTML = '<div class="al-head">' + escapeHtml(heading) + '</div>'
+      + (items.length ? items.map(function(a, i){
+          return '<div class="al-item al-' + (a.fresh ? 'fresh' : a.level) + '">'
+            + '<div class="al-t">' + escapeHtml(a.title) + '</div>'
+            + (a.detail ? ('<div class="al-d">' + escapeHtml(a.detail) + '</div>') : '')
+            + ((a.page || a.go) ? ('<button type="button" class="al-go" data-al="' + i + '">Open</button>') : '')
+            + '</div>';
+        }).join('') : ('<div class="al-empty">' + escapeHtml(empty) + '</div>'));
+    Array.prototype.forEach.call(dd.querySelectorAll('[data-al]'), function(b){
+      b.addEventListener('click', function(){ dd.classList.remove('open'); onGo(items[+b.getAttribute('data-al')]); });
+    });
+  }
+  function renderAlerts(){
+    var btn = document.getElementById('alertsBtn'), dd = document.getElementById('alertsDropdown');
+    var badge = document.getElementById('alertsCount');
+    if(!btn || !dd || !badge) return;
+    var items = adminAlerts();
+    var n = items.filter(function(a){ return a.level === 'warn'; }).length;
+    badge.textContent = n;
+    badge.style.display = n ? 'inline-block' : 'none';
+    btn.title = n ? (n + ' thing' + (n === 1 ? '' : 's') + ' need attention') : 'Nothing needs attention';
+    renderAlertList(dd, 'Needs attention', items, 'Nothing needs attention right now.', function(a){
+      if(a.view) REQ_VIEW = a.view;
+      var tab = document.querySelector('.page-tab[data-page="' + a.page + '"]');
+      if(tab) tab.click();
+    });
+  }
+
+  var NOTIF_SEEN = null;                     // when this person last opened their bell
+  function loadNotifSeen(){
+    return storage.get('notifSeenAt', false).then(function(res){
+      NOTIF_SEEN = (res && res.value) ? res.value : '';
+      renderEmpAlerts();
+    }).catch(function(){ NOTIF_SEEN = ''; });
+  }
+  function empAlerts(){
+    var name = viewRole && viewRole.name;
+    if(!name) return [];
+    var cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+    return leaveRequests.filter(function(r){
+      return r.empName === name && (r.status === 'approved' || r.status === 'rejected' || r.status === 'query')
+          && String(r.updatedAt || '') >= cutoff;
+    }).sort(function(a, b){ return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); })
+      .slice(0, 12).map(function(r){
+        var what = reqTypeName(r.leaveType, r.half) + ' · ' + fmtDateRange(r.dateFrom, r.dateTo);
+        var t = r.status === 'approved' ? ('Approved: ' + what)
+              : r.status === 'rejected' ? ('Not approved: ' + what)
+              : ('A question about: ' + what);
+        var d = r.status === 'query' ? ((r.adminNote ? ('“' + r.adminNote + '” ') : '') + 'Reply under My Requests.')
+              : (r.adminNote || '');
+        return { level:'info', fresh: NOTIF_SEEN !== null && String(r.updatedAt || '') > NOTIF_SEEN,
+                 title:t, detail:d, go:true };
+      });
+  }
+  function renderEmpAlerts(){
+    var btn = document.getElementById('empAlertsBtn'), dd = document.getElementById('empAlertsDropdown');
+    var badge = document.getElementById('empAlertsCount');
+    if(!btn || !dd || !badge) return;
+    var items = empAlerts();
+    var n = items.filter(function(a){ return a.fresh; }).length;
+    badge.textContent = n;
+    badge.style.display = n ? 'inline-block' : 'none';
+    renderAlertList(dd, 'Your requests', items, 'No decisions on your requests in the last 30 days.', function(){
+      var l = document.getElementById('myRequestsList');
+      if(l) try{ l.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
+    });
+  }
+  (function(){
+    function wire(btnId, ddId, onOpen){
+      var btn = document.getElementById(btnId), dd = document.getElementById(ddId);
+      if(!btn || !dd) return;
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        var opening = !dd.classList.contains('open');
+        if(opening && onOpen) onOpen();
+        dd.classList.toggle('open');
+        positionDropdown(btn, dd);
+      });
+      dd.addEventListener('click', function(e){ e.stopPropagation(); });
+      document.addEventListener('click', function(){ dd.classList.remove('open'); });
+    }
+    wire('alertsBtn', 'alertsDropdown', renderAlerts);
+    wire('empAlertsBtn', 'empAlertsDropdown', function(){
+      renderEmpAlerts();                                   // list shows what was new...
+      NOTIF_SEEN = new Date().toISOString();               // ...and opening it counts as seen
+      storage.set('notifSeenAt', NOTIF_SEEN, false).catch(function(){});
+      var badge = document.getElementById('empAlertsCount');
+      if(badge) badge.style.display = 'none';
+    });
+    loadNotifSeen();
+    loadDeviceStatus();
+    setInterval(loadDeviceStatus, 5 * 60 * 1000);
+    setInterval(function(){ try{ renderAlerts(); }catch(e){} }, 60 * 1000);   // the office-hours rule moves with the clock
+  })();
   function fmtDateRange(from, to){
     if(from===to) return from;
     return from + ' → ' + to;
@@ -7183,6 +7366,7 @@ function buildExcelBackup(){
     var name = viewRole && viewRole.name;
     var list = document.getElementById('myRequestsList');
     if(!name || !list) return;
+    try{ renderEmpAlerts(); }catch(e){}
     /* Only the month on screen. The list grows with every request ever made,
        and someone looking at August does not want March's leave in the way. */
     var ym = empCalMonth || defaultMonth;

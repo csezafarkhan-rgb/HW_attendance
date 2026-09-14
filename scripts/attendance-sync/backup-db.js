@@ -19,8 +19,12 @@ const DIR = path.join(DATA_DIR, 'db-backups');
 const KEEP = 30;
 const LOG = path.join(DATA_DIR, 'push-log.txt');
 
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
 function logLine(text) {
-  const line = new Date().toISOString().slice(0, 16).replace('T', ' ') + '  backup: ' + text;
+  const line = stamp() + '  backup: ' + text;
   console.log(line);
   try { fs.appendFileSync(LOG, line + '\r\n'); } catch (e) {}
 }

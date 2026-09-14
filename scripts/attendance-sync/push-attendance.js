@@ -22,8 +22,13 @@ const CSV = process.env.HW_CSV || path.join(DATA_DIR, '1_Daily Attendace file', 
 const TOKEN_FILE = process.env.HW_TOKEN_FILE || path.join(DATA_DIR, 'sync-token.txt');
 const LOG = path.join(DATA_DIR, 'push-log.txt');
 
+// Local time, like build-log.txt beside it (toISOString wrote UTC, 5h30 behind).
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
 function logLine(text) {
-  const line = new Date().toISOString().slice(0, 16).replace('T', ' ') + '  ' + text;
+  const line = stamp() + '  ' + text;
   console.log(line);
   try {
     fs.appendFileSync(LOG, line + '\r\n');
