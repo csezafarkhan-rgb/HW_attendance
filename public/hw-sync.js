@@ -46,7 +46,18 @@
      that will not be there tomorrow. A view-only account's refusals are left
      quiet: its editing controls are hidden already. */
   var noticeTimer = null;
+  // What a person calls each stored setting, for the notice.
+  var KEY_NAMES = {
+    overrides: 'the attendance marks', halfDays: 'the part-day leave', leaveRequests: 'the leave requests',
+    shiftAssignments: 'the shifts', dayShifts: 'the one-day shifts', satPolicy: 'the Saturday settings',
+    joinDates: 'the joining dates', salaries: 'the salaries', payRules: 'the pay rules',
+    officialLeaves: 'the holidays', manualRecords: 'the manual entries', lateExcuses: 'the late excuses',
+    earlyExcuses: 'the early excuses', mispunchFlags: 'the mispunch flags', leaveDeductions: 'the leave deductions',
+    manualLeave: 'the leave entered by hand', employeeOrder: 'the employee order', empNames: 'the display names',
+    companyInfo: 'the company details', signatures: 'the signatures', customShifts: 'the shift list'
+  };
   function saveFailed(what, e) {
+    what = KEY_NAMES[String(what).replace(/"/g, '')] || what;
     if (e && (e.status === 403 || e.message === 'not_authenticated')) return;
     try {
       var el = document.getElementById('hwSaveFailed');
@@ -61,21 +72,36 @@
         el.addEventListener('click', function () { el.style.display = 'none'; });
         document.body.appendChild(el);
       }
-      var why = (e && e.status === 413) ? 'it is too large for the server to store'
-              : (e && e.name === 'AbortError') ? 'the server did not answer in time'
-              : 'the server could not store it';
-      el.textContent = 'Not saved: the last change to ' + what + ' did not reach the server because ' + why
-        + '. Reload the page and check before making more changes.';
+      if (e && e.status === 409) {
+        el.textContent = 'Not saved: someone else changed ' + what + ' after this page loaded it, so saving '
+          + 'would have overwritten their change. Reload the page to see it, then make your change again.';
+      } else {
+        var why = (e && e.status === 413) ? 'it is too large for the server to store'
+                : (e && e.name === 'AbortError') ? 'the server did not answer in time'
+                : 'the server could not store it';
+        el.textContent = 'Not saved: the last change to ' + what + ' did not reach the server because ' + why
+          + '. Reload the page and check before making more changes.';
+      }
       el.style.display = 'block';
       clearTimeout(noticeTimer);
       noticeTimer = setTimeout(function () { el.style.display = 'none'; }, 20000);
     } catch (_) {}
   }
 
+  /* Versions of shared keys. serverVersions is what the server last said;
+     seen is what this page last actually read or wrote - the copy a save is
+     made from, so it is what the save sends as baseVersion. A background
+     refresh updates the first but not the second, or a stale page would look
+     up to date and overwrite someone's change without being refused. */
+  var serverVersions = Object.create(null);
+  var seen = Object.create(null);
+  var queues = Object.create(null);         // saves of one key, one after another
+
   window.HWSync = {
     hydrate: function () {
       return api('GET', '/api/kv-all').then(function (r) {
         cache = (r && r.values) || Object.create(null);
+        serverVersions = (r && r.versions) || Object.create(null);
         hydrated = true;
         return cache;
       });
@@ -104,25 +130,44 @@
     get: function (key, shared) {
       // Served from cache so boot stays fast; hydrate() ran before the app did.
       if (hydrated && Object.prototype.hasOwnProperty.call(cache, key)) {
+        if (serverVersions[key] != null) seen[key] = serverVersions[key];
         return Promise.resolve({ key: key, value: cache[key], shared: !!shared });
       }
       if (hydrated) return Promise.resolve(null);
-      return api('GET', '/api/kv/' + encodeURIComponent(key) + '?shared=' + (shared !== false));
+      return api('GET', '/api/kv/' + encodeURIComponent(key) + '?shared=' + (shared !== false))
+        .then(function (r) {
+          if (r && r.version != null && shared !== false) { seen[key] = r.version; serverVersions[key] = r.version; }
+          return r;
+        });
     },
 
     set: function (key, value, shared) {
       var v = String(value);
+      var isShared = shared !== false;
       var had = Object.prototype.hasOwnProperty.call(cache, key), before = cache[key];
       cache[key] = v;                       // optimistic, so the UI stays snappy
-      return api('PUT', '/api/kv/' + encodeURIComponent(key), { value: v, shared: shared !== false })
-        .then(function () { return { key: key, value: v, shared: !!shared }; })
-        .catch(function (e) {
-          /* Put back what was stored. Deleting it made the key read as empty
-             for the rest of the session, as though it had never been saved. */
-          if (had) cache[key] = before; else delete cache[key];
-          saveFailed('"' + key + '"', e);
-          throw e;
-        });
+      var run = function () {
+        var body = { value: v, shared: isShared };
+        if (isShared && seen[key] != null) body.baseVersion = seen[key];
+        return api('PUT', '/api/kv/' + encodeURIComponent(key), body)
+          .then(function (r) {
+            if (isShared && r && r.version != null) { seen[key] = r.version; serverVersions[key] = r.version; }
+            return { key: key, value: v, shared: !!shared };
+          })
+          .catch(function (e) {
+            /* Put back what was stored. Deleting it made the key read as empty
+               for the rest of the session, as though it had never been saved. */
+            if (had) cache[key] = before; else delete cache[key];
+            saveFailed('"' + key + '"', e);
+            throw e;
+          });
+      };
+      /* One save of a key at a time, each sending the version the previous one
+         returned. Two quick saves in a row would otherwise both send the same
+         base, and the second would be refused as a conflict with the first. */
+      var p = (queues[key] || Promise.resolve()).then(run, run);
+      queues[key] = p.catch(function () {});
+      return p;
     },
 
     delete: function (key, shared) {

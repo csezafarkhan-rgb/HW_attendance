@@ -54,25 +54,29 @@ function query(sql, p) {
     });
     return rows(new Array(n).fill({}));
   }
-  if (s.startsWith('SELECT key, value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL')) {
-    const r = kvFind(p[0], p[1], null); return rows(r ? [{ key: r.key, value: r.value }] : []);
+  if (s.startsWith('SELECT key, value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL')) {
+    const r = kvFind(p[0], p[1], null); return rows(r ? [{ key: r.key, value: r.value, version: r.version }] : []);
   }
-  if (s.startsWith('SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE')) {
-    const r = kvFind(p[0], p[1], null); return rows(r ? [{ value: r.value }] : []);
+  if (s.startsWith('SELECT value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE')) {
+    const r = kvFind(p[0], p[1], null); return rows(r ? [{ value: r.value, version: r.version }] : []);
   }
   if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'leaveRequests' AND user_id IS NULL")) {
     const r = kvFind(p[0], 'leaveRequests', null); return rows(r ? [{ value: r.value }] : []);
   }
-  if (s.startsWith('SELECT key, value FROM kv WHERE org_id = $1 AND key = $2 AND user_id = $3')) {
-    const r = kvFind(p[0], p[1], p[2]); return rows(r ? [{ key: r.key, value: r.value }] : []);
+  if (s.startsWith('SELECT key, value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id = $3')) {
+    const r = kvFind(p[0], p[1], p[2]); return rows(r ? [{ key: r.key, value: r.value, version: r.version }] : []);
   }
   if (s.startsWith('INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL')) {
-    const r = kvFind(p[0], p[1], null); if (r) r.value = p[2]; else db.kv.push({ org_id: p[0], user_id: null, key: p[1], value: p[2] });
-    return rows([]);
+    let r = kvFind(p[0], p[1], null);
+    if (r) { r.value = p[2]; r.version = String(Number(r.version) + 1); }   // pg returns bigint as text
+    else { r = { org_id: p[0], user_id: null, key: p[1], value: p[2], version: '1' }; db.kv.push(r); }
+    return rows([{ version: r.version }]);
   }
   if (s.startsWith('INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1,$2')) {
-    const r = kvFind(p[0], p[2], p[1]); if (r) r.value = p[3]; else db.kv.push({ org_id: p[0], user_id: p[1], key: p[2], value: p[3] });
-    return rows([]);
+    let r = kvFind(p[0], p[2], p[1]);
+    if (r) { r.value = p[3]; r.version = String(Number(r.version) + 1); }
+    else { r = { org_id: p[0], user_id: p[1], key: p[2], value: p[3], version: '1' }; db.kv.push(r); }
+    return rows([{ version: r.version }]);
   }
   if (s.startsWith('INSERT INTO change_log')) return rows([]);
   if (s.startsWith('INSERT INTO employees')) return rows([]);
@@ -85,10 +89,10 @@ function query(sql, p) {
   if (s.startsWith('SELECT key FROM kv WHERE org_id = $1 AND user_id IS NULL AND key LIKE $2')) {
     return rows(db.kv.filter(r => r.org_id === p[0] && r.user_id === null && r.key.startsWith(p[1].slice(0, -1))).map(r => ({ key: r.key })));
   }
-  if (s.startsWith('SELECT key, value, (user_id IS NULL) AS shared FROM kv')) {
+  if (s.startsWith('SELECT key, value, version, (user_id IS NULL) AS shared FROM kv')) {
     return rows(db.kv.filter(r => r.org_id === p[0] && (r.user_id === null || r.user_id === p[1]))
       .sort((a, b) => (a.user_id === null ? 0 : 1) - (b.user_id === null ? 0 : 1))
-      .map(r => ({ key: r.key, value: r.value, shared: r.user_id === null })));
+      .map(r => ({ key: r.key, value: r.value, version: r.version, shared: r.user_id === null })));
   }
   return Promise.reject(new Error('fake db: unhandled SQL: ' + s.slice(0, 120)));
 }
@@ -202,6 +206,22 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   await boss('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(staleAdmin), shared: true });
   const after = JSON.parse(db.kv.find(r => r.key === 'leaveRequests').value);
   check("admin's stale save keeps the request raised meanwhile", !!after.find(r => r.id === 'req_new_ok') && after.find(r => r.id === 'req_r1').status === 'approved', after.map(r => r.id + ':' + r.status));
+
+  // --- a save made from an older copy is refused ---
+  const v0 = (await boss('GET', '/api/kv/joinDates?shared=true')).body.version;
+  const bySecond = await second('PUT', '/api/kv/joinDates', { value: '{"Asha Test":"2026-02-01"}', shared: true, baseVersion: v0 });
+  check('save from the current version accepted, version bumped', bySecond.status === 200 && bySecond.body.version === v0 + 1, bySecond.body);
+  const stale = await boss('PUT', '/api/kv/joinDates', { value: '{"Asha Test":"2026-03-01"}', shared: true, baseVersion: v0 });
+  check('save from an older copy refused with 409 and the current version', stale.status === 409 && stale.body.error === 'conflict' && stale.body.version === v0 + 1, stale);
+  check("the other admin's change survives", JSON.parse(db.kv.find(r => r.key === 'joinDates').value)['Asha Test'] === '2026-02-01');
+  const retry = await boss('PUT', '/api/kv/joinDates', { value: '{"Asha Test":"2026-03-01"}', shared: true, baseVersion: v0 + 1 });
+  check('after reloading (current version) the save goes through', retry.status === 200 && retry.body.version === v0 + 2, retry.body);
+  const unversioned = await boss('PUT', '/api/kv/joinDates', { value: '{"Asha Test":"2026-01-01"}', shared: true });
+  check('a save without a version still works (older pages)', unversioned.status === 200, unversioned.status);
+  const kvAllV = (await boss('GET', '/api/kv-all')).body;
+  check('kv-all reports versions', kvAllV.versions && kvAllV.versions.joinDates === v0 + 3, kvAllV.versions);
+  const reqStale = await boss('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(JSON.parse(kvAllV.values.leaveRequests)), shared: true, baseVersion: 1 });
+  check('leaveRequests are merged, never refused as a conflict', reqStale.status === 200, reqStale.status);
 
   // --- role and active flag re-read on every request ---
   await boss('PATCH', '/api/users/2', { role: 'admin_view' });

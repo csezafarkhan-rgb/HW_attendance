@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS kv (
   key        TEXT NOT NULL,
   value      TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  version    BIGINT NOT NULL DEFAULT 1   -- bumped on every save; a stale save gets 409
 );
 -- One row per (org, key) for shared values, per (org, user, key) for personal.
 CREATE UNIQUE INDEX IF NOT EXISTS kv_shared_idx

@@ -45,6 +45,8 @@ const pool = new Pool({
   // to the current two-role model before the app starts using the Users panel.
   // Keep older databases compatible with the current user model.
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE');
+  // A shared value's version, so a save made from an older copy can be refused (409).
+  await pool.query('ALTER TABLE kv ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1');
   await pool.query("UPDATE users SET role = 'employee' WHERE org_id = $1 AND role IN ('viewer','editor')", [orgId]);
 
   /* Widen the constraint to the three-role model. Existing 'admin' rows are

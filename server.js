@@ -458,8 +458,8 @@ app.get('/api/kv/:key', requireAuth, async (req, res) => {
   const shared = req.query.shared !== 'false';
   const { rows } = await pool.query(
     shared
-      ? 'SELECT key, value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL'
-      : 'SELECT key, value FROM kv WHERE org_id = $1 AND key = $2 AND user_id = $3',
+      ? 'SELECT key, value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL'
+      : 'SELECT key, value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id = $3',
     shared ? [req.session.orgId, key] : [req.session.orgId, key, req.session.userId]
   );
   if (!rows[0]) return res.json(null);   // storage.get resolves null when absent
@@ -474,7 +474,7 @@ app.get('/api/kv/:key', requireAuth, async (req, res) => {
     value = valueForEmployee(key, value, (req.user && req.user.name) || '', requests);
     if (value === undefined) return res.json(null);
   }
-  res.json({ key: rows[0].key, value: value, shared });
+  res.json({ key: rows[0].key, value: value, shared, version: Number(rows[0].version) });
 });
 
 app.put('/api/kv/:key', requireAuth, async (req, res) => {
@@ -489,37 +489,54 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'read_only' });
   }
   let value = String((req.body && req.body.value) != null ? req.body.value : '');
+  /* The version of this key the page last read or wrote. Shared values are
+     whole JSON blobs, so two people saving one used to mean the second silently
+     replaced the first's change. A save made from an older copy is now refused
+     with 409 and the page says so. Omitted = the old unchecked save. */
+  const base = req.body && req.body.baseVersion;
+  const baseVersion = (typeof base === 'number' && Number.isFinite(base)) ? base : null;
+  let version = null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    if (shared && key === 'leaveRequests') {
-      // Locked, so two people saving requests at once are merged one after the other.
-      const cur = await client.query(
-        'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE',
-        [req.session.orgId, key]);
-      const stored = cur.rows[0] ? cur.rows[0].value : '[]';
-      if (req.session.role === 'employee') {
-        const merged = mergeEmployeeRequests(stored, value, (req.user && req.user.name) || '');
-        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_requests' }); }
-        value = merged;
-      } else {
-        value = keepNewerRequests(stored, value);
-      }
-    }
     if (shared) {
-      await client.query(
+      // Locked, so saves of one key happen one after the other.
+      const cur = await client.query(
+        'SELECT value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE',
+        [req.session.orgId, key]);
+      const row = cur.rows[0];
+      if (key === 'leaveRequests') {
+        // Merged on the server rather than refused - see mergeEmployeeRequests.
+        const stored = row ? row.value : '[]';
+        if (req.session.role === 'employee') {
+          const merged = mergeEmployeeRequests(stored, value, (req.user && req.user.name) || '');
+          if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_requests' }); }
+          value = merged;
+        } else {
+          value = keepNewerRequests(stored, value);
+        }
+      } else if (baseVersion !== null && row && Number(row.version) !== baseVersion) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'conflict', key, version: Number(row.version) });
+      }
+      const up = await client.query(
         `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, $4)
          ON CONFLICT (org_id, key) WHERE user_id IS NULL
-         DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+         DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by,
+                       version = kv.version + 1
+         RETURNING version`,
         [req.session.orgId, key, value, req.session.userId]
       );
+      version = Number(up.rows[0].version);
     } else {
-      await client.query(
+      const up = await client.query(
         `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1,$2,$3,$4,$2)
          ON CONFLICT (org_id, user_id, key) WHERE user_id IS NOT NULL
-         DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+         DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1
+         RETURNING version`,
         [req.session.orgId, req.session.userId, key, value]
       );
+      version = Number(up.rows[0].version);
     }
     if (shared) await logChange(client, req.session.orgId, 'kv', key, req.session.userId);
     await client.query('COMMIT');
@@ -529,7 +546,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   if (shared && req.session.role === 'employee') {
     value = valueForEmployee(key, value, (req.user && req.user.name) || '', null);
   }
-  res.json({ key, value, shared });
+  res.json({ key, value, shared, version });
 });
 
 app.delete('/api/kv/:key', requireAuth, async (req, res) => {
@@ -563,7 +580,7 @@ app.get('/api/kv', requireAuth, async (req, res) => {
 /* Bulk read — one request at boot instead of ~30 sequential gets. */
 app.get('/api/kv-all', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT key, value, (user_id IS NULL) AS shared FROM kv WHERE org_id = $1 AND (user_id IS NULL OR user_id = $2)
+    `SELECT key, value, version, (user_id IS NULL) AS shared FROM kv WHERE org_id = $1 AND (user_id IS NULL OR user_id = $2)
      ORDER BY (user_id IS NULL) DESC`,  // personal overrides shared
     [req.session.orgId, req.session.userId]
   );
@@ -571,13 +588,13 @@ app.get('/api/kv-all', requireAuth, async (req, res) => {
   const name = (req.user && req.user.name) || '';
   let requests = null;
   if (employee) rows.forEach(r => { if (r.shared && r.key === 'leaveRequests') requests = r.value; });
-  const out = {};
+  const out = {}, versions = {};
   rows.forEach(r => {
-    if (!employee || !r.shared) { out[r.key] = r.value; return; }
+    if (!employee || !r.shared) { out[r.key] = r.value; if (r.shared) versions[r.key] = Number(r.version); return; }
     const v = valueForEmployee(r.key, r.value, name, requests);
-    if (v !== undefined) out[r.key] = v;
+    if (v !== undefined) { out[r.key] = v; versions[r.key] = Number(r.version); }
   });
-  res.json({ values: out });
+  res.json({ values: out, versions });
 });
 
 /* ---------------- employees + records ---------------- */
