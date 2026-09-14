@@ -11,6 +11,7 @@
     "start": "node server.js",
     "migrate": "node migrate.js",
     "create-user": "node scripts/create-user.js",
+    "test": "node test/run-all.js",
     "test:api": "node test/api.test.js"
   },
   "dependencies": {

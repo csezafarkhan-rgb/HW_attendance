@@ -1,0 +1,35 @@
+# Runs on every push and pull request. A red cross on a commit in GitHub means
+# something below failed - open the run to see which check and why.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Syntax of every script, server access rules on an in-memory database,
+      # dashboard logic, and the office-PC helper's access rules.
+      - run: npm test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # public/index.html is what Render serves. It must be the build of src/,
+      # or a change to src/ never reaches staff.
+      - name: public/index.html is up to date with src/
+        run: |
+          python build.py
+          git diff --exit-code --stat -- public/index.html

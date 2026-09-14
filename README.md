@@ -57,6 +57,17 @@ For automatic first-admin creation:
     node scripts/create-user.js admin@local.test testpass123 admin
     npm start
 
+Run the checks that need no database. The same run happens on GitHub for every
+push (`.github/workflows/ci.yml`):
+
+    npm test
+
+It parses every script, runs `server.js` against an in-memory stand-in for
+Postgres to check the access rules, runs the dashboard's leave, request,
+restore and dataset logic, and checks the office-PC helper's access rules.
+CI also rebuilds `public/index.html` and fails if it differs from the committed
+file.
+
 Run the API tests (needs a reachable database):
 
     npm run test:api
