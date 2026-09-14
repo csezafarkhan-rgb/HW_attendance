@@ -7331,7 +7331,18 @@ function buildExcelBackup(){
         manual: true
       };
     }
-    return recIndex[emp+'|'+d] || null;
+    return satOffDay(emp, d, recIndex[emp+'|'+d] || null);
+  }
+  /* A Saturday is a weekly off for anyone whose Saturday is set to "Full day
+     off" in Shifts - the same as a Sunday. The punch file carries only the days
+     someone attended, so those Saturdays arrived with no row at all and showed
+     as a blank "-". An "Absent" with no punch on such a Saturday is the same day
+     misnamed. A Saturday they did come in keeps its punches. */
+  function satOffDay(emp, d, rec){
+    if(rec && !(rec.st === 'AB' && !rec['in'])) return rec;
+    if(new Date(d+'T00:00:00').getDay() !== 6) return rec;
+    if(getSatPolicy(emp).mode !== 'OFF') return rec;
+    return {e:emp, d:d, 'in':'', out:'', dur:'', late:'', early:'', st:'WO', c:0, satOff:true};
   }
   function getOverride(emp,d){ return overrides[emp+'|'+d] || null; }
 
