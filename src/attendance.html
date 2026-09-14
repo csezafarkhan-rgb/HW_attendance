@@ -2737,6 +2737,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <div class="month-dropdown" id="payRulesDropdown" style="min-width:300px;"></div>
     </div>
     <button class="month-btn" id="payLockBtn" style="display:none;">🔒 Lock month</button>
+    <button class="month-btn" id="payCsvBtn" title="One row per person for the month shown - for accounts or a bank upload">⬇ Pay CSV</button>
   </div>
   <div class="table-scroll"><div id="salaryWrap"></div></div>
 </div>
@@ -9188,6 +9189,34 @@ function buildExcelBackup(){
       };
     })();
     var rows = emps.map(function(e){ return computePay(e.name, ym); });
+    /* The month's pay as a CSV for accounts or a bank upload: the same figures
+       as the table and the slips, one row per person and a total. */
+    (function(){
+      var cb = document.getElementById('payCsvBtn');
+      if(!cb) return;
+      cb.onclick = function(){
+        var r2 = function(v){ return (Math.round((+v || 0) * 100) / 100).toFixed(2); };
+        var out = [['Employee code', 'Employee', 'Month', 'Monthly gross', 'Days in month', 'Days before joining',
+                    'Working days', 'Present', 'Leave', 'WFH', 'Unpaid days', 'Unpaid amount', 'Before-joining amount',
+                    'Overtime', 'PF', 'ESI', 'Other deduction', 'Total deductions', 'Net payable']];
+        var tot = { gross:0, lop:0, pre:0, ot:0, pf:0, esi:0, oth:0, ded:0, net:0 };
+        rows.forEach(function(r){
+          var e = employeesByName[r.emp] || {};
+          var st = r.stat || {};
+          out.push([e.code || '', dispName(r.emp), monthLabel(ym), r2(r.gross), r.calDays, r.preJoinDays || 0,
+                    r.workDays, r.presentDays, r.leaveDays, r.wfhDays, r.lop || 0, r2(r.lopAmt), r2(r.preJoinAmt),
+                    r2(r.otAmt), r2(st.pf), r2(st.esi), r2(st.other), r2(r.deduct), r2(r.net)]);
+          tot.gross += +r.gross || 0; tot.lop += +r.lopAmt || 0; tot.pre += +r.preJoinAmt || 0; tot.ot += +r.otAmt || 0;
+          tot.pf += +st.pf || 0; tot.esi += +st.esi || 0; tot.oth += +st.other || 0; tot.ded += +r.deduct || 0; tot.net += +r.net || 0;
+        });
+        out.push(['', 'TOTAL', monthLabel(ym), r2(tot.gross), '', '', '', '', '', '', '', r2(tot.lop), r2(tot.pre),
+                  r2(tot.ot), r2(tot.pf), r2(tot.esi), r2(tot.oth), r2(tot.ded), r2(tot.net)]);
+        // The byte-order mark makes Excel read the file as UTF-8, names included.
+        var blob = new Blob(['﻿' + rowsToCsv(out)], { type: 'text/csv;charset=utf-8' });
+        saveBlob(blob, 'payroll-' + ym + '.csv');
+        showUploadStatus('Pay for ' + monthLabel(ym) + ' exported: ' + rows.length + ' people, net total ₹' + r2(tot.net) + '.');
+      };
+    })();
     var tGross = 0, tDed = 0, tNet = 0, unset = 0, flagged = 0;
     rows.forEach(function(r){
       tGross += r.gross; tDed += r.deduct; tNet += r.net;
