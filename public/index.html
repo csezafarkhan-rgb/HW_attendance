@@ -525,9 +525,35 @@
     var fp = document.getElementById('lgFpNote');
     if (fp) fp.textContent = 'Forgot password? Contact Admin';
 
+    /* Two-step sign-in: after a right password on an account that has it on,
+       the same card asks for the code from the authenticator app. */
+    var codeField = document.getElementById('lgCode') ? document.getElementById('lgCodeField') : null;
+    var codeEl = document.getElementById('lgCode');
+    var userField = uEl ? uEl.closest('.lg-field') : null;
+    var codeMode = false;
+    function idleLabel() { return codeMode ? 'Verify' : 'Sign in'; }
+    function setCodeMode(on) {
+      codeMode = !!on;
+      if (userField) userField.style.display = on ? 'none' : '';
+      if (passField) passField.style.display = on ? 'none' : '';
+      if (rememberRow) rememberRow.style.display = on ? 'none' : '';
+      if (codeField) codeField.style.display = on ? '' : 'none';
+      if (backBtn) { backBtn.style.display = on ? '' : 'none'; if (on) backBtn.textContent = '← Start again'; }
+      if (sub) sub.textContent = on ? 'Enter the 6-digit code from your authenticator app, or one of your recovery codes'
+                                    : 'Sign in to open your dashboards';
+      if (btn) { btn.disabled = false; btn.textContent = idleLabel(); }
+      if (codeEl) codeEl.value = '';
+      if (on) { if (pEl) pEl.value = ''; setTimeout(function () { try { codeEl.focus(); } catch (e) {} }, 60); }
+    }
+    if (backBtn) backBtn.addEventListener('click', function () {
+      if (!codeMode) return;
+      clearError(); setCodeMode(false);
+      try { uEl.focus(); } catch (e) {}
+    });
+
     function showError(message) {
       if (errEl) { errEl.textContent = message; errEl.style.display = 'block'; }
-      if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+      if (btn) { btn.disabled = false; btn.textContent = idleLabel(); }
     }
     function clearError() {
       if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
@@ -566,9 +592,35 @@
         }
       });
     }
+    function submitCode() {
+      var code = ((codeEl && codeEl.value) || '').trim();
+      if (!code) return showError('Enter the code from your authenticator app.');
+      clearError();
+      if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+      apiJson('/api/login/two-step', { method: 'POST', body: JSON.stringify({ code: code }) })
+        .then(function (body) {
+          if (!body || !body.user) throw new Error('invalid_login_response');
+          var left = body.recoveryLeft;
+          codeMode = false;
+          enter(body.user);
+          if (typeof left === 'number') {
+            setTimeout(function () {
+              alert('You signed in with a recovery code. That code will not work again - ' + left +
+                    ' left.' + (left <= 3 ? ' Turn two-step sign-in off and on again under Users to get new codes.' : ''));
+            }, 900);
+          }
+        })
+        .catch(function (e) {
+          if (e && e.status === 429) return showError('Too many attempts. Try again in a few minutes.');
+          if (e && e.message === 'two_step_expired') { setCodeMode(false); return showError('That took too long, or too many codes were wrong. Sign in again.'); }
+          if (e && e.message === 'invalid_code') { if (codeEl) { codeEl.value = ''; try { codeEl.focus(); } catch (_) {} } return showError('That code is not right. Codes change every 30 seconds - use the one showing now.'); }
+          showError('Could not check the code. Please try again.');
+        });
+    }
     function submit(ev) {
       if (ev && ev.preventDefault) ev.preventDefault();
       if (btn && btn.disabled) return;
+      if (codeMode) return submitCode();
       var username = (uEl && uEl.value || '').trim();
       var password = (pEl && pEl.value) || '';
       if (!username || !password) return showError('Enter your username/email and password.');
@@ -579,6 +631,7 @@
         method: 'POST',
         body: JSON.stringify({ email: username, password: password, remember: remember })
       }).then(function (body) {
+        if (body && body.twoStep) return setCodeMode(true);
         if (!body || !body.user) throw new Error('invalid_login_response');
         enter(body.user);
       }).catch(function (e) {
@@ -604,6 +657,7 @@
     if (btn) btn.addEventListener('click', submit);
     if (form) form.addEventListener('submit', submit);
     if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
+    if (codeEl) codeEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
     if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
     if (outBtn) outBtn.addEventListener('click', function () { window.HWAuth.signOut(); });
 
@@ -651,6 +705,7 @@
       <form id="lgForm">
         <div class="lg-field"><label for="lgUser">Username</label><input id="lgUser" type="text" autocomplete="username" spellcheck="false" autocapitalize="none" autocorrect="off"></div>
         <div class="lg-field" id="lgPassField"><label for="lgPass">Password</label><div class="lg-pwwrap"><input id="lgPass" type="password" autocomplete="current-password"><button type="button" id="lgEye" tabindex="-1" aria-label="Show password">👁</button></div></div>
+        <div class="lg-field" id="lgCodeField" style="display:none"><label for="lgCode">Code from your authenticator app</label><input id="lgCode" type="text" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="12"></div>
         <div class="lg-row" id="lgRememberRow" style="display:none"><input id="lgRemember" type="checkbox"><label for="lgRemember">Keep me signed in for 30 days</label></div>
         <button id="lgBtn" type="button">Sign in</button>
         <button id="lgBack" type="button" style="display:none;background:none;border:0;color:#5B6472;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;">← Not you? Use a different name</button>
@@ -731,6 +786,7 @@
   <div id="usersModal">
     <div class="um-card">
       <div class="um-top"><h2>👥 Users &amp; Access</h2><button id="umClose" class="um-btn">✕ Close</button></div>
+      <div id="umTwoStep" class="um-addbox" style="display:none"></div>
       <div class="um-note">Accounts are stored securely in PostgreSQL. Create either an Admin account (full access) or an Employee account (their own attendance only). Passwords are never stored in plain text.</div>
       <div class="um-addbox">
         <div class="um-addrow">
@@ -3176,7 +3232,8 @@ function _initLoginGateReal(startWorkspace){
       invalid_email:'Enter a valid work email.', password_too_short:'Password must be at least 8 characters.',
       email_exists:'That email already has an account.', employee_name_required:'Employee name is required.',
       last_admin:'At least one active admin is required.', cannot_delete_self:'You cannot delete your own account.',
-      cannot_remove_own_admin:'You cannot remove your own admin access.', cannot_disable_self:'You cannot disable your own account.'
+      cannot_remove_own_admin:'You cannot remove your own admin access.', cannot_disable_self:'You cannot disable your own account.',
+      reset_own_two_step:'Switch your own two-step sign-in off under "Your sign-in" above.'
     };
     return map[m] || m;
   }
@@ -3213,6 +3270,16 @@ function _initLoginGateReal(startWorkspace){
         pwBtn.onclick=function(){ var v=pw.value||''; if(v.length<8){serverFlash('Password must be at least 8 characters.',false);return;} pwBtn.disabled=true; pwBtn.textContent='Saving…'; userApi('/api/users/'+u.id,{method:'PATCH',body:JSON.stringify({password:v})}).then(function(){pw.value='';pwBtn.disabled=false;pwBtn.textContent='Set password';serverFlash('Password updated for '+u.email+'.',true);}).catch(function(e){pwBtn.disabled=false;pwBtn.textContent='Set password';serverFlash(serverErrorMessage(e),false);}); };
         var del=document.createElement('button'); del.className='um-btn um-del'; del.textContent='Delete';
         del.onclick=function(){ if(del.dataset.armed!=='1'){del.dataset.armed='1';del.textContent='Sure?';setTimeout(function(){if(del.dataset.armed==='1'){del.dataset.armed='';del.textContent='Delete';}},3500);return;} del.disabled=true; userApi('/api/users/'+u.id,{method:'DELETE'}).then(function(){serverFlash('Deleted '+u.email+'.',true);serverRenderUsers();}).catch(function(e){del.disabled=false;del.dataset.armed='';del.textContent='Delete';serverFlash(serverErrorMessage(e),false);}); };
+        if(u.two_step){
+          var tsb=document.createElement('span'); tsb.className='um-rec'; tsb.textContent='2-step on'; tsb.title='Signs in with a password and a code from an authenticator app'; head.appendChild(tsb);
+          var meNow=window.HWAuth && window.HWAuth.user && window.HWAuth.user.id===u.id;
+          if(!meNow){
+            var tsr=document.createElement('button'); tsr.className='um-btn'; tsr.textContent='Reset 2-step';
+            tsr.title='For a lost phone: switches two-step off so they can sign in with the password and set it up again';
+            tsr.onclick=function(){ if(tsr.dataset.armed!=='1'){tsr.dataset.armed='1';tsr.textContent='Sure?';setTimeout(function(){if(tsr.dataset.armed==='1'){tsr.dataset.armed='';tsr.textContent='Reset 2-step';}},3500);return;} tsr.disabled=true; userApi('/api/users/'+u.id,{method:'PATCH',body:JSON.stringify({resetTwoStep:true})}).then(function(){serverFlash('Two-step sign-in switched off for '+u.email+'. They sign in with the password and can set it up again.',true);serverRenderUsers();}).catch(function(e){tsr.disabled=false;tsr.dataset.armed='';tsr.textContent='Reset 2-step';serverFlash(serverErrorMessage(e),false);}); };
+            head.appendChild(tsr);
+          }
+        }
         head.appendChild(role); head.appendChild(del); row.appendChild(head);
         var details=document.createElement('div'); details.className='um-pw'; details.appendChild(name); details.appendChild(active); details.appendChild(save); row.appendChild(details);
         if(u.role==='employee'){
@@ -3245,7 +3312,73 @@ function _initLoginGateReal(startWorkspace){
     var role=document.getElementById('umNewRole'), emp=document.getElementById('umNewAttEmp');
     function toggle(){ if(role && emp){ emp.style.display=role.value==='employee'?'':'none'; emp.placeholder=role.value==='employee'?'Employee name exactly as shown in Attendance':'Not required for admin'; } }
     if(role && !role.dataset.bound){role.dataset.bound='1';role.addEventListener('change',toggle);} toggle();
-    serverRenderUsers(); modal.style.display='flex';
+    serverRenderUsers(); renderTwoStep(); modal.style.display='flex';
+  }
+
+  /* Your own two-step sign-in: turn on (password, add the key to an app,
+     confirm with a code, save the recovery codes) or off (password and a code). */
+  function renderTwoStep(){
+    var box=document.getElementById('umTwoStep'); if(!box) return;
+    function el(tag, props, kids){ var e=document.createElement(tag); Object.keys(props||{}).forEach(function(k){ if(k==='style') e.style.cssText=props[k]; else e[k]=props[k]; }); (kids||[]).forEach(function(c){ if(c) e.appendChild(typeof c==='string'?document.createTextNode(c):c); }); return e; }
+    function msg(text, ok){ return el('div',{className:ok?'um-flash-ok':'',style:'display:block;margin-top:8px;font-size:12.5px;'+(ok?'':'color:#B42318;'),textContent:text}); }
+    function errText(e){ var m=e&&e.message; return m==='invalid_credentials'?'That password is not right.':m==='invalid_code'?'That code is not right. Use the one showing in the app now.':m==='already_enabled'?'Two-step sign-in is already on.':(m||'Something went wrong.'); }
+    box.style.display='block';
+    box.innerHTML='';
+    box.appendChild(el('div',{style:'font-weight:800;margin-bottom:4px;',textContent:'🔐 Your sign-in'}));
+    var body=el('div',{textContent:'Loading…',className:'um-note'}); box.appendChild(body);
+    userApi('/api/two-step').then(function(st){
+      body.innerHTML='';
+      if(st.enabled){
+        body.appendChild(el('div',{textContent:'Two-step sign-in is on: a password alone cannot open your account. '+st.recoveryLeft+' recovery code'+(st.recoveryLeft===1?'':'s')+' left.'}));
+        var off=el('button',{className:'um-btn',textContent:'Turn off'}); body.appendChild(el('div',{className:'um-pw',style:'margin-top:6px'},[off]));
+        off.onclick=function(){
+          var pw=el('input',{type:'password',className:'um-pwin',placeholder:'your password',autocomplete:'current-password'});
+          var code=el('input',{type:'text',className:'um-pwin',placeholder:'code from the app',inputMode:'numeric',autocomplete:'one-time-code'});
+          var go=el('button',{className:'um-btn um-del',textContent:'Turn off two-step'});
+          var row=el('div',{className:'um-pw'},[pw,code,go]); off.parentNode.replaceWith(row); pw.focus();
+          go.onclick=function(){ go.disabled=true; userApi('/api/two-step/disable',{method:'POST',body:JSON.stringify({password:pw.value,code:code.value})}).then(function(){ renderTwoStep(); serverRenderUsers(); serverFlash('Two-step sign-in is off for your account.',true); }).catch(function(e){ go.disabled=false; var old=row.nextSibling; if(old&&old.className!=='um-pw') old.remove(); row.after(msg(errText(e),false)); }); };
+        };
+        return;
+      }
+      body.appendChild(el('div',{textContent:'Two-step sign-in is off. Turn it on so a stolen or guessed password alone cannot open the admin side. You need an authenticator app on your phone (Google Authenticator, Microsoft Authenticator or similar).'}));
+      var on=el('button',{className:'um-btn um-add',textContent:'Turn on'}); body.appendChild(el('div',{className:'um-pw',style:'margin-top:6px'},[on]));
+      on.onclick=function(){
+        var pw=el('input',{type:'password',className:'um-pwin',placeholder:'your password',autocomplete:'current-password'});
+        var next=el('button',{className:'um-btn um-add',textContent:'Continue'});
+        var row=el('div',{className:'um-pw'},[pw,next]); on.parentNode.replaceWith(row); pw.focus();
+        var err=null;
+        next.onclick=function(){
+          next.disabled=true;
+          userApi('/api/two-step/setup',{method:'POST',body:JSON.stringify({password:pw.value})}).then(function(s){
+            body.innerHTML='';
+            var key=s.secret.replace(/(.{4})/g,'$1 ').trim();
+            body.appendChild(el('div',{textContent:'1. In the authenticator app, add an account and choose "Enter a setup key". Account: HW Attendance. Key:'}));
+            body.appendChild(el('div',{style:'font:700 15px/1.5 ui-monospace,Consolas,monospace;letter-spacing:.5px;margin:6px 0;user-select:all;word-break:break-all;',textContent:key}));
+            body.appendChild(el('div',{style:'font-size:12px;margin-bottom:8px;'},['On this phone? ', el('a',{href:s.uri,textContent:'Open it in the authenticator app'}),' instead.']));
+            body.appendChild(el('div',{textContent:'2. Type the 6-digit code the app now shows:'}));
+            var code=el('input',{type:'text',className:'um-pwin',placeholder:'123456',inputMode:'numeric',autocomplete:'one-time-code',maxLength:6});
+            var confirm=el('button',{className:'um-btn um-add',textContent:'Confirm and turn on'});
+            var crow=el('div',{className:'um-pw',style:'margin-top:6px'},[code,confirm]); body.appendChild(crow); code.focus();
+            confirm.onclick=function(){
+              confirm.disabled=true;
+              userApi('/api/two-step/enable',{method:'POST',body:JSON.stringify({code:code.value})}).then(function(r){
+                body.innerHTML='';
+                body.appendChild(el('div',{style:'font-weight:700;color:#0F6B3A;',textContent:'✓ Two-step sign-in is on. Other devices signed in to your account have been signed out.'}));
+                body.appendChild(el('div',{style:'margin-top:6px',textContent:'Save these recovery codes somewhere safe (not on the same phone). Each one works once, in place of a code, if the phone is lost. They are not shown again.'}));
+                var list=el('div',{style:'font:700 14px/1.7 ui-monospace,Consolas,monospace;display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:2px 14px;margin:8px 0;user-select:all;'});
+                r.recoveryCodes.forEach(function(c){ list.appendChild(el('div',{textContent:c})); });
+                body.appendChild(list);
+                var copy=el('button',{className:'um-btn',textContent:'Copy codes'});
+                copy.onclick=function(){ try{ navigator.clipboard.writeText(r.recoveryCodes.join('\n')).then(function(){ copy.textContent='Copied ✓'; }); }catch(_){} };
+                var done=el('button',{className:'um-btn',textContent:'I saved them'});
+                done.onclick=function(){ renderTwoStep(); serverRenderUsers(); };
+                body.appendChild(el('div',{className:'um-pw'},[copy,done]));
+              }).catch(function(e){ confirm.disabled=false; if(err) err.remove(); err=msg(errText(e),false); crow.after(err); code.value=''; code.focus(); });
+            };
+          }).catch(function(e){ next.disabled=false; if(err) err.remove(); err=msg(errText(e),false); row.after(err); });
+        };
+      };
+    }).catch(function(){ box.style.display='none'; });
   }
 
   /* The legacy login initializer is no longer executed in production; therefore

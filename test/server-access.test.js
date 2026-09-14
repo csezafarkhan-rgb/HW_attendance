@@ -99,6 +99,8 @@ function query(sql, p) {
     return rows(db.users.filter(u => u.email === p[0] || u.email.split('@')[0] === p[0]));
   }
   if (s.startsWith('UPDATE users SET last_login_at')) return rows([]);
+  if (s.startsWith('SELECT totp_enabled, totp_secret, totp_last_step, totp_recovery FROM users WHERE id = $1')) return rows(db.users.filter(u => u.id === p[0]));
+  if (s.startsWith('SELECT id, email, name, role, org_id FROM users WHERE id = $1 AND is_active = TRUE')) return rows(db.users.filter(u => u.id === p[0] && u.is_active));
   if (s.startsWith('SELECT password_hash FROM users WHERE id = $1')) return rows(db.users.filter(u => u.id === p[0]));
   if (s.startsWith('UPDATE users SET password_hash = $1 WHERE id = $2')) { db.users.find(u => u.id === p[1]).password_hash = p[0]; return rows([]); }
   if (s.startsWith('SELECT id, role, is_active FROM users WHERE id = $1 AND org_id = $2')) return rows(db.users.filter(u => u.id === p[0] && u.org_id === p[1]));
@@ -179,11 +181,11 @@ Module._load = function (request, parent, isMain) {
 };
 
 // ---------------- http helpers ----------------
-function client() {
+function client(ip) {
   let cookie = '';
   return async function call(method, url, body) {
     const res = await fetch(base + url, {
-      method, headers: Object.assign({ 'content-type': 'application/json' }, cookie ? { cookie } : {}),
+      method, headers: Object.assign({ 'content-type': 'application/json' }, cookie ? { cookie } : {}, ip ? { 'x-forwarded-for': ip } : {}),
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     const sc = res.headers.get('set-cookie');
@@ -430,6 +432,65 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   let blocked = 0;
   for (let i = 0; i < 21; i++) { const c = client(); if ((await c('POST', '/api/login', { email: 'ravi@x.com', password: 'wrong' })).status === 429) blocked++; }
   check('failures still limited (21st refused)', blocked === 1, blocked);
+
+  // --- two-step sign-in (from another address: the one above is now limited) ---
+  const totp = require(path.join(REPO, 'totp.js'));
+  const IP = '10.0.0.7';
+  const sec = client(IP);
+  await sec('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  check('turning it on asks for the password', (await sec('POST', '/api/two-step/setup', { password: 'nope' })).status === 401);
+  const setup = await sec('POST', '/api/two-step/setup', { password: 'password123' });
+  check('setup gives a key and an app link', setup.status === 200 && /^[A-Z2-7]{32}$/.test(setup.body.secret) && /^otpauth:\/\/totp\//.test(setup.body.uri), setup.body);
+  const key = setup.body.secret;
+  check('not in force before a code confirms it', db.users[1].totp_enabled !== true);
+  check('a wrong code does not turn it on', (await sec('POST', '/api/two-step/enable', { code: '000000' })).status === 401);
+  const nowStep = totp.stepNow();
+  const en = await sec('POST', '/api/two-step/enable', { code: totp.codeAt(key, nowStep) });
+  check('a code from the app turns it on, with 10 recovery codes', en.status === 200 && en.body.recoveryCodes.length === 10 && db.users[1].totp_enabled === true, en.body);
+  check('recovery codes are stored only as hashes', !en.body.recoveryCodes.some(c => String(db.users[1].totp_recovery).includes(c)));
+  check('employees cannot turn it on', (await ravi('POST', '/api/two-step/setup', { password: 'password123' })).status === 403);
+
+  const s2 = client(IP);
+  const pw = await s2('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  check('the right password alone asks for a code', pw.status === 200 && pw.body.twoStep === true && !pw.body.user, pw.body);
+  check('...and is not signed in yet', (await s2('GET', '/api/me')).status === 401 && (await s2('GET', '/api/kv-all')).status === 401);
+  check('the code already used cannot be used again', (await s2('POST', '/api/login/two-step', { code: totp.codeAt(key, nowStep) })).body.error === 'invalid_code');
+  const ok2 = await s2('POST', '/api/login/two-step', { code: totp.codeAt(key, nowStep + 1) });
+  check('the current code signs in', ok2.status === 200 && ok2.body.user && ok2.body.user.email === 'second@x.com', ok2.body);
+  check('...and the session works', (await s2('GET', '/api/me')).status === 200);
+
+  const s3 = client(IP);
+  await s3('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  const rc = await s3('POST', '/api/login/two-step', { code: en.body.recoveryCodes[0].toUpperCase() });
+  check('a recovery code signs in once, and says how many are left', rc.status === 200 && rc.body.recoveryLeft === 9, rc.body);
+  const s4 = client(IP);
+  await s4('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  check('the same recovery code does not work twice', (await s4('POST', '/api/login/two-step', { code: en.body.recoveryCodes[0] })).status === 401);
+  let last = null;
+  for (let i = 0; i < 4; i++) last = await s4('POST', '/api/login/two-step', { code: '111111' });
+  check('five wrong codes end the attempt', last.body.error === 'two_step_expired', last.body);
+  check('...and then even a right code needs the password again', (await s4('POST', '/api/login/two-step', { code: totp.codeAt(key, nowStep + 1) })).body.error === 'two_step_expired');
+  check('no code step without the password first', (await client(IP)('POST', '/api/login/two-step', { code: '123456' })).body.error === 'two_step_expired');
+  const st = await s2('GET', '/api/two-step');
+  check('status shows on, 9 codes left', st.body.enabled === true && st.body.recoveryLeft === 9, st.body);
+
+  const self = await boss('PATCH', '/api/users/1', { resetTwoStep: true });
+  check('a super admin cannot reset their own two-step from the list', self.status === 400, self);
+  check('employees cannot reset anyone', (await ravi('PATCH', '/api/users/2', { resetTwoStep: true })).status === 403);
+  const rs = await boss('PATCH', '/api/users/2', { resetTwoStep: true });
+  check('another super admin can reset it (lost phone)', rs.status === 200 && db.users[1].totp_enabled === false && !db.users[1].totp_secret);
+  check('...which signs them out', (await s2('GET', '/api/me')).status === 401);
+  const plain = await client(IP)('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  check('...and they sign in with the password again', plain.status === 200 && plain.body.user, plain.body);
+
+  const b2 = client(IP);
+  const bl = await b2('POST', '/api/login', { email: 'boss@x.com', password: 'newpassword1' });  // changed earlier in this test
+  const bs = await b2('POST', '/api/two-step/setup', { password: 'newpassword1' });
+  const be = await b2('POST', '/api/two-step/enable', { code: totp.codeAt(bs.body.secret, totp.stepNow()) });
+  const bd = await b2('POST', '/api/two-step/disable', { password: 'newpassword1', code: '000000' });
+  check('turning it off needs a code', bd.status === 401 && bd.body.error === 'invalid_code' && db.users[0].totp_enabled === true, [bl, bs, be, bd]);
+  const off = await b2('POST', '/api/two-step/disable', { password: 'newpassword1', code: totp.codeAt(bs.body.secret, totp.stepNow() + 1) });
+  check('password and a code turn it off', off.status === 200 && db.users[0].totp_enabled === false, off.body);
 
   srv.close();
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

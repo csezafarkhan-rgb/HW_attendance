@@ -49,6 +49,11 @@ For automatic first-admin creation:
 - `ADMIN_NAME=<optional display name>`
 - `ORG_NAME=<optional organization name>`
 
+Occasional:
+
+- `SYNC_TOKEN=<long random string>` lets the office PC upload attendance and take backups (`scripts/attendance-sync/README.md`)
+- `RESET_TWO_STEP=<email>` switches that account's two-step sign-in off on the next deploy; remove it afterwards
+
 ## Local development
 
     npm install
@@ -116,6 +121,22 @@ Employees are limited by the server, not only by what the page shows:
 - **Save conflicts**: shared values carry a version; a save made from an older copy
   than the server's is refused (409) and the page asks the person to reload.
 
+## Two-step sign-in
+
+Admins can turn on two-step sign-in for their own account: **Users → Your sign-in
+→ Turn on**. After the password, sign-in asks for the 6-digit code from an
+authenticator app (Google Authenticator, Microsoft Authenticator or similar).
+
+- Turning it on asks for the password, shows a setup key for the app, and is only
+  in force once a code from the app confirms it. Other devices are then signed out.
+- Ten **recovery codes** are shown once. Each works one time in place of a code.
+- A lost phone: another super admin clicks **Reset 2-step** on that account in
+  the Users list; the person signs in with the password and sets it up again.
+- The only super admin lost both phone and recovery codes: set
+  `RESET_TWO_STEP=<their email>` in Render, deploy, sign in, then remove the variable.
+- Codes are checked on the server (`totp.js`, RFC 6238); a code cannot be reused,
+  five wrong codes end the attempt, and recovery codes are stored only as hashes.
+
 ## Security notes
 
 - **Keep the repo private.** Employee names and attendance times are personal data.
@@ -149,6 +170,10 @@ another user edits something, skipping the current user's own echoes.
 | POST | `/api/logout` | |
 | GET | `/api/me` | current user |
 | POST | `/api/change-password` | |
+| POST | `/api/login/two-step` | the code, after a password that answered `twoStep: true` |
+| GET | `/api/two-step` | own status |
+| POST | `/api/two-step/setup`, `/enable`, `/disable` | admins, own account |
+| GET/POST | `/api/client-errors` | page script errors (read: admins) |
 | GET | `/api/users` | admin and view-admin |
 | POST/PATCH/DELETE | `/api/users` | super admin only |
 | GET | `/api/kv-all` | bulk hydrate at boot |

@@ -16,6 +16,7 @@ const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const totp = require('./totp');
 
 const PORT = process.env.PORT || 3000;
 const REMEMBER_MS = 1000 * 60 * 60 * 24 * 30;   // "keep me signed in" window
@@ -406,11 +407,28 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   if (!u || !u.is_active || !(await bcrypt.compare(password, u.password_hash))) {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
+  const ts = await twoStepOf(u.id);
   // A new session id at sign-in, so a cookie planted beforehand is not the one
   // that ends up signed in.
-  await new Promise(function (resolve, reject) {
+  await regenerateSession(req);
+  const remember = !!(req.body && req.body.remember);
+  if (ts.enabled) {
+    /* The password was right, but this session is not signed in until the code
+       from the authenticator app is given too. Nothing but POST
+       /api/login/two-step reads this. */
+    req.session.pendingTwoStep = { userId: u.id, at: Date.now(), tries: 0, remember };
+    return res.json({ twoStep: true });
+  }
+  await finishLogin(req, u, remember);
+  res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name, role: u.role } });
+});
+
+function regenerateSession(req) {
+  return new Promise(function (resolve, reject) {
     req.session.regenerate(function (err) { return err ? reject(err) : resolve(); });
   });
+}
+async function finishLogin(req, u, remember) {
   req.session.userId = u.id;
   req.session.orgId = u.org_id;
   req.session.role = u.role;
@@ -418,13 +436,127 @@ app.post('/api/login', loginLimiter, async (req, res) => {
      Unchecked means a browser-session cookie, so a shared machine does not stay
      signed in after the window is closed. The password is never stored either
      way - this only extends the server session. */
-  if (req.body && req.body.remember) {
+  if (remember) {
     req.session.cookie.maxAge = REMEMBER_MS;
   } else {
     req.session.cookie.expires = false;
   }
   await pool.query('UPDATE users SET last_login_at = now() WHERE id = $1', [u.id]);
-  res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name, role: u.role } });
+}
+
+/* ---------------- two-step sign-in ----------------
+   Optional, per account: after the password, a 6-digit code from an
+   authenticator app. Ten one-time recovery codes cover a lost phone; after
+   that another super admin can switch it off for the account (Users panel),
+   and if the only super admin is locked out, RESET_TWO_STEP=<email> in Render
+   switches it off on the next deploy (migrate.js). */
+const TWO_STEP_ROLES = ['admin', 'admin_view'];
+const PENDING_TWO_STEP_MS = 5 * 60 * 1000;
+async function twoStepOf(userId) {
+  const { rows } = await pool.query(
+    'SELECT totp_enabled, totp_secret, totp_last_step, totp_recovery FROM users WHERE id = $1', [userId]);
+  const r = rows[0] || {};
+  const recovery = parseJson(r.totp_recovery);
+  return {
+    enabled: !!r.totp_enabled,
+    secret: r.totp_secret || null,
+    lastStep: r.totp_last_step == null ? null : Number(r.totp_last_step),
+    recovery: Array.isArray(recovery) ? recovery : []
+  };
+}
+/* A code from the app, or a recovery code. What to write back when it passes:
+   the step used (so it cannot be replayed) or the recovery codes left. */
+function checkTwoStepCode(ts, code) {
+  const step = totp.verify(ts.secret, code, ts.lastStep);
+  if (step !== -1) return { ok: true, step, recovery: ts.recovery, usedRecovery: false };
+  const left = totp.useRecovery(ts.recovery, code);
+  if (left) return { ok: true, step: ts.lastStep, recovery: left, usedRecovery: true };
+  return { ok: false };
+}
+async function saveTwoStepUse(userId, orgId, result) {
+  await pool.query(
+    'UPDATE users SET totp_last_step = $1, totp_recovery = $2 WHERE id = $3 AND org_id = $4',
+    [result.step, JSON.stringify(result.recovery), userId, orgId]);
+}
+
+app.post('/api/login/two-step', loginLimiter, async (req, res) => {
+  const pending = req.session && req.session.pendingTwoStep;
+  if (!pending || Date.now() - pending.at > PENDING_TWO_STEP_MS) {
+    if (req.session) delete req.session.pendingTwoStep;
+    return res.status(401).json({ error: 'two_step_expired' });
+  }
+  const { rows } = await pool.query(
+    'SELECT id, email, name, role, org_id FROM users WHERE id = $1 AND is_active = TRUE', [pending.userId]);
+  const u = rows[0];
+  if (!u) { delete req.session.pendingTwoStep; return res.status(401).json({ error: 'two_step_expired' }); }
+  const ts = await twoStepOf(u.id);
+  const result = ts.enabled ? checkTwoStepCode(ts, req.body && req.body.code) : { ok: false };
+  if (!result.ok) {
+    pending.tries = (pending.tries || 0) + 1;
+    if (pending.tries >= 5) {
+      delete req.session.pendingTwoStep;
+      return res.status(401).json({ error: 'two_step_expired' });
+    }
+    return res.status(401).json({ error: 'invalid_code', triesLeft: 5 - pending.tries });
+  }
+  await saveTwoStepUse(u.id, u.org_id, result);
+  await regenerateSession(req);
+  await finishLogin(req, u, !!pending.remember);
+  res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name, role: u.role },
+             recoveryLeft: result.usedRecovery ? result.recovery.length : undefined });
+});
+
+app.get('/api/two-step', requireAuth, async (req, res) => {
+  const ts = await twoStepOf(req.session.userId);
+  res.json({ enabled: ts.enabled, recoveryLeft: ts.enabled ? ts.recovery.length : 0,
+             available: TWO_STEP_ROLES.includes(req.session.role) });
+});
+
+/* Step 1 of turning it on: the password again, then a new secret for the app.
+   It is not in force until a code from the app proves the app has it. */
+app.post('/api/two-step/setup', requireRole(...TWO_STEP_ROLES), async (req, res) => {
+  const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
+  if (!rows[0] || !(await bcrypt.compare(String((req.body && req.body.password) || ''), rows[0].password_hash))) {
+    return res.status(401).json({ error: 'invalid_credentials' });
+  }
+  const ts = await twoStepOf(req.session.userId);
+  if (ts.enabled) return res.status(409).json({ error: 'already_enabled' });
+  const secret = totp.newSecret();
+  await pool.query('UPDATE users SET totp_secret = $1 WHERE id = $2 AND org_id = $3',
+    [secret, req.session.userId, req.session.orgId]);
+  const me = await pool.query('SELECT id, email, name, role, org_id FROM users WHERE id = $1 AND is_active = TRUE', [req.session.userId]);
+  const account = (me.rows[0] && me.rows[0].email) || 'account';
+  res.json({ secret, uri: totp.otpauthUri(secret, account, 'HW Attendance') });
+});
+
+// Step 2: a code from the app. Returns the recovery codes, shown this once.
+app.post('/api/two-step/enable', requireRole(...TWO_STEP_ROLES), async (req, res) => {
+  const ts = await twoStepOf(req.session.userId);
+  if (ts.enabled) return res.status(409).json({ error: 'already_enabled' });
+  if (!ts.secret) return res.status(400).json({ error: 'setup_first' });
+  const step = totp.verify(ts.secret, req.body && req.body.code, null);
+  if (step === -1) return res.status(401).json({ error: 'invalid_code' });
+  const codes = totp.newRecoveryCodes(10);
+  await pool.query(
+    'UPDATE users SET totp_enabled = $1, totp_last_step = $2, totp_recovery = $3 WHERE id = $4 AND org_id = $5',
+    [true, step, JSON.stringify(codes.map(totp.hashRecovery)), req.session.userId, req.session.orgId]);
+  await endSessions(req.session.userId, req.sessionID);   // other devices sign in again, with a code
+  res.json({ ok: true, recoveryCodes: codes });
+});
+
+// Switching it off asks for the password and a current code (or a recovery code).
+app.post('/api/two-step/disable', requireAuth, async (req, res) => {
+  const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
+  if (!rows[0] || !(await bcrypt.compare(String((req.body && req.body.password) || ''), rows[0].password_hash))) {
+    return res.status(401).json({ error: 'invalid_credentials' });
+  }
+  const ts = await twoStepOf(req.session.userId);
+  if (!ts.enabled) return res.json({ ok: true });
+  if (!checkTwoStepCode(ts, req.body && req.body.code).ok) return res.status(401).json({ error: 'invalid_code' });
+  await pool.query(
+    'UPDATE users SET totp_enabled = $1, totp_secret = $2, totp_last_step = $3, totp_recovery = $4 WHERE id = $5 AND org_id = $6',
+    [false, null, null, null, req.session.userId, req.session.orgId]);
+  res.json({ ok: true });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -462,7 +594,7 @@ app.post('/api/change-password', requireAuth, async (req, res) => {
 
 app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, email, name, role, is_active, last_login_at, created_at
+    `SELECT id, email, name, role, is_active, last_login_at, created_at, totp_enabled AS two_step
        FROM users WHERE org_id = $1 ORDER BY email`,
     [req.session.orgId]
   );
@@ -494,8 +626,21 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
 
 app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { role, is_active, password, name } = req.body || {};
+  const { role, is_active, password, name, resetTwoStep } = req.body || {};
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  /* Another super admin's lost phone: switch two-step off for them, so they
+     can sign in with the password and set it up again. Your own account is
+     switched off from "Your sign-in", which asks for a code. */
+  if (resetTwoStep === true) {
+    if (id === req.session.userId) return res.status(400).json({ error: 'reset_own_two_step' });
+    const t = await pool.query('SELECT id, role, is_active FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
+    if (!t.rows[0]) return res.status(404).json({ error: 'not_found' });
+    await pool.query(
+      'UPDATE users SET totp_enabled = $1, totp_secret = $2, totp_last_step = $3, totp_recovery = $4 WHERE id = $5 AND org_id = $6',
+      [false, null, null, null, id, req.session.orgId]);
+    await endSessions(id, '');
+    return res.json({ ok: true });
+  }
   const currentQ = await pool.query('SELECT id, role, is_active FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
   if (!currentQ.rows[0]) return res.status(404).json({ error: 'not_found' });
   if (id === req.session.userId && role !== undefined && role !== 'admin') return res.status(400).json({ error: 'cannot_remove_own_admin' });

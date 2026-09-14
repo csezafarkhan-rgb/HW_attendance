@@ -47,6 +47,22 @@ const pool = new Pool({
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE');
   // A shared value's version, so a save made from an older copy can be refused (409).
   await pool.query('ALTER TABLE kv ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1');
+  // Two-step sign-in (totp.js).
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT');
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE');
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT');
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery TEXT');
+  /* The last way back in: the only super admin lost the phone and the recovery
+     codes. Set RESET_TWO_STEP to their email in Render, deploy, sign in with
+     the password, then remove the variable. */
+  const resetEmail = (process.env.RESET_TWO_STEP || '').trim().toLowerCase();
+  if (resetEmail) {
+    const r = await pool.query(
+      'UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_last_step = NULL, totp_recovery = NULL WHERE lower(email) = $1 RETURNING id',
+      [resetEmail]);
+    console.log(r.rowCount ? 'two-step sign-in switched off for ' + resetEmail + ' - remove RESET_TWO_STEP now'
+                           : 'RESET_TWO_STEP: no account with that email');
+  }
   await pool.query("UPDATE users SET role = 'employee' WHERE org_id = $1 AND role IN ('viewer','editor')", [orgId]);
 
   /* Widen the constraint to the three-role model. Existing 'admin' rows are

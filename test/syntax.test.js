@@ -25,7 +25,7 @@ function inlineScripts(file) {
 }
 inlineScripts('src/attendance.html');
 inlineScripts('src/shell.template.html');
-['server.js', 'migrate.js', 'public/hw-sync.js', 'public/hw-auth.js',
+['server.js', 'migrate.js', 'totp.js','public/hw-sync.js', 'public/hw-auth.js',
  'scripts/create-user.js', 'scripts/attendance-sync/sync-service.js',
  'scripts/attendance-sync/push-attendance.js', 'scripts/attendance-sync/backup-db.js',
  'scripts/attendance-sync/dashboard-parser.js'].forEach(function (f) {

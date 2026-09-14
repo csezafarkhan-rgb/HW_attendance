@@ -102,9 +102,35 @@
     var fp = document.getElementById('lgFpNote');
     if (fp) fp.textContent = 'Forgot password? Contact Admin';
 
+    /* Two-step sign-in: after a right password on an account that has it on,
+       the same card asks for the code from the authenticator app. */
+    var codeField = document.getElementById('lgCode') ? document.getElementById('lgCodeField') : null;
+    var codeEl = document.getElementById('lgCode');
+    var userField = uEl ? uEl.closest('.lg-field') : null;
+    var codeMode = false;
+    function idleLabel() { return codeMode ? 'Verify' : 'Sign in'; }
+    function setCodeMode(on) {
+      codeMode = !!on;
+      if (userField) userField.style.display = on ? 'none' : '';
+      if (passField) passField.style.display = on ? 'none' : '';
+      if (rememberRow) rememberRow.style.display = on ? 'none' : '';
+      if (codeField) codeField.style.display = on ? '' : 'none';
+      if (backBtn) { backBtn.style.display = on ? '' : 'none'; if (on) backBtn.textContent = '← Start again'; }
+      if (sub) sub.textContent = on ? 'Enter the 6-digit code from your authenticator app, or one of your recovery codes'
+                                    : 'Sign in to open your dashboards';
+      if (btn) { btn.disabled = false; btn.textContent = idleLabel(); }
+      if (codeEl) codeEl.value = '';
+      if (on) { if (pEl) pEl.value = ''; setTimeout(function () { try { codeEl.focus(); } catch (e) {} }, 60); }
+    }
+    if (backBtn) backBtn.addEventListener('click', function () {
+      if (!codeMode) return;
+      clearError(); setCodeMode(false);
+      try { uEl.focus(); } catch (e) {}
+    });
+
     function showError(message) {
       if (errEl) { errEl.textContent = message; errEl.style.display = 'block'; }
-      if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+      if (btn) { btn.disabled = false; btn.textContent = idleLabel(); }
     }
     function clearError() {
       if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
@@ -143,9 +169,35 @@
         }
       });
     }
+    function submitCode() {
+      var code = ((codeEl && codeEl.value) || '').trim();
+      if (!code) return showError('Enter the code from your authenticator app.');
+      clearError();
+      if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+      apiJson('/api/login/two-step', { method: 'POST', body: JSON.stringify({ code: code }) })
+        .then(function (body) {
+          if (!body || !body.user) throw new Error('invalid_login_response');
+          var left = body.recoveryLeft;
+          codeMode = false;
+          enter(body.user);
+          if (typeof left === 'number') {
+            setTimeout(function () {
+              alert('You signed in with a recovery code. That code will not work again - ' + left +
+                    ' left.' + (left <= 3 ? ' Turn two-step sign-in off and on again under Users to get new codes.' : ''));
+            }, 900);
+          }
+        })
+        .catch(function (e) {
+          if (e && e.status === 429) return showError('Too many attempts. Try again in a few minutes.');
+          if (e && e.message === 'two_step_expired') { setCodeMode(false); return showError('That took too long, or too many codes were wrong. Sign in again.'); }
+          if (e && e.message === 'invalid_code') { if (codeEl) { codeEl.value = ''; try { codeEl.focus(); } catch (_) {} } return showError('That code is not right. Codes change every 30 seconds - use the one showing now.'); }
+          showError('Could not check the code. Please try again.');
+        });
+    }
     function submit(ev) {
       if (ev && ev.preventDefault) ev.preventDefault();
       if (btn && btn.disabled) return;
+      if (codeMode) return submitCode();
       var username = (uEl && uEl.value || '').trim();
       var password = (pEl && pEl.value) || '';
       if (!username || !password) return showError('Enter your username/email and password.');
@@ -156,6 +208,7 @@
         method: 'POST',
         body: JSON.stringify({ email: username, password: password, remember: remember })
       }).then(function (body) {
+        if (body && body.twoStep) return setCodeMode(true);
         if (!body || !body.user) throw new Error('invalid_login_response');
         enter(body.user);
       }).catch(function (e) {
@@ -181,6 +234,7 @@
     if (btn) btn.addEventListener('click', submit);
     if (form) form.addEventListener('submit', submit);
     if (pEl) pEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
+    if (codeEl) codeEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(e); });
     if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
     if (outBtn) outBtn.addEventListener('click', function () { window.HWAuth.signOut(); });
 

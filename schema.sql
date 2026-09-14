@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS users (
   is_active     BOOLEAN NOT NULL DEFAULT TRUE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_login_at TIMESTAMPTZ,
+  -- two-step sign-in (totp.js): the app secret, whether it is in force, the
+  -- last code step used (no replays), and sha256 hashes of recovery codes
+  totp_secret    TEXT,
+  totp_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
+  totp_last_step BIGINT,
+  totp_recovery  TEXT,
   UNIQUE (org_id, email)
 );
 CREATE INDEX IF NOT EXISTS users_email_idx ON users (lower(email));
