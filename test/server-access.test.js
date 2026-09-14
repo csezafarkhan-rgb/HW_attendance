@@ -20,7 +20,8 @@ const db = {
   records: [],    // {org, e, d, data}
   employees: [],  // {org, name, code, shift}
   changes: [],
-  history: []
+  history: [],
+  errors: []
 };
 const DEVICE_TOKEN = 'test-device-token-' + 'x'.repeat(40);
 process.env.SYNC_TOKEN = DEVICE_TOKEN;
@@ -32,6 +33,18 @@ function query(sql, p) {
   const s = sql.replace(/\s+/g, ' ').trim();
   const rows = x => Promise.resolve({ rows: x, rowCount: x.length });
   if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(s)) return rows([]);
+  // --- script errors from browsers ---
+  if (s.startsWith('UPDATE client_errors SET count = count + 1')) {
+    const hit = db.errors.find(e => e.message === p[0] && (e.source || '') === p[1] && (e.line == null ? -1 : e.line) === p[2] && (e.user_id || -1) === p[3]);
+    if (hit) { hit.count++; return rows([{ id: hit.id }]); }
+    return rows([]);
+  }
+  if (s.startsWith('INSERT INTO client_errors')) {
+    db.errors.push({ id: db.errors.length + 1, org_id: p[0], user_id: p[1], user_name: p[2], message: p[3], source: p[4], line: p[5], stack: p[6], page: p[7], count: 1 });
+    return rows([]);
+  }
+  if (s.startsWith('DELETE FROM client_errors')) return rows([]);
+  if (s.startsWith('SELECT id, first_at, last_at, count, user_name, message, source, line, page FROM client_errors')) return rows(db.errors.slice().reverse());
   // --- locked months and history ---
   if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths' AND user_id IS NULL")) {
     const r = kvFind(p[0], 'lockedMonths', null); return rows(r ? [{ value: r.value }] : []);
@@ -319,6 +332,19 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('empty replace refused, nothing deleted', empty.status === 400 && db.records.length === 1, [empty.status, db.records.length]);
   const byEmp = await ravi('PUT', '/api/dataset?replace=1', two);
   check('employee cannot replace', byEmp.status === 403 && db.records.length === 1, byEmp.status);
+
+  // --- script errors ---
+  const anon = client();
+  const e1 = await anon('POST', '/api/client-errors', { message: "TypeError: Cannot read properties of undefined (reading 'split')", source: 'about:srcdoc', line: 1234, page: 'dashboard' });
+  check('an error can be reported before signing in', e1.status === 200, e1.status);
+  await anon('POST', '/api/client-errors', { message: "TypeError: Cannot read properties of undefined (reading 'split')", source: 'about:srcdoc', line: 1234, page: 'dashboard' });
+  check('the same error again counts, not a new row', db.errors.length === 1 && db.errors[0].count === 2, db.errors);
+  await boss('POST', '/api/client-errors', { message: 'ReferenceError: x is not defined', source: 'about:srcdoc', line: 9 });
+  check('a signed-in report records who', db.errors.length === 2 && db.errors[1].user_name === 'Boss', db.errors[1]);
+  check('an empty report is refused', (await anon('POST', '/api/client-errors', { message: '  ' })).status === 400);
+  const errList = await boss('GET', '/api/client-errors?hours=24');
+  check('admins read the errors', errList.status === 200 && errList.body.errors.length === 2, errList.body);
+  check('employees cannot read them', (await ravi('GET', '/api/client-errors')).status === 403);
 
   // --- locked months ---
   await boss('PUT', '/api/kv/overrides', { value: JSON.stringify({ 'Asha Test|2026-08-20': { cat: 'LEAVE', detail: 'CL' }, 'Asha Test|2026-09-10': { cat: 'LEAVE' } }), shared: true });

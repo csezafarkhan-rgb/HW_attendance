@@ -83,6 +83,26 @@ function makeBrowser() {
     try { await b.storage.set('newKey', '1', true); } catch (e) { ok = false; }
     check('a key never read saves without a version (as before)', ok && b.log[0].base === undefined, b.log);
   }
+  {
+    // The error reporter, with a window that can hold listeners.
+    const listeners = {}, posts = [];
+    const window = { addEventListener: (t, f) => { listeners[t] = f; } };
+    window.self = window.top = window;
+    const ctx = { window, document: { getElementById: () => null, createElement: () => ({ style: {}, appendChild() {} }), body: { appendChild() {} } },
+      fetch: (url, o) => { if (url === '/api/client-errors') posts.push(JSON.parse(o.body)); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); },
+      setTimeout, clearTimeout, AbortController, console, Object, JSON, Promise, String, Error, setInterval() {} };
+    vm.createContext(ctx); vm.runInContext(code, ctx);
+    const boom = { target: window, message: "TypeError: Cannot read properties of null (reading 'value')", filename: 'about:srcdoc', lineno: 812, error: { stack: 'at renderX' } };
+    listeners.error(boom); listeners.error(boom);
+    check('an uncaught error is reported once, with where', posts.length === 1 && posts[0].line === 812 && posts[0].page === 'shell', posts);
+    listeners.error({ target: { tagName: 'IMG' } });
+    listeners.unhandledrejection({ reason: new Error('Failed to fetch') });
+    check('image load failures and network drop-outs are not reported', posts.length === 1, posts);
+    listeners.unhandledrejection({ reason: new Error('x is not defined') });
+    check('a rejected promise is reported', posts.length === 2 && /^Unhandled: x is not defined/.test(posts[1].message), posts);
+    for (let i = 0; i < 20; i++) listeners.error({ target: window, message: 'Error ' + i, filename: 'a', lineno: i });
+    check('at most ten per page', posts.length === 10, posts.length);
+  }
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

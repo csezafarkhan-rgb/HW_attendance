@@ -6543,6 +6543,15 @@ function buildExcelBackup(){
       renderAlerts();
     }).catch(function(){});
   }
+  // Script errors people's browsers reported in the last day (admins, server-backed app only).
+  var CLIENT_ERRORS = null;
+  function loadClientErrors(){
+    if(!window.HWSync || typeof window.HWSync.hydrateDataset !== 'function' || !viewRole || viewRole.role !== 'admin') return Promise.resolve();
+    return fetch('/api/client-errors?hours=24', { credentials:'same-origin' })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ CLIENT_ERRORS = j ? (j.errors || []) : null; renderAlerts(); })
+      .catch(function(){});
+  }
   function officeHoursNow(d){
     var dow = d.getDay(), m = d.getHours() * 60 + d.getMinutes();
     return dow >= 1 && dow <= 6 && m >= 600 && m <= 1110;          // Mon-Sat, 10:00-18:30
@@ -6563,6 +6572,14 @@ function buildExcelBackup(){
               + 'push-log.txt and build-log.txt on that PC say which.' });
         }
       }
+    }
+    if(CLIENT_ERRORS && CLIENT_ERRORS.length){
+      var errN = CLIENT_ERRORS.reduce(function(s, e){ return s + (+e.count || 1); }, 0);
+      out.push({ level:'warn', title: errN + ' page error' + (errN === 1 ? '' : 's') + ' in the last 24 hours',
+        detail: CLIENT_ERRORS.slice(0, 3).map(function(e){
+          return ((+e.count > 1) ? (e.count + '× ') : '') + String(e.message).slice(0, 120)
+            + (e.user_name ? (' (' + e.user_name + ')') : '');
+        }).join(' · ') + '. Something on a page is broken — pass these on to whoever maintains the dashboard.' });
     }
     var pend = pendingRequestCount();
     if(pend) out.push({ level:'warn', title: pend + ' leave request' + (pend === 1 ? '' : 's') + ' waiting for a decision',
@@ -6683,6 +6700,8 @@ function buildExcelBackup(){
     loadNotifSeen();
     loadDeviceStatus();
     setInterval(loadDeviceStatus, 5 * 60 * 1000);
+    setTimeout(loadClientErrors, 8000);                    // once the session has said who this is
+    setInterval(loadClientErrors, 5 * 60 * 1000);
     setInterval(function(){ try{ renderAlerts(); }catch(e){} }, 60 * 1000);   // the office-hours rule moves with the clock
   })();
   function fmtDateRange(from, to){

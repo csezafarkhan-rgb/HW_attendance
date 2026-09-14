@@ -202,6 +202,44 @@
     }
   };
 
+  /* ---- script errors: sent to the server so an admin sees them ----
+     A broken button used to fail silently on someone's screen, and nobody
+     heard about it. Uncaught errors and rejected promises are reported, once
+     per message per page load and at most ten, with where they happened -
+     never what was typed. Network drop-outs and a lapsed sign-in are left out:
+     they are not bugs, and the page already says so. */
+  (function () {
+    if (typeof window.addEventListener !== 'function') return;
+    var sent = {}, total = 0;
+    var page = (window.self === window.top) ? 'shell' : 'dashboard';
+    function noise(msg) {
+      return /not_authenticated|Failed to fetch|NetworkError|Load failed|AbortError|aborted|ResizeObserver loop/i.test(msg);
+    }
+    function report(message, source, line, stack) {
+      message = String(message || '').slice(0, 500);
+      if (!message || noise(message) || total >= 10) return;
+      var sig = message + '|' + source + '|' + line;
+      if (sent[sig]) return;
+      sent[sig] = true; total++;
+      try {
+        fetch('/api/client-errors', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: message, source: String(source || '').slice(0, 300), line: line || null,
+                                 stack: String(stack || '').slice(0, 4000), page: page }),
+          keepalive: true
+        }).catch(function () {});
+      } catch (_) {}
+    }
+    window.addEventListener('error', function (e) {
+      if (!e || e.target !== window && e.target && e.target.tagName) return;   // an image or script failing to load
+      report(e.message || (e.error && e.error.message), e.filename, e.lineno, e.error && e.error.stack);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      report('Unhandled: ' + ((r && (r.message || r.error)) || String(r)), '', null, r && r.stack);
+    });
+  })();
+
   /* ---- live sync: poll the change feed and refresh when someone else edits ---- */
   var cursor = 0, polling = false;
 

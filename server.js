@@ -815,6 +815,42 @@ app.post('/api/records', requireAuth, bigJson, async (req, res) => {
   res.json({ ok: true, upserted: result.upserted, lockedChanged: result.lockedChanged });
 });
 
+/* ---------------- script errors from browsers ----------------
+   Reported by hw-sync.js from the shell and the dashboard. Open before sign-in
+   (a page can break before anyone is signed in), so it is rate limited, small,
+   and stores only the error text - never form contents. */
+const errorLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+app.post('/api/client-errors', errorLimiter, async (req, res) => {
+  const b = req.body || {};
+  const message = clip(b.message, 500).trim();
+  if (!message) return res.status(400).json({ error: 'no_message' });
+  const source = clip(b.source, 300), stack = clip(b.stack, 4000), page = clip(b.page, 60), ua = clip(req.headers['user-agent'], 300);
+  const line = Number.isFinite(+b.line) ? Math.max(0, Math.min(10000000, Math.round(+b.line))) : null;
+  const userId = (req.session && req.session.userId) || null;
+  const orgId = (req.session && req.session.orgId) || null;
+  const userName = (req.user && req.user.name) || null;
+  const same = await pool.query(
+    `UPDATE client_errors SET count = count + 1, last_at = now()
+      WHERE message = $1 AND COALESCE(source,'') = $2 AND COALESCE(line,-1) = $3
+        AND COALESCE(user_id,-1) = $4 AND last_at > now() - interval '1 hour'
+      RETURNING id`, [message, source, line === null ? -1 : line, userId || -1]);
+  if (!same.rows.length) {
+    await pool.query(
+      `INSERT INTO client_errors (org_id, user_id, user_name, message, source, line, stack, page, user_agent)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [orgId, userId, userName, message, source, line, stack, page, ua]);
+    if (Math.random() < 0.05) await pool.query("DELETE FROM client_errors WHERE last_at < now() - interval '30 days'");
+  }
+  res.json({ ok: true });
+});
+app.get('/api/client-errors', requireRole('admin', 'admin_view'), async (req, res) => {
+  const hours = Math.min(24 * 30, Math.max(1, parseInt(req.query.hours, 10) || 24));
+  const { rows } = await pool.query(
+    `SELECT id, first_at, last_at, count, user_name, message, source, line, page FROM client_errors
+      WHERE last_at > now() - ($1 || ' hours')::interval AND (org_id = $2 OR org_id IS NULL)
+      ORDER BY last_at DESC LIMIT 200`, [String(hours), req.session.orgId]);
+  res.json({ errors: rows });
+});
+
 /* Who changed what. Admins only; the day view asks for one entry ("Name|date"). */
 app.get('/api/history', requireRole('admin', 'admin_view'), async (req, res) => {
   const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));

@@ -94,6 +94,26 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE INDEX IF NOT EXISTS history_item_idx ON history (org_id, item);
 CREATE INDEX IF NOT EXISTS history_recent_idx ON history (org_id, id DESC);
 
+-- Script errors from people's browsers, so a broken button is seen by an admin
+-- instead of failing quietly on someone's screen. Repeats within an hour add to
+-- count rather than new rows; rows older than 30 days are cleared.
+CREATE TABLE IF NOT EXISTS client_errors (
+  id         BIGSERIAL PRIMARY KEY,
+  org_id     INTEGER REFERENCES orgs(id) ON DELETE CASCADE,
+  first_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  count      INTEGER NOT NULL DEFAULT 1,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name  TEXT,
+  message    TEXT NOT NULL,
+  source     TEXT,
+  line       INTEGER,
+  stack      TEXT,
+  page       TEXT,
+  user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS client_errors_recent_idx ON client_errors (last_at DESC);
+
 -- Lets clients poll "what changed since X" cheaply for live sync.
 CREATE TABLE IF NOT EXISTS change_log (
   id         BIGSERIAL PRIMARY KEY,
