@@ -7,7 +7,7 @@ Takes the existing shell + attendance dashboard and rewires them:
     the API-backed version instead of localStorage;
   - injects hw-auth.js into the shell and neutralises the old client-side
     login gate so the server decides who gets in;
-  - strips the embedded attendance seed, because records now come from Postgres
+  - empties the embedded dataset, because records now come from Postgres
     (and because employee data should not sit in a git repo).
 """
 import base64, pathlib, re, sys
@@ -31,12 +31,12 @@ def main():
         sys.exit('FATAL: html2canvas marker not found in dashboard')
     dash = dash.replace(marker, '<script>\n' + sync + '\n</script>\n' + marker, 1)
 
-    # ---- drop the embedded seed + dataset (records live in Postgres now) ----
-    seed = re.search(r'<script>\(function\(\)\{try\{var s=JSON\.parse\(decodeURIComponent.*?</script>', dash, re.S)
-    if seed:
-        dash = dash.replace(seed.group(0), '<!-- seed removed: settings now load from /api/kv -->')
-    else:
-        print('WARN: seed block not found')
+    # ---- empty the embedded dataset (records live in Postgres now) ----
+    # The seed script that used to sit beside it has been deleted from the
+    # source itself, so there is nothing left to strip. Refuse to build if one
+    # ever comes back: it carried staff names.
+    if re.search(r'<script>\(function\(\)\{try\{var s=JSON\.parse\(decodeURIComponent', dash):
+        sys.exit('FATAL: an embedded seed script is back in src/attendance.html - remove it')
 
     dh = re.search(r'(<script id="data-holder" type="application/json">)(.*?)(</script>)', dash, re.S)
     if dh:
