@@ -8751,24 +8751,22 @@ function buildExcelBackup(){
        month by month, resetting the balance after each charge, and it honours a
        figure typed in by hand - so read it rather than working it out a second
        way and risking two answers. */
-    var monthDed = (mtx.ded && mtx.ded[mi] != null) ? mtx.ded[mi] : 0;
-    var autoDed  = (mtx.autoDed && mtx.autoDed[mi] != null) ? mtx.autoDed[mi] : 0;
+    /* Read from the all-months matrix: mtx follows the Leave Record's Months
+       picker, which lives in each browser, so hiding a month on one machine
+       changed what that machine said someone is paid. */
+    var monthDed = (mtxDed.ded && mtxDed.ded[mi] != null) ? mtxDed.ded[mi] : 0;
+    var autoDed  = (mtxDed.autoDed && mtxDed.autoDed[mi] != null) ? mtxDed.autoDed[mi] : 0;
     var dedManual = getLeaveDeduction(emp, ym);
-    var overdrawn = Math.max(0, -(mtx.combinedRem || 0));
+    var overdrawn = Math.max(0, -(mtxDed.combinedRem || 0));
     var charged = 0;
-    for(var ci = 0; ci < mi; ci++){ charged += (mtx.ded && mtx.ded[ci]) ? mtx.ded[ci] : 0; }
-    /* Charge whatever the balance is still short by AFTER the deductions the
-       Leave Record has already applied. If "Leave left" reads −1.84, that 1.84
-       has not been paid for yet and is charged here; once charged the balance
-       reads 0 and later months charge nothing, so it cannot be taken twice.
-       This also survives a deduction cell typed over by hand - the shortfall is
-       still visible in the closing figure. */
-    /* From the all-months matrix. mtx follows the Leave Record's Months picker,
-       which lives in each browser, so hiding a month on one machine changed what
-       that machine said someone is paid. The balance shown still uses mtx, to
-       match the Leave Record on screen; the money does not. */
-    var stillShort = Math.max(0, -(mtxDed.afterDed || 0));
-    var lop = payRules.allLeaveUnpaid ? leaveDays : stillShort;
+    for(var ci = 0; ci < mi; ci++){ charged += (mtxDed.ded && mtxDed.ded[ci]) ? mtxDed.ded[ci] : 0; }
+    /* Unpaid days are this month's Salary Deduction row - what the Leave Record
+       says is charged to salary, including a figure typed over it by hand.
+       Pay used to charge only what was still short AFTER those deductions,
+       which is always nothing: the row resets the balance to zero as it charges.
+       So the Leave Record read "3.33 charged to salary" while pay deducted 0.
+       Each month's row is charged in that month's pay, once. */
+    var lop = payRules.allLeaveUnpaid ? leaveDays : monthDed;
     lop = Math.round(lop * 100) / 100;
     // Days the punch file calls absent with nothing marked against them. They are
     // not deducted - that is a decision, not a default - but pay should not be
@@ -8782,7 +8780,12 @@ function buildExcelBackup(){
     var calDays = dates.length;
     var perDay  = calDays > 0 ? gross / calDays : 0;
     var lopAmt  = Math.round(perDay * lop * 100) / 100;      // days lost to unpaid leave
-    var stat    = statutory(gross);                          // PF / ESI / fixed, from gross
+    /* Days of the month before joining are not paid. Someone who joined on the
+       20th of a 31-day month earns 12/31 of it; the whole month used to be paid.
+       Shown as its own deduction so the salary itself stays the monthly figure. */
+    var preJoinDays = dates.filter(function(ds){ return beforeJoining(emp, ds); }).length;
+    var preJoinAmt  = Math.round(perDay * preJoinDays * 100) / 100;
+    var stat    = statutory(Math.max(0, gross - preJoinAmt)); // PF / ESI / fixed, on what was earned
     /* Work on a holiday, a Sunday, or a Saturday that is off for this person is
        paid. The hourly rate follows the day rate over the shift length, so a
        shorter shift earns proportionally more per hour, as it should. */
@@ -8798,7 +8801,7 @@ function buildExcelBackup(){
     var otAmt  = (payRules.ot && extraMin > 0)
       ? Math.round(otRate * (extraMin/60) * (+payRules.otMult || 1) * 100) / 100
       : 0;
-    var deduct  = Math.round((lopAmt + stat.total) * 100) / 100;
+    var deduct  = Math.round((lopAmt + preJoinAmt + stat.total) * 100) / 100;
     var net     = Math.round((gross + otAmt - deduct) * 100) / 100;
     var r2p = function(v){ return Math.round(v*100)/100; };
     return {emp:emp, ym:ym, pending:pending,
@@ -8824,6 +8827,7 @@ function buildExcelBackup(){
             dedManual:dedManual,
             alreadyCharged:Math.round(charged*100)/100,
             monthDedShown:Math.round(monthDed*100)/100,
+            preJoinDays:preJoinDays, preJoinAmt:preJoinAmt,
             gross:gross, perDay:Math.round(perDay*100)/100, lop:lop,
             lopAmt:lopAmt, stat:stat, deduct:deduct, net:net};
   }
@@ -8940,7 +8944,7 @@ function buildExcelBackup(){
             + '<td'+(r.lop>0?' class="lop"':'')
             +   ' title="'+([
                   'Rule: '+(payRules.allLeaveUnpaid ? 'every day of leave is charged' : 'the Leave Record\u2019s deduction row'),
-                  'Balance still short: '+r.lop,
+                  'Charged this month: '+r.lop,
                   'Leave Record deduction row for '+monthLabel(ym)+': '+r.monthDedShown,
                   'Calculated figure: '+r.autoDed,
                   (r.dedManual !== null && r.dedManual !== undefined)
@@ -9035,6 +9039,8 @@ function buildExcelBackup(){
       +     line('Per day \u00b7 '+r.calDays+' days in the month', '\u20b9'+money(r.perDay))
       +     (r.otAmt>0 ? line('Overtime \u00b7 '+fmtMin(r.extraMin)+' at '+(payRules.otMult||1)+'\u00d7',
                               '+\u20b9'+money(r.otAmt), 'extra') : '')
+      +     (r.preJoinAmt>0 ? line('Before joining ('+r.preJoinDays+' day'+(r.preJoinDays===1?'':'s')+')',
+                              '\u2212\u20b9'+money(r.preJoinAmt), 'neg') : '')
       +     (r.lopAmt>0 ? line((payRules.allLeaveUnpaid ? 'Leave, unpaid (' : 'Leave overdrawn (')
                               + (r.lop||0) + ' days)', '\u2212\u20b9'+money(r.lopAmt), 'neg') : '')
       +     (r.stat.pf>0 ? line('Provident fund ('+payRules.pfPct+'%)', '\u2212\u20b9'+money(r.stat.pf), 'neg') : '')
@@ -9372,6 +9378,7 @@ function buildExcelBackup(){
       + row('Monthly gross', '\u20b9'+money(r.gross))
       + row('Per day ('+r.calDays+' days in the month)', '\u20b9'+money(r.perDay))
       + (r.otAmt>0 ? row('Overtime ('+fmtMin(r.extraMin)+' at '+(payRules.otMult||1)+'\u00d7)', '+\u20b9'+money(r.otAmt)) : '')
+      + (r.preJoinAmt>0 ? row('Before joining ('+r.preJoinDays+' day'+(r.preJoinDays===1?'':'s')+')', '\u2212\u20b9'+money(r.preJoinAmt)) : '')
       + (r.lopAmt>0 ? row((payRules.allLeaveUnpaid ? 'Leave, unpaid (' : 'Leave overdrawn (')
                           +(r.lop||0)+' days)', '\u2212\u20b9'+money(r.lopAmt)) : '')
       + (r.stat.pf>0 ? row('Provident fund ('+payRules.pfPct+'%)', '\u2212\u20b9'+money(r.stat.pf)) : '')
@@ -11443,7 +11450,11 @@ function buildExcelBackup(){
       clAssign:clAssign, slAssign:slAssign,
       clTaken:r2(clTaken), slTaken:r2(slTaken),
       clRem:clRem, slRem:slRem, combinedRem:combinedRem,
-      ded:effDed, autoDed:ded, totalDed:totalDed, afterDed:r2(combinedRem + totalDed)
+      /* Accrual is rounded to two places per type and the deduction is worked
+         from the unrounded balance, so the two can miss by a hundredth - an
+         employee fully charged read "-0.01 left". Anything that small is zero. */
+      ded:effDed, autoDed:ded, totalDed:totalDed,
+      afterDed:(function(v){ return Math.abs(v) < 0.015 ? 0 : v; })(r2(combinedRem + totalDed))
     };
   }
 
