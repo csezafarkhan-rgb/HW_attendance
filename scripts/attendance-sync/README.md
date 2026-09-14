@@ -22,6 +22,23 @@ finished, and the punch readers themselves for anything newer.
 | `Pull-DeviceLogs.ps1` | Reads the punch readers over the network. 32-bit, because the ZKTeco SDK is. |
 | `Check-AttendanceHealth.ps1` | Reads the logs once a day and says on screen whether attendance is still flowing. |
 | `sync-service.js` | Listens on `127.0.0.1:8765` so the dashboard's Sync button can ask for a fetch on demand. |
+| `push-attendance.js` | Sends the built file to the server (`POST /api/device/records`) after every build, so the site is current with nobody signed in. Logs to `push-log.txt`. |
+| `dashboard-parser.js` | Lifts the dashboard's own CSV import out of `src/attendance.html`, so an upload lands exactly as an import of the same file would. |
+| `backup-db.js` | Nightly full copy of the database (`GET /api/device/backup`) into `db-backups\` in the data folder, keeping 30 days. |
+
+## Sending to the server: the one-time token
+
+The office PC has no user account, so the server trusts it by a shared secret:
+
+1. `sync-token.txt` in the data folder holds a long random token (created once on
+   the office PC; never commit it).
+2. In Render → the `hw-attendance` service → **Environment**, add `SYNC_TOKEN` with
+   exactly that value, and save (Render redeploys).
+
+Until both match, `push-log.txt` says why nothing was sent (`SYNC_TOKEN is not set
+in Render yet`, or `refused the token`) and the dashboard's watched folder keeps
+working as before. To restore from a backup, the `.json.gz` holds every table
+the app uses (users with password hashes, settings, employees, records).
 
 `Build-AttendanceCsv.ps1` runs 64-bit (the Access driver is) and shells out to
 `Pull-DeviceLogs.ps1` in 32-bit PowerShell (the reader SDK is). They cannot
@@ -60,6 +77,8 @@ Facts worth not rediscovering:
 | `HW Attendance - Build CSV` | every 30 min 09:30–18:30, and at logon |
 | `HW Attendance - Daily Check` | 10:00 |
 | `HW Attendance - Sync Helper` | at logon, and every 5 min 09:30–19:30 to restart it if it has stopped |
+| `HW Attendance - Nightly DB Backup` | 17:45, or as soon as the PC is next on if it was asleep |
+| `HW Attendance - Keep Server Awake` | every 10 min 09:00–19:00 - the free Render server sleeps after 15 idle minutes, and its slow wake-up is what showed staff an old copy of the data |
 
 The logon run matters: the PC sleeps around 18:45, about when people punch out,
 so the last punches of a day can only be collected the next morning.

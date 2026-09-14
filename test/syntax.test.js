@@ -26,7 +26,9 @@ function inlineScripts(file) {
 inlineScripts('src/attendance.html');
 inlineScripts('src/shell.template.html');
 ['server.js', 'migrate.js', 'public/hw-sync.js', 'public/hw-auth.js',
- 'scripts/create-user.js', 'scripts/attendance-sync/sync-service.js'].forEach(function (f) {
+ 'scripts/create-user.js', 'scripts/attendance-sync/sync-service.js',
+ 'scripts/attendance-sync/push-attendance.js', 'scripts/attendance-sync/backup-db.js',
+ 'scripts/attendance-sync/dashboard-parser.js'].forEach(function (f) {
   // wrapped as a function body so CommonJS top-level return and require parse
   parse('(function(require,module,exports,__dirname,__filename){' + fs.readFileSync(path.join(ROOT, f), 'utf8') + '\n})', f);
 });

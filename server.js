@@ -14,6 +14,8 @@ const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const crypto = require('crypto');
+const zlib = require('zlib');
 
 const PORT = process.env.PORT || 3000;
 const REMEMBER_MS = 1000 * 60 * 60 * 24 * 30;   // "keep me signed in" window
@@ -72,7 +74,7 @@ app.use(helmet({
    they are skipped here rather than parsed twice: express.json marks the request
    once it has read it, so a second parser would be a no-op and the small limit
    would reject the import before it ever reached the route. */
-const IMPORT_PATHS = ['/api/dataset', '/api/records', '/api/employees'];
+const IMPORT_PATHS = ['/api/dataset', '/api/records', '/api/employees', '/api/device/records'];
 const smallJson = express.json({ limit: '200kb' });
 const bigJson = express.json({ limit: '25mb' });
 app.use(function (req, res, next) {
@@ -730,6 +732,100 @@ app.post('/api/employees', requireAuth, bigJson, async (req, res) => {
 
 /* Live sync: clients poll this with the last id they saw. Cheap enough to hit
    every few seconds; returns immediately with nothing when idle. */
+/* ---------------- the office PC ----------------
+   The office PC has no user and no session. It proves itself with SYNC_TOKEN, a
+   long random value set in Render's environment and kept in a file on that PC,
+   outside the repository. Unset, these routes answer 503 and do nothing. */
+function requireDevice(req, res, next) {
+  const token = String(process.env.SYNC_TOKEN || '');
+  if (token.length < 32) return res.status(503).json({ error: 'device_sync_not_configured' });
+  const got = Buffer.from(String(req.headers.authorization || '').replace(/^Bearer\s+/i, ''));
+  const want = Buffer.from(token);
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) {
+    return res.status(401).json({ error: 'bad_device_token' });
+  }
+  next();
+}
+const deviceLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
+async function deviceOrgId() {
+  const { rows } = await pool.query('SELECT id FROM orgs ORDER BY id LIMIT 1');
+  return rows[0] ? rows[0].id : null;
+}
+
+/* Punches straight from the office PC, parsed there by the dashboard's own
+   import code. Attendance used to reach the server only when an admin had the
+   dashboard open with the watched folder connected, so the site was as old as
+   the last time someone looked. This does what an import of that file does:
+   each person's day is replaced by the file's row, people new to the file are
+   added, and nothing else - marks and manual entries - is touched. */
+app.post('/api/device/records', deviceLimiter, requireDevice, bigJson, async (req, res) => {
+  const orgId = await deviceOrgId();
+  if (!orgId) return res.status(503).json({ error: 'no_org' });
+  const records = Array.isArray(req.body && req.body.records) ? req.body.records : null;
+  const employees = Array.isArray(req.body && req.body.employees) ? req.body.employees : [];
+  if (!records || !records.length) return res.status(400).json({ error: 'no_records' });
+  if (records.length > 20000) return res.status(413).json({ error: 'too_many_records' });
+  const client = await pool.connect();
+  let n = 0, added = 0;
+  try {
+    await client.query('BEGIN');
+    for (const e of employees) {
+      if (!e || !e.name || e.name === 'Card') continue;
+      const r = await client.query(
+        `INSERT INTO employees (org_id, code, name, shift) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (org_id, name) DO NOTHING`,
+        [orgId, e.code || null, String(e.name), e.shift || '9:00-6:00']);
+      added += r.rowCount || 0;
+    }
+    for (const r of records) {
+      if (!r || typeof r.e !== 'string' || !r.e || !DAY_RE.test(String(r.d || '')) || r.e === 'Card') continue;
+      const data = Object.assign({}, r); delete data.e; delete data.d;
+      await client.query(
+        `INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,NULL)
+         ON CONFLICT (org_id, employee, day)
+         DO UPDATE SET data = EXCLUDED.data, updated_at = now(), updated_by = NULL`,
+        [orgId, r.e, r.d, JSON.stringify(data)]);
+      n++;
+    }
+    const status = JSON.stringify({
+      at: new Date().toISOString(), rows: n, employeesAdded: added,
+      newestPunch: String((req.body && req.body.newestPunch) || ''), source: 'office-pc'
+    });
+    await client.query(
+      `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'deviceStatus', $2, NULL)
+       ON CONFLICT (org_id, key) WHERE user_id IS NULL
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
+      [orgId, status]);
+    await logChange(client, orgId, 'records', 'office-pc', null);
+    if (added) await logChange(client, orgId, 'employees', 'office-pc', null);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+  res.json({ ok: true, records: n, employeesAdded: added });
+});
+
+/* A full copy of the data, for the office PC to keep. The database is on
+   Render's free plan, which expires, and backups otherwise only ever happened in
+   a browser. Password hashes are included so accounts can be restored; the
+   file is as sensitive as the database and is kept outside the repository. */
+app.get('/api/device/backup', deviceLimiter, requireDevice, async (req, res) => {
+  const orgId = await deviceOrgId();
+  if (!orgId) return res.status(503).json({ error: 'no_org' });
+  const q = (sql) => pool.query(sql, [orgId]).then(r => r.rows);
+  const dump = {
+    _type: 'hw-attendance-db-backup', _version: 1, exportedAt: new Date().toISOString(),
+    orgs: await pool.query('SELECT * FROM orgs WHERE id = $1', [orgId]).then(r => r.rows),
+    users: await q('SELECT id, org_id, email, password_hash, name, role, is_active, created_at, last_login_at FROM users WHERE org_id = $1'),
+    kv: await q('SELECT user_id, key, value, updated_at, version FROM kv WHERE org_id = $1'),
+    employees: await q('SELECT code, name, shift, is_active FROM employees WHERE org_id = $1'),
+    records: await q("SELECT employee, to_char(day,'YYYY-MM-DD') AS day, data, updated_at FROM records WHERE org_id = $1 ORDER BY day")
+  };
+  const gz = zlib.gzipSync(Buffer.from(JSON.stringify(dump)));
+  res.setHeader('Content-Type', 'application/gzip');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(gz);
+});
+
 app.get('/api/changes', requireAuth, async (req, res) => {
   const since = parseInt(req.query.since, 10) || 0;
   const { rows } = await pool.query(

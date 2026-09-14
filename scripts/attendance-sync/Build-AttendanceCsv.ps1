@@ -40,6 +40,7 @@ param(
     [string] $DataDir = 'E:\Drive H- Desktop\ZAFAR LISTING\AI Projects\Attendance backup',
     [int]    $Days    = 30,
     [switch] $NoDeviceRead,          # skip the readers, use the database alone
+    [switch] $NoPush,                # write the file but do not send it to the server
     [switch] $WhatIfOnly
 )
 
@@ -423,3 +424,27 @@ $line = '{0}  rows={1} fromEssl={2} rebuilt={3} stale={4} open={5} newFromReader
 Add-Content -LiteralPath $log -Value $line
 $keep = Get-Content -LiteralPath $log -Tail 400
 Set-Content -LiteralPath $log -Value $keep
+
+<#  Send the file to the server as well, so the live site is current without
+    anyone opening the dashboard (push-attendance.js; it logs to push-log.txt and
+    does nothing until the sync token is set up). Its own process with a time
+    limit: a slow or sleeping server must not hold the build lock for long. #>
+if (-not $NoPush) {
+    $pusher = Join-Path (Split-Path -Parent $PSCommandPath) 'push-attendance.js'
+    $node = Join-Path $env:ProgramFiles 'nodejs\node.exe'
+    if (-not (Test-Path -LiteralPath $node)) { $node = 'node' }
+    if (Test-Path -LiteralPath $pusher) {
+        $pushOut = Join-Path $env:TEMP ('ett_push_{0}.out' -f $PID)
+        $pushErr = Join-Path $env:TEMP ('ett_push_{0}.err' -f $PID)
+        try {
+            $push = Start-Process -FilePath $node -ArgumentList ('"{0}"' -f $pusher) -NoNewWindow -PassThru `
+                                  -RedirectStandardOutput $pushOut -RedirectStandardError $pushErr
+            if (-not $push.WaitForExit(150000)) { try { $push.Kill() } catch { } }
+            Write-Output ('sent to server       : ' + ((Get-Content -LiteralPath $pushOut -ErrorAction SilentlyContinue) -join ' '))
+        } catch {
+            Write-Output ('sending to the server could not start: ' + $_.Exception.Message)
+        } finally {
+            Remove-Item -LiteralPath $pushOut, $pushErr -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

@@ -17,8 +17,12 @@ const db = {
     { id: 4, org_id: 1, email: 'ravi@x.com', name: 'Ravi Test', role: 'employee', is_active: true }
   ],
   kv: [],         // {org_id, user_id, key, value}
-  records: []     // {org, e, d, data}
+  records: [],    // {org, e, d, data}
+  employees: [],  // {org, name, code, shift}
+  changes: []
 };
+const DEVICE_TOKEN = 'test-device-token-' + 'x'.repeat(40);
+process.env.SYNC_TOKEN = DEVICE_TOKEN;
 db.users.forEach(u => { u.password_hash = bcrypt.hashSync('password123', 4); });
 let store = null;
 
@@ -27,6 +31,31 @@ function query(sql, p) {
   const s = sql.replace(/\s+/g, ' ').trim();
   const rows = x => Promise.resolve({ rows: x, rowCount: x.length });
   if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(s)) return rows([]);
+  // --- the office PC's routes ---
+  if (s === 'SELECT id FROM orgs ORDER BY id LIMIT 1') return rows([{ id: 1 }]);
+  if (s.startsWith("INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'deviceStatus'")) {
+    let r = kvFind(p[0], 'deviceStatus', null);
+    if (r) { r.value = p[1]; r.version = String(Number(r.version) + 1); }
+    else db.kv.push({ org_id: p[0], user_id: null, key: 'deviceStatus', value: p[1], version: '1' });
+    return rows([]);
+  }
+  if (s.startsWith('INSERT INTO employees (org_id, code, name, shift) VALUES ($1,$2,$3,$4) ON CONFLICT (org_id, name) DO NOTHING')) {
+    if (db.employees.find(e => e.org === p[0] && e.name === p[2])) return Promise.resolve({ rows: [], rowCount: 0 });
+    db.employees.push({ org: p[0], code: p[1], name: p[2], shift: p[3] });
+    return Promise.resolve({ rows: [], rowCount: 1 });
+  }
+  if (s.startsWith('INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,NULL)')) {
+    const r = db.records.find(x => x.org === p[0] && x.e === p[1] && x.d === p[2]);
+    if (r) r.data = p[3]; else db.records.push({ org: p[0], e: p[1], d: p[2], data: p[3] });
+    return rows([]);
+  }
+  if (s === 'SELECT * FROM orgs WHERE id = $1') return rows([{ id: 1, name: 'Test Org' }]);
+  if (s.startsWith('SELECT id, org_id, email, password_hash, name, role, is_active, created_at, last_login_at FROM users WHERE org_id = $1')) return rows(db.users);
+  if (s.startsWith('SELECT user_id, key, value, updated_at, version FROM kv WHERE org_id = $1')) return rows(db.kv);
+  if (s.startsWith('SELECT code, name, shift, is_active FROM employees WHERE org_id = $1')) return rows(db.employees);
+  if (s.startsWith("SELECT employee, to_char(day,'YYYY-MM-DD') AS day, data, updated_at FROM records WHERE org_id = $1")) {
+    return rows(db.records.map(r => ({ employee: r.e, day: r.d, data: JSON.parse(r.data) })));
+  }
   if (s.startsWith('SELECT role, is_active, org_id, name FROM users WHERE id = $1')) {
     return rows(db.users.filter(u => u.id === p[0]).map(u => ({ role: u.role, is_active: u.is_active, org_id: u.org_id, name: u.name })));
   }
@@ -252,6 +281,47 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('empty replace refused, nothing deleted', empty.status === 400 && db.records.length === 1, [empty.status, db.records.length]);
   const byEmp = await ravi('PUT', '/api/dataset?replace=1', two);
   check('employee cannot replace', byEmp.status === 403 && db.records.length === 1, byEmp.status);
+
+  // --- the office PC: token-only upload and backup ---
+  const device = async (method, url, body, token) => {
+    const res = await fetch(base + url, {
+      method, headers: Object.assign({ 'content-type': 'application/json' }, token ? { authorization: 'Bearer ' + token } : {}),
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { status: res.status, buf, json: (() => { try { return JSON.parse(buf.toString()); } catch (e) { return null; } })() };
+  };
+  const pushBody = {
+    employees: [{ name: 'New Person', code: 'N1', shift: '9:30-6:30' }, { name: 'Card', code: '', shift: '' }],
+    records: [
+      { e: 'New Person', d: '2026-09-14', in: '9:35', out: '', st: 'PR', c: 1 },
+      { e: 'Asha Test', d: '2026-09-01', in: '9:40', out: '18:30', st: 'PR', c: 2 },
+      { e: 'Card', d: '2026-09-14', st: 'AB' },
+      { e: 'Bad Date', d: '2026-10-NaN', st: 'PR' }
+    ],
+    newestPunch: '2026-09-14'
+  };
+  check('upload with no token refused', (await device('POST', '/api/device/records', pushBody)).status === 401);
+  check('upload with a wrong token refused', (await device('POST', '/api/device/records', pushBody, 'nope-' + 'y'.repeat(40))).status === 401);
+  check('a signed-in admin cannot use the device route either', (await boss('POST', '/api/device/records', pushBody)).status === 401);
+  delete process.env.SYNC_TOKEN;
+  check('nothing works until SYNC_TOKEN is set (503)', (await device('POST', '/api/device/records', pushBody, DEVICE_TOKEN)).status === 503);
+  process.env.SYNC_TOKEN = DEVICE_TOKEN;
+  const before = db.records.length;
+  const pushed = await device('POST', '/api/device/records', pushBody, DEVICE_TOKEN);
+  check('upload accepted: 2 rows, 1 new person', pushed.status === 200 && pushed.json.records === 2 && pushed.json.employeesAdded === 1, pushed.json);
+  check('Card and bad dates skipped', !db.records.some(r => r.e === 'Card' || r.e === 'Bad Date') && !db.employees.some(e => e.name === 'Card'));
+  check("that person's day replaced by the file's row", JSON.parse(db.records.find(r => r.e === 'Asha Test' && r.d === '2026-09-01').data).in === '9:40');
+  check('new day added', db.records.length === before + 1);
+  const status = JSON.parse(kvFind(1, 'deviceStatus', null).value);
+  check('last upload recorded for the dashboard', status.rows === 2 && status.newestPunch === '2026-09-14' && !!status.at, status);
+  // Ravi: Asha was signed out everywhere by the disable check above.
+  check('employees cannot see the office-PC status', !('deviceStatus' in (await ravi('GET', '/api/kv-all')).body.values));
+  check('backup needs the token', (await device('GET', '/api/device/backup')).status === 401);
+  const bk = await device('GET', '/api/device/backup', undefined, DEVICE_TOKEN);
+  let dump = null; try { dump = JSON.parse(require('zlib').gunzipSync(bk.buf).toString()); } catch (e) {}
+  check('backup is a complete gzip copy', bk.status === 200 && dump && dump._type === 'hw-attendance-db-backup'
+    && dump.records.length === db.records.length && dump.users.length === db.users.length && dump.kv.length === db.kv.length, dump && Object.keys(dump));
 
   // --- login limit counts failures only ---
   let okLogins = 0;
