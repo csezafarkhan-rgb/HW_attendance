@@ -614,10 +614,18 @@ app.put('/api/dataset', requireAuth, bigJson, async (req, res) => {
   if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const employees = Array.isArray(req.body && req.body.employees) ? req.body.employees : [];
   const records = Array.isArray(req.body && req.body.records) ? req.body.records : [];
+  /* ?replace=1 is a restore: the attendance becomes exactly what was sent.
+     An upsert alone could never undo an import - rows the import added stayed -
+     so Undo import and Restore brought everything back except the attendance.
+     Only the dashboard's restore asks for it, after the person confirms, and an
+     empty payload is refused rather than taken as "delete everything". */
+  const replace = req.query.replace === '1';
+  if (replace && !records.length) return res.status(400).json({ error: 'nothing_to_restore' });
   const client = await pool.connect();
   let employeesUpserted = 0, recordsUpserted = 0;
   try {
     await client.query('BEGIN');
+    if (replace) await client.query('DELETE FROM records WHERE org_id = $1', [req.session.orgId]);
     for (const e of employees) {
       if (!e || !e.name) continue;
       await client.query(

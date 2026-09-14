@@ -92,6 +92,11 @@
       return api('PUT', '/api/dataset', dataset || {employees: [], records: []}, 90000)
         .catch(function (e) { saveFailed('the attendance records', e); throw e; });
     },
+    // A restore: the server's attendance becomes exactly this (see PUT /api/dataset?replace=1).
+    replaceDataset: function (dataset) {
+      return api('PUT', '/api/dataset?replace=1', dataset, 120000)
+        .catch(function (e) { saveFailed('the restored attendance', e); throw e; });
+    },
     cached: function () { return cache; }
   };
 

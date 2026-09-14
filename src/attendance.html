@@ -3311,20 +3311,42 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     if(mdy>0 && dmy===0) return 'mdy';
     return dmy>mdy ? 'dmy' : 'mdy'; // ambiguous → keep prior month-first behaviour
   }
+  var MONTH_NUM = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  /* Returns YYYY-MM-DD, or '' when the text is not a real date. It used to hand
+     back whatever it built: "10-Sep-2026" became 2026-10-NaN and "9/14/2026
+     00:00" kept the time on the year. Those went into the records and the
+     server, where one bad day rolled back the whole save. */
   function toISODate(s, order){
-    s = (s||'').trim();
-    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    var parts = s.split(/[\/\-.]/);
-    if(parts.length===3){
-      if(parts[0].length===4){ return parts[0]+'-'+pad2(parseInt(parts[1],10))+'-'+pad2(parseInt(parts[2],10)); }
-      var d, m, y = parts[2];
-      if(order==='dmy'){ d = parseInt(parts[0],10); m = parseInt(parts[1],10); }
-      else { m = parseInt(parts[0],10); d = parseInt(parts[1],10); }
-      if(m>12 && d<=12){ var t=m; m=d; d=t; } // defensive swap if clearly reversed
-      if(y.length===2) y = '20'+y;
-      return y+'-'+pad2(m)+'-'+pad2(d);
+    s = (s||'').trim().replace(/[T\s]+\d{1,2}:\d{2}(:\d{2})?(\s*[AaPp][Mm])?$/, '');   // a trailing time
+    var out = '';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
+      out = s;
+    } else {
+      var named = /^(\d{1,2})[\s\-\/.]+([A-Za-z]{3,9})[\s\-\/.,]+(\d{2}|\d{4})$/.exec(s);
+      if(named){
+        var mn = MONTH_NUM[named[2].slice(0,3).toLowerCase()];
+        if(mn) out = (named[3].length===2 ? '20'+named[3] : named[3]) + '-' + pad2(mn) + '-' + pad2(parseInt(named[1],10));
+      } else {
+        var parts = s.split(/[\/\-.]/);
+        if(parts.length===3){
+          if(parts[0].length===4){
+            out = parts[0]+'-'+pad2(parseInt(parts[1],10))+'-'+pad2(parseInt(parts[2],10));
+          } else {
+            var d, m, y = parts[2];
+            if(order==='dmy'){ d = parseInt(parts[0],10); m = parseInt(parts[1],10); }
+            else { m = parseInt(parts[0],10); d = parseInt(parts[1],10); }
+            if(m>12 && d<=12){ var t=m; m=d; d=t; } // defensive swap if clearly reversed
+            if(y.length===2) y = '20'+y;
+            out = y+'-'+pad2(m)+'-'+pad2(d);
+          }
+        }
+      }
     }
-    return s;
+    var ok = /^(\d{4})-(\d{2})-(\d{2})$/.exec(out);
+    if(!ok) return '';
+    var chk = new Date(+ok[1], +ok[2]-1, +ok[3]);
+    if(chk.getFullYear() !== +ok[1] || chk.getMonth() !== +ok[2]-1 || chk.getDate() !== +ok[3]) return '';
+    return out;
   }
   /* The column is labelled "Punches", so it should count punch events. The old
      rule counted only re-entries - the (in) punches BETWEEN the first and last
@@ -3420,6 +3442,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       var dateRaw = (row[col.date]||'').trim();
       if(!name || !dateRaw) continue;
       var iso = toISODate(dateRaw, dateOrder);
+      if(!iso) continue;                               // not a date - skipped, never stored
       if(newOverrides){
         newOverrides.push({
           e:name, d:iso,
@@ -3615,19 +3638,27 @@ function showUploadStatus(msg, isError){
          with the 'customDataset' key only ever used as a fallback - so reading
          that key alone produced a backup with every setting and no attendance
          data at all. */
-      idbData('get').then(function(v){
-        return { k:'customDataset', v:(v != null ? v : null) };
-      }).catch(function(){ return { k:'customDataset', v:null }; })
+      /* What is on screen, which is what the server holds. The IndexedDB copy
+         only changes when this browser saves, so on a machine that had not
+         saved for a week the backup - and the restore point taken before an
+         import - held last week's attendance. */
+      (typeof RECORDS !== 'undefined' && RECORDS.length)
+        ? Promise.resolve({ k:'customDataset', v: JSON.stringify({ employees: EMPLOYEES, records: RECORDS }) })
+        : idbData('get').then(function(v){
+            return { k:'customDataset', v:(v != null ? v : null) };
+          }).catch(function(){ return { k:'customDataset', v:null }; })
     ])).then(function(list){
       var data={}, n=0;
-      /* The IndexedDB copy is authoritative, so it is applied last and wins
-         over an older fallback of the same key. */
+      /* The dataset entry is applied last and wins over an older fallback of the same key. */
       list.forEach(function(o){ if(o.v!=null){ data['attDashboard_'+o.k]=o.v; n++; } });
-      // anything left in localStorage from an older build
+      // anything left in localStorage from an older build - but not the restore
+      // points or the import log, which are not data and nested inside each other
       try{
         for(var i=0;i<localStorage.length;i++){
           var k=localStorage.key(i);
-          if(k && k.indexOf('attDashboard_')===0 && data[k]==null){ data[k]=localStorage.getItem(k); n++; }
+          if(!k || k.indexOf('attDashboard_')!==0 || data[k]!=null) continue;
+          if(BACKUP_SKIP_KEYS.indexOf(k.slice('attDashboard_'.length)) > -1) continue;
+          data[k]=localStorage.getItem(k); n++;
         }
       }catch(_){}
       if(!n) return null;
@@ -3752,7 +3783,7 @@ function checkImportFolder(quiet){
   /* A quiet check is the one that runs by itself on load, with no click to ask
      permission on. It may only look; if permission has lapsed it says so on
      screen and leaves the asking to the Reconnect button. */
-  return ensureDirPerm(IMPORT_DIR, !quiet).then(function(ok){
+  return ensureDirPerm(IMPORT_DIR, !quiet, 'read').then(function(ok){
     if(!ok){
       IMPORT_DIR_PERM = 'prompt';
       renderImportFolder();
@@ -3987,7 +4018,7 @@ function offerImportFile(file, stamp){
   idbImpDir('get').then(function(dir){
     if(!dir) return;
     IMPORT_DIR = dir;
-    return dirPermState(dir).then(function(p){
+    return dirPermState(dir, 'read').then(function(p){
       IMPORT_DIR_PERM = p;
       renderImportFolder();
       // Only worth looking if we are allowed to; otherwise the Reconnect button has it.
@@ -4150,13 +4181,17 @@ function renderSignSetting(){
          the person, because the panel is per admin and this only ever removes
          the signature of whoever is signed in. */
       var whose = (viewRole && (viewRole.name || viewRole.username)) || k;
-      if(!confirm('Remove the signature for ' + whose + '?\n\n'
-                  + 'Forms you approve from now on will print without it. '
-                  + 'You can upload it again or generate one from your name.')) return;
-      delete SIGNS[k].data;
-      renderSignSetting();
-      saveSigns();
-      showUploadStatus('Signature removed for ' + whose + '.');
+      // In-page: a suppressed confirm() returned false and the button did nothing.
+      hwConfirm({ title: 'Remove the signature for ' + whose + '?',
+                  message: 'Forms you approve from now on will print without it. '
+                    + 'You can upload it again or generate one from your name.',
+                  confirmLabel: 'Remove signature', danger: true }).then(function(ok){
+        if(!ok) return;
+        delete SIGNS[k].data;
+        renderSignSetting();
+        saveSigns();
+        showUploadStatus('Signature removed for ' + whose + '.');
+      });
     });
     var by = document.getElementById('signBy');
     if(by) by.addEventListener('change', function(){
@@ -4185,7 +4220,7 @@ function renderImportFolder(){
 }
 function reconnectImportFolder(){
   if(!IMPORT_DIR) return;
-  ensureDirPerm(IMPORT_DIR, true).then(function(ok){          // a click, so the browser will ask
+  ensureDirPerm(IMPORT_DIR, true, 'read').then(function(ok){  // a click, so the browser will ask
     IMPORT_DIR_PERM = ok ? 'granted' : 'prompt';
     renderImportFolder();
     if(ok) checkImportFolder(false);
@@ -4201,18 +4236,21 @@ function reconnectImportFolder(){
 
    So the two are separated: anything running on its own asks what the state
    is, and only a button asks for the permission itself. */
-function dirPermState(dir){
+/* mode: 'read' for the import folder, which is only ever read and is picked
+   with read access - checking it as readwrite reported a perfectly good read
+   grant as "needs reconnecting". The backup folder is written, so readwrite. */
+function dirPermState(dir, mode){
   if(!dir || !dir.queryPermission) return Promise.resolve('granted');   // no permission model here
-  return dir.queryPermission({mode:'readwrite'})
+  return dir.queryPermission({mode: mode || 'readwrite'})
     .then(function(p){ return p || 'prompt'; })
     .catch(function(){ return 'granted'; });
 }
-function ensureDirPerm(dir, byClick){
+function ensureDirPerm(dir, byClick, mode){
   if(!dir) return Promise.resolve(false);
-  return dirPermState(dir).then(function(p){
+  return dirPermState(dir, mode).then(function(p){
     if(p === 'granted') return true;
     if(!byClick || !dir.requestPermission) return false;   // never spend the ask on a page load
-    return dir.requestPermission({mode:'readwrite'})
+    return dir.requestPermission({mode: mode || 'readwrite'})
       .then(function(p2){ return p2 === 'granted'; })
       .catch(function(){ return false; });
   });
@@ -4317,8 +4355,15 @@ function ensureDirPerm(dir, byClick){
   // Restore writes back through `storage` so it lands where the dashboard reads
   // from. Keys present in the file replace what's there; keys absent are left
   // alone, so a partial backup adds rather than wipes.
+  /* Kept in a backup's localStorage sweep but not data: the restore points
+     themselves (each one used to contain the one before it, so every import
+     made them bigger) and the import log. */
+  var BACKUP_SKIP_KEYS = ['preImportRestore', 'importLog', 'hasBackupDir'];
+  /* Resolves true once everything is written and the page is reloading, false
+     when it could not be. Callers wait for it: they used to reload on a timer of
+     their own, part-way through a multi-MB write. */
   function restoreFullBackup(data){
-    var jobs=[], n=0;
+    var jobs=[], n=0, dataset=null;
     /* Two shapes reach here. The older export prefixes every key with
        "attDashboard_"; the daily snapshot writes the plain key names. Only the
        prefixed form was accepted, so a snapshot imported as "no data to
@@ -4328,26 +4373,47 @@ function ensureDirPerm(dir, byClick){
       var key = (k.indexOf('attDashboard_') === 0) ? k.slice('attDashboard_'.length) : k;
       var val = data[k];
       if(!key || val == null) return;
+      if(BACKUP_SKIP_KEYS.indexOf(key) > -1) return;
       // stored as text either way, so an object from a snapshot is serialised
       var text = (typeof val === 'string') ? val : JSON.stringify(val);
-      n++;
-      try{ localStorage.setItem('attDashboard_' + key, text); }catch(_){}   // keep the fallback in step
-      /* The punch data is read from IndexedDB at startup, not from the shared
-         store - so it has to be written back there or a restored backup would
-         come up with every setting and no attendance. */
-      if(key === 'customDataset'){
-        jobs.push(idbData('set', text).catch(function(e){
-          console.error('restore punches', e);
-        }));
+      /* This browser's own settings go back under their own names. They were
+         written as attDashboard_hw_leave_hidden and so on, which nothing reads. */
+      if(key.indexOf('hw_') === 0 || key.indexOf('attDashboard_') === 0){
+        try{ localStorage.setItem(key, text); n++; }catch(_){}
+        return;
       }
-      jobs.push(storage.set(key, text, true).catch(function(){}));
+      n++;
+      if(key === 'customDataset'){
+        /* The attendance. The browser copy is only a fallback now - the server
+           decides what loads - so it goes to the server as a replacement, not
+           into the shared store as one key (far past the size the server takes).
+           Written to the browser as well, for the fallback. */
+        try{ dataset = JSON.parse(text); }catch(_){ dataset = null; }
+        jobs.push(idbData('set', text).catch(function(e){ console.error('restore punches', e); }));
+        return;
+      }
+      try{ localStorage.setItem('attDashboard_' + key, text); }catch(_){}   // keep the fallback in step
+      jobs.push(storage.set(key, text, true));
     });
-    if(!n){ bkStatus('This backup file has no data to restore.', true); return; }
-    bkStatus('Restoring '+n+' data sets\u2026', false);
-    Promise.all(jobs).then(function(){
+    if(!n){ bkStatus('This backup file has no data to restore.', true); return Promise.resolve(false); }
+    if(dataset && dataset.records && dataset.records.length && window.HWSync && window.HWSync.replaceDataset){
+      jobs.push(window.HWSync.replaceDataset({ employees: dataset.employees || [], records: dataset.records }));
+    }
+    bkStatus('Restoring '+n+' data sets…', false);
+    showUploadStatus('Restoring '+n+' data sets…', false);
+    return Promise.all(jobs).then(function(){
       bkStatus('Full backup restored ('+n+' data sets) — reloading…', false);
+      showUploadStatus('Restored — reloading…', false);
       setTimeout(function(){ location.reload(); }, 700);
-    }).catch(function(e){ bkStatus('Could not restore the backup: '+((e&&e.message)||e), true); });
+      return true;
+    }).catch(function(e){
+      /* Every failure used to be swallowed, so a refused write still said
+         "restored". Say it did not, and do not reload over the evidence. */
+      var why = 'The backup was not fully restored (' + ((e && e.message) || e) + '). Nothing has been reloaded — check the data before trying again.';
+      bkStatus(why, true);
+      showUploadStatus(why, true);
+      return false;
+    });
   }
   /* ---------- Excel (.xlsx) export & import (no libraries) ---------- */
   function downloadBlob(blob, fname){
@@ -4962,6 +5028,13 @@ function restoreSettingsFromSheets(sheets){
     try{ JSON.parse(text); }catch(e){ continue; }      // skip anything unreadable
     try{ localStorage.setItem('attDashboard_' + key, text); }catch(e){}
     try{ storage.set(key, text, true); }catch(e){}
+    /* Into memory as well. The import that follows applies the sheet's Mark
+       column to the in-memory marks and saves them - which wrote the old marks
+       straight back over the ones just restored, losing any leave booked ahead. */
+    try{
+      if(key === 'overrides')     overrides = JSON.parse(text) || {};
+      if(key === 'manualRecords') manualRecords = JSON.parse(text) || {};
+    }catch(e){}
     n++;
   }
   return n;
@@ -5421,16 +5494,22 @@ function buildExcelBackup(){
       + '<button type="button" class="ui-btn" id="undoImportBtn">Undo that import</button>'
       + '<button type="button" class="ui-x" id="undoImportDismiss" title="Keep the import and hide this">\u2715</button>';
     var b = document.getElementById('undoImportBtn');
+    /* In-page popups, not window.confirm: the frame can suppress dialogs, and
+       confirm() then returns false without asking - these buttons did nothing. */
     if(b) b.onclick = function(){
-      if(!confirmish('Undo the import of "' + (info.file || 'that file') + '"?\n\n'
-        + 'Everything goes back to how it was just before that import. Anything '
-        + 'changed since will be lost.')) return;
-      var pt = getPreImportPoint(); if(!pt) return;
-      restoreFullBackup(pt);
-      try{ localStorage.removeItem(PRE_IMPORT_KEY); }catch(e){}
-      window.__attPreImport = null;
-      showUploadStatus('Import undone \u2014 reloading\u2026', false);
-      setTimeout(function(){ location.reload(); }, 900);
+      hwConfirm({ title: 'Undo the import of "' + (info.file || 'that file') + '"?',
+                  message: 'Everything goes back to how it was just before that import. Anything changed since will be lost.',
+                  confirmLabel: 'Undo import', danger: true }).then(function(ok){
+        if(!ok) return;
+        var pt = getPreImportPoint(); if(!pt) return;
+        b.disabled = true;
+        // The way back is only thrown away once the restore has actually landed.
+        restoreFullBackup(pt).then(function(done){
+          if(!done){ b.disabled = false; return; }
+          try{ localStorage.removeItem(PRE_IMPORT_KEY); }catch(e){}
+          window.__attPreImport = null;
+        });
+      });
     };
     var d = document.getElementById('undoImportDismiss');
     if(d) d.onclick = function(){
@@ -5476,18 +5555,21 @@ function buildExcelBackup(){
       b.onclick = function(){
         var e = byId(b.getAttribute('data-ih-restore'));
         if(!e) return;
-        if(!confirmish('Go back to how things were just before importing "'
-          + (e.file || 'that file') + '"?\n\nAnything changed since will be lost.')) return;
-        b.disabled = true; b.textContent = 'Restoring\u2026';
-        getRestoreSnapshot(e).then(function(snap){
-          if(!snap){
-            b.disabled = false; b.textContent = 'Restore';
-            showUploadStatus('That restore point is no longer stored in this browser.', true);
-            return;
-          }
-          restoreFullBackup(snap);
-          showUploadStatus('Restored \u2014 reloading\u2026', false);
-          setTimeout(function(){ location.reload(); }, 900);
+        hwConfirm({ title: 'Go back to just before importing "' + (e.file || 'that file') + '"?',
+                    message: 'Anything changed since will be lost.',
+                    confirmLabel: 'Restore', danger: true }).then(function(ok){
+          if(!ok) return;
+          b.disabled = true; b.textContent = 'Restoring\u2026';
+          getRestoreSnapshot(e).then(function(snap){
+            if(!snap){
+              b.disabled = false; b.textContent = 'Restore';
+              showUploadStatus('That restore point is no longer stored in this browser.', true);
+              return;
+            }
+            restoreFullBackup(snap).then(function(done){
+              if(!done){ b.disabled = false; b.textContent = 'Restore'; }
+            });
+          });
         });
       };
     });
@@ -5496,29 +5578,34 @@ function buildExcelBackup(){
         var id = b.getAttribute('data-ih-drop');
         var e = byId(id);
         if(!e) return;
-        if(!confirmish('Remove the restore point for "' + (e.file || 'that file') + '"?\n\n'
-          + 'The attendance data stays as it is; only the way back is discarded.')) return;
-        dropRestorePoint(e).then(function(){
-          writeImportLog(readImportLog().filter(function(x){ return x.id !== id; }));
-          renderImportHistory();
-          renderUndoImport();
+        hwConfirm({ title: 'Remove the restore point for "' + (e.file || 'that file') + '"?',
+                    message: 'The attendance data stays as it is; only the way back is discarded.',
+                    confirmLabel: 'Remove' }).then(function(ok){
+          if(!ok) return;
+          dropRestorePoint(e).then(function(){
+            writeImportLog(readImportLog().filter(function(x){ return x.id !== id; }));
+            renderImportHistory();
+            renderUndoImport();
+          });
         });
       };
     });
     var clr = document.getElementById('ihClear');
     if(clr) clr.onclick = function(){
-      if(!confirmish('Clear the import log?\n\nAll ' + log.length + ' restore point(s) are '
-        + 'discarded and the space is freed. Your attendance data is not touched, but '
-        + 'imports made before now can no longer be undone.')) return;
-      clearImportLog().then(function(){
-        showUploadStatus('Import log cleared.', false);
+      hwConfirm({ title: 'Clear the import log?',
+                  message: 'All ' + log.length + ' restore point(s) are discarded and the space is freed. '
+                    + 'Your attendance data is not touched, but imports made before now can no longer be undone.',
+                  confirmLabel: 'Clear log', danger: true }).then(function(ok){
+        if(!ok) return;
+        clearImportLog().then(function(){
+          showUploadStatus('Import log cleared.', false);
+        });
       });
     };
   }
 
   function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
-  function confirmish(msg){ try{ return window.confirm(msg); }catch(e){ return true; } }
   /* Ask again before anything that changes many records at once.
      Not window.confirm: inside the dashboard's frame the browser can suppress
      dialogs, and confirm() then returns false without ever asking - which is
@@ -5538,6 +5625,7 @@ function buildExcelBackup(){
         + '<div class="hwc-title" id="hwcTitle"></div>'
         + '<div class="hwc-msg" id="hwcMsg"></div>'
         + '<ul class="hwc-list"></ul>'
+        + (o.input ? '<textarea class="ov-reason hwc-input" rows="3" style="width:100%;box-sizing:border-box;margin:4px 0 10px;"></textarea>' : '')
         + '<div class="hwc-actions"><button type="button" class="btn ghost hwc-no">Cancel</button>'
         + '<button type="button" class="btn primary hwc-yes"></button></div></div>';
       ov.querySelector('.hwc-title').textContent = o.title || 'Are you sure?';
@@ -5556,6 +5644,10 @@ function buildExcelBackup(){
         ul.style.display = 'none';
       }
       var yes = ov.querySelector('.hwc-yes'), no = ov.querySelector('.hwc-no');
+      /* o.input = {placeholder, required}: a text box for what prompt() used to
+         ask. Confirming then resolves with the text (possibly ''), not true. */
+      var box = o.input ? ov.querySelector('.hwc-input') : null;
+      if(box) box.placeholder = o.input.placeholder || '';
       yes.textContent = o.confirmLabel || 'Confirm';
       if(o.danger) yes.classList.add('hwc-danger');
       var settled = false;
@@ -5572,11 +5664,16 @@ function buildExcelBackup(){
          the popup rather than closing as an "outside" click. */
       ov.addEventListener('click', function(e){ e.stopPropagation(); if(e.target === ov) close(false); });
       ov.addEventListener('mousedown', function(e){ e.stopPropagation(); });
-      yes.addEventListener('click', function(){ close(true); });
+      yes.addEventListener('click', function(){
+        if(!box){ close(true); return; }
+        var text = box.value.trim();
+        if(o.input.required && !text){ box.focus(); return; }
+        close(text);
+      });
       no.addEventListener('click', function(){ close(false); });
       document.addEventListener('keydown', onKey, true);
       document.body.appendChild(ov);
-      try{ (o.danger ? no : yes).focus(); }catch(e){}
+      try{ (box || (o.danger ? no : yes)).focus(); }catch(e){}
     });
   }
 
@@ -6050,7 +6147,9 @@ function buildExcelBackup(){
      joined on the 20th of a 31-day month earns 12/31 of that month's leave, not
      the whole month and not none of it. */
   function accrualShare(emp, year, month){
-    var j = getJoinDate(emp);
+    // Normalised as beforeJoining does: a restored "15/06/2026" sliced as
+    // YYYY-MM-DD gave NaN and a full year's accrual.
+    var j = normJoin(getJoinDate(emp));
     if(!j) return 1;
     var jy = parseInt(j.slice(0,4), 10),
         jm = parseInt(j.slice(5,7), 10),
@@ -6248,9 +6347,25 @@ function buildExcelBackup(){
   // ---------- leave requests (employee -> admin workflow, shared) ----------
   var leaveRequests = []; // {id, empName, dateFrom, dateTo, leaveType, message, status, adminNote, employeeReply, createdAt, updatedAt}
 
+  /* Requests are written by employees, and parts of them go into markup and
+     attributes unescaped - the id in data-id, the leave type in a class name.
+     Keep those fields to the characters they are made of, so a request edited
+     by hand before it was saved cannot carry markup into an admin's page. */
+  var REQ_STATUSES = ['pending', 'query', 'approved', 'rejected', 'recorded'];
+  function cleanRequests(list){
+    if(!Array.isArray(list)) return [];
+    return list.filter(function(r){ return r && typeof r === 'object'; }).map(function(r){
+      r.id = String(r.id == null ? '' : r.id).replace(/[^\w-]/g, '');
+      r.leaveType = String(r.leaveType || 'CL').replace(/[^A-Za-z]/g, '') || 'CL';
+      ['dateFrom', 'dateTo'].forEach(function(k){ r[k] = String(r[k] || '').replace(/[^\d-]/g, ''); });
+      if(r.returnOn && !/^\d{4}-\d{2}-\d{2}$/.test(r.returnOn)) r.returnOn = '';
+      if(REQ_STATUSES.indexOf(r.status) === -1) r.status = 'pending';
+      return r;
+    });
+  }
   function loadLeaveRequests(){
     return storage.get('leaveRequests', true).then(function(res){
-      if(res && res.value){ try{ leaveRequests = JSON.parse(res.value) || []; }catch(e){ leaveRequests = []; } }
+      if(res && res.value){ try{ leaveRequests = cleanRequests(JSON.parse(res.value)); }catch(e){ leaveRequests = []; } }
     }).catch(function(){ leaveRequests = []; });
   }
   function saveLeaveRequests(){
@@ -6268,15 +6383,25 @@ function buildExcelBackup(){
     }
     return out;
   }
+  /* Each mark approval writes carries the request's id, and a day already
+     holding a different mark is left alone. Approval used to overwrite whatever
+     was there - a visit set by hand became leave - and undoing the approval then
+     deleted the day outright, so the visit was lost; with two requests covering
+     one day, rejecting either cleared the day the other still granted. */
   function applyApprovedRequestToAttendance(req){
     var dates = eachDateBetween(req.dateFrom, req.dateTo);
+    var kept = 0;
     dates.forEach(function(dateStr){
+      var key = req.empName+'|'+dateStr;
       /* A day worked from home or spent at a customer is not leave, and must
          not come off the balance. Only CL, Sick and Other do. */
       /* A half day is not an override - it is a part-day marker, so it goes to
          halfDays where the leave maths already counts it as 0.5. */
       if(isPartDay(req.leaveType)){
-        halfDays[req.empName+'|'+dateStr] = {
+        var curH = halfDays[key];
+        if(curH && curH.reqId !== req.id && curH.kind !== req.leaveType){ kept++; return; }
+        halfDays[key] = {
+          reqId: req.id,
           kind: req.leaveType,
           half: req.half || '',
           leave: 'CL',
@@ -6289,13 +6414,20 @@ function buildExcelBackup(){
       var cat = (req.leaveType === 'WFH')   ? 'WFH'
               : (req.leaveType === 'VISIT') ? 'VISIT'
               : 'LEAVE';
-      overrides[req.empName+'|'+dateStr] = {
+      var cur = overrides[key];
+      if(cur && cur.reqId !== req.id && cur.cat !== cat){ kept++; return; }
+      overrides[key] = {
         cat: cat,
         detail: (cat === 'LEAVE') ? req.leaveType : '',
         reason: req.message || '',
+        reqId: req.id,
         at: new Date().toISOString()
       };
     });
+    if(kept){
+      showUploadStatus(kept + ' day(s) of ' + dispName(req.empName) + '’s request already carried a different mark '
+        + 'and were left as they were. Change them on the Attendance Record if the request should replace them.');
+    }
     // a half day writes to halfDays, everything else to overrides - save both
     return Promise.all([saveOverrides(), saveHalfDays()]);
   }
@@ -6571,6 +6703,11 @@ function buildExcelBackup(){
               req.updatedAt = new Date().toISOString();
               jobs.push(applyApprovedRequestToAttendance(req));
             } else if(act === 'reject'){
+              /* An approved request already wrote its days into the record.
+                 Rejecting it from here only changed the status, so the leave
+                 stayed marked and kept being charged - the single "reject"
+                 path undoes it, and so must this one. */
+              if(req.status === 'approved') jobs.push(revertApprovedRequest(req));
               req.status = 'rejected';
               req.updatedAt = new Date().toISOString();
             } else if(act === 'archive'){
@@ -6608,18 +6745,22 @@ function buildExcelBackup(){
      hand is left alone rather than silently discarded. */
   function revertApprovedRequest(req){
     var kept = 0;
+    /* Only a mark this request wrote. Marks written before request ids were
+       stamped have none, and fall back to matching the kind as before. */
+    var mine = function(m, sameKind){ return !!m && (m.reqId ? m.reqId === req.id : sameKind); };
     eachDateBetween(req.dateFrom, req.dateTo).forEach(function(d){
       var key = req.empName + '|' + d;
       if(isPartDay(req.leaveType)){
-        if(halfDays[key] && halfDays[key].kind === req.leaveType) delete halfDays[key];
-        else if(halfDays[key]) kept++;
+        var hd = halfDays[key];
+        if(mine(hd, hd && hd.kind === req.leaveType)) delete halfDays[key];
+        else if(hd) kept++;
         return;
       }
       var want = (req.leaveType === 'WFH')   ? 'WFH'
                : (req.leaveType === 'VISIT') ? 'VISIT'
                : 'LEAVE';
       var ov = overrides[key];
-      if(ov && ov.cat === want) delete overrides[key];
+      if(mine(ov, ov && ov.cat === want)) delete overrides[key];
       else if(ov) kept++;
     });
     return Promise.all([saveOverrides(), saveHalfDays()]).then(function(){ return kept; });
@@ -6738,7 +6879,9 @@ function buildExcelBackup(){
         var nextDay = run && (function(){
           var d = new Date(run.dateTo + 'T00:00:00');
           d.setDate(d.getDate() + 1);
-          return d.toISOString().slice(0,10) === row.date;
+          // Local date parts: toISOString() of local midnight is the previous day
+          // in India, so no two consecutive days ever grouped.
+          return (d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())) === row.date;
         })();
         if(run && sameKind && nextDay){ run.dateTo = row.date; return; }
         if(run) out.push(run);
@@ -6906,11 +7049,11 @@ function buildExcelBackup(){
         +   (reqIsArchived(req) ? '\u21a9 Restore' : '\u2913 Archive') + '</button></div>';
       var noteHtml = unmarkedNoteHtml(req, true);
       if(req.adminNote) noteHtml += '<div class="req-note"><strong>Admin:</strong> '+req.adminNote.replace(/</g,'&lt;')+'</div>';
-      if(req.employeeReply) noteHtml += '<div class="req-note"><strong>'+req.empName+':</strong> '+req.employeeReply.replace(/</g,'&lt;')+'</div>';
+      if(req.employeeReply) noteHtml += '<div class="req-note"><strong>'+escapeHtml(req.empName)+':</strong> '+req.employeeReply.replace(/</g,'&lt;')+'</div>';
       return '<div class="req-card">'+
         '<div class="req-top">'+
           '<label class="req-pick"><input type="checkbox" class="req-sel" value="'+req.id+'"></label>'+
-          '<div><div class="req-emp">'+req.empName+'</div><div class="req-dates">'+fmtDateRange(req.dateFrom, req.dateTo)+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+reqTypeName(req.leaveType, req.half)+'</span></div></div>'+
+          '<div><div class="req-emp">'+escapeHtml(req.empName)+'</div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeName(req.leaveType, req.half))+'</span></div></div>'+
           '<span class="req-status '+statusCls+'">'+(REQ_STATUS_LABEL[req.status]||req.status)+'</span>'+
         '</div>'+
         (req.message ? '<div class="req-msg">'+req.message.replace(/</g,'&lt;')+'</div>' : '')+
@@ -6977,19 +7120,32 @@ function buildExcelBackup(){
             saveLeaveRequests().then(function(){ renderRequestsPage(); refreshActivePage(); });
           });
         } else if(act === 'reject'){
-          var reason = prompt('Reason for rejecting this request (optional):') || '';
-          req.status = 'rejected';
-          req.adminNote = reason;
-          req.updatedAt = new Date().toISOString();
-          saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); });
+          // In-page, not prompt(): a suppressed dialog returned null and Raise Query did nothing.
+          hwConfirm({ title: 'Reject ' + dispName(req.empName) + '’s request?',
+                      message: fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeName(req.leaveType, req.half),
+                      input: { placeholder: 'Reason for rejecting (optional)' },
+                      confirmLabel: 'Reject', danger: true }).then(function(reason){
+            if(reason === false) return;
+            var undo = (req.status === 'approved') ? revertApprovedRequest(req) : Promise.resolve(0);
+            undo.then(function(){
+              req.status = 'rejected';
+              req.adminNote = reason;
+              req.updatedAt = new Date().toISOString();
+              saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); refreshActivePage(); });
+            });
+          });
         } else if(act === 'query'){
-          var q = prompt('What would you like to ask the employee?');
-          if(!q) return;
-          req.status = 'query';
-          req.adminNote = q;
-          req.employeeReply = '';
-          req.updatedAt = new Date().toISOString();
-          saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); });
+          hwConfirm({ title: 'Ask ' + dispName(req.empName) + ' about this request',
+                      message: fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeName(req.leaveType, req.half),
+                      input: { placeholder: 'What would you like to ask?', required: true },
+                      confirmLabel: 'Send question' }).then(function(q){
+            if(!q) return;
+            req.status = 'query';
+            req.adminNote = q;
+            req.employeeReply = '';
+            req.updatedAt = new Date().toISOString();
+            saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); });
+          });
         }
       });
     });
@@ -7080,7 +7236,7 @@ function buildExcelBackup(){
       }
       return '<div class="req-card">'+
         '<div class="req-top">'+
-          '<div><div class="req-dates">'+fmtDateRange(req.dateFrom, req.dateTo)+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+reqTypeName(req.leaveType, req.half)+'</span></div></div>'+
+          '<div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeName(req.leaveType, req.half))+'</span></div></div>'+
           '<span class="req-status '+statusCls+'">'+(REQ_STATUS_LABEL[req.status]||req.status)+'</span>'+
         '</div>'+
         (req.message ? '<div class="req-msg">'+req.message.replace(/</g,'&lt;')+'</div>' : '')+
@@ -7169,7 +7325,8 @@ function buildExcelBackup(){
     if(fromEl) fromEl.addEventListener('change', syncReturn);
     t.addEventListener('change', syncReturn);
     if(fromEl) fromEl.addEventListener('change', function(){
-      if(t.value === 'HALF' && toEl) toEl.value = fromEl.value;
+      // Every part-day kind is one day (the To box is disabled for all of them).
+      if(isPartDay(t.value) && toEl) toEl.value = fromEl.value;
     });
   })();
   document.getElementById('requestModalClose').addEventListener('click', function(){
@@ -7344,6 +7501,9 @@ function buildExcelBackup(){
              then judged on when they left; today has no out time yet, so there
              is nothing left to hold against it and it contributes nothing. It
              still counts as a day being worked, so it earns its leverage. */
+          // A confirmed part-day is out of the reckoning today too; checked below
+          // for past days, today returned first and read afternoon leave as late.
+          if(getHalfDay(empName, dateStr)) return;
           if(isToday){
             net += getLateExcuse(empName, dateStr) ? 0 : (sh.startMin - toMin(rec['in']));
             counted++;
@@ -8603,7 +8763,11 @@ function buildExcelBackup(){
        reads 0 and later months charge nothing, so it cannot be taken twice.
        This also survives a deduction cell typed over by hand - the shortfall is
        still visible in the closing figure. */
-    var stillShort = Math.max(0, -(mtx.afterDed || 0));
+    /* From the all-months matrix. mtx follows the Leave Record's Months picker,
+       which lives in each browser, so hiding a month on one machine changed what
+       that machine said someone is paid. The balance shown still uses mtx, to
+       match the Leave Record on screen; the money does not. */
+    var stillShort = Math.max(0, -(mtxDed.afterDed || 0));
     var lop = payRules.allLeaveUnpaid ? leaveDays : stillShort;
     lop = Math.round(lop * 100) / 100;
     // Days the punch file calls absent with nothing marked against them. They are
@@ -8622,10 +8786,13 @@ function buildExcelBackup(){
     /* Work on a holiday, a Sunday, or a Saturday that is off for this person is
        paid. The hourly rate follows the day rate over the shift length, so a
        shorter shift earns proportionally more per hour, as it should. */
-    var shiftMin = 0;
-    (function(){
-      var probe = dates.filter(function(d){ return owedMinutes(emp, d) > 0; })[0];
-      shiftMin = probe ? owedMinutes(emp, probe) : 540;
+    /* The standing shift's length. It was taken from the month's first owed day,
+       which in a month starting on a Saturday is a 4-hour home Saturday - making
+       the hourly rate, and every overtime hour that month, 2.25 times too high. */
+    var shiftMin = (function(){
+      var sh = parseShift(getShift(emp));
+      var len = sh.endMin - sh.startMin;
+      return len > 0 ? len : 540;
     })();
     var otRate = (perDay > 0 && shiftMin > 0) ? (perDay / (shiftMin/60)) : 0;
     var otAmt  = (payRules.ot && extraMin > 0)
@@ -9157,9 +9324,27 @@ function buildExcelBackup(){
     return (e && e.code) ? e.code : '';
   }
 
+  /* Print a page of its own without opening a window. Inside the workspace
+     frame window.open returns null, so the slip's Print button only ever said
+     the pop-up was blocked. A hidden frame in this page prints the same. */
+  function printHtmlInPage(html){
+    var f = document.createElement('iframe');
+    f.setAttribute('aria-hidden', 'true');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(f);
+    var doc = f.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(function(){
+      try{ f.contentWindow.focus(); f.contentWindow.print(); }
+      catch(e){ showUploadStatus('Could not open printing: ' + ((e && e.message) || e), true); }
+      setTimeout(function(){ if(f.parentNode) f.parentNode.removeChild(f); }, 60000);
+    }, 350);
+  }
   function printSlip(r, ym, coName, coAddr, coLogo){
-    var w = window.open('', '_blank');
-    if(!w){ showUploadStatus('The browser blocked the print window. Allow pop-ups for this page.', true); return; }
+    // Names and the address go into markup, so they are escaped.
+    r = Object.assign({}, r, { emp: escapeHtml(r.emp) });
+    coName = escapeHtml(coName); coAddr = escapeHtml(coAddr);
+    var w = { document: { parts: [], write: function(s){ this.parts.push(s); }, close: function(){} } };
     var row = function(l,v,b){ return '<tr><td>'+l+'</td><td style="text-align:right'+(b?';font-weight:700':'')+'">'+v+'</td></tr>'; };
     w.document.write('<!doctype html><html><head><title>Salary Slip \u2014 '+r.emp+' \u2014 '+monthLabel(ym)+'</title>'
       + '<style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);margin:32px;}'
@@ -9197,8 +9382,7 @@ function buildExcelBackup(){
       + '</table>'
       + '<div class="foot">Worked out from the attendance record. Unpaid days are leave taken beyond the accrued balance.</div>'
       + '</body></html>');
-    w.document.close();
-    setTimeout(function(){ try{ w.print(); }catch(e){} }, 350);
+    printHtmlInPage(w.document.parts.join(''));
   }
 
   function renderHolidaysPage(){
@@ -9283,7 +9467,7 @@ function buildExcelBackup(){
       if(lastRequestsSnapshot === null){ lastRequestsSnapshot = val; return; }
       if(val !== lastRequestsSnapshot){
         lastRequestsSnapshot = val;
-        try{ leaveRequests = JSON.parse(val) || []; }catch(e){ leaveRequests = []; }
+        try{ leaveRequests = cleanRequests(JSON.parse(val)); }catch(e){ leaveRequests = []; }
         if(viewRole && viewRole.role === 'admin'){
           renderReqBadge();
           if(currentPage === 'requests') renderRequestsPage();
@@ -10433,12 +10617,19 @@ function buildExcelBackup(){
         card.id = 'kpiHoverCard'; card.className = 'lv-card mtr-card';
         document.body.appendChild(card);
       }
+      /* Bound once, reading this render's figures from the element. The page
+         re-renders on every change and every live-sync refresh, and each render
+         used to add another pair of listeners - an hour in, one hover ran the
+         breakdown hundreds of times over stale copies of the stats. */
+      wrap.__kpiData = { stats: stats, prevBy: prevBy };
+      if(wrap.__kpiHoverBound) return;
+      wrap.__kpiHoverBound = true;
       wrap.addEventListener('mouseover', function(ev){
         var c = ev.target && ev.target.closest ? ev.target.closest('.kpi-live') : null;
         if(!c){ return; }
         var key = c.getAttribute('data-kpi'), d = KPI_DEFS[key];
         if(!d) return;
-        var rows = kpiBreakdown(key, stats, prevBy);
+        var rows = kpiBreakdown(key, wrap.__kpiData.stats, wrap.__kpiData.prevBy);
         card.innerHTML = '<div class="lv-card-h">'+d.t+'</div>'
           + '<div class="lv-card-s">'+(d.better==='high'?'Highest':'Lowest')+' first</div>'
           + '<div class="mtr-box">'
@@ -10777,11 +10968,11 @@ function buildExcelBackup(){
           return;
         }
         if(holiday && !ov){
-          html += '<td class="att-cell holiday-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(holiday.name+(holiday.note?' — '+holiday.note:'')).replace(/"/g,'&quot;')+'">'+holiday.name+(holiday.note?(' · '+holiday.note):'')+'</td>';
+          html += '<td class="att-cell holiday-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+escapeHtml(holiday.name+(holiday.note?' — '+holiday.note:''))+'">'+escapeHtml(holiday.name+(holiday.note?(' · '+holiday.note):''))+'</td>';
         } else if(ov){
           var cat = OV_CATS[ov.cat] || OV_CATS.OTHER;
           var ovDur = wfhCellDuration(emp.name, dateStr, ov);
-          var tag = cat.tag(ov.detail) + (ovDur ? ' · '+ovDur : '');
+          var tag = escapeHtml(cat.tag(ov.detail) + (ovDur ? ' · '+ovDur : ''));   // the detail comes from an approved request's type
           var fdBadge = (ov.cat === 'LEAVE') ? ' <span class="hd-pill full" title="Full day">'+hdMark('FULL')+'</span>' : '';
           html += '<td class="ov-cell '+cat.cls+' emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(ov.reason?ov.reason.replace(/"/g,'&quot;'):'')+'">'+tag+fdBadge+'</td>';
         } else if(rec && rec.st === 'WO'){
@@ -11100,9 +11291,13 @@ function buildExcelBackup(){
       });
     });
     btn.onclick = function(e){ e.stopPropagation(); dd.classList.toggle('open'); };
-    document.addEventListener('click', function(e){
-      if(!dd.contains(e.target) && e.target!==btn) dd.classList.remove('open');
-    });
+    // Once: this runs on every render, and each call used to add another listener.
+    if(!dd.__outsideClose){
+      dd.__outsideClose = true;
+      document.addEventListener('click', function(e){
+        if(!dd.contains(e.target) && e.target!==btn) dd.classList.remove('open');
+      });
+    }
   }
 
 
@@ -11897,7 +12092,7 @@ function buildExcelBackup(){
         '<option value="CL"'+(!hdCur||hdCur.leave!=='SL'?' selected':'')+'>Deduct as Casual Leave</option>'+
         '<option value="SL"'+(hdCur&&hdCur.leave==='SL'?' selected':'')+'>Deduct as Sick Leave</option>'+
       '</select>'+
-      '<textarea class="ov-reason" id="halfDayNote" style="margin-top:6px;" placeholder="Reason, e.g. approved \u2014 half day CL">'+(hdCur&&hdCur.note?hdCur.note:'')+'</textarea>'+
+      '<textarea class="ov-reason" id="halfDayNote" style="margin-top:6px;" placeholder="Reason, e.g. approved \u2014 half day CL">'+escapeHtml(hdCur&&hdCur.note?hdCur.note:'')+'</textarea>'+
       '<button class="btn primary" id="halfDaySave" style="width:100%;">Save part-day leave</button>'+
     '</div>';
 
@@ -11944,9 +12139,11 @@ function buildExcelBackup(){
         '<label style="font-size:10.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;">Hours worked (manual entry, e.g. for WFH — format H:MM)</label>'+
         '<input class="ov-detail" id="ovDuration" placeholder="e.g. 7:30" value="'+durationVal.replace(/"/g,'&quot;')+'" style="margin-bottom:0;"/>'+
       '</div>'+
-      '<textarea class="ov-reason" id="ovReason" placeholder="Optional note…">'+reasonVal+'</textarea>'+
+      /* Escaped: approving a request copies the employee's own message into
+         this note, and "</textarea>" in it ended the box and ran the rest. */
+      '<textarea class="ov-reason" id="ovReason" placeholder="Optional note…">'+escapeHtml(reasonVal)+'</textarea>'+
       '<div class="modal-actions"><button class="btn ghost" id="ovClear">Clear Mark</button><button class="btn primary" id="ovSave">Save</button></div>'+
-      '<div class="save-note" id="ovSaveNote">'+(ov ? 'Currently marked: '+OV_CATS[ov.cat].tag(ov.detail) : 'Visible to everyone viewing this dashboard.')+'</div>'+
+      '<div class="save-note" id="ovSaveNote">'+(ov ? 'Currently marked: '+escapeHtml((OV_CATS[ov.cat]||OV_CATS.OTHER).tag(ov.detail)) : 'Visible to everyone viewing this dashboard.')+'</div>'+
       manualHtml + dayShiftHtml + halfDayHtml + lateExcuseHtml + earlyExcuseHtml + mispunchHtml;
 
     var selectedCat = ov ? ov.cat : null;
@@ -12216,7 +12413,8 @@ function buildExcelBackup(){
     if(!msg || !msg.user) return;
     SESSION_FROM_SHELL = true;
     var att = msg.att || {};
-    var sig = msg.user + '|' + (att.role || '') + '|' + (att.emp || '');
+    // The tier is part of it: demoting an admin to view-only mid-session was ignored until a reload.
+    var sig = msg.user + '|' + (att.role || '') + '|' + (att.emp || '') + '|' + (att.tier || '');
     // The shell re-sends every few seconds so a late frame still gets it;
     // acting on every repeat would re-initialise the page over and over.
     if(sig === SESSION_APPLIED) return;
@@ -12801,8 +12999,8 @@ function buildExcelBackup(){
         + (tips.length ? (' title="'+tips.join(' · ').replace(/"/g,'&quot;')+'"') : '')+'>'+
         '<span class="d">'+day+'</span>'+
         (marks ? '<span class="ec-marks">'+marks+'</span>' : '')+
-        (label ? '<span class="s">'+label+'</span>' : '')+
-        (timeStr ? '<span class="t">'+timeStr+'</span>' : '')+
+        (label ? '<span class="s">'+escapeHtml(label)+'</span>' : '')+
+        (timeStr ? '<span class="t">'+escapeHtml(timeStr)+'</span>' : '')+
         '</div>';
     });
     grid.className = 'emp-cal-grid' + (EMP_CAL_COMPACT ? ' compact' : '');
@@ -12823,7 +13021,7 @@ function buildExcelBackup(){
     var lx = getLateExcuse(name, dateStr);
     modalName.textContent = name;
     modalDate.textContent = new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-    var statusHtml = '<span class="status-chip">'+(ov ? (OV_CATS[ov.cat]||OV_CATS.OTHER).tag(ov.detail) : (rec ? STATUS_LABEL[rec.st] : 'No Record'))+'</span>';
+    var statusHtml = '<span class="status-chip">'+escapeHtml(ov ? (OV_CATS[ov.cat]||OV_CATS.OTHER).tag(ov.detail) : (rec ? STATUS_LABEL[rec.st] : 'No Record'))+'</span>';
     var punchHtml = '<div class="punch-grid">'+
       '<div class="punch-item"><div class="k">In Time</div><div class="v">'+(rec?fmtTime(rec['in']):'—')+'</div></div>'+
       '<div class="punch-item"><div class="k">Out Time</div><div class="v">'+(rec?fmtTime(rec.out):'—')+'</div></div>'+
