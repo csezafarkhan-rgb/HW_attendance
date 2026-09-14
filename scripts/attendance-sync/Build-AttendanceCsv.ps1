@@ -45,6 +45,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+<#  One build at a time. The schedule and the dashboard's Live Sync button can
+    start one together; two copies then both call the readers (which take one
+    connection at a time, so both pulls can fail), read each other's half-written
+    punch file, and write the same CSV at once. A second copy waits for the first
+    to finish. The lock is released when this process ends, however it ends. #>
+$buildLock = New-Object System.Threading.Mutex($false, 'Global\HWAttendanceBuild')
+$haveLock = $false
+try   { $haveLock = $buildLock.WaitOne([TimeSpan]::FromMinutes(4)) }
+catch [System.Threading.AbandonedMutexException] { $haveLock = $true }   # previous run died holding it
+if (-not $haveLock) { Write-Output 'another build is still running - skipped'; exit 0 }
+
 $from = (Get-Date).Date.AddDays(-$Days)
 $to   = (Get-Date).Date
 
@@ -60,13 +71,30 @@ function Get-Rows([string] $sql) {
 }
 
 try {
-    # Punches live in a table per month, so ask only for the months in range.
+    <#  Punches live in a table per month, so ask only for the months in range.
+
+        Which tables exist is asked first. Every failed read used to count as
+        "no table", so a real read error - a copy taken mid-write, a driver
+        fault - left the month with no punches. eSSL's rows then won every day,
+        including the half-finished ones, and the shorter file overwrote the good
+        one. A month with no table is skipped; any other failure stops the run,
+        and the previous file stays as it was. #>
+    $conn = New-Object System.Data.Odbc.OdbcConnection($cs)
+    $conn.Open()
+    try     { $tableNames = @($conn.GetSchema('Tables') | ForEach-Object { '' + $_.TABLE_NAME }) }
+    finally { $conn.Close() }
+
     $punches = @()
-    $cursor  = Get-Date -Year $from.Year -Month $from.Month -Day 1
+    # Midnight on the 1st. Get-Date -Day 1 kept the current time of day, so on
+    # the 1st of a month at 10:12 the loop stopped before reaching that month.
+    $cursor  = New-Object DateTime $from.Year, $from.Month, 1
     while ($cursor -le $to) {
         $table = 'DeviceLogs_{0}_{1}' -f $cursor.Month, $cursor.Year
-        try   { $punches += (Get-Rows "SELECT UserId, LogDate, Direction, DeviceId FROM $table") }
-        catch { Write-Verbose "no table $table" }
+        if ($tableNames -contains $table) {
+            $punches += (Get-Rows "SELECT UserId, LogDate, Direction, DeviceId FROM $table")
+        } else {
+            Write-Verbose "no table $table"
+        }
         $cursor = $cursor.AddMonths(1)
     }
 
@@ -181,7 +209,27 @@ if (-not $NoDeviceRead) {
     $dump   = Join-Path $DataDir 'device-punches.csv'                                # data, kept out of the repo
     $ps32   = Join-Path $env:SystemRoot 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
     if ((Test-Path -LiteralPath $puller) -and (Test-Path -LiteralPath $ps32)) {
-        & $ps32 -NoProfile -ExecutionPolicy Bypass -File $puller -Days 3 -OutFile $dump 2>&1 | Out-Null
+        <#  Started as its own process with a time limit. Called with & and 2>&1
+            under ErrorActionPreference Stop, any error the puller wrote - both
+            readers off, the SDK missing - became fatal here, so the whole build
+            died and the file was not refreshed from the database either. And a
+            reader stalling mid-transfer left the build waiting forever, which
+            made the scheduler skip every run after it. #>
+        $pullOut = Join-Path $env:TEMP ('ett_pull_{0}.out' -f $PID)
+        $pullErr = Join-Path $env:TEMP ('ett_pull_{0}.err' -f $PID)
+        try {
+            $pullArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Days 3 -OutFile "{1}"' -f $puller, $dump
+            $pull = Start-Process -FilePath $ps32 -ArgumentList $pullArgs -NoNewWindow -PassThru `
+                                  -RedirectStandardOutput $pullOut -RedirectStandardError $pullErr
+            if (-not $pull.WaitForExit(180000)) {
+                try { $pull.Kill() } catch { }
+                Write-Output 'reader pull took over 3 minutes and was stopped; using the punches already on file'
+            }
+        } catch {
+            Write-Output ('reader pull could not run: ' + $_.Exception.Message)
+        } finally {
+            Remove-Item -LiteralPath $pullOut, $pullErr -Force -ErrorAction SilentlyContinue
+        }
         if (Test-Path -LiteralPath $dump) {
             $devicePunches = @(Import-Csv -LiteralPath $dump)
         }
@@ -219,8 +267,6 @@ foreach ($p in $devicePunches) {
     if (-not $emp) { continue }
     $key = '{0}|{1}' -f $emp.EmployeeId, $when.ToString('yyyy-MM-dd')
     if (-not $rawByKey.ContainsKey($key)) { $rawByKey[$key] = [System.Collections.ArrayList]::new() }
-    $stamp = $when.ToString('HH:mm')
-    if ($rawByKey[$key] | Where-Object { $_.At.ToString('HH:mm') -eq $stamp }) { continue }
     <#  Which reader a punch came from decides whether it is an arrival or a
         departure - one is mounted as IN, the other as OUT. Without a name there
         is no way to tell, and guessing "in" turns somebody's departure into a
@@ -228,6 +274,11 @@ foreach ($p in $devicePunches) {
         reader is skipped rather than assumed. #>
     $name = $deviceByIp[('' + $p.Device).Trim()]
     if (-not $name) { continue }
+    # The same punch is the same person at the same reader in the same minute.
+    # Matching on the minute alone dropped a genuine one: out at 13:05 on one
+    # reader and back in at 13:05 on the other.
+    $stamp = $when.ToString('HH:mm')
+    if ($rawByKey[$key] | Where-Object { $_.At.ToString('HH:mm') -eq $stamp -and $_.Device -eq $name }) { continue }
     [void] $rawByKey[$key].Add([pscustomobject]@{
         At = $when
         # Which reader it came from says in or out; these are mounted one each.
@@ -352,7 +403,11 @@ if ($WhatIfOnly) { Write-Output 'WhatIfOnly - nothing written'; return }
 
 $dir = Split-Path -Parent $OutFile
 if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-$rows | Export-Csv -LiteralPath $OutFile -NoTypeInformation -Encoding UTF8
+# Written beside the file and then swapped in, so the dashboard watching this
+# folder never picks up a file cut off halfway through writing.
+$partial = $OutFile + '.partial'
+$rows | Export-Csv -LiteralPath $partial -NoTypeInformation -Encoding UTF8
+Move-Item -LiteralPath $partial -Destination $OutFile -Force
 Write-Output ('written             : {0}' -f $OutFile)
 
 # A scheduled run has nobody watching it, so leave a line behind. One line per

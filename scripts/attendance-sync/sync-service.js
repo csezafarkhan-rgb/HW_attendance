@@ -46,10 +46,11 @@ function rebuild() {
   if (running) return running;               // one at a time; latecomers join it
   running = new Promise(resolve => {
     const started = Date.now();
-    execFile('powershell.exe',
+    const child = execFile('powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, '-Days', '30'],
-      { cwd: HERE, timeout: 5 * 60 * 1000, windowsHide: true },
+      { cwd: HERE, windowsHide: true },
       (err, stdout, stderr) => {
+        clearTimeout(limit);
         const text = String(stdout || '');
         // The script prints a line per figure; lift the ones worth reporting.
         const pick = re => { const m = text.match(re); return m ? m[1].trim() : null; };
@@ -62,30 +63,55 @@ function rebuild() {
           error: err ? String(stderr || err.message).slice(0, 400) : null
         });
       });
+    /* Five minutes, then the whole process tree. execFile's own timeout killed
+       only this powershell.exe: the 32-bit reader pull it started kept running,
+       and a kill during the database read left the temp .mdb copy behind. */
+    const limit = setTimeout(() => {
+      execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
+    }, 5 * 60 * 1000);
   }).finally(() => { running = null; });
   return running;
 }
 
 const server = http.createServer((req, res) => {
-  const origin = req.headers.origin || '';
-  if (ALLOWED.indexOf(origin) > -1) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-  }
   res.setHeader('Cache-Control', 'no-store');
 
-  /*  A page on https calling 127.0.0.1 is not mixed content - loopback counts
-      as trustworthy - but Chrome's Private Network Access still preflights it
-      and wants the server to say plainly that it accepts a call from a public
-      page. Without these it fails before the request is ever made. */
-  res.setHeader('Access-Control-Allow-Private-Network', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  /*  Only requests addressed to this machine by name. A hostile domain that
+      resolves to 127.0.0.1 (DNS rebinding) arrives with its own name in Host,
+      and would otherwise be able to read what /sync returns. */
+  const host = String(req.headers.host || '').toLowerCase();
+  if (host !== '127.0.0.1:' + PORT && host !== 'localhost:' + PORT) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: false, error: 'wrong host' }));
+  }
 
-  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+  const origin = req.headers.origin || '';
+  const allowed = ALLOWED.indexOf(origin) > -1;
+  if (allowed) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    /*  A page on https calling 127.0.0.1 is not mixed content - loopback counts
+        as trustworthy - but Chrome's Private Network Access still preflights it
+        and wants the server to say plainly that it accepts a call from a public
+        page. Without these it fails before the request is ever made. Said only
+        to the dashboard, not to every site that asks. */
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'content-type');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+
+  if (req.method === 'OPTIONS') { res.writeHead(allowed ? 204 : 403); return res.end(); }
 
   const url = (req.url || '').split('?')[0];
+
+  /*  Rebuilding reads both readers and rewrites the watched file, so only the
+      dashboard may ask for it. Any other page could trigger it with a plain
+      <img src="http://127.0.0.1:8765/sync"> - which sends no Origin at all. */
+  if (url === '/sync' && !allowed) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: false, error: 'not from the dashboard' }));
+  }
 
   if (url === '/ping') {                      // is the helper here at all?
     res.writeHead(200, { 'Content-Type': 'application/json' });

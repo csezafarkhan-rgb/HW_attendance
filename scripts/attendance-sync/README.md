@@ -73,6 +73,26 @@ writing anything. With `--headless` there is no window to close.
 `-WindowStyle Hidden` did not help: it hides the window only after it has
 already appeared.
 
+Rules the builder keeps, learned the hard way:
+
+- **One build at a time.** It holds the `Global\HWAttendanceBuild` lock, so a
+  scheduled run and a Live Sync press can't both hit the readers or write the
+  file at once. A second copy waits up to four minutes for the first.
+- **Readers can fail; the build carries on.** The reader pull runs as its own
+  process with a three-minute limit. Readers being off, the SDK missing or a
+  stalled transfer costs freshness, not the whole run.
+- **A month's punch table is read or the run stops.** It first lists the tables
+  that exist, skips a month with none, and treats any other read error as fatal.
+  Failing leaves yesterday's good file in place instead of writing a short one.
+  The month loop starts at midnight on the 1st, so the current month is read
+  on the 1st too.
+- **Files are swapped in, never written in place.** Both CSVs are written to
+  `.partial` and then moved over, so the dashboard never imports half a file.
+- **The helper only answers the dashboard.** `/sync` needs the dashboard's
+  Origin, and every request must be addressed to `127.0.0.1` or `localhost`,
+  which blocks drive-by pages and DNS rebinding. A build running past five
+  minutes is killed with its whole process tree.
+
 `Pull-DeviceLogs.ps1` adds to `device-punches.csv` instead of replacing it. If
 a reader can't be reached, or a read stops partway, the punches from earlier
 runs stay in the file, so a bad run no longer takes the day's in-times out of

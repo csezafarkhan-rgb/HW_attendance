@@ -56,9 +56,15 @@ if (-not (Test-Path -LiteralPath $log)) {
         $today = (Get-Date).ToString('MM-dd')
         # Before anyone has arrived there is nothing to see, so only judge this
         # once the morning is under way, and only on a working day.
-        $weekday = (Get-Date).DayOfWeek -ne 'Sunday'
-        if ($weekday -and (Get-Date).Hour -ge 10 -and -not $stamp.StartsWith($today)) {
-            $problems += ("No punch recorded today - newest is $stamp. The readers may be unreachable.")
+        $dow = (Get-Date).DayOfWeek
+        if ($dow -ne 'Sunday' -and (Get-Date).Hour -ge 10 -and -not $stamp.StartsWith($today)) {
+            if ($dow -eq 'Saturday') {
+                # Most people are off or at home on a Saturday, so an empty
+                # morning is normal; say it without raising the alarm.
+                $notes += "No punch yet today (Saturday) - newest is $stamp"
+            } else {
+                $problems += ("No punch recorded today - newest is $stamp. The readers may be unreachable.")
+            }
         }
     } else {
         $notes += 'No punch figure in the log yet'

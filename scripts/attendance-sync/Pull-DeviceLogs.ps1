@@ -126,5 +126,9 @@ if (Test-Path -LiteralPath $OutFile) {
     }
 }
 
-$rows | Sort-Object LogDate | Export-Csv -LiteralPath $OutFile -NoTypeInformation -Encoding UTF8
+# Written aside and swapped in: if this is stopped mid-write (the build gives it
+# three minutes), the punches already on file must not be left half a file.
+$partial = $OutFile + '.partial'
+$rows | Sort-Object LogDate | Export-Csv -LiteralPath $partial -NoTypeInformation -Encoding UTF8
+Move-Item -LiteralPath $partial -Destination $OutFile -Force
 Write-Output ("written: {0} ({1} punches from {2} device(s), {3} kept from earlier runs)" -f $OutFile, $rows.Count, $reached, $carried)
