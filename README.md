@@ -76,6 +76,23 @@ anyone. Writing is what separates the two admin tiers: the server gates every
 write on the role being `admin`, and the dashboard hides the controls a view
 admin cannot use so they are not clicking things that only return 403.
 
+The role and the active flag are read from `users` on every API request, so
+demoting or disabling an account takes effect on that person's next click, not
+at their next sign-in. Resetting a password or disabling an account also ends
+that account's other sessions.
+
+Employees are limited by the server, not only by what the page shows:
+
+- Reading shared keys, they get their own entries only (their marks, excuses,
+  shifts, join date, requests), the handful of settings every calendar needs
+  (holidays, thresholds, company info), and just the signatures their own
+  approved day-off forms print with. Salaries, pay rules and everyone else's
+  data are not sent.
+- Saving `leaveRequests` is merged on the server: they can add a request of
+  their own, always as pending, and answer a query on one of their own.
+  Everything else in the array stays as stored. An admin's save cannot drop a
+  request raised after their copy was loaded, since nothing deletes requests.
+
 ## Security notes
 
 - **Keep the repo private.** Employee names and attendance times are personal data.

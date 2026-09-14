@@ -94,6 +94,39 @@ app.use(session({
   }
 }));
 
+/* Who is calling, read fresh from the users table on every API request. The
+   role used to be copied into the session at login and never looked at again,
+   so disabling an account or demoting an admin changed nothing for a tab they
+   already had open - for up to 30 days with "keep me signed in". */
+app.use('/api', function (req, res, next) {
+  if (!req.session || !req.session.userId) return next();
+  if (req.path === '/login' || req.path === '/logout') return next();
+  pool.query('SELECT role, is_active, org_id, name FROM users WHERE id = $1', [req.session.userId])
+    .then(function (result) {
+      const u = result.rows[0];
+      if (!u || !u.is_active) {
+        return req.session.destroy(function () {
+          res.clearCookie('hw.sid');
+          res.status(401).json({ error: 'not_authenticated' });
+        });
+      }
+      if (req.session.role !== u.role) req.session.role = u.role;
+      if (req.session.orgId !== u.org_id) req.session.orgId = u.org_id;
+      req.user = u;
+      next();
+    })
+    .catch(next);
+});
+
+/* Sign an account out everywhere, optionally keeping the session making the
+   request. A failure here must not undo the change that asked for it. */
+function endSessions(userId, keepSid) {
+  return pool.query(
+    "DELETE FROM session WHERE (sess->>'userId') = $1 AND sid <> $2",
+    [String(userId), keepSid || '']
+  ).catch(function (e) { console.error('could not end sessions for user ' + userId + ':', e.message); });
+}
+
 /* ---------------- helpers ---------------- */
 
 function requireAuth(req, res, next) {
@@ -128,6 +161,102 @@ function mayWriteSharedKey(role, key) {
   return role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) > -1;
 }
 
+/* What an employee account may read from the shared keys: its own entries and
+   the few settings every calendar needs. The KV routes used to hand any signed-in
+   account every shared key - salaries, pay rules, signatures, everyone's marks
+   and requests. Anything not named here is hidden from employees. */
+const EMP_KEYED_BY_DAY = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags', 'manualRecords',
+                          'lateExcuses', 'earlyExcuses', 'manualLeave', 'leaveDeductions'];  // "Name|date"
+const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames'];         // "Name"
+const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
+                      'weeklyLeverageMin', 'companyInfo', 'customShifts'];
+const EMP_VISIBLE_KEYS = EMP_KEYED_BY_DAY.concat(EMP_KEYED_BY_NAME, EMP_READABLE, ['leaveRequests', 'signatures']);
+
+function parseJson(s) { try { return JSON.parse(s); } catch (e) { return undefined; } }
+function ownRequests(value, name) {
+  const all = parseJson(value);
+  return Array.isArray(all) ? all.filter(function (r) { return r && r.empName === name; }) : [];
+}
+/* The shared value as an employee sees it, or undefined when it is hidden.
+   requestsValue is the stored leaveRequests, needed to decide which signatures
+   their own approved day-off forms print with. */
+function valueForEmployee(key, value, name, requestsValue) {
+  if (EMP_READABLE.indexOf(key) > -1) return value;
+  if (key === 'leaveRequests') return JSON.stringify(ownRequests(value, name));
+  const byDay = EMP_KEYED_BY_DAY.indexOf(key) > -1, byName = EMP_KEYED_BY_NAME.indexOf(key) > -1;
+  if (byDay || byName || key === 'signatures') {
+    const obj = parseJson(value);
+    const out = {};
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return '{}';
+    let approvers = null;
+    if (key === 'signatures') {
+      approvers = {};
+      ownRequests(requestsValue, name).forEach(function (r) {
+        if (r.status === 'approved' && r.approvedBy) approvers[String(r.approvedBy).trim().toLowerCase()] = true;
+      });
+    }
+    Object.keys(obj).forEach(function (k) {
+      const mine = approvers ? approvers[k] === true
+                 : byName ? k === name
+                 : k.split('|')[0] === name;
+      if (mine) out[k] = obj[k];
+    });
+    return JSON.stringify(out);
+  }
+  return undefined;
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
+/* An employee saves the whole leaveRequests array, and used to be able to save
+   anything in it: approve their own leave, or drop everyone else's requests.
+   Their save is now merged into the stored array. They may add a new request of
+   their own, always as pending, and answer a query on one of their own; every
+   other entry stays exactly as stored. */
+function mergeEmployeeRequests(storedValue, incomingValue, name) {
+  const incoming = parseJson(incomingValue);
+  if (!Array.isArray(incoming)) return null;
+  const parsed = parseJson(storedValue);
+  const out = Array.isArray(parsed) ? parsed : [];
+  const byId = {};
+  out.forEach(function (r) { if (r && r.id) byId[String(r.id)] = r; });
+  const now = new Date().toISOString();
+  incoming.forEach(function (r) {
+    if (!r || typeof r !== 'object' || r.empName !== name || typeof r.id !== 'string') return;
+    const cur = byId[r.id];
+    if (!cur) {
+      if (!/^req_[A-Za-z0-9_]{1,60}$/.test(r.id)) return;
+      if (!DAY_RE.test(r.dateFrom) || !DAY_RE.test(r.dateTo) || r.dateTo < r.dateFrom) return;
+      if (!/^[A-Za-z]{1,16}$/.test(String(r.leaveType || ''))) return;
+      const fresh = {
+        id: r.id, empName: name, dateFrom: r.dateFrom, dateTo: r.dateTo,
+        leaveType: r.leaveType, message: clip(r.message, 2000), half: clip(r.half, 20),
+        returnOn: DAY_RE.test(r.returnOn || '') ? r.returnOn : '',
+        status: 'pending', adminNote: '', employeeReply: '', createdAt: now, updatedAt: now
+      };
+      out.push(fresh);
+      byId[fresh.id] = fresh;
+    } else if (cur.empName === name && cur.status === 'query'
+               && typeof r.employeeReply === 'string' && r.employeeReply.trim()) {
+      cur.employeeReply = clip(r.employeeReply.trim(), 2000);
+      cur.status = 'pending';
+      cur.updatedAt = now;
+    }
+  });
+  return JSON.stringify(out);
+}
+/* Nothing in the dashboard deletes a request - they are archived - so an admin's
+   save that lacks one is a copy loaded before an employee raised it. Keep it,
+   rather than let the admin's older copy silently remove it. */
+function keepNewerRequests(storedValue, incomingValue) {
+  const stored = parseJson(storedValue), incoming = parseJson(incomingValue);
+  if (!Array.isArray(stored) || !Array.isArray(incoming)) return incomingValue;
+  const seen = {};
+  incoming.forEach(function (r) { if (r && r.id) seen[String(r.id)] = true; });
+  const missing = stored.filter(function (r) { return r && r.id && !seen[String(r.id)]; });
+  return missing.length ? JSON.stringify(incoming.concat(missing)) : incomingValue;
+}
+
 // Mirrors the key rules the dashboard's own storage shim enforced.
 function validKey(k) {
   return typeof k === 'string' && k.length > 0 && k.length < 200 && !/[\s\/\\'"]/.test(k);
@@ -144,6 +273,9 @@ async function logChange(client, orgId, entity, ref, userId) {
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
+  // Only failures count. An office signs in from one address around 9:30, and
+  // counting successes locked out everyone after the twentieth person.
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'too_many_attempts' }
@@ -175,6 +307,11 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   if (!u || !u.is_active || !(await bcrypt.compare(password, u.password_hash))) {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
+  // A new session id at sign-in, so a cookie planted beforehand is not the one
+  // that ends up signed in.
+  await new Promise(function (resolve, reject) {
+    req.session.regenerate(function (err) { return err ? reject(err) : resolve(); });
+  });
   req.session.userId = u.id;
   req.session.orgId = u.org_id;
   req.session.role = u.role;
@@ -218,6 +355,7 @@ app.post('/api/change-password', requireAuth, async (req, res) => {
   }
   const hash = await bcrypt.hash(String(newPassword), 12);
   await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.session.userId]);
+  await endSessions(req.session.userId, req.sessionID);   // other devices sign in again
   res.json({ ok: true });
 });
 
@@ -290,6 +428,10 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
      RETURNING id, email, name, role, is_active, last_login_at, created_at`, vals
   );
   if (!rows[0]) return res.status(404).json({ error: 'not_found' });
+  // A reset password or a disabled account should not leave old sign-ins working.
+  if ((password !== undefined && String(password) !== '') || is_active === false) {
+    await endSessions(id, id === req.session.userId ? req.sessionID : '');
+  }
   res.json({ user: rows[0] });
 });
 
@@ -304,6 +446,7 @@ app.delete('/api/users/:id', requireRole('admin'), async (req, res) => {
     if (admins.rows[0].n <= 1) return res.status(400).json({ error: 'last_admin' });
   }
   await pool.query('DELETE FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
+  await endSessions(id, '');
   res.json({ ok: true });
 });
 
@@ -320,7 +463,18 @@ app.get('/api/kv/:key', requireAuth, async (req, res) => {
     shared ? [req.session.orgId, key] : [req.session.orgId, key, req.session.userId]
   );
   if (!rows[0]) return res.json(null);   // storage.get resolves null when absent
-  res.json({ key: rows[0].key, value: rows[0].value, shared });
+  let value = rows[0].value;
+  if (shared && req.session.role === 'employee') {
+    let requests = null;
+    if (key === 'signatures') {
+      const rq = await pool.query(
+        "SELECT value FROM kv WHERE org_id = $1 AND key = 'leaveRequests' AND user_id IS NULL", [req.session.orgId]);
+      requests = rq.rows[0] ? rq.rows[0].value : null;
+    }
+    value = valueForEmployee(key, value, (req.user && req.user.name) || '', requests);
+    if (value === undefined) return res.json(null);
+  }
+  res.json({ key: rows[0].key, value: value, shared });
 });
 
 app.put('/api/kv/:key', requireAuth, async (req, res) => {
@@ -334,10 +488,24 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   if (shared && !mayWriteSharedKey(req.session.role, key)) {
     return res.status(403).json({ error: 'read_only' });
   }
-  const value = String((req.body && req.body.value) != null ? req.body.value : '');
+  let value = String((req.body && req.body.value) != null ? req.body.value : '');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (shared && key === 'leaveRequests') {
+      // Locked, so two people saving requests at once are merged one after the other.
+      const cur = await client.query(
+        'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE',
+        [req.session.orgId, key]);
+      const stored = cur.rows[0] ? cur.rows[0].value : '[]';
+      if (req.session.role === 'employee') {
+        const merged = mergeEmployeeRequests(stored, value, (req.user && req.user.name) || '');
+        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_requests' }); }
+        value = merged;
+      } else {
+        value = keepNewerRequests(stored, value);
+      }
+    }
     if (shared) {
       await client.query(
         `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, $4)
@@ -357,6 +525,10 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
     await client.query('COMMIT');
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
+  // Answer with what this account may see - the merged array holds everyone's requests.
+  if (shared && req.session.role === 'employee') {
+    value = valueForEmployee(key, value, (req.user && req.user.name) || '', null);
+  }
   res.json({ key, value, shared });
 });
 
@@ -383,18 +555,28 @@ app.get('/api/kv', requireAuth, async (req, res) => {
       : 'SELECT key FROM kv WHERE org_id = $1 AND user_id = $3 AND key LIKE $2',
     shared ? [req.session.orgId, prefix + '%'] : [req.session.orgId, prefix + '%', req.session.userId]
   );
-  res.json({ keys: rows.map(r => r.key), prefix, shared });
+  let keys = rows.map(r => r.key);
+  if (shared && req.session.role === 'employee') keys = keys.filter(k => EMP_VISIBLE_KEYS.indexOf(k) > -1);
+  res.json({ keys, prefix, shared });
 });
 
 /* Bulk read — one request at boot instead of ~30 sequential gets. */
 app.get('/api/kv-all', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT key, value FROM kv WHERE org_id = $1 AND (user_id IS NULL OR user_id = $2)
+    `SELECT key, value, (user_id IS NULL) AS shared FROM kv WHERE org_id = $1 AND (user_id IS NULL OR user_id = $2)
      ORDER BY (user_id IS NULL) DESC`,  // personal overrides shared
     [req.session.orgId, req.session.userId]
   );
+  const employee = req.session.role === 'employee';
+  const name = (req.user && req.user.name) || '';
+  let requests = null;
+  if (employee) rows.forEach(r => { if (r.shared && r.key === 'leaveRequests') requests = r.value; });
   const out = {};
-  rows.forEach(r => { out[r.key] = r.value; });
+  rows.forEach(r => {
+    if (!employee || !r.shared) { out[r.key] = r.value; return; }
+    const v = valueForEmployee(r.key, r.value, name, requests);
+    if (v !== undefined) out[r.key] = v;
+  });
   res.json({ values: out });
 });
 

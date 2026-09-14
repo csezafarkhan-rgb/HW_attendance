@@ -3093,6 +3093,85 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     });
   }
   function applySavedJson(v){ if(!v) return false; try{ var d = JSON.parse(v); if(d && d.employees && d.records){ applyDataset(d); return true; } }catch(e){} return false; }
+
+  /* Whose attendance is on screen. 'local' means the server had not answered
+     in time and this browser's own saved copy is showing - which may be days
+     old. Saving that copy to the server used to upsert every stale row over
+     whatever other people had imported since, so while it is showing, saves stay
+     in this browser; when the server answers, rows changed here are laid over
+     the server's data and only then saved. */
+  var DATASET_SOURCE = 'server';
+  var localBaseline = null;           // "emp|date" -> row as the local copy had it
+  function markLocalDataset(){
+    DATASET_SOURCE = 'local';
+    localBaseline = {};
+    RECORDS.forEach(function(r){ localBaseline[r.e + '|' + r.d] = JSON.stringify(r); });
+  }
+  function redrawAfterDataset(){
+    try{
+      if(viewRole && viewRole.role === 'employee'){ renderEmployeeCalendar(); return; }
+      if(!adminInitDone) return;          // the first render happens after this anyway
+      renderMonthDropdown(); renderMonthLabel(); renderLegend();
+      renderEmpDropdown(); renderEmpBtnLabel(); renderShiftDropdown();
+      refreshActivePage(); renderReqBadge();
+    }catch(e){ console.error('redraw after dataset', e); }
+  }
+  function adoptServerDataset(remote){
+    if(DATASET_SOURCE !== 'local') return;
+    var changed = RECORDS.filter(function(r){
+      return !localBaseline || localBaseline[r.e + '|' + r.d] !== JSON.stringify(r);
+    });
+    var records = remote.records.slice(), at = {};
+    records.forEach(function(r, i){ at[r.e + '|' + r.d] = i; });
+    var emps = remote.employees.slice(), known = {};
+    emps.forEach(function(e){ known[e.name] = true; });
+    changed.forEach(function(r){
+      var k = r.e + '|' + r.d;
+      if(at[k] != null) records[at[k]] = r; else records.push(r);
+      if(!known[r.e]){
+        var local = EMPLOYEES.filter(function(e){ return e.name === r.e; })[0];
+        if(local){ emps.push(local); known[r.e] = true; }
+      }
+    });
+    DATASET_SOURCE = 'server';
+    localBaseline = null;
+    applyDataset({employees: emps, records: records});
+    // The month on screen was chosen before this data existed; choose again if it is not in it.
+    if(!state.selectedMonths.some(function(ym){ return ALL_MONTHS.indexOf(ym) > -1; })){
+      var dn = new Date();
+      var thisYm = dn.getFullYear() + '-' + (dn.getMonth()+1 < 10 ? '0' : '') + (dn.getMonth()+1);
+      defaultMonth = ALL_MONTHS.indexOf(thisYm) > -1 ? thisYm : ALL_MONTHS[ALL_MONTHS.length-1];
+      state.selectedMonths = defaultMonth ? [defaultMonth] : [];
+    }
+    if(ALL_MONTHS.indexOf(empCalMonth) === -1) empCalMonth = defaultMonth;
+    // People who arrived with this data start visible, as they do at load and after an import.
+    if(!visibleEmpSet) visibleEmpSet = {};
+    EMPLOYEES.forEach(function(e){ if(!(e.name in visibleEmpSet)) visibleEmpSet[e.name] = true; });
+    redrawAfterDataset();
+    if(changed.length){
+      persistDataset();
+      showUploadStatus('The server has answered. ' + changed.length + ' row(s) changed while it was away have been added to its attendance and saved.');
+    }
+  }
+  function waitForServerDataset(first){
+    var tries = 0;
+    var handle = function(p){
+      Promise.resolve(p).then(function(remote){
+        if(DATASET_SOURCE !== 'local') return;
+        if(!remote) throw new Error('no answer');
+        if(remote.employees.length || remote.records.length){ adoptServerDataset(remote); return; }
+        // The server is up and genuinely empty: this browser's copy is the data.
+        DATASET_SOURCE = 'server'; localBaseline = null;
+        persistDataset();
+      }).catch(function(){
+        // Keep asking - every 15s for the first ten minutes, then once a minute.
+        if(DATASET_SOURCE === 'local'){
+          setTimeout(function(){ handle(window.HWSync.hydrateDataset()); }, ++tries < 40 ? 15000 : 60000);
+        }
+      });
+    };
+    handle(first);
+  }
   function loadCustomDataset(){
     var withDeadline = function(p, ms, fallback){
       return new Promise(function(resolve){
@@ -3142,19 +3221,34 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
         // once. If there is no local copy, the bundled empty dataset still lets
         // the dashboard render normally instead of hanging.
         return localLoad().then(function(hadLocal){
-          if(hadLocal && remote !== null){
+          if(remote === null){
+            /* No answer yet - not an empty database. Show the local copy, but
+               keep waiting for the server instead of discarding its reply. */
+            markLocalDataset();
+            waitForServerDataset(remoteLoad);
+          } else if(hadLocal){
             /* Do not block first paint on a database write. Sync in background. */
             persistDataset().catch(function(e){ console.warn('initial dataset sync failed', e); });
           }
           return !!hadLocal;
         });
-      }).catch(function(){ return localLoad(); });
+      }).catch(function(){
+        return localLoad().then(function(hadLocal){
+          markLocalDataset();
+          waitForServerDataset(window.HWSync.hydrateDataset());
+          return hadLocal;
+        });
+      });
     }
     return localLoad();
   }
   function persistDataset(){
     var dataset = {employees:EMPLOYEES, records:RECORDS};
     var json = JSON.stringify(dataset);
+    if(DATASET_SOURCE === 'local'){
+      // Kept here until the server answers - see DATASET_SOURCE.
+      return idbData('set', json).catch(function(){});
+    }
     // Postgres is now the source of truth. Keep IndexedDB as a local fallback
     // and migration bridge so an existing imported backup is not lost while the
     // first database sync happens.
@@ -7622,6 +7716,10 @@ function buildExcelBackup(){
   window.addEventListener('message', function(e){
     if(!e.data || e.data.type !== 'hw-remote-change') return;
     var applyRemote = function(d){
+      if(d && (d.employees.length || d.records.length) && DATASET_SOURCE === 'local'){
+        adoptServerDataset(d);            // merge, so rows changed here are not dropped
+        return;
+      }
       if(d && (d.employees.length || d.records.length)){
         applyDataset(d);
         renderMonthDropdown(); renderMonthLabel();
@@ -12779,7 +12877,11 @@ function buildExcelBackup(){
       return d.getFullYear()+'-'+(d.getMonth()+1<10?'0':'')+(d.getMonth()+1); })();
     defaultMonth = (ALL_MONTHS.indexOf(todayNow) > -1) ? todayNow
                  : (ALL_MONTHS.indexOf(defaultMonth) > -1 ? defaultMonth : latestNow);
-    state.selectedMonths = [defaultMonth];
+    // No data yet (a slow server and nothing saved in this browser) leaves no
+    // month to pick. [undefined] crashed the month label and stopped the first
+    // render at "Loading..."; an empty selection draws, and the month is chosen
+    // again when the server's data arrives.
+    state.selectedMonths = defaultMonth ? [defaultMonth] : [];
     // One rejected loader used to fail the whole Promise.all, leaving the page
     // blank. Swallow individual failures so a bad or missing key can never stop
     // the grid from rendering.
