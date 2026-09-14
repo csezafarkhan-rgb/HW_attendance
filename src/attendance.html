@@ -1972,7 +1972,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* ---- compact month ----
    Half the height. The day number, the colour and the marks stay; the punch
    times and the status word go, since those are what the day drill is for. */
-.emp-cal-grid.compact /* ---- narrow screens: the attendance work added since the shared layer ----
+/* ---- narrow screens: the attendance work added since the shared layer ----
    Written here rather than in mobile_block.py because these are attendance's
    own components; the shared layer only knows generic class names. */
 @media (max-width: 820px){
@@ -2029,7 +2029,12 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .rk{ font-size:10px; padding:1px 7px; }
   .dof-sheet{ margin:8px; padding:12px 12px; font-size:12.5px; }
 }
-.emp-cal-cell{ min-height:42px; padding:4px 6px; }
+/* A stray ".emp-cal-grid.compact" used to sit in front of the 820px block above,
+   which made the browser throw that whole block away, and left this rule
+   applying to every calendar instead of the compact one. */
+.emp-cal-grid.compact .emp-cal-cell{ min-height:42px; padding:4px 6px; }
+.emp-cal-grid.compact .emp-cal-cell,
+.emp-cal-grid.compact .emp-cal-cell.empty{ height:56px; }
 .emp-cal-grid.compact .emp-cal-cell .t{ display:none; }
 .emp-cal-grid.compact .emp-cal-cell .s{ font-size:10px; line-height:1.2;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -2096,6 +2101,32 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   border-radius:4px;font-size:12px;font-weight:800;padding:0 4px;}
 /* Amber where it still counts against the person, green once an admin has
    excused it - the same reading the attendance grid uses. */
+/* Phones: after the base tile rules above, so these win without !important.
+   Seven columns stay (a month needs them); the tiles get shorter, and times and
+   the status word are left to the day view a tap opens. */
+@media (max-width: 820px){
+  .emp-cal-grid .emp-cal-cell,
+  .emp-cal-grid .emp-cal-cell.empty{ height:66px; }
+  .emp-cal-cell{ padding:4px 5px; border-radius:7px; }
+  .emp-cal-cell .d{ font-size:12px; }
+  .emp-cal-cell .s{ font-size:9.5px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .emp-cal-cell[data-date]:hover{ transform:none; }
+  .ec-marks{ top:3px; right:3px; gap:2px; }
+  .ec-m{ min-width:15px; height:15px; line-height:15px; font-size:10px; padding:0 3px; }
+  .emp-cal-dow{ font-size:11px; letter-spacing:0; padding:5px 0; }
+}
+@media (max-width: 520px){
+  .emp-cal-grid .emp-cal-cell,
+  .emp-cal-grid .emp-cal-cell.empty{ height:54px; }
+  .emp-cal-grid.compact .emp-cal-cell,
+  .emp-cal-grid.compact .emp-cal-cell.empty{ height:42px; }
+  .emp-cal-dow{ font-size:10px; }
+}
+/* Phones zoom the page into any field set below 16px when it is tapped. */
+@media (max-width: 820px){
+  #employeeView input, #employeeView select, #employeeView textarea,
+  #requestModalOverlay input, #requestModalOverlay select, #requestModalOverlay textarea{ font-size:16px !important; }
+}
 .ec-m.late{background:#F2C230;color:#4A3800;}
 .ec-m.early{background:#F0A85C;color:#4A2A00;}
 .ec-m.ok{background:#3E9C6B;color:#fff;}
@@ -13434,7 +13465,16 @@ function buildExcelBackup(){
     var lx = getLateExcuse(name, dateStr);
     modalName.textContent = name;
     modalDate.textContent = new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-    var statusHtml = '<span class="status-chip">'+escapeHtml(ov ? (OV_CATS[ov.cat]||OV_CATS.OTHER).tag(ov.detail) : (rec ? STATUS_LABEL[rec.st] : 'No Record'))+'</span>';
+    // The employee reads "Casual leave", not the grid's code "Leave_CL".
+    var ovText = '';
+    if(ov){
+      var ovCat = OV_CATS[ov.cat] ? ov.cat : 'OTHER';
+      if(ovCat === 'LEAVE') ovText = REQ_TYPE_LABEL[ov.detail] || ('Leave' + (ov.detail ? ' · ' + ov.detail : ''));
+      else if(ovCat === 'VISIT') ovText = 'Off-site visit' + (ov.detail ? ' · ' + ov.detail : '');
+      else if(ovCat === 'WFH') ovText = 'Work from home';
+      else ovText = OV_CATS.OTHER.tag(ov.detail);
+    }
+    var statusHtml = '<span class="status-chip">'+escapeHtml(ov ? ovText : (rec ? STATUS_LABEL[rec.st] : 'No Record'))+'</span>';
     var punchHtml = '<div class="punch-grid">'+
       '<div class="punch-item"><div class="k">In Time</div><div class="v">'+(rec?fmtTime(rec['in']):'—')+'</div></div>'+
       '<div class="punch-item"><div class="k">Out Time</div><div class="v">'+(rec?fmtTime(rec.out):'—')+'</div></div>'+

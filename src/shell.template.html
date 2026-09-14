@@ -134,6 +134,14 @@
   #topbar .brand span, #topbar .brand{ font-size: 0; }
   #topbar .brand::first-letter{ font-size: 16px; }
   #topbar .navbtn{ font-size: 12px; padding: 7px 10px; }
+  /* The company name and the sign-out button both fit on one line: a small
+     logo, the name cut short with "...", no address. Before, the bar was
+     twice the screen wide and sign-out was off to the right out of sight. */
+  #topbar .hw-logo{ width: 40px; height: 28px; margin-right: 0; }
+  #topbar .hw-co-wrap{ flex: 1 1 auto; min-width: 0; margin: 0 4px; }
+  #topbar .hw-co-name{ font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+  #topbar .hw-co-addr{ display: none; }
+  #topbar .topbar-right{ flex: 0 0 auto; }
 }
 </style>
 </head>
