@@ -78,6 +78,22 @@ CREATE TABLE IF NOT EXISTS records (
 );
 CREATE INDEX IF NOT EXISTS records_month_idx ON records (org_id, day);
 
+-- Who changed what, entry by entry: a mark on one day, a salary, a request.
+-- Written by the server on every shared save; read in the dashboard's day view.
+CREATE TABLE IF NOT EXISTS history (
+  id           BIGSERIAL PRIMARY KEY,
+  org_id       INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name    TEXT,
+  area         TEXT NOT NULL,      -- the setting: overrides, salaries, leaveRequests, records...
+  item         TEXT,               -- the entry inside it: "Name|2026-09-10", a request id, a month
+  before_value TEXT,
+  after_value  TEXT
+);
+CREATE INDEX IF NOT EXISTS history_item_idx ON history (org_id, item);
+CREATE INDEX IF NOT EXISTS history_recent_idx ON history (org_id, id DESC);
+
 -- Lets clients poll "what changed since X" cheaply for live sync.
 CREATE TABLE IF NOT EXISTS change_log (
   id         BIGSERIAL PRIMARY KEY,

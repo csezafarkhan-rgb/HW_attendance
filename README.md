@@ -104,6 +104,18 @@ Employees are limited by the server, not only by what the page shows:
   Everything else in the array stays as stored. An admin's save cannot drop a
   request raised after their copy was loaded, since nothing deletes requests.
 
+## Locked months and history
+
+- **Lock a month** from the Payroll page after its pay run. The server then refuses
+  changes to that month's marks, part-days, excuses, manual entries, holidays and
+  leave deductions (423), skips its rows in imports and uploads, and a restore
+  leaves them as they are. Salaries are one figure per person, not per month, so a
+  salary change still shows in a locked month's figures.
+- **History**: every shared save records who changed which entry, from what to what
+  (`history` table, `GET /api/history`). Admins see a day's changes from the day popup.
+- **Save conflicts**: shared values carry a version; a save made from an older copy
+  than the server's is refused (409) and the page asks the person to reload.
+
 ## Security notes
 
 - **Keep the repo private.** Employee names and attendance times are personal data.

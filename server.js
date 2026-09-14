@@ -255,6 +255,95 @@ function mergeEmployeeRequests(storedValue, incomingValue, name) {
   });
   return JSON.stringify(out);
 }
+/* ---------- change history and locked months ----------
+   A shared value is a whole JSON blob, so "what changed" means comparing the
+   stored blob with the incoming one entry by entry. The same comparison serves
+   two purposes: the history of who changed which entry, and refusing a change
+   to a month whose pay has been run and locked. */
+const DAY_MAPS = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags', 'manualRecords', 'lateExcuses', 'earlyExcuses'];
+const MONTH_MAPS = ['manualLeave', 'leaveDeductions'];                  // "Name|YYYY-MM"
+function canon(v) {                                                   // key order must not count as a change
+  if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+}
+function isPlainObject(x) { return !!x && typeof x === 'object' && !Array.isArray(x); }
+/* [{item, before, after}] for each entry that differs. Objects by key, arrays of
+   things with an id (leave requests) by id, anything else as one value. */
+function diffValue(beforeText, afterText) {
+  if (beforeText === afterText) return [];
+  const b = beforeText == null ? undefined : parseJson(beforeText);
+  const a = parseJson(afterText);
+  const out = [];
+  const push = (item, bv, av) => out.push({ item, before: bv === undefined ? null : clip(canon(bv), 1000), after: av === undefined ? null : clip(canon(av), 1000) });
+  if (isPlainObject(a) && (b === undefined || isPlainObject(b))) {
+    const bo = b || {};
+    Object.keys(Object.assign({}, bo, a)).forEach(k => { if (canon(bo[k]) !== canon(a[k])) push(k, bo[k], a[k]); });
+  } else if (Array.isArray(a) && (b === undefined || Array.isArray(b)) && a.every(x => x && x.id)) {
+    const byId = {};
+    (b || []).forEach(x => { if (x && x.id) byId[x.id] = x; });
+    a.forEach(x => { if (canon(byId[x.id]) !== canon(x)) push(String(x.id), byId[x.id], x); });
+  } else if (canon(b) !== canon(a)) {
+    out.push({ item: '', before: beforeText == null ? null : clip(beforeText, 1000), after: clip(afterText, 1000) });
+  }
+  return out;
+}
+// The month an entry belongs to, for the keys a locked month protects.
+function entryMonth(key, item) {
+  const part = String(item).split('|')[1] || '';
+  if (DAY_MAPS.indexOf(key) > -1) return /^\d{4}-\d{2}-\d{2}$/.test(part) ? part.slice(0, 7) : null;
+  if (MONTH_MAPS.indexOf(key) > -1) return /^\d{4}-\d{2}$/.test(part) ? part : null;
+  if (key === 'officialLeaves') return /^\d{4}-\d{2}-\d{2}$/.test(item) ? String(item).slice(0, 7) : null;
+  return null;
+}
+async function lockedMonthsOf(client, orgId) {
+  const r = await client.query("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths' AND user_id IS NULL", [orgId]);
+  const v = r.rows[0] ? parseJson(r.rows[0].value) : null;
+  return isPlainObject(v) ? v : {};
+}
+async function addHistory(client, orgId, userId, userName, area, changes) {
+  for (const c of changes.slice(0, 300)) {
+    await client.query(
+      'INSERT INTO history (org_id, user_id, user_name, area, item, before_value, after_value) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [orgId, userId || null, userName || null, area, c.item, c.before, c.after]);
+  }
+  if (changes.length > 300) {
+    await client.query(
+      'INSERT INTO history (org_id, user_id, user_name, area, item, before_value, after_value) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [orgId, userId || null, userName || null, area, '', null, (changes.length - 300) + ' more changes in the same save']);
+  }
+}
+/* Attendance rows, upserted, except in locked months. A whole-dataset save
+   carries locked rows too, unchanged; those are skipped quietly. A locked row
+   that would actually change is counted, so the page can say it was refused. */
+async function upsertRecords(client, orgId, userId, records, locked) {
+  const lockedList = Object.keys(locked || {});
+  const existing = {};
+  if (lockedList.length) {
+    const r = await client.query(
+      "SELECT employee, to_char(day,'YYYY-MM-DD') AS d, data FROM records WHERE org_id = $1 AND to_char(day,'YYYY-MM') = ANY($2)",
+      [orgId, lockedList]);
+    r.rows.forEach(x => { existing[x.employee + '|' + x.d] = x.data; });
+  }
+  let upserted = 0, lockedChanged = 0;
+  for (const r of records) {
+    if (!r || !r.e || !DAY_RE.test(String(r.d || ''))) continue;
+    const data = Object.assign({}, r); delete data.e; delete data.d;
+    if (locked && locked[String(r.d).slice(0, 7)]) {
+      const had = existing[r.e + '|' + r.d];
+      if (had === undefined || canon(had) !== canon(data)) lockedChanged++;
+      continue;
+    }
+    await client.query(
+      `INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (org_id, employee, day)
+       DO UPDATE SET data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+      [orgId, String(r.e), r.d, JSON.stringify(data), userId || null]);
+    upserted++;
+  }
+  return { upserted, lockedChanged };
+}
+
 /* Nothing in the dashboard deletes a request - they are archived - so an admin's
    save that lacks one is a copy loaded before an employee raised it. Keep it,
    rather than let the admin's older copy silently remove it. */
@@ -529,6 +618,20 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'conflict', key, version: Number(row.version) });
       }
+      var changes = diffValue(row ? row.value : null, value);
+      /* A month whose pay has been run is locked. A save that changes any of its
+         days - a mark, a part-day, an excuse, a manual entry - is refused whole,
+         naming the months, rather than partly applied. */
+      if (key !== 'lockedMonths' && changes.length &&
+          (DAY_MAPS.indexOf(key) > -1 || MONTH_MAPS.indexOf(key) > -1 || key === 'officialLeaves')) {
+        const locked = await lockedMonthsOf(client, req.session.orgId);
+        const hit = {};
+        changes.forEach(c => { const m = entryMonth(key, c.item); if (m && locked[m]) hit[m] = true; });
+        if (Object.keys(hit).length) {
+          await client.query('ROLLBACK');
+          return res.status(423).json({ error: 'month_locked', key, months: Object.keys(hit).sort() });
+        }
+      }
       const up = await client.query(
         `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, $4)
          ON CONFLICT (org_id, key) WHERE user_id IS NULL
@@ -548,7 +651,13 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
       );
       version = Number(up.rows[0].version);
     }
-    if (shared) await logChange(client, req.session.orgId, 'kv', key, req.session.userId);
+    if (shared) {
+      await logChange(client, req.session.orgId, 'kv', key, req.session.userId);
+      if (changes && changes.length) {
+        await addHistory(client, req.session.orgId, req.session.userId,
+          (req.user && req.user.name) || ('user ' + req.session.userId), key, changes);
+      }
+    }
     await client.query('COMMIT');
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
@@ -649,10 +758,17 @@ app.put('/api/dataset', requireAuth, bigJson, async (req, res) => {
   const replace = req.query.replace === '1';
   if (replace && !records.length) return res.status(400).json({ error: 'nothing_to_restore' });
   const client = await pool.connect();
-  let employeesUpserted = 0, recordsUpserted = 0;
+  let employeesUpserted = 0, result = { upserted: 0, lockedChanged: 0 };
   try {
     await client.query('BEGIN');
-    if (replace) await client.query('DELETE FROM records WHERE org_id = $1', [req.session.orgId]);
+    const locked = await lockedMonthsOf(client, req.session.orgId);
+    const lockedList = Object.keys(locked);
+    // A restore never reaches into a locked month: those rows stay as paid.
+    if (replace) {
+      await client.query(
+        "DELETE FROM records WHERE org_id = $1 AND NOT (to_char(day,'YYYY-MM') = ANY($2))",
+        [req.session.orgId, lockedList]);
+    }
     for (const e of employees) {
       if (!e || !e.name) continue;
       await client.query(
@@ -662,20 +778,13 @@ app.put('/api/dataset', requireAuth, bigJson, async (req, res) => {
       );
       employeesUpserted++;
     }
-    for (const r of records) {
-      if (!r || !r.e || !r.d) continue;
-      const data = Object.assign({}, r);
-      delete data.e; delete data.d;
-      await client.query(
-        `INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (org_id, employee, day)
-         DO UPDATE SET data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-        [req.session.orgId, String(r.e), r.d, JSON.stringify(data), req.session.userId]
-      );
-      recordsUpserted++;
-    }
+    result = await upsertRecords(client, req.session.orgId, req.session.userId, records, locked);
     if (employeesUpserted) await logChange(client, req.session.orgId, 'employees', null, req.session.userId);
-    if (recordsUpserted) await logChange(client, req.session.orgId, 'records', null, req.session.userId);
+    if (result.upserted) await logChange(client, req.session.orgId, 'records', null, req.session.userId);
+    if (replace) {
+      await addHistory(client, req.session.orgId, req.session.userId, (req.user && req.user.name) || null,
+        'records', [{ item: '', before: null, after: 'Attendance restored from a backup: ' + result.upserted + ' rows' }]);
+    }
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');
@@ -683,7 +792,7 @@ app.put('/api/dataset', requireAuth, bigJson, async (req, res) => {
   } finally {
     client.release();
   }
-  res.json({ ok: true, employees: employeesUpserted, records: recordsUpserted });
+  res.json({ ok: true, employees: employeesUpserted, records: result.upserted, lockedChanged: result.lockedChanged });
 });
 
 /* Upsert a batch of records — used by the Excel import and by day edits.
@@ -694,25 +803,31 @@ app.post('/api/records', requireAuth, bigJson, async (req, res) => {
   const records = (req.body && req.body.records) || [];
   if (!Array.isArray(records)) return res.status(400).json({ error: 'records_must_be_array' });
   const client = await pool.connect();
-  let n = 0;
+  let result = { upserted: 0, lockedChanged: 0 };
   try {
     await client.query('BEGIN');
-    for (const r of records) {
-      if (!r || !r.e || !r.d) continue;
-      const data = Object.assign({}, r); delete data.e; delete data.d;
-      await client.query(
-        `INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (org_id, employee, day)
-         DO UPDATE SET data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-        [req.session.orgId, String(r.e), r.d, JSON.stringify(data), req.session.userId]
-      );
-      n++;
-    }
+    result = await upsertRecords(client, req.session.orgId, req.session.userId, records,
+                                 await lockedMonthsOf(client, req.session.orgId));
     await logChange(client, req.session.orgId, 'records', null, req.session.userId);
     await client.query('COMMIT');
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
-  res.json({ ok: true, upserted: n });
+  res.json({ ok: true, upserted: result.upserted, lockedChanged: result.lockedChanged });
+});
+
+/* Who changed what. Admins only; the day view asks for one entry ("Name|date"). */
+app.get('/api/history', requireRole('admin', 'admin_view'), async (req, res) => {
+  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+  const params = [req.session.orgId];
+  let where = 'org_id = $1';
+  if (req.query.item) { params.push(String(req.query.item)); where += ` AND item = $${params.length}`; }
+  if (req.query.area) { params.push(String(req.query.area)); where += ` AND area = $${params.length}`; }
+  if (req.query.before) { params.push(parseInt(req.query.before, 10) || 0); where += ` AND id < $${params.length}`; }
+  params.push(limit);
+  const { rows } = await pool.query(
+    `SELECT id, at, user_name, area, item, before_value, after_value FROM history WHERE ${where}
+     ORDER BY id DESC LIMIT $${params.length}`, params);
+  res.json({ history: rows });
 });
 
 app.post('/api/employees', requireAuth, bigJson, async (req, res) => {
@@ -785,16 +900,10 @@ app.post('/api/device/records', deviceLimiter, requireDevice, bigJson, async (re
         [orgId, e.code || null, String(e.name), e.shift || '9:00-6:00']);
       added += r.rowCount || 0;
     }
-    for (const r of records) {
-      if (!r || typeof r.e !== 'string' || !r.e || !DAY_RE.test(String(r.d || '')) || r.e === 'Card') continue;
-      const data = Object.assign({}, r); delete data.e; delete data.d;
-      await client.query(
-        `INSERT INTO records (org_id, employee, day, data, updated_by) VALUES ($1,$2,$3,$4,NULL)
-         ON CONFLICT (org_id, employee, day)
-         DO UPDATE SET data = EXCLUDED.data, updated_at = now(), updated_by = NULL`,
-        [orgId, r.e, r.d, JSON.stringify(data)]);
-      n++;
-    }
+    const usable = records.filter(r => r && typeof r.e === 'string' && r.e && r.e !== 'Card');
+    const locked = await lockedMonthsOf(client, orgId);
+    const result = await upsertRecords(client, orgId, null, usable, locked);   // a paid month is never re-imported
+    n = result.upserted;
     const status = JSON.stringify({
       at: new Date().toISOString(), rows: n, employeesAdded: added,
       newestPunch: String((req.body && req.body.newestPunch) || ''), source: 'office-pc'

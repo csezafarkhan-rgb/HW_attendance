@@ -34,6 +34,7 @@
         if (!res.ok) {
           var err = new Error((data && data.error) || ('http_' + res.status));
           err.status = res.status;
+          err.data = data;                  // e.g. the months a locked-month refusal names
           throw err;
         }
         return data;
@@ -56,6 +57,12 @@
     manualLeave: 'the leave entered by hand', employeeOrder: 'the employee order', empNames: 'the display names',
     companyInfo: 'the company details', signatures: 'the signatures', customShifts: 'the shift list'
   };
+  function monthName(ym) {
+    var m = /^(\d{4})-(\d{2})$/.exec(String(ym));
+    if (!m) return String(ym);
+    try { return new Date(+m[1], +m[2] - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); }
+    catch (_) { return String(ym); }
+  }
   function saveFailed(what, e) {
     what = KEY_NAMES[String(what).replace(/"/g, '')] || what;
     if (e && (e.status === 403 || e.message === 'not_authenticated')) return;
@@ -75,6 +82,12 @@
       if (e && e.status === 409) {
         el.textContent = 'Not saved: someone else changed ' + what + ' after this page loaded it, so saving '
           + 'would have overwritten their change. Reload the page to see it, then make your change again.';
+      } else if (e && e.status === 423) {
+        var months = ((e.data && e.data.months) || []).map(monthName).join(', ');
+        el.textContent = (months
+            ? ('Not saved: ' + months + ' is locked because its pay has been run. ')
+            : ('Not saved: ' + what + ' fall in a month that is locked because its pay has been run. '))
+          + 'An admin can unlock it on the Payroll page; reload to put back what the page shows.';
       } else {
         var why = (e && e.status === 413) ? 'it is too large for the server to store'
                 : (e && e.name === 'AbortError') ? 'the server did not answer in time'
@@ -116,6 +129,14 @@
       // Every row is upserted one by one, which on a full month outlasts 8 seconds;
       // aborting then reported a failure for a save that went on to succeed.
       return api('PUT', '/api/dataset', dataset || {employees: [], records: []}, 90000)
+        .then(function (r) {
+          // Rows in a locked month are skipped by the server; say so if any of them had changed.
+          if (r && r.lockedChanged > 0) {
+            saveFailed(r.lockedChanged + ' attendance row' + (r.lockedChanged === 1 ? '' : 's'),
+                       { status: 423, data: { months: [] } });
+          }
+          return r;
+        })
         .catch(function (e) { saveFailed('the attendance records', e); throw e; });
     },
     // A restore: the server's attendance becomes exactly this (see PUT /api/dataset?replace=1).

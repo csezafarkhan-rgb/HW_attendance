@@ -471,6 +471,13 @@ body{
 .al-go{ margin-top:6px; font-size:11px; font-weight:700; padding:4px 10px; border-radius:7px;
   border:1px solid var(--line-dk); background:#fff; color:var(--ink); cursor:pointer; }
 .al-empty{ font-size:12px; color:var(--ink-soft); padding:10px 6px; }
+/* A day's change history, in the day popup. */
+.dh-list{ margin-top:8px; font-size:11.5px; }
+.dh-row{ padding:7px 0; border-top:1px solid var(--line); }
+.dh-top{ color:var(--ink-soft); }
+.dh-top b{ color:var(--ink); }
+.dh-val{ margin-top:2px; color:var(--ink); line-height:1.4; }
+#payLockBtn.on{ background:#FFF6E8 !important; border-color:#E08A00 !important; color:#8A5A00 !important; }
 .req-badge.untaken{ background:#FFF6D6; color:#8A5A00; border:1px solid #E8D07A;
   padding:0 6px; margin-left:3px; }
 .req-card{
@@ -2729,6 +2736,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="month-btn" id="payRulesBtn">Deductions</button>
       <div class="month-dropdown" id="payRulesDropdown" style="min-width:300px;"></div>
     </div>
+    <button class="month-btn" id="payLockBtn" style="display:none;">🔒 Lock month</button>
   </div>
   <div class="table-scroll"><div id="salaryWrap"></div></div>
 </div>
@@ -7861,6 +7869,16 @@ function buildExcelBackup(){
       if(res && res.value){ try{ leaveDeductions = JSON.parse(res.value); }catch(e){ leaveDeductions = {}; } }
     }).catch(function(){ leaveDeductions = {}; });
   }
+  /* Months whose pay has been run, locked from the Payroll page. The server is
+     what refuses changes to them; this lets the page show it before anyone tries. */
+  var lockedMonths = {};
+  function loadLockedMonths(){
+    return storage.get('lockedMonths', true).then(function(res){
+      try{ lockedMonths = (res && res.value) ? (JSON.parse(res.value) || {}) : {}; }catch(e){ lockedMonths = {}; }
+    }).catch(function(){ lockedMonths = {}; });
+  }
+  function saveLockedMonths(){ return storage.set('lockedMonths', JSON.stringify(lockedMonths), true); }
+  function isMonthLocked(ym){ return !!(lockedMonths && lockedMonths[ym]); }
   function saveLeaveDeductions(){
     return storage.set('leaveDeductions', JSON.stringify(leaveDeductions), true).catch(function(e){ console.error(e); });
   }
@@ -7900,7 +7918,7 @@ function buildExcelBackup(){
 
   function renderMonthLabel(){
     if(state.selectedMonths.length===0) monthBtnLabel.textContent='Select month(s)';
-    else if(state.selectedMonths.length===1) monthBtnLabel.textContent=monthLabel(state.selectedMonths[0]);
+    else if(state.selectedMonths.length===1) monthBtnLabel.textContent=monthLabel(state.selectedMonths[0]) + (isMonthLocked(state.selectedMonths[0]) ? ' 🔒' : '');
     else monthBtnLabel.textContent=state.selectedMonths.length+' months';
     document.getElementById('monthBar').textContent = state.selectedMonths.length===1 ? monthLabel(state.selectedMonths[0]).toUpperCase() : (state.selectedMonths.length===0 ? 'SELECT MONTH' : state.selectedMonths.map(monthLabelShort).join(' + ').toUpperCase());
     try{ parent.postMessage({ type:'hw-monthbar', text: document.getElementById('monthBar').textContent }, '*'); }catch(e){}
@@ -9135,6 +9153,40 @@ function buildExcelBackup(){
     var emps = visibleEmployees();
     if(!emps.length){ wrap.innerHTML = '<div class="empty-state">No employees match your filter.</div>'; return; }
     var ym = salaryMonth();
+    /* Lock a month once its pay has been run: from then on nobody can change
+       its attendance, marks, leave or excuses, so the figures paid stay the
+       figures shown. Full admins only; unlocking is one click back. */
+    (function(){
+      var lb = document.getElementById('payLockBtn');
+      if(!lb) return;
+      var canLock = viewRole && viewRole.role === 'admin' && viewRole.tier !== 'admin_view' && !!window.HWSync;
+      lb.style.display = canLock ? '' : 'none';
+      var locked = isMonthLocked(ym), info = lockedMonths[ym] || {};
+      lb.textContent = locked ? ('🔓 Unlock ' + monthLabel(ym)) : ('🔒 Lock ' + monthLabel(ym));
+      lb.classList.toggle('on', locked);
+      lb.title = locked
+        ? ('Locked' + (info.by ? (' by ' + info.by) : '') + (info.at ? (' on ' + new Date(info.at).toLocaleDateString()) : '')
+           + '. Nobody can change this month until it is unlocked.')
+        : 'Lock after the pay run, so this month’s attendance, marks and leave cannot change.';
+      lb.onclick = function(){
+        hwConfirm(locked
+          ? { title:'Unlock ' + monthLabel(ym) + '?', confirmLabel:'Unlock',
+              message:'Its attendance, marks, leave and excuses can be changed again, which can change pay already run.' }
+          : { title:'Lock ' + monthLabel(ym) + '?', confirmLabel:'Lock month',
+              message:'Do this after the pay run. Nobody can then change this month’s attendance, marks, leave or excuses, '
+                + 'imports skip it, and a restore leaves it as it is. It can be unlocked here.' }
+        ).then(function(ok){
+          if(!ok) return;
+          var before = JSON.parse(JSON.stringify(lockedMonths));
+          if(locked) delete lockedMonths[ym];
+          else lockedMonths[ym] = { by: (viewRole.name || viewRole.username || ''), at: new Date().toISOString() };
+          saveLockedMonths().then(function(){
+            showUploadStatus(monthLabel(ym) + (locked ? ' unlocked.' : ' locked. Its pay figures cannot change now.'));
+            renderSalaryPage(); renderMonthLabel();
+          }).catch(function(){ lockedMonths = before; renderSalaryPage(); });
+        });
+      };
+    })();
     var rows = emps.map(function(e){ return computePay(e.name, ym); });
     var tGross = 0, tDed = 0, tNet = 0, unset = 0, flagged = 0;
     rows.forEach(function(r){
@@ -12564,7 +12616,59 @@ function buildExcelBackup(){
       });
     }
 
+    // A locked month is read-only here; the server would refuse the save anyway.
+    if(isMonthLocked(dateStr.slice(0, 7))){
+      var lockNote = document.createElement('div');
+      lockNote.className = 'req-drift';
+      lockNote.textContent = monthLabel(dateStr.slice(0, 7)) + ' is locked because its pay has been run. '
+        + 'Unlock it on the Payroll page to change this day.';
+      modalBody.insertBefore(lockNote, modalBody.firstChild);
+      Array.prototype.forEach.call(modalBody.querySelectorAll('button, input, textarea, select'), function(el){ el.disabled = true; });
+      Array.prototype.forEach.call(modalBody.querySelectorAll('.ov-cat'), function(el){ el.style.pointerEvents = 'none'; el.style.opacity = '.5'; });
+    }
+    appendDayHistory(emp, dateStr);
     modalOverlay.classList.add('open');
+  }
+  /* Who changed this day, and from what to what - asked of the server's history
+     when wanted, not on every open. Admins, on the server-backed app only. */
+  var HISTORY_AREA = { overrides:'Mark', halfDays:'Part-day leave', manualRecords:'Manual entry',
+    lateExcuses:'Late excuse', earlyExcuses:'Early excuse', mispunchFlags:'Mispunch flag', dayShifts:'Shift for the day' };
+  function describeHistValue(text){
+    if(text == null) return '(nothing)';
+    var v; try{ v = JSON.parse(text); }catch(e){ return String(text).slice(0, 140); }
+    if(!v || typeof v !== 'object') return String(v);
+    if(v.cat) return (OV_CATS[v.cat] || OV_CATS.OTHER).tag(v.detail) + (v.duration ? (' · ' + v.duration) : '') + (v.reason ? (' — ' + v.reason) : '');
+    if(v.kind) return hdLabel(v.kind) + (v.note ? (' — ' + v.note) : '');
+    if(v['in'] !== undefined || v.out !== undefined) return 'in ' + (v['in'] || '—') + ', out ' + (v.out || '—') + (v.reqId ? ' (from a request)' : '');
+    if(v.note !== undefined) return 'excused' + (v.note ? (': ' + v.note) : '');
+    return JSON.stringify(v).slice(0, 140);
+  }
+  function appendDayHistory(emp, dateStr){
+    if(!window.HWSync || !viewRole || viewRole.role !== 'admin') return;
+    var wrap = document.createElement('div');
+    wrap.className = 'day-hist';
+    wrap.innerHTML = '<button type="button" class="btn ghost" style="width:auto;padding:5px 12px;font-size:11.5px;margin-top:12px;">'
+      + '🕓 Show changes to this day</button><div class="dh-list"></div>';
+    modalBody.appendChild(wrap);
+    var btn = wrap.querySelector('button'), list = wrap.querySelector('.dh-list');
+    btn.disabled = false;                                   // history can be read even in a locked month
+    btn.addEventListener('click', function(){
+      btn.style.display = 'none';
+      list.textContent = 'Loading…';
+      fetch('/api/history?limit=50&item=' + encodeURIComponent(emp + '|' + dateStr), { credentials:'same-origin' })
+        .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function(j){
+          var rows = (j && j.history) || [];
+          if(!rows.length){ list.textContent = 'No changes recorded for this day. History is kept from September 2026 onwards.'; return; }
+          list.innerHTML = rows.map(function(h){
+            return '<div class="dh-row"><div class="dh-top"><b>' + escapeHtml(HISTORY_AREA[h.area] || h.area) + '</b> · '
+              + escapeHtml(new Date(h.at).toLocaleString()) + ' · ' + escapeHtml(h.user_name || 'Office PC') + '</div>'
+              + '<div class="dh-val">' + escapeHtml(describeHistValue(h.before_value)) + ' → '
+              + escapeHtml(describeHistValue(h.after_value)) + '</div></div>';
+          }).join('');
+        })
+        .catch(function(){ list.textContent = 'Could not load the history.'; });
+    });
   }
   function closeModal(){ modalOverlay.classList.remove('open'); }
   document.getElementById('modalClose').addEventListener('click', closeModal);
@@ -13351,7 +13455,7 @@ function buildExcelBackup(){
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
       loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
-      loadLeaveDeductions].map(safe));
+      loadLeaveDeductions, loadLockedMonths].map(safe));
   }).then(function(){
     // Settings arrive after the first paint, and the leave figures depend on
     // them - joining dates in particular. Redraw once they are in.

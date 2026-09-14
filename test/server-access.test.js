@@ -19,7 +19,8 @@ const db = {
   kv: [],         // {org_id, user_id, key, value}
   records: [],    // {org, e, d, data}
   employees: [],  // {org, name, code, shift}
-  changes: []
+  changes: [],
+  history: []
 };
 const DEVICE_TOKEN = 'test-device-token-' + 'x'.repeat(40);
 process.env.SYNC_TOKEN = DEVICE_TOKEN;
@@ -31,6 +32,28 @@ function query(sql, p) {
   const s = sql.replace(/\s+/g, ' ').trim();
   const rows = x => Promise.resolve({ rows: x, rowCount: x.length });
   if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(s)) return rows([]);
+  // --- locked months and history ---
+  if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths' AND user_id IS NULL")) {
+    const r = kvFind(p[0], 'lockedMonths', null); return rows(r ? [{ value: r.value }] : []);
+  }
+  if (s.startsWith('INSERT INTO history')) {
+    db.history.push({ id: db.history.length + 1, org_id: p[0], user_id: p[1], user_name: p[2], area: p[3], item: p[4], before_value: p[5], after_value: p[6], at: new Date() });
+    return rows([]);
+  }
+  if (s.startsWith('SELECT id, at, user_name, area, item, before_value, after_value FROM history WHERE')) {
+    let out = db.history.filter(h => h.org_id === p[0]);
+    let i = 1;
+    if (/ AND item = \$/.test(s)) { const v = p[i++]; out = out.filter(h => h.item === v); }
+    if (/ AND area = \$/.test(s)) { const v = p[i++]; out = out.filter(h => h.area === v); }
+    return rows(out.slice().reverse().slice(0, p[p.length - 1]));
+  }
+  if (s.startsWith("SELECT employee, to_char(day,'YYYY-MM-DD') AS d, data FROM records WHERE org_id = $1 AND to_char(day,'YYYY-MM') = ANY($2)")) {
+    return rows(db.records.filter(r => r.org === p[0] && p[1].indexOf(r.d.slice(0, 7)) > -1).map(r => ({ employee: r.e, d: r.d, data: JSON.parse(r.data) })));
+  }
+  if (s.startsWith("DELETE FROM records WHERE org_id = $1 AND NOT (to_char(day,'YYYY-MM') = ANY($2))")) {
+    db.records = db.records.filter(r => r.org !== p[0] || p[1].indexOf(r.d.slice(0, 7)) > -1);
+    return rows([]);
+  }
   // --- the office PC's routes ---
   if (s === 'SELECT id FROM orgs ORDER BY id LIMIT 1') return rows([{ id: 1 }]);
   if (s.startsWith("INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'deviceStatus'")) {
@@ -297,6 +320,42 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   const byEmp = await ravi('PUT', '/api/dataset?replace=1', two);
   check('employee cannot replace', byEmp.status === 403 && db.records.length === 1, byEmp.status);
 
+  // --- locked months ---
+  await boss('PUT', '/api/kv/overrides', { value: JSON.stringify({ 'Asha Test|2026-08-20': { cat: 'LEAVE', detail: 'CL' }, 'Asha Test|2026-09-10': { cat: 'LEAVE' } }), shared: true });
+  const histBefore = db.history.length;
+  const lockRes = await boss('PUT', '/api/kv/lockedMonths', { value: JSON.stringify({ '2026-08': { by: 'Boss', at: '2026-09-05' } }), shared: true });
+  check('admin locks August', lockRes.status === 200);
+  check('an employee cannot lock or unlock a month', (await ravi('PUT', '/api/kv/lockedMonths', { value: '{}', shared: true })).status === 403);
+  const augEdit = await boss('PUT', '/api/kv/overrides', { value: JSON.stringify({ 'Asha Test|2026-08-20': { cat: 'WFH' }, 'Asha Test|2026-09-10': { cat: 'LEAVE' } }), shared: true });
+  check('changing a day in a locked month is refused (423, month named)', augEdit.status === 423 && augEdit.body.error === 'month_locked' && augEdit.body.months.join() === '2026-08', augEdit.body);
+  check('...and nothing of that save was applied', JSON.parse(kvFind(1, 'overrides', null).value)['Asha Test|2026-08-20'].cat === 'LEAVE');
+  const sepEdit = await boss('PUT', '/api/kv/overrides', { value: JSON.stringify({ 'Asha Test|2026-08-20': { cat: 'LEAVE', detail: 'CL' }, 'Asha Test|2026-09-10': { cat: 'WFH' } }), shared: true });
+  check('a change only in an open month still saves, locked entries unchanged', sepEdit.status === 200, sepEdit.status);
+  const ded = await boss('PUT', '/api/kv/leaveDeductions', { value: JSON.stringify({ 'Asha Test|2026-08': 2 }), shared: true });
+  check('a month-keyed setting (salary deduction) for a locked month is refused too', ded.status === 423, ded.status);
+
+  // --- change history ---
+  const sepHist = db.history.slice(histBefore).filter(h => h.area === 'overrides' && h.item === 'Asha Test|2026-09-10');
+  check('history records who changed which day, from what to what', sepHist.length === 1 && sepHist[0].user_name === 'Boss'
+    && /LEAVE/.test(sepHist[0].before_value) && /WFH/.test(sepHist[0].after_value), sepHist);
+  check('unchanged entries are not written to history', !db.history.slice(histBefore).some(h => h.item === 'Asha Test|2026-08-20'));
+  check('the lock itself is in history', db.history.slice(histBefore).some(h => h.area === 'lockedMonths' && h.item === '2026-08'));
+  const hApi = await boss('GET', '/api/history?item=' + encodeURIComponent('Asha Test|2026-09-10'));
+  check('admins read one day’s history', hApi.status === 200 && hApi.body.history.length >= 1 && hApi.body.history[0].area === 'overrides', hApi.body);
+  check('employees cannot read history', (await ravi('GET', '/api/history')).status === 403);
+
+  // --- attendance rows in a locked month ---
+  db.records.push({ org: 1, e: 'Asha Test', d: '2026-08-21', data: JSON.stringify({ in: '9:30', out: '18:30', st: 'PR' }) });
+  const dsLocked = await boss('PUT', '/api/dataset', { employees: [], records: [
+    { e: 'Asha Test', d: '2026-08-21', in: '9:30', out: '18:30', st: 'PR' },          // unchanged: skipped quietly
+    { e: 'Asha Test', d: '2026-08-22', in: '9:31', out: '18:31', st: 'PR' },          // new in a locked month
+    { e: 'Asha Test', d: '2026-09-02', in: '9:32', out: '18:32', st: 'PR' } ] });
+  check('dataset save skips locked rows and reports the one that would change', dsLocked.status === 200 && dsLocked.body.records === 1 && dsLocked.body.lockedChanged === 1, dsLocked.body);
+  check('the locked month was not written', !db.records.some(r => r.d === '2026-08-22'));
+  await boss('PUT', '/api/dataset?replace=1', { employees: [], records: [{ e: 'Asha Test', d: '2026-09-03', st: 'PR' }] });
+  check('a restore keeps the locked month’s rows', db.records.some(r => r.d === '2026-08-21') && !db.records.some(r => r.d === '2026-09-02'), db.records.map(r => r.d));
+  await boss('PUT', '/api/kv/lockedMonths', { value: '{}', shared: true });          // unlock for the tests below
+
   // --- the office PC: token-only upload and backup ---
   const device = async (method, url, body, token) => {
     const res = await fetch(base + url, {
@@ -327,7 +386,7 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('upload accepted: 2 rows, 1 new person', pushed.status === 200 && pushed.json.records === 2 && pushed.json.employeesAdded === 1, pushed.json);
   check('Card and bad dates skipped', !db.records.some(r => r.e === 'Card' || r.e === 'Bad Date') && !db.employees.some(e => e.name === 'Card'));
   check("that person's day replaced by the file's row", JSON.parse(db.records.find(r => r.e === 'Asha Test' && r.d === '2026-09-01').data).in === '9:40');
-  check('new day added', db.records.length === before + 1);
+  check('new day added', db.records.some(r => r.e === 'New Person' && r.d === '2026-09-14') && db.records.length > before, db.records.length - before);
   const status = JSON.parse(kvFind(1, 'deviceStatus', null).value);
   check('last upload recorded for the dashboard', status.rows === 2 && status.newestPunch === '2026-09-14' && !!status.at, status);
   // Ravi: Asha was signed out everywhere by the disable check above.
