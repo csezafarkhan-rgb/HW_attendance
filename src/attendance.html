@@ -623,6 +623,102 @@ body{
 .req-tab.on:hover{ color:#fff; }
 .req-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
 .req-actions .btn{flex:none;padding:7px 14px;font-size:12px;}
+/* ---- Requests page, restyled to match Backup and the dashboard ----
+   Scoped to the admin list (#requestsList). --rc is a card's status colour:
+   amber waiting, blue query, green approved, red rejected. */
+#requestsList .req-bar{ gap:6px; margin:2px 0 14px; padding:6px; border-radius:14px; background:rgba(255,255,255,.7);
+  border:1px solid #E3E9F3; box-shadow:0 2px 10px rgba(26,40,72,.05); }
+#requestsList .req-tab{ --tc:#3B7DF5; border:1px solid transparent; background:transparent; border-radius:10px; padding:7px 13px;
+  font-size:12.5px; font-weight:700; color:#4A5566; transition:background .15s, color .15s, box-shadow .15s; }
+#requestsList .req-tab b{ display:inline-block; min-width:20px; padding:0 6px; margin-left:6px; border-radius:20px; text-align:center;
+  font:800 11px/18px 'Inter',sans-serif; background:color-mix(in srgb, var(--tc) 14%, #fff); color:color-mix(in srgb, var(--tc) 80%, #141A24); }
+#requestsList .req-tab:hover{ background:color-mix(in srgb, var(--tc) 8%, #fff); color:color-mix(in srgb, var(--tc) 85%, #141A24); border-color:transparent; }
+#requestsList .req-tab.on{ color:#fff; border-color:transparent;
+  background:linear-gradient(180deg, color-mix(in srgb, var(--tc) 80%, #fff), var(--tc));
+  box-shadow:0 4px 12px color-mix(in srgb, var(--tc) 30%, transparent), inset 0 1px 0 rgba(255,255,255,.35); }
+#requestsList .req-tab.on b{ background:rgba(255,255,255,.28); color:#fff; }
+#requestsList .rt-live{ --tc:#D97706; } #requestsList .rt-approved{ --tc:#16A34A; } #requestsList .rt-rejected{ --tc:#DC2626; }
+#requestsList .rt-all{ --tc:#2563EB; }  #requestsList .rt-arch{ --tc:#64748B; }
+#requestsList .req-tab.right, #requestsList #reqArchiveSettled{ border:1px solid #E3E9F3; background:#fff; color:#4A5566; }
+#requestsList .req-emp-sel{ border:1px solid #E3E9F3; background:#fff; }
+#requestsList .req-untaken{ background:linear-gradient(180deg,#FFF6D6,#FDEBB0); box-shadow:0 2px 8px rgba(217,119,6,.15); }
+
+#requestsList .req-card{ --rc:#64748B; position:relative; overflow:hidden; border-radius:14px; padding:14px 16px 14px 18px; margin-bottom:10px;
+  border:1px solid color-mix(in srgb, var(--rc) 22%, #fff);
+  background:linear-gradient(115deg, color-mix(in srgb, var(--rc) 8%, #fff) 0%, #fff 55%);
+  box-shadow:0 2px 10px rgba(26,40,72,.05); transition:transform .12s ease, box-shadow .15s ease; }
+#requestsList .req-card::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+  background:linear-gradient(180deg, var(--rc), color-mix(in srgb, var(--rc) 40%, #fff)); }
+#requestsList .req-card:hover{ transform:translateY(-1px); box-shadow:0 8px 20px color-mix(in srgb, var(--rc) 16%, transparent); }
+#requestsList .req-card.st-pending{ --rc:#D97706; } #requestsList .req-card.st-query{ --rc:#2563EB; }
+#requestsList .req-card.st-approved{ --rc:#16A34A; } #requestsList .req-card.st-rejected{ --rc:#DC2626; }
+#requestsList .req-card.is-arch{ filter:saturate(.55); opacity:.92; }
+#requestsList .req-card .req-top{ align-items:center; gap:12px; flex-wrap:nowrap; }
+#requestsList .req-card .req-top > div{ flex:1; min-width:0; }
+#requestsList .req-av, #requestsList .unreq-row .req-av{ flex:none; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font:800 12.5px 'Inter',sans-serif; color:#fff; letter-spacing:.02em;
+  background:linear-gradient(145deg, color-mix(in srgb, var(--av) 70%, #fff), var(--av));
+  box-shadow:0 3px 8px color-mix(in srgb, var(--av) 35%, transparent), inset 0 1px 0 rgba(255,255,255,.35); }
+#requestsList .req-card .req-emp{ font-size:13.5px; }
+#requestsList .req-card .req-dates{ font-family:'Inter',sans-serif; font-weight:600; font-size:11.5px; }
+#requestsList .req-card .req-kind{ margin-top:5px; }
+#requestsList .req-status{ display:inline-flex; align-items:center; gap:6px; padding:4px 11px; font-size:10.5px;
+  color:color-mix(in srgb, var(--rc) 82%, #141A24); background:color-mix(in srgb, var(--rc) 13%, #fff);
+  border:1px solid color-mix(in srgb, var(--rc) 28%, #fff); }
+#requestsList .req-status::before{ content:''; width:7px; height:7px; border-radius:50%; background:var(--rc);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--rc) 20%, transparent); }
+#requestsList .req-card .req-msg{ margin:10px 0 0 48px; padding:8px 12px; border-radius:10px; background:#F6F8FC;
+  border:1px solid #E6EBF4; color:#2A3342; font-style:italic; }
+#requestsList .req-note{ margin:8px 0 0 48px; border-radius:10px; background:color-mix(in srgb, #2563EB 7%, #fff);
+  border:1px solid color-mix(in srgb, #2563EB 18%, #fff); }
+#requestsList .req-drift{ margin-left:48px; border-radius:10px; }
+#requestsList .req-card .req-actions{ display:inline-flex; margin:12px 6px 0 0; gap:6px; vertical-align:top; }
+#requestsList .req-acts{ margin-left:48px; }
+/* !important on the colours: the shared button layer sets them with !important. */
+#requestsList .req-actions .btn, #requestsList .unreq-row .btn{ flex:none !important; width:auto !important; border-radius:10px !important; font-weight:700; padding:7px 14px;
+  border:1px solid #D6DEEC !important; background:#fff !important; color:#1B2330 !important;
+  box-shadow:0 2px 6px rgba(26,40,72,.06) !important; transition:transform .1s, box-shadow .15s, background .15s; }
+#requestsList .req-actions .btn:hover, #requestsList .unreq-row .btn:hover{ transform:translateY(-1px); box-shadow:0 6px 14px rgba(26,40,72,.12) !important; }
+#requestsList .req-actions .btn[data-act="approve"], #requestsList .req-actions .btn[data-act="to-approved"], #requestsList .unreq-row .btn[data-dec="approved"]{
+  color:#fff !important; border-color:transparent !important; background:linear-gradient(180deg,#34C27A,#16A34A) !important; box-shadow:0 4px 12px rgba(22,163,74,.28) !important; }
+#requestsList .req-actions .btn[data-act="reject"], #requestsList .req-actions .btn[data-act="to-rejected"], #requestsList .unreq-row .btn[data-dec="rejected"]{
+  color:#B42318 !important; border-color:#F5C2BC !important; background:#FFF5F4 !important; }
+#requestsList .req-actions .btn[data-act="query"]{ color:#1D4ED8 !important; border-color:#BFD3F8 !important; background:#F3F7FF !important; }
+#requestsList .req-actions .btn[data-act="to-pending"]{ color:#8A5A00 !important; border-color:#EBC77A !important; background:#FFFAEB !important; }
+#requestsList .req-actions .btn[data-act="form"]{ color:#6D28D9 !important; border-color:#DDD0F7 !important; background:#F8F5FF !important; }
+#requestsList .req-actions .btn[data-act="archive"], #requestsList .req-actions .btn[data-act="unarchive"]{ color:#475569 !important; background:#F4F6FA !important; }
+/* "Sure? Removes the day" stays solid red over the colours above. */
+#requestsList .btn.req-armed, #requestsList .btn.req-armed:hover{ transform:none; background:#B3261E !important; border-color:#B3261E !important; color:#fff !important; }
+#requestsList .req-bulk{ border-radius:14px; background:linear-gradient(135deg,#1E3A8A,#2563EB); box-shadow:0 8px 20px rgba(37,99,235,.25); }
+
+#requestsList .unreq{ border-radius:14px; border-color:#F0D58A; background:linear-gradient(135deg,#FFF8E1,#FFFDF6 60%);
+  box-shadow:0 4px 14px rgba(217,119,6,.10); }
+#requestsList .unreq.is-clear{ border-color:#BFE3CC; background:linear-gradient(135deg,#ECF8F1,#FBFEFC 60%); box-shadow:none; }
+#requestsList .unreq.is-clear .unreq-h{ color:#166534; border-bottom:0; }
+#requestsList .unreq-h{ display:block; padding:12px 16px 12px 50px; position:relative; font-size:13px; }
+#requestsList .unreq-h::before{ content:'\26a0\fe0f'; position:absolute; left:14px; top:11px; width:26px; height:26px; border-radius:8px;
+  display:flex; align-items:center; justify-content:center; font-size:14px; background:#FDEBB0; }
+#requestsList .unreq.is-clear .unreq-h::before{ content:'\2705'; background:#D3F0DE; }
+#requestsList .unreq-h b{ display:inline-block; margin-left:6px; padding:0 8px; border-radius:20px; background:#D97706; color:#fff;
+  font:800 11px/18px 'Inter',sans-serif; }
+#requestsList .unreq-row{ gap:12px; padding:9px 16px; transition:background .12s; }
+#requestsList .unreq-row:hover{ background:rgba(255,255,255,.7); }
+#requestsList .unreq-row .req-av{ width:30px; height:30px; font-size:11px; }
+#requestsList .empty-state{ border-radius:14px; border:1.5px dashed #C9D3E3; background:linear-gradient(180deg,#fff,#F6F8FC); padding:28px; }
+
+/* Compact list: the same colours, a slimmer row. */
+#requestsList.req-compact .req-card{ padding:8px 12px 8px 16px; border-radius:11px; margin-bottom:6px; }
+#requestsList.req-compact .req-av{ width:26px; height:26px; font-size:10px; }
+#requestsList.req-compact .req-card .req-msg,
+#requestsList.req-compact .req-note,
+#requestsList.req-compact .req-drift,
+#requestsList.req-compact .req-acts{ margin-left:38px; }
+#requestsList.req-compact .req-card:not(.open) .req-actions{ display:none; }
+#requestsList.req-compact .req-card.open .req-actions{ display:inline-flex; }
+@media (max-width:700px){
+  #requestsList .req-card .req-msg, #requestsList .req-note, #requestsList .req-drift,
+  #requestsList .req-acts{ margin-left:0; }
+}
 .page{display:none;}
 /* Every page runs the full width of the content column. Requests, Official
    Leaves and Backup used to be capped at 1600px and centred, which on a wide
@@ -7122,7 +7218,7 @@ function buildExcelBackup(){
   function reqBarHtml(all){
     var c = reqCounts(all);
     var tab = function(key, label, n, cls){
-      return '<button type="button" class="req-tab' + (REQ_VIEW === key ? ' on' : '')
+      return '<button type="button" class="req-tab rt-' + key + (REQ_VIEW === key ? ' on' : '')
            + (cls ? (' ' + cls) : '') + '" data-reqview="' + key + '">'
            + label + ' <b>' + n + '</b></button>';
     };
@@ -7508,7 +7604,7 @@ function buildExcelBackup(){
                      return overrides[k] && overrides[k].cat === 'LEAVE'; }).length
                  + Object.keys(halfDays || {}).length;
       if(!marked) return '';
-      return '<div class="unreq"><div class="unreq-h">Nothing taken without a request'
+      return '<div class="unreq is-clear"><div class="unreq-h">Nothing taken without a request'
         + '<span>All ' + marked + ' leave and part-day mark' + (marked === 1 ? '' : 's')
         + ' in the record already have a request against them.</span></div></div>';
     }
@@ -7518,6 +7614,7 @@ function buildExcelBackup(){
       +   'Approve to accept it, or reject to remove the day from the record.</span></div>'
       + list.slice(0, 40).map(function(it, i){
           return '<div class="unreq-row">'
+            + reqAvatar(it.empName)
             + '<div><b>' + shotEsc(dispName(it.empName)) + '</b>'
             +   '<div class="unreq-d">' + fmtDateRange(it.dateFrom, it.dateTo)
             +     ' \u00b7 ' + shotEsc(reqTypeName(it.type, it.half))
@@ -7561,6 +7658,16 @@ function buildExcelBackup(){
     });
   }
 
+  /* A round badge with the person's initials, in a colour of their own, so a
+     long list of requests can be scanned by who at a glance. */
+  var REQ_AVATAR_COLOURS = ['#2563EB','#16A34A','#D97706','#7C3AED','#DC2626','#0D9488','#DB2777','#4F46E5','#0284C7','#65A30D'];
+  function reqAvatar(name){
+    var n = String(name || '').trim();
+    var parts = n.split(/\s+/).filter(Boolean);
+    var ini = ((parts[0] || '?').charAt(0) + (parts.length > 1 ? parts[parts.length-1].charAt(0) : '')).toUpperCase();
+    var h = 0; for(var i=0;i<n.length;i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    return '<span class="req-av" style="--av:'+REQ_AVATAR_COLOURS[h % REQ_AVATAR_COLOURS.length]+'" aria-hidden="true">'+escapeHtml(ini)+'</span>';
+  }
   function renderRequestsPage(){
     var list = document.getElementById('requestsList');
     if(!list) return;
@@ -7614,15 +7721,16 @@ function buildExcelBackup(){
       var noteHtml = unmarkedNoteHtml(req, true);
       if(req.adminNote) noteHtml += '<div class="req-note"><strong>Admin:</strong> '+req.adminNote.replace(/</g,'&lt;')+'</div>';
       if(req.employeeReply) noteHtml += '<div class="req-note"><strong>'+escapeHtml(req.empName)+':</strong> '+req.employeeReply.replace(/</g,'&lt;')+'</div>';
-      return '<div class="req-card">'+
+      return '<div class="req-card st-'+statusCls+(reqIsArchived(req)?' is-arch':'')+'">'+
         '<div class="req-top">'+
           '<label class="req-pick"><input type="checkbox" class="req-sel" value="'+req.id+'"></label>'+
+          reqAvatar(req.empName)+
           '<div><div class="req-emp">'+escapeHtml(req.empName)+'</div><div class="req-dates">'+escapeHtml(fmtDateRange(req.dateFrom, req.dateTo))+'</div><div class="req-kind"><span class="rk rk-'+(req.leaveType||'CL')+'">'+escapeHtml(reqTypeText(req))+'</span></div></div>'+
           '<span class="req-status '+statusCls+'">'+(REQ_STATUS_LABEL[req.status]||req.status)+'</span>'+
         '</div>'+
         (req.message ? '<div class="req-msg">'+req.message.replace(/</g,'&lt;')+'</div>' : '')+
         noteHtml+
-        actionsHtml+
+        '<div class="req-acts">'+actionsHtml+'</div>'+
       '</div>';
     }).join('');
     wireReqBar();
