@@ -643,6 +643,29 @@ body{
 .bk-drop-txt span{ color:var(--ink-soft); }
 .bk-drop-btn{ flex:none; font:700 12.5px 'Inter',sans-serif; color:#fff; padding:8px 16px; border-radius:10px;
   background:linear-gradient(180deg,#5b9bff,#3B7DF5); box-shadow:0 4px 12px rgba(59,125,245,.30), inset 0 1px 0 rgba(255,255,255,.4); }
+/* The watched folder: the same card family as the drop zone, solid because it
+   is a setting rather than a target. Green once a folder is being watched,
+   amber when the browser needs it reconnected. */
+.bk-folder{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; max-width:980px;
+  border:1.5px solid #D6DEEC; border-radius:14px; background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(243,246,252,.95));
+  box-shadow:0 2px 10px rgba(26,40,72,.05); transition:border-color .15s, background .15s; }
+.bk-folder.is-set{ border-color:#A9D9BD; background:linear-gradient(180deg,#FFFFFF,#EEF8F2); }
+.bk-folder.is-lapsed{ border-color:#EBC77A; background:linear-gradient(180deg,#FFFFFF,#FDF6E6); }
+.bk-folder-txt{ flex:1 1 200px; display:flex; flex-direction:column; gap:2px; min-width:0; font-size:13px; color:var(--ink); }
+.bk-folder-txt > span{ font-size:11.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bk-folder-btns{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.bk-btn{ font:700 12.5px 'Inter',sans-serif; padding:8px 15px; border-radius:10px; cursor:pointer; white-space:nowrap;
+  color:#1B2330; background:#fff; border:1px solid #D6DEEC; box-shadow:0 2px 6px rgba(26,40,72,.07), inset 0 1px 0 #fff;
+  transition:transform .1s, box-shadow .15s, background .15s, border-color .15s; }
+.bk-btn:hover{ transform:translateY(-1px); border-color:#B8C4D8; box-shadow:0 6px 14px rgba(26,40,72,.12); }
+.bk-btn:active{ transform:translateY(0); box-shadow:inset 0 2px 4px rgba(26,40,72,.12); }
+.bk-btn:disabled{ opacity:.6; cursor:default; transform:none; }
+.bk-btn.primary{ color:#fff; border-color:transparent; background:linear-gradient(180deg,#5b9bff,#3B7DF5);
+  box-shadow:0 4px 12px rgba(59,125,245,.30), inset 0 1px 0 rgba(255,255,255,.4); }
+.bk-btn.primary:hover{ box-shadow:0 8px 18px rgba(59,125,245,.36), inset 0 1px 0 rgba(255,255,255,.4); }
+.bk-btn.warn{ color:#5B4200; border-color:#EBC77A; background:linear-gradient(180deg,#FFF6DD,#FBE7AE); }
+.bk-btn.ghost{ color:#B42318; background:transparent; border-color:transparent; box-shadow:none; }
+.bk-btn.ghost:hover{ background:#FDECEA; border-color:#F5C2BC; box-shadow:none; }
 .bk-drop-name{ flex-basis:100%; font-size:11.5px; font-weight:600; color:#0F6B3A; }
 .bk-drop-name:empty{ display:none; }
 .search-box, .month-btn{
@@ -2818,12 +2841,18 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div style="padding:16px 18px 2px;"><div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Bringing data in</div><div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">Load the punch file, or put back a backup you saved earlier.</div></div>
   <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Watch a folder for the punch file</label>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <button class="btn" id="impDirPick" style="width:auto;padding:8px 14px;">📁 Choose folder</button>
-      <button class="btn" id="impDirCheck" style="width:auto;padding:8px 14px;display:none;">Check now</button>
-      <button class="btn" id="impDirReconnect" style="width:auto;padding:8px 14px;display:none;">🔓 Reconnect</button>
-      <span style="font-size:11.5px;color:var(--ink-soft);">Watching: <b id="impDirName">none chosen</b></span>
-      <button class="btn" id="impDirForget" style="width:auto;padding:8px 14px;display:none;margin-left:auto;">Stop watching</button>
+    <div class="bk-folder" id="impDirCard">
+      <span class="bk-drop-ico bk-folder-ico" id="impDirIco">📁</span>
+      <span class="bk-folder-txt">
+        <b id="impDirTitle">No folder chosen</b>
+        <span>Watching: <b id="impDirName">none chosen</b></span>
+      </span>
+      <span class="bk-folder-btns">
+        <button type="button" class="bk-btn primary" id="impDirPick">📁 Choose folder</button>
+        <button type="button" class="bk-btn" id="impDirCheck" style="display:none;">↻ Check now</button>
+        <button type="button" class="bk-btn warn" id="impDirReconnect" style="display:none;">🔓 Reconnect</button>
+        <button type="button" class="bk-btn ghost" id="impDirForget" style="display:none;">Stop watching</button>
+      </span>
     </div>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">
       The newest <b>.csv</b> or <b>.xlsx</b> in that folder is offered when you open this tab, and whenever you press <b>Check now</b>.
@@ -4311,6 +4340,18 @@ function renderImportFolder(){
   if(f) f.style.display = IMPORT_DIR ? '' : 'none';
   var c = document.getElementById('impDirCheck');
   if(c) c.style.display = IMPORT_DIR ? '' : 'none';
+  var card = document.getElementById('impDirCard');
+  if(card){
+    card.classList.toggle('is-set', !!IMPORT_DIR && !lapsed);
+    card.classList.toggle('is-lapsed', lapsed);
+  }
+  var title = document.getElementById('impDirTitle');
+  if(title) title.textContent = !IMPORT_DIR ? 'No folder chosen'
+    : (lapsed ? 'Folder needs reconnecting' : 'Watching the punch file folder');
+  var ico = document.getElementById('impDirIco');
+  if(ico) ico.textContent = !IMPORT_DIR ? '📁' : (lapsed ? '⚠️' : '📂');
+  var pick = document.getElementById('impDirPick');
+  if(pick && !pick.disabled) pick.textContent = IMPORT_DIR ? '📁 Change folder' : '📁 Choose folder';
 }
 function reconnectImportFolder(){
   if(!IMPORT_DIR) return;
