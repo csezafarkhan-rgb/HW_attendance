@@ -2283,6 +2283,40 @@ table.dash-table tr:hover td{background:#F7F9FC;}
   font-family:'IBM Plex Mono',monospace; }
 .ih-act{ display:flex; gap:6px; }
 .ih-act .btn{ width:auto; padding:6px 11px; font-size:11px; }
+/* Styled to match the other Backup tabs: a card per import in the colour of
+   its file type, with the restore action as the one button that stands out. */
+.ih{ padding:8px 18px 20px; max-width:1100px; }
+.ih-bar{ gap:12px; padding:2px 0 12px; }
+.ih-count{ margin-left:0; display:flex; align-items:center; gap:10px; font-family:'Inter',sans-serif;
+  font-size:11.5px; color:var(--ink-soft); }
+.ih-count b{ color:var(--ink); font-size:13px; }
+.ih-meter{ display:inline-block; position:relative; width:120px; height:6px; border-radius:6px; background:#E3E9F3; overflow:hidden; }
+.ih-meter i{ position:absolute; left:0; top:0; bottom:0; border-radius:6px; background:linear-gradient(90deg,#5b9bff,#3B7DF5); }
+.ih-bar #ihClear{ margin-left:auto; }
+.ih-empty{ display:flex; align-items:center; gap:12px; padding:14px 16px; border:1.5px dashed #B8C4D8; border-radius:14px;
+  background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(243,246,252,.9)); max-width:640px; font-size:13px; color:var(--ink); }
+.ih-empty > span:last-child{ display:flex; flex-direction:column; gap:2px; }
+.ih-empty > span:last-child span{ font-size:11.5px; color:var(--ink-soft); }
+.ih-row{ --ihc:#5B7FA6; position:relative; overflow:hidden; gap:14px; padding:11px 14px 11px 16px; border-radius:14px; margin-bottom:8px;
+  border:1px solid color-mix(in srgb, var(--ihc) 22%, #fff);
+  background:linear-gradient(120deg, color-mix(in srgb, var(--ihc) 9%, #fff) 0%, #fff 60%);
+  box-shadow:0 2px 8px rgba(26,40,72,.05); transition:transform .12s ease, box-shadow .15s ease; }
+.ih-row::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+  background:linear-gradient(180deg, var(--ihc), color-mix(in srgb, var(--ihc) 45%, #fff)); }
+.ih-row:hover{ transform:translateY(-1px); box-shadow:0 8px 18px color-mix(in srgb, var(--ihc) 16%, transparent); }
+.ih-row.is-latest{ border-color:color-mix(in srgb, var(--ihc) 45%, #fff); background:linear-gradient(120deg, color-mix(in srgb, var(--ihc) 15%, #fff) 0%, #fff 65%);
+  box-shadow:0 4px 14px color-mix(in srgb, var(--ihc) 14%, transparent); }
+.ih-ico{ width:38px; height:38px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:18px;
+  background:color-mix(in srgb, var(--ihc) 15%, #fff); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ihc) 25%, transparent); }
+.ih-file{ display:flex; align-items:center; gap:8px; font-size:13px; }
+.ih-pin{ font-family:'Inter',sans-serif; font-size:9.5px; font-weight:800; letter-spacing:.06em; padding:2px 8px; border-radius:20px;
+  background:linear-gradient(180deg,#5b9bff,#3B7DF5); color:#fff; flex:none; }
+.ih-pin.old{ background:#EEF1F6; color:var(--ink-soft); }
+.ih-meta{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:4px; font-family:'Inter',sans-serif; }
+.ih-when{ font-size:11px; color:var(--ink-soft); margin-right:2px; }
+.ih-chip{ font-size:10.5px; font-weight:700; padding:1px 8px; border-radius:20px;
+  color:color-mix(in srgb, var(--ihc) 80%, #141A24); background:color-mix(in srgb, var(--ihc) 12%, #fff); }
+.ih-act{ gap:8px; }
 @media (max-width: 700px){
   .ih-row{ grid-template-columns:auto 1fr; }
   .ih-act{ grid-column:1 / -1; }
@@ -2961,7 +2995,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   </div>
 
   <div class="bk-panel" data-bk="history">
-  <div style="padding:16px 18px 2px;border-top:1px solid var(--line);margin-top:14px;">
+  <div style="padding:16px 18px 2px;">
     <div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Import history</div>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">
       Roll back to how things were just before any of these imports. The most recent
@@ -5797,29 +5831,41 @@ function buildExcelBackup(){
     if(!box) return;
     var log = readImportLog();
     if(!log.length){
-      box.innerHTML = '<div class="ih-empty">No imports recorded yet. '
-        + 'A restore point is kept automatically each time you bring a file in.</div>';
+      box.innerHTML = '<div class="ih-empty"><span class="bk-drop-ico">\ud83d\udd70\ufe0f</span>'
+        + '<span><b>No imports recorded yet</b><span>A restore point is kept automatically each time you bring a file in.</span></span></div>';
       return;
     }
     var when = function(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso || ''; } };
+    // The file's kind, as an icon and a colour, so a list of imports scans at a glance.
+    var kind = function(name){
+      var n = String(name || '').toLowerCase();
+      if(/\.xlsx?$/.test(n)) return {i:'\ud83d\udcca', c:'#16A34A', t:'Excel'};
+      if(/\.csv$/.test(n))   return {i:'\ud83d\udcc4', c:'#0284C7', t:'CSV'};
+      if(/\.json$/.test(n))  return {i:'\ud83d\uddc4\ufe0f', c:'#7C3AED', t:'Backup'};
+      return {i:'\ud83d\udce5', c:'#5B7FA6', t:'Import'};
+    };
     var rows = log.map(function(e, i){
       var counts = [];
-      if(e.records != null) counts.push(Number(e.records).toLocaleString() + ' records');
-      if(e.employees != null) counts.push(e.employees + ' employees');
-      return '<div class="ih-row' + (i === 0 ? ' is-latest' : '') + '">'
-        + '<span class="ih-pin' + (i === 0 ? '' : ' old') + '">' + (i === 0 ? 'Latest' : ('#' + (i + 1))) + '</span>'
-        + '<span class="ih-main"><span class="ih-file">' + escapeHtml(e.file || '(file)') + '</span>'
-        + '<span class="ih-meta">' + escapeHtml(when(e.at))
-        + (counts.length ? (' \u00b7 ' + counts.join(' \u00b7 ')) : '') + '</span></span>'
+      if(e.records != null) counts.push('<span class="ih-chip">' + Number(e.records).toLocaleString() + ' records</span>');
+      if(e.employees != null) counts.push('<span class="ih-chip">' + e.employees + ' employees</span>');
+      var k = kind(e.file);
+      return '<div class="ih-row' + (i === 0 ? ' is-latest' : '') + '" style="--ihc:' + k.c + '">'
+        + '<span class="ih-ico" title="' + k.t + '">' + k.i + '</span>'
+        + '<span class="ih-main"><span class="ih-file">' + escapeHtml(e.file || '(file)')
+        +   '<span class="ih-pin' + (i === 0 ? '' : ' old') + '">' + (i === 0 ? 'Latest' : ('#' + (i + 1))) + '</span></span>'
+        + '<span class="ih-meta"><span class="ih-when">\ud83d\udd52 ' + escapeHtml(when(e.at)) + '</span>'
+        + counts.join('') + '</span></span>'
         + '<span class="ih-act">'
-        +   '<button type="button" class="btn" data-ih-restore="' + escapeHtml(e.id) + '">Restore</button>'
-        +   '<button type="button" class="btn" data-ih-drop="' + escapeHtml(e.id) + '">Remove</button>'
+        +   '<button type="button" class="bk-btn primary" data-ih-restore="' + escapeHtml(e.id) + '">\u21ba Restore</button>'
+        +   '<button type="button" class="bk-btn ghost" data-ih-drop="' + escapeHtml(e.id) + '">Remove</button>'
         + '</span></div>';
     }).join('');
+    var pct = Math.min(100, Math.round(log.length / MAX_RESTORE_POINTS * 100));
     box.innerHTML = '<div class="ih-bar">'
-      + '<button type="button" class="btn" id="ihClear">Clear import log</button>'
-      + '<span class="ih-count">' + log.length + ' of ' + MAX_RESTORE_POINTS + ' restore points kept</span>'
-      + '</div>' + rows;
+      + '<span class="ih-count"><b>' + log.length + '</b> of ' + MAX_RESTORE_POINTS + ' restore points kept'
+      +   '<i class="ih-meter"><i style="width:' + pct + '%"></i></i></span>'
+      + '<button type="button" class="bk-btn ghost" id="ihClear">\ud83d\uddd1 Clear import log</button>'
+      + '</div><div class="ih-list">' + rows + '</div>';
 
     var byId = function(id){ for(var i=0;i<log.length;i++) if(log[i].id === id) return log[i]; return null; };
 
