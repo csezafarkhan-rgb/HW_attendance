@@ -480,10 +480,35 @@ body{
   letter-spacing:.05em; vertical-align:middle; background:#3B7DF5; color:#fff; }
 /* The employee's own performance panel: this month against last. */
 .emp-perf{ border-radius:14px; border:1px solid #E3E9F3; background:linear-gradient(160deg,#F5F8FF,#fff 60%);
-  box-shadow:0 4px 14px rgba(26,40,72,.07); padding:11px 12px; margin-bottom:12px; }
-.ep-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
-.ep-head b{ display:block; font-size:12.5px; color:var(--ink); }
-.ep-head span{ font-size:10.5px; color:var(--ink-soft); }
+  box-shadow:0 4px 14px rgba(26,40,72,.07); padding:8px 10px; margin-bottom:12px; }
+/* Folded by default: one clickable line with the counts. */
+.ep-head{ display:flex; align-items:center; gap:10px; width:100%; margin:0; padding:2px; border:0; background:none;
+  font:inherit; text-align:left; cursor:pointer; border-radius:10px; }
+.ep-head:hover{ background:rgba(59,125,245,.05); }
+.ep-h-txt{ flex:1; min-width:0; }
+.ep-h-txt b{ display:block; font-size:12.5px; color:var(--ink); }
+.ep-h-txt > span{ font-size:10.5px; color:var(--ink-soft); }
+.ep-badges{ display:flex; gap:4px; flex:none; }
+.ep-bdg{ font:800 10.5px/18px 'Inter',sans-serif; padding:0 7px; border-radius:20px; white-space:nowrap; }
+.ep-bdg.bad{ background:#FEE2E2; color:#B91C1C; box-shadow:inset 0 0 0 1px #FECACA; }
+.ep-bdg.good{ background:#DCFCE7; color:#15803D; box-shadow:inset 0 0 0 1px #BBF7D0; }
+.ep-bdg.flat{ background:#EEF2F7; color:#64748B; }
+.ep-chev{ flex:none; color:#94A3B8; font-size:12px; transition:transform .15s; }
+.emp-perf.open .ep-chev{ transform:rotate(180deg); }
+.emp-perf.open .ep-head{ margin-bottom:8px; }
+.ep-item{ position:relative; padding-right:26px !important; }
+.ep-x{ position:absolute; top:5px; right:5px; width:20px; height:20px; border:0; border-radius:50%; background:transparent;
+  color:#94A3B8; font-size:15px; line-height:20px; cursor:pointer; padding:0; }
+.ep-x:hover{ background:rgba(15,23,42,.08); color:#0F172A; }
+.ep-foot{ display:flex; justify-content:flex-end; margin-top:6px; }
+.ep-clearall, .al-clearall{ border:0; background:none; font:700 11px 'Inter',sans-serif; color:#64748B; cursor:pointer; padding:2px 4px; border-radius:6px; }
+.ep-clearall:hover, .al-clearall:hover{ color:#B91C1C; background:#FEF2F2; }
+.al-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.al-item{ position:relative; }
+.al-x{ position:absolute; top:5px; right:6px; width:20px; height:20px; border:0; border-radius:50%; background:transparent;
+  color:#94A3B8; font-size:15px; line-height:20px; cursor:pointer; padding:0; }
+.al-x:hover{ background:rgba(15,23,42,.08); color:#0F172A; }
+.al-item:has(.al-x) .al-t{ padding-right:22px; }
 .ep-score{ flex:none; display:flex; flex-direction:column; align-items:center; padding:5px 10px; border-radius:12px; min-width:62px;
   background:#EEF2F7; color:#334155; }
 .ep-score i{ font-style:normal; font:800 18px/1.1 'IBM Plex Mono',monospace; }
@@ -7102,13 +7127,16 @@ function buildExcelBackup(){
       page:'attendance' });
     return out;
   }
-  function renderAlertList(dd, heading, items, empty, onGo){
-    dd.innerHTML = '<div class="al-head">' + escapeHtml(heading) + '</div>'
-      + (items.length ? items.map(function(a, i){
+  function renderAlertList(dd, heading, items, empty, onGo, onClear){
+    var clearable = onClear ? items.filter(function(a){ return a.sig && !a.section; }) : [];
+    dd.innerHTML = '<div class="al-head">' + escapeHtml(heading)
+      + (clearable.length > 1 ? '<button type="button" class="al-clearall" id="alClearAll">Clear all</button>' : '') + '</div>'
+      + (items.filter(function(a){ return !a.section; }).length ? items.map(function(a, i){
           if(a.section) return '<div class="al-sec">' + escapeHtml(a.section) + '</div>';
           // A new request decision is green; a performance change keeps its own colour and gains a "new" mark.
           var lvl = (a.fresh && !a.perf) ? 'fresh' : a.level;
           return '<div class="al-item al-' + lvl + (a.fresh && a.perf ? ' al-new' : '') + '">'
+            + ((onClear && a.sig) ? ('<button type="button" class="al-x" data-alx="' + i + '" title="Clear this alert" aria-label="Clear this alert">×</button>') : '')
             + '<div class="al-t">' + escapeHtml(a.title) + '</div>'
             + (a.detail ? ('<div class="al-d">' + escapeHtml(a.detail) + '</div>') : '')
             + ((a.page || a.go) ? ('<button type="button" class="al-go" data-al="' + i + '">Open</button>') : '')
@@ -7116,6 +7144,14 @@ function buildExcelBackup(){
         }).join('') : ('<div class="al-empty">' + escapeHtml(empty) + '</div>'));
     Array.prototype.forEach.call(dd.querySelectorAll('[data-al]'), function(b){
       b.addEventListener('click', function(){ dd.classList.remove('open'); onGo(items[+b.getAttribute('data-al')]); });
+    });
+    Array.prototype.forEach.call(dd.querySelectorAll('[data-alx]'), function(b){
+      b.addEventListener('click', function(e){ e.stopPropagation(); onClear(items[+b.getAttribute('data-alx')]); });
+    });
+    var ca = dd.querySelector('#alClearAll');
+    if(ca) ca.addEventListener('click', function(e){
+      e.stopPropagation();
+      onClear({ sigs: clearable.map(function(a){ return a.sig; }) });   // one save for the lot
     });
   }
   function renderAlerts(){
@@ -7218,6 +7254,28 @@ function buildExcelBackup(){
     return { ym:ym, prevYm:prevYm, prevLbl:prevLbl, items:items, ready:true, now:s, was:q };
   }
   /* The same changes on the employee's own page, above their leave figures. */
+  /* Alerts this person has cleared: a performance change by its signature
+     ("YYYY-MM|metric|up/down"), a request decision by id and when it changed.
+     Kept per person on the server, so a cleared alert stays gone on any device. */
+  var ALERTS_CLEARED = null;
+  function loadAlertsCleared(){
+    return storage.get('alertsCleared', false).then(function(res){
+      try{ ALERTS_CLEARED = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ ALERTS_CLEARED = []; }
+      try{ if(viewRole && viewRole.role === 'employee'){ renderEmpPerf(viewRole.name); } }catch(e){}
+      renderEmpAlerts();
+    }).catch(function(){ ALERTS_CLEARED = []; });
+  }
+  function isAlertCleared(sig){ return !!sig && (ALERTS_CLEARED || []).indexOf(sig) > -1; }
+  function clearAlerts(sigs){
+    var list = (ALERTS_CLEARED || []).slice();
+    sigs.forEach(function(s){ if(s && list.indexOf(s) === -1) list.push(s); });
+    ALERTS_CLEARED = list.slice(-300);                    // older ones have long since expired anyway
+    storage.set('alertsCleared', JSON.stringify(ALERTS_CLEARED), false).catch(function(){});
+    try{ if(viewRole && viewRole.name){ renderEmpPerf(viewRole.name); } }catch(e){}
+    renderEmpAlerts();
+  }
+  /* The panel starts folded to one line with its counts; a click opens it. */
+  var EMP_PERF_OPEN = false;
   function renderEmpPerf(name){
     var box = document.getElementById('empPerf');
     if(!box) return;
@@ -7230,17 +7288,40 @@ function buildExcelBackup(){
     box.style.display = '';
     var scoreNow = perfScore(p.now), scoreWas = perfScore(p.was);
     var d = scoreNow - scoreWas;
-    var head = '<div class="ep-head"><div><b>This month so far</b><span>compared with ' + escapeHtml(p.prevLbl) + '</span></div>'
-      + '<div class="ep-score ' + (d >= 3 ? 'up' : (d <= -3 ? 'down' : 'flat')) + '" title="Performance score out of 100">'
-      +   '<i>' + scoreNow + '</i><em>' + (Math.abs(d) < 1 ? 'no change' : ((d > 0 ? '↑ ' : '↓ ') + Math.abs(Math.round(d)))) + '</em></div></div>';
-    var list = p.items.filter(function(it){ return it.key !== 'score'; });
-    box.innerHTML = head + (list.length
-      ? '<div class="ep-list">' + list.map(function(it){
-          return '<div class="ep-item ' + (it.good ? 'good' : 'bad') + '">'
-            + '<span class="ep-ico">' + (it.good ? '↑' : (it.word === 'over' ? '!' : '↓')) + '</span>'
-            + '<span class="ep-txt"><b>' + escapeHtml(it.title) + '</b><span>' + escapeHtml(it.detail) + '</span></span></div>';
-        }).join('') + '</div>'
-      : '<div class="ep-steady">Holding steady on every measure — nothing has moved much since ' + escapeHtml(p.prevLbl) + '.</div>');
+    var list = p.items.filter(function(it){ return it.key !== 'score' && !isAlertCleared(it.sig); });
+    var downs = list.filter(function(it){ return !it.good; }).length, ups = list.length - downs;
+    box.classList.toggle('open', EMP_PERF_OPEN);
+    var head = '<button type="button" class="ep-head" id="empPerfToggle" aria-expanded="' + EMP_PERF_OPEN + '">'
+      + '<span class="ep-h-txt"><b>Your performance</b><span>this month vs ' + escapeHtml(p.prevLbl) + '</span></span>'
+      + '<span class="ep-badges">'
+      +   (downs ? '<span class="ep-bdg bad" title="' + downs + ' going down">↓ ' + downs + '</span>' : '')
+      +   (ups ? '<span class="ep-bdg good" title="' + ups + ' going up">↑ ' + ups + '</span>' : '')
+      +   (!list.length ? '<span class="ep-bdg flat">steady</span>' : '')
+      + '</span>'
+      + '<span class="ep-score ' + (d >= 3 ? 'up' : (d <= -3 ? 'down' : 'flat')) + '" title="Performance score out of 100">'
+      +   '<i>' + scoreNow + '</i><em>' + (Math.abs(d) < 1 ? 'no change' : ((d > 0 ? '↑ ' : '↓ ') + Math.abs(Math.round(d)))) + '</em></span>'
+      + '<span class="ep-chev" aria-hidden="true">▾</span></button>';
+    var body = '';
+    if(EMP_PERF_OPEN){
+      body = list.length
+        ? '<div class="ep-list">' + list.map(function(it){
+            return '<div class="ep-item ' + (it.good ? 'good' : 'bad') + '">'
+              + '<span class="ep-ico">' + (it.good ? '↑' : (it.word === 'over' ? '!' : '↓')) + '</span>'
+              + '<span class="ep-txt"><b>' + escapeHtml(it.title) + '</b><span>' + escapeHtml(it.detail) + '</span></span>'
+              + '<button type="button" class="ep-x" data-ep-clear="' + escapeHtml(it.sig) + '" title="Clear this alert" aria-label="Clear this alert">×</button></div>';
+          }).join('') + '</div>'
+          + '<div class="ep-foot"><button type="button" class="ep-clearall" id="empPerfClearAll">Clear all</button></div>'
+        : '<div class="ep-steady">Nothing to show — ' + (p.items.some(function(it){ return it.key !== 'score'; })
+            ? 'you have cleared this month’s alerts.' : ('holding steady on every measure since ' + escapeHtml(p.prevLbl) + '.')) + '</div>';
+    }
+    box.innerHTML = head + body;
+    var tg = document.getElementById('empPerfToggle');
+    if(tg) tg.onclick = function(){ EMP_PERF_OPEN = !EMP_PERF_OPEN; renderEmpPerf(name); };
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ep-clear]'), function(b){
+      b.onclick = function(){ clearAlerts([b.getAttribute('data-ep-clear')]); };
+    });
+    var ca = document.getElementById('empPerfClearAll');
+    if(ca) ca.onclick = function(){ clearAlerts(list.map(function(it){ return it.sig; })); };
   }
   function empAlerts(){
     var name = viewRole && viewRole.name;
@@ -7258,8 +7339,8 @@ function buildExcelBackup(){
         var d = r.status === 'query' ? ((r.adminNote ? ('“' + r.adminNote + '” ') : '') + 'Reply under My Requests.')
               : (r.adminNote || '');
         return { level:'info', fresh: NOTIF_SEEN !== null && String(r.updatedAt || '') > NOTIF_SEEN,
-                 title:t, detail:d, go:true };
-      });
+                 title:t, detail:d, go:true, sig: 'req|' + r.id + '|' + (r.updatedAt || '') };
+      }).filter(function(a){ return !isAlertCleared(a.sig); });
   }
   var EMP_PERF_ITEMS = [];                   // what the bell last showed, to mark seen on open
   function renderEmpAlerts(){
@@ -7272,7 +7353,7 @@ function buildExcelBackup(){
       var nm = viewRole && viewRole.name;
       var p = (nm && viewRole.role === 'employee') ? empPerfChanges(nm) : null;
       if(p && p.ready){
-        perf = p.items.map(function(it){
+        perf = p.items.filter(function(it){ return !isAlertCleared(it.sig); }).map(function(it){
           return { level: it.good ? 'good' : 'warn', fresh: PERF_SEEN !== null && PERF_SEEN.indexOf(it.sig) === -1,
                    title: it.title, detail: it.detail, sig: it.sig, perf: true, go: true };
         });
@@ -7286,9 +7367,10 @@ function buildExcelBackup(){
     badge.style.display = n ? 'inline-block' : 'none';
     btn.title = 'Your performance and decisions on your requests';
     renderAlertList(dd, 'Updates', items, 'Nothing new — no changes in your performance and no decisions on your requests in the last 30 days.', function(a){
+      if(a && a.perf){ EMP_PERF_OPEN = true; try{ renderEmpPerf(viewRole.name); }catch(e){} }
       var target = document.getElementById((a && a.perf) ? 'empPerf' : 'myRequestsList');
       if(target) try{ target.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
-    });
+    }, function(a){ if(a && a.sigs) clearAlerts(a.sigs); else if(a && a.sig) clearAlerts([a.sig]); });
   }
   (function(){
     function wire(btnId, ddId, onOpen){
@@ -7320,6 +7402,7 @@ function buildExcelBackup(){
     });
     loadNotifSeen();
     loadPerfSeen();
+    loadAlertsCleared();
     loadDeviceStatus();
     setInterval(loadDeviceStatus, 5 * 60 * 1000);
     setTimeout(loadClientErrors, 8000);                    // once the session has said who this is
