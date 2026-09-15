@@ -666,6 +666,35 @@ body{
 .bk-btn.warn{ color:#5B4200; border-color:#EBC77A; background:linear-gradient(180deg,#FFF6DD,#FBE7AE); }
 .bk-btn.ghost{ color:#B42318; background:transparent; border-color:transparent; box-shadow:none; }
 .bk-btn.ghost:hover{ background:#FDECEA; border-color:#F5C2BC; box-shadow:none; }
+.bk-btn.green{ color:#fff; border-color:transparent; background:linear-gradient(180deg,#34C27A,#16A34A);
+  box-shadow:0 4px 12px rgba(22,163,74,.28), inset 0 1px 0 rgba(255,255,255,.4); }
+/* Take data out: the two exports side by side, each a card in its own colour. */
+.bk-export-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px; max-width:980px; }
+.bk-export{ --bc:#3B7DF5; max-width:none; border-color:color-mix(in srgb, var(--bc) 28%, #fff);
+  background:linear-gradient(135deg, color-mix(in srgb, var(--bc) 10%, #fff), #fff 70%); }
+.bk-export .bk-drop-ico{ background:color-mix(in srgb, var(--bc) 14%, #fff); }
+/* The auto-backup switch, in place of a bare checkbox. */
+.bk-switch{ display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--ink-soft); cursor:pointer; margin-top:3px; white-space:normal; }
+.bk-switch input{ position:absolute; opacity:0; width:1px; height:1px; }
+.bk-switch i{ flex:none; position:relative; width:30px; height:17px; border-radius:17px; background:#CBD3E1; transition:background .15s; }
+.bk-switch i::after{ content:''; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .15s; }
+.bk-switch input:checked + i{ background:#16A34A; }
+.bk-switch input:checked + i::after{ transform:translateX(13px); }
+.bk-switch input:focus-visible + i{ outline:2px solid #3B7DF5; outline-offset:2px; }
+/* Signature: the image drop zone with its preview, and the name and actions beside it. */
+.bk-sign-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:10px; max-width:980px; }
+.bk-sign-drop{ max-width:none; flex-wrap:nowrap; }
+.bk-sign-drop .bk-drop-txt{ flex:1 1 80px; min-width:0; }
+@media (max-width:560px){ .bk-sign-drop{ flex-wrap:wrap; } }
+.bk-sign-preview{ flex:none; width:150px; height:54px; border-radius:10px; background:#fff center/contain no-repeat;
+  border:1px solid #D6DEEC; box-shadow:inset 0 1px 3px rgba(26,40,72,.06);
+  display:flex; align-items:center; justify-content:center; font-size:10.5px; color:var(--ink-dim); }
+.bk-sign-side{ max-width:none; align-items:center; }
+.bk-sign-by{ flex:1 1 220px; display:flex; flex-direction:column; gap:4px; font-size:11px; font-weight:700; color:var(--ink-soft); }
+.bk-sign-by input{ padding:8px 11px; border:1px solid #D6DEEC; border-radius:10px; font:inherit; font-size:12.5px; font-weight:500;
+  color:var(--ink); background:#fff; box-shadow:inset 0 1px 2px rgba(26,40,72,.05); }
+.bk-sign-by input:focus{ outline:none; border-color:#3B7DF5; box-shadow:0 0 0 3px rgba(59,125,245,.18); }
 .bk-drop-name{ flex-basis:100%; font-size:11.5px; font-weight:600; color:#0F6B3A; }
 .bk-drop-name:empty{ display:none; }
 .search-box, .month-btn{
@@ -1173,6 +1202,21 @@ td.dur-col.out-over{ color:#B42318; font-weight:700; background:#FDECEA; }
 .ins-good{ border-left-color:#2F8F5B; } .ins-good .ins-t{ color:#2F8F5B; }
 .ins-warn{ border-left-color:#C4643C; } .ins-warn .ins-t{ color:#C4643C; }
 .ins-info{ border-left-color:#5B7FA6; } .ins-info .ins-t{ color:#5B7FA6; }
+/* Colourful insights: --ic is set per card from what it reports. */
+#dashWrap .ins{ --ic:#5B7FA6; position:relative; display:flex; align-items:center; gap:10px; overflow:hidden;
+  padding:10px 12px 10px 14px; border-radius:14px; border:1px solid color-mix(in srgb, var(--ic) 24%, #fff);
+  background:linear-gradient(120deg, color-mix(in srgb, var(--ic) 14%, #fff) 0%, #fff 78%);
+  box-shadow:0 2px 10px color-mix(in srgb, var(--ic) 10%, transparent), inset 0 1px 0 #fff;
+  transition:transform .12s ease, box-shadow .15s ease; }
+#dashWrap .ins::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+  background:linear-gradient(180deg, var(--ic), color-mix(in srgb, var(--ic) 45%, #fff)); }
+#dashWrap .ins:hover{ transform:translateY(-1px); box-shadow:0 8px 18px color-mix(in srgb, var(--ic) 20%, transparent); }
+#dashWrap .ins-ico{ flex:none; width:32px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+  font-size:16px; line-height:1; background:color-mix(in srgb, var(--ic) 16%, #fff);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ic) 26%, transparent); }
+#dashWrap .ins-body{ min-width:0; }
+#dashWrap .ins .ins-t{ color:color-mix(in srgb, var(--ic) 85%, #141A24); }
+#dashWrap .ins .ins-d{ color:#1B2330; }
 .dash-trend{ text-align:center; }
 .spk{ display:block; margin:0 auto; }
 .spk-none{ color:#C6CBD3; font-size:11px; }
@@ -2932,20 +2976,34 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div style="padding:16px 18px 2px;"><div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Taking data out</div><div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">Save everything, either as a backup file or as an editable spreadsheet.</div></div>
 <div style="padding:14px 18px 6px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Full backup — all data</label>
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-      <button class="btn primary" id="bkExportAll" style="width:auto;padding:10px 22px;">⤓ Export All Data (JSON/Backup)</button>
-      <button class="btn" id="bkExportXlsx" style="width:auto;padding:10px 22px;">⤓ Export All Data (EXCEL/Editable)</button>
+    <div class="bk-export-row">
+      <div class="bk-folder bk-export" style="--bc:#3B7DF5">
+        <span class="bk-drop-ico">🗄️</span>
+        <span class="bk-folder-txt"><b>Full backup (.json)</b><span>Everything, for restoring later</span></span>
+        <button type="button" class="bk-btn primary" id="bkExportAll">⤓ Export backup</button>
+      </div>
+      <div class="bk-folder bk-export" style="--bc:#16A34A">
+        <span class="bk-drop-ico">📊</span>
+        <span class="bk-folder-txt"><b>Editable Excel (.xlsx)</b><span>Bulk-edit the attendance, then upload it back</span></span>
+        <button type="button" class="bk-btn green" id="bkExportXlsx">⤓ Export Excel</button>
+      </div>
     </div>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;"><b>Export all data</b> saves one <b>.json</b> (complete backup for restoring). <b>Export to Excel</b> saves an <b>.xlsx</b> of the attendance you can bulk-edit in Excel and bring back via <b>Upload data</b>. On Chrome/Edge you'll be asked <b>where to save</b> — pick any folder on your PC.</div>
   </div>
 
   <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Auto Excel backup on HD Screenshot</label>
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-      <button class="btn" id="bkChooseFolder" style="width:auto;padding:10px 20px;">📁 Choose backup folder…</button>
-      <button class="btn" id="bkReconnect" style="width:auto;padding:10px 20px;display:none;">🔓 Reconnect folder</button>
-      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);cursor:pointer;"><input type="checkbox" id="bkAutoToggle" checked> Save an Excel backup every time I take an HD Screenshot</label>
-      <button class="btn" id="bkForgetFolder" style="width:auto;padding:8px 14px;display:none;">Forget folder</button>
+    <div class="bk-folder" id="bkDirCard">
+      <span class="bk-drop-ico" id="bkDirIco">📁</span>
+      <span class="bk-folder-txt">
+        <b id="bkDirTitle">Saving to Downloads</b>
+        <label class="bk-switch"><input type="checkbox" id="bkAutoToggle" checked><i></i> Save an Excel backup every time I take an HD Screenshot</label>
+      </span>
+      <span class="bk-folder-btns">
+        <button type="button" class="bk-btn primary" id="bkChooseFolder">📁 Choose backup folder</button>
+        <button type="button" class="bk-btn warn" id="bkReconnect" style="display:none;">🔓 Reconnect folder</button>
+        <button type="button" class="bk-btn ghost" id="bkForgetFolder" style="display:none;">Forget folder</button>
+      </span>
     </div>
     <div id="bkFolderStatus" style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">Each <b>📸 HD Screenshot</b> also saves an <b>Excel (.xlsx)</b> backup of all data to your <b>Downloads</b>. To send it straight to a specific folder instead (no download), pick one here (Chrome/Edge).</div>
   </div>
@@ -2955,15 +3013,23 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <div class="bk-panel" data-bk="sign">
   <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Your signature for approved leave forms <span style="font-weight:500;text-transform:none;">— signed in as <b id="signWho">—</b></span></label>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <div id="signPreview" style="width:150px;height:52px;border:1px dashed var(--line-dk);border-radius:8px;background:#fff center/contain no-repeat;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--ink-dim);">none set</div>
-      <button class="btn" id="signPick" style="width:auto;padding:8px 14px;">🖼 Choose image…</button>
-      <button class="btn" id="signMake" style="width:auto;padding:8px 14px;">✍ Generate from name</button>
-      <button class="btn" id="signClear" style="width:auto;padding:8px 14px;display:none;">Remove</button>
-      <input type="file" id="signUpload" accept="image/*" style="display:none;"/>
-      <label style="font-size:11.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">
-        Name beneath it <input type="text" id="signBy" placeholder="e.g. A. Sharma, Managing Director" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px;min-width:230px;"/>
-      </label>
+    <div class="bk-sign-row">
+      <!-- Click or drop an image here; the preview sits inside the zone. -->
+      <div class="bk-drop bk-sign-drop" id="signDrop" role="button" tabindex="0" title="Choose a signature image, or drop one here">
+        <div id="signPreview" class="bk-sign-preview">none set</div>
+        <span class="bk-drop-txt"><b>Signature image</b> <span>drop it here, or</span></span>
+        <button type="button" class="bk-btn primary" id="signPick">🖼 Choose image</button>
+        <input type="file" id="signUpload" accept="image/*" style="display:none;"/>
+      </div>
+      <div class="bk-folder bk-sign-side">
+        <label class="bk-sign-by">Name beneath it
+          <input type="text" id="signBy" placeholder="e.g. A. Sharma, Managing Director"/>
+        </label>
+        <span class="bk-folder-btns">
+          <button type="button" class="bk-btn" id="signMake">✍ Generate from name</button>
+          <button type="button" class="bk-btn ghost" id="signClear" style="display:none;">Remove</button>
+        </span>
+      </div>
     </div>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">
       Printed above the approval line on requests <b>you</b> approve — each admin has their own.
@@ -4293,7 +4359,23 @@ function renderSignSetting(){
     var pick = document.getElementById('signPick');
     var file = document.getElementById('signUpload');
     if(pick && file){
-      pick.addEventListener('click', function(){ file.click(); });
+      pick.addEventListener('click', function(e){ e.stopPropagation(); file.click(); });
+      /* The zone around the preview: a click anywhere on it chooses an image,
+         and an image dropped on it is taken as if chosen. */
+      var zone = document.getElementById('signDrop');
+      if(zone){
+        zone.addEventListener('click', function(e){ if(e.target === file) return; file.click(); });
+        zone.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); file.click(); } });
+        ['dragenter','dragover'].forEach(function(t){ zone.addEventListener(t, function(e){ e.preventDefault(); zone.classList.add('over'); }); });
+        ['dragleave','dragend','drop'].forEach(function(t){ zone.addEventListener(t, function(){ zone.classList.remove('over'); }); });
+        zone.addEventListener('drop', function(e){
+          e.preventDefault();
+          var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if(!f) return;
+          if(!/^image\//.test(f.type)){ showUploadStatus('That is not an image. Drop a PNG or JPG of the signature.', true); return; }
+          try{ var dt = new DataTransfer(); dt.items.add(f); file.files = dt.files; file.dispatchEvent(new Event('change', {bubbles:true})); }catch(_){}
+        });
+      }
       file.addEventListener('change', function(e){
         var f = e.target.files && e.target.files[0];
         e.target.value = '';
@@ -4506,6 +4588,18 @@ function ensureDirPerm(dir, byClick, mode){
     var recon=document.getElementById('bkReconnect');
     if(tog) tog.checked = autoBackupOn();
     if(recon) recon.style.display = (dir && perm && perm !== 'granted') ? '' : 'none';
+    // The card says the same thing at a glance: green saving to a folder, amber needing reconnecting.
+    var lapsedDir = !!(dir && perm && perm !== 'granted');
+    var card = document.getElementById('bkDirCard');
+    if(card){ card.classList.toggle('is-set', !!dir && !lapsedDir); card.classList.toggle('is-lapsed', lapsedDir); }
+    var ttl = document.getElementById('bkDirTitle');
+    if(ttl) ttl.textContent = !dir ? 'Saving to Downloads'
+      : (lapsedDir ? ('Folder “' + (dir.name || 'chosen folder') + '” needs reconnecting')
+                   : ('Saving to “' + (dir.name || 'chosen folder') + '”'));
+    var ico = document.getElementById('bkDirIco');
+    if(ico) ico.textContent = !dir ? '📥' : (lapsedDir ? '⚠️' : '📂');
+    var chooseB = document.getElementById('bkChooseFolder');
+    if(chooseB) chooseB.textContent = dir ? '📁 Change folder' : '📁 Choose backup folder';
     if(dir){
       if(st) st.innerHTML = (perm && perm !== 'granted')
         ? 'Backup folder: <b>'+ (dir.name||'(chosen folder)') +'</b> — still remembered, but the browser drops permission to write to it each time the page reloads. '
@@ -11102,14 +11196,31 @@ function buildExcelBackup(){
       if(lateSum && lateSum.lateDays > 0)
         out.push({k:'info', t:'Most lateness', d:lateSum.name+' \u2014 '+lateSum.lateDays+' days, '+fmtMin(lateSum.totalLateMin)+' in total'});
       if(!out.length) return '';
-      return '<div class="ins-grid">'+out.slice(0,6).map(function(o){
-        return '<div class="ins ins-'+o.k+'"><div class="ins-t">'+o.t+'</div><div class="ins-d">'+shotEsc(o.d)+'</div></div>';
-      }).join('')+'</div>';
+      return renderInsights(out.slice(0,6));
+    }
+    /* Each insight in its own colour and icon, read from what it says, so the
+       strip matches the KPI cards above it. */
+    function insTheme(o){
+      var t = String(o.t || '');
+      if(/^Highest score/.test(t))    return {c:'#CA8A04', i:'🏆'};
+      if(/^Most improved/.test(t))    return {c:'#0D9488', i:'📈'};
+      if(/^Biggest drop/.test(t))     return {c:'#DC2626', i:'📉'};
+      if(/^Needs attention/.test(t))  return {c:'#EA580C', i:'🚩'};
+      if(/^Most extra hours/.test(t)) return {c:'#2563EB', i:'⏱️'};
+      if(/^Most time out/.test(t))    return {c:'#E11D48', i:'☕'};
+      if(/^Most lateness/.test(t))    return {c:'#D97706', i:'🐢'};
+      if(/^Across the team/.test(t))  return {c:'#4F46E5', i:'👥'};
+      if(o.k === 'good') return {c:'#16A34A', i:'🥇'};
+      if(o.k === 'warn') return {c:'#EA580C', i:'🔻'};
+      return {c:'#5B7FA6', i:'💡'};
     }
     function renderInsights(list){
       if(!list || !list.length) return '';
       return '<div class="ins-grid">'+list.map(function(o){
-        return '<div class="ins ins-'+o.k+'"><div class="ins-t">'+o.t+'</div><div class="ins-d">'+shotEsc(o.d)+'</div></div>';
+        var th = insTheme(o);
+        return '<div class="ins ins-'+o.k+'" style="--ic:'+th.c+'">'
+          + '<span class="ins-ico" aria-hidden="true">'+th.i+'</span>'
+          + '<div class="ins-body"><div class="ins-t">'+o.t+'</div><div class="ins-d">'+shotEsc(o.d)+'</div></div></div>';
       }).join('')+'</div>';
     }
 
