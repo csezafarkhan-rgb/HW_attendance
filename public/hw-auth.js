@@ -143,7 +143,12 @@
       if (outBtn) outBtn.style.display = '';
       /* Managing accounts and taking a whole-project backup are changes, so they
          belong to the super admin alone - a view admin gets neither button. */
-      if (usersBtn) usersBtn.style.display = user.role === 'admin' ? '' : 'none';
+      /* A view admin cannot manage accounts, but can still protect their own
+         sign-in: the same button opens just the "Your sign-in" section. */
+      if (usersBtn) {
+        usersBtn.style.display = (user.role === 'admin' || user.role === 'admin_view') ? '' : 'none';
+        if (user.role === 'admin_view') { usersBtn.textContent = '🔐 Sign-in'; usersBtn.title = 'Two-step sign-in for your account'; }
+      }
       if (pbBtn) pbBtn.style.display = user.role === 'admin' ? '' : 'none';
 
       var ready = (window.HWSync && typeof window.HWSync.hydrate === 'function')
@@ -183,11 +188,12 @@
           if (typeof left === 'number') {
             setTimeout(function () {
               alert('You signed in with a recovery code. That code will not work again - ' + left +
-                    ' left.' + (left <= 3 ? ' Turn two-step sign-in off and on again under Users to get new codes.' : ''));
+                    ' left.' + (left <= 3 ? ' Turn two-step sign-in off and on again (Users, or Sign-in for a view admin) to get new codes.' : ''));
             }, 900);
           }
         })
         .catch(function (e) {
+          if (e && e.message === 'two_step_locked') return showError('Too many wrong codes on this account. Two-step sign-in is locked for 15 minutes.');
           if (e && e.status === 429) return showError('Too many attempts. Try again in a few minutes.');
           if (e && e.message === 'two_step_expired') { setCodeMode(false); return showError('That took too long, or too many codes were wrong. Sign in again.'); }
           if (e && e.message === 'invalid_code') { if (codeEl) { codeEl.value = ''; try { codeEl.focus(); } catch (_) {} } return showError('That code is not right. Codes change every 30 seconds - use the one showing now.'); }

@@ -52,7 +52,7 @@ For automatic first-admin creation:
 Occasional:
 
 - `SYNC_TOKEN=<long random string>` lets the office PC upload attendance and take backups (`scripts/attendance-sync/README.md`)
-- `RESET_TWO_STEP=<email>` switches that account's two-step sign-in off on the next deploy; remove it afterwards
+- `RESET_TWO_STEP=<email>` switches that account's two-step sign-in off once (not again on later restarts); remove it afterwards. To reset the same account again later, use `<email>#2`
 
 ## Local development
 
@@ -134,6 +134,9 @@ authenticator app (Google Authenticator, Microsoft Authenticator or similar).
   the Users list; the person signs in with the password and sets it up again.
 - The only super admin lost both phone and recovery codes: set
   `RESET_TWO_STEP=<their email>` in Render, deploy, sign in, then remove the variable.
+  It runs once; the app restarting after sleep does not repeat it.
+- Ten wrong codes in a row lock two-step sign-in for that account for 15 minutes,
+  from any address. A view admin sets up two-step from the 🔐 Sign-in button.
 - Codes are checked on the server (`totp.js`, RFC 6238); a code cannot be reused,
   five wrong codes end the attempt, and recovery codes are stored only as hashes.
 

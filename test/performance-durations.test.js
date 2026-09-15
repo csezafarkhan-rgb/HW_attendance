@@ -39,7 +39,8 @@ check('total, in and out duration add up', s.totalDurMin === 3 * 540 && s.inDurM
 check('daily averages', s.avgTotalDurMin === 540 && s.avgInDurMin === 473 && s.avgOutDurMin === 67, s);
 check('out time up to 1:00 (45 lunch + 15 tea) is within, beyond it is over', s.breakOkDays === 2 && s.breakOverDays === 1 && s.breakOverMin === 30, s);
 check('breaks within: 2 of 3 days', s.breakOkPct === 67, s.breakOkPct);
-check('in-office: in duration against total less the allowance', s.inOfficePct === Math.min(100, Math.round(1420 / (1620 - 180) * 100)), s.inOfficePct);
+// Per day, then averaged: 490/480 -> 100, 480/480 -> 100, 450/480 -> 93.75; a day with no break cannot hide one with a long one.
+check('in-office: each day\'s in duration against its total less the allowance, averaged', s.inOfficePct === Math.round((100 + 100 + 93.75) / 3), s.inOfficePct);
 
 const perfect = { attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700, breakOkPct: 100, inOfficePct: 100 };
 check('a perfect month scores 100', ctx.perfScore(perfect) === 100, ctx.perfScore(perfect));

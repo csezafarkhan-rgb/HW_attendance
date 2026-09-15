@@ -452,17 +452,32 @@ async function finishLogin(req, u, remember) {
    switches it off on the next deploy (migrate.js). */
 const TWO_STEP_ROLES = ['admin', 'admin_view'];
 const PENDING_TWO_STEP_MS = 5 * 60 * 1000;
+/* Failed codes are counted per account, not per address or session: ten in a
+   row lock two-step sign-in (and switching it off) for 15 minutes, whoever is
+   asking and from wherever. Re-entering the password does not reset it. */
+const TWO_STEP_MAX_FAILS = 10;
 async function twoStepOf(userId) {
   const { rows } = await pool.query(
-    'SELECT totp_enabled, totp_secret, totp_last_step, totp_recovery FROM users WHERE id = $1', [userId]);
+    `SELECT totp_enabled, totp_secret, totp_last_step, totp_recovery,
+            (totp_locked_until IS NOT NULL AND totp_locked_until > now()) AS locked
+       FROM users WHERE id = $1`, [userId]);
   const r = rows[0] || {};
   const recovery = parseJson(r.totp_recovery);
   return {
     enabled: !!r.totp_enabled,
     secret: r.totp_secret || null,
     lastStep: r.totp_last_step == null ? null : Number(r.totp_last_step),
-    recovery: Array.isArray(recovery) ? recovery : []
+    recovery: Array.isArray(recovery) ? recovery : [],
+    rawRecovery: r.totp_recovery == null ? '' : String(r.totp_recovery),
+    locked: !!r.locked
   };
+}
+async function noteTwoStepFailure(userId) {
+  await pool.query(
+    `UPDATE users SET totp_fail_count = COALESCE(totp_fail_count, 0) + 1,
+            totp_locked_until = CASE WHEN COALESCE(totp_fail_count, 0) + 1 >= $2
+                                     THEN now() + interval '15 minutes' ELSE totp_locked_until END
+      WHERE id = $1`, [userId, TWO_STEP_MAX_FAILS]);
 }
 /* A code from the app, or a recovery code. What to write back when it passes:
    the step used (so it cannot be replayed) or the recovery codes left. */
@@ -473,11 +488,26 @@ function checkTwoStepCode(ts, code) {
   if (left) return { ok: true, step: ts.lastStep, recovery: left, usedRecovery: true };
   return { ok: false };
 }
-async function saveTwoStepUse(userId, orgId, result) {
-  await pool.query(
-    'UPDATE users SET totp_last_step = $1, totp_recovery = $2 WHERE id = $3 AND org_id = $4',
-    [result.step, JSON.stringify(result.recovery), userId, orgId]);
+/* Only if nothing changed since the code was checked: two requests racing with
+   the same code (or recovery code) cannot both pass, and a slower one cannot
+   write back a spent recovery code. False means another request got there first. */
+async function saveTwoStepUse(userId, orgId, ts, result) {
+  const r = await pool.query(
+    `UPDATE users SET totp_last_step = $1, totp_recovery = $2, totp_fail_count = 0, totp_locked_until = NULL
+      WHERE id = $3 AND org_id = $4
+        AND totp_last_step IS NOT DISTINCT FROM $5::bigint AND COALESCE(totp_recovery, '') = $6
+      RETURNING id`,
+    [result.step, JSON.stringify(result.recovery), userId, orgId, ts.lastStep, ts.rawRecovery]);
+  return r.rows.length === 1;
 }
+// Per signed-in account, for the routes that take a password or a code.
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10, skipSuccessfulRequests: true,
+  standardHeaders: true, legacyHeaders: false,
+  keyGenerator: req => 'user:' + ((req.session && req.session.userId) || 'none'),
+  validate: false,
+  message: { error: 'too_many_attempts' }
+});
 
 app.post('/api/login/two-step', loginLimiter, async (req, res) => {
   const pending = req.session && req.session.pendingTwoStep;
@@ -490,8 +520,10 @@ app.post('/api/login/two-step', loginLimiter, async (req, res) => {
   const u = rows[0];
   if (!u) { delete req.session.pendingTwoStep; return res.status(401).json({ error: 'two_step_expired' }); }
   const ts = await twoStepOf(u.id);
+  if (ts.locked) return res.status(429).json({ error: 'two_step_locked' });
   const result = ts.enabled ? checkTwoStepCode(ts, req.body && req.body.code) : { ok: false };
-  if (!result.ok) {
+  if (!result.ok || !(await saveTwoStepUse(u.id, u.org_id, ts, result))) {
+    await noteTwoStepFailure(u.id);
     pending.tries = (pending.tries || 0) + 1;
     if (pending.tries >= 5) {
       delete req.session.pendingTwoStep;
@@ -499,7 +531,6 @@ app.post('/api/login/two-step', loginLimiter, async (req, res) => {
     }
     return res.status(401).json({ error: 'invalid_code', triesLeft: 5 - pending.tries });
   }
-  await saveTwoStepUse(u.id, u.org_id, result);
   await regenerateSession(req);
   await finishLogin(req, u, !!pending.remember);
   res.json({ ok: true, user: { id: u.id, email: u.email, name: u.name, role: u.role },
@@ -514,7 +545,7 @@ app.get('/api/two-step', requireAuth, async (req, res) => {
 
 /* Step 1 of turning it on: the password again, then a new secret for the app.
    It is not in force until a code from the app proves the app has it. */
-app.post('/api/two-step/setup', requireRole(...TWO_STEP_ROLES), async (req, res) => {
+app.post('/api/two-step/setup', requireRole(...TWO_STEP_ROLES), accountLimiter, async (req, res) => {
   const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
   if (!rows[0] || !(await bcrypt.compare(String((req.body && req.body.password) || ''), rows[0].password_hash))) {
     return res.status(401).json({ error: 'invalid_credentials' });
@@ -530,7 +561,7 @@ app.post('/api/two-step/setup', requireRole(...TWO_STEP_ROLES), async (req, res)
 });
 
 // Step 2: a code from the app. Returns the recovery codes, shown this once.
-app.post('/api/two-step/enable', requireRole(...TWO_STEP_ROLES), async (req, res) => {
+app.post('/api/two-step/enable', requireRole(...TWO_STEP_ROLES), accountLimiter, async (req, res) => {
   const ts = await twoStepOf(req.session.userId);
   if (ts.enabled) return res.status(409).json({ error: 'already_enabled' });
   if (!ts.secret) return res.status(400).json({ error: 'setup_first' });
@@ -545,14 +576,18 @@ app.post('/api/two-step/enable', requireRole(...TWO_STEP_ROLES), async (req, res
 });
 
 // Switching it off asks for the password and a current code (or a recovery code).
-app.post('/api/two-step/disable', requireAuth, async (req, res) => {
+app.post('/api/two-step/disable', requireAuth, accountLimiter, async (req, res) => {
   const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.session.userId]);
   if (!rows[0] || !(await bcrypt.compare(String((req.body && req.body.password) || ''), rows[0].password_hash))) {
     return res.status(401).json({ error: 'invalid_credentials' });
   }
   const ts = await twoStepOf(req.session.userId);
   if (!ts.enabled) return res.json({ ok: true });
-  if (!checkTwoStepCode(ts, req.body && req.body.code).ok) return res.status(401).json({ error: 'invalid_code' });
+  if (ts.locked) return res.status(429).json({ error: 'two_step_locked' });
+  if (!checkTwoStepCode(ts, req.body && req.body.code).ok) {
+    await noteTwoStepFailure(req.session.userId);
+    return res.status(401).json({ error: 'invalid_code' });
+  }
   await pool.query(
     'UPDATE users SET totp_enabled = $1, totp_secret = $2, totp_last_step = $3, totp_recovery = $4 WHERE id = $5 AND org_id = $6',
     [false, null, null, null, req.session.userId, req.session.orgId]);
@@ -575,7 +610,7 @@ app.get('/api/me', async (req, res) => {
   res.json({ user: rows[0] });
 });
 
-app.post('/api/change-password', requireAuth, async (req, res) => {
+app.post('/api/change-password', requireAuth, accountLimiter, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!newPassword || String(newPassword).length < 8) {
     return res.status(400).json({ error: 'password_too_short' });
@@ -636,8 +671,8 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
     const t = await pool.query('SELECT id, role, is_active FROM users WHERE id = $1 AND org_id = $2', [id, req.session.orgId]);
     if (!t.rows[0]) return res.status(404).json({ error: 'not_found' });
     await pool.query(
-      'UPDATE users SET totp_enabled = $1, totp_secret = $2, totp_last_step = $3, totp_recovery = $4 WHERE id = $5 AND org_id = $6',
-      [false, null, null, null, id, req.session.orgId]);
+      'UPDATE users SET totp_enabled = $1, totp_secret = $2, totp_last_step = $3, totp_recovery = $4, totp_fail_count = $5, totp_locked_until = $6 WHERE id = $7 AND org_id = $8',
+      [false, null, null, null, 0, null, id, req.session.orgId]);
     await endSessions(id, '');
     return res.json({ ok: true });
   }
@@ -961,14 +996,19 @@ app.post('/api/records', requireAuth, bigJson, async (req, res) => {
 });
 
 /* ---------------- script errors from browsers ----------------
-   Reported by hw-sync.js from the shell and the dashboard. Open before sign-in
-   (a page can break before anyone is signed in), so it is rate limited, small,
-   and stores only the error text - never form contents. */
+   Reported by hw-sync.js from the shell and the dashboard. Signed-in people
+   only: anyone could post before, filling the database and putting their own
+   words in admins' alerts. Rate limited, small, capped per hour, and only the
+   error text is kept - never form contents. */
 const errorLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+const CLIENT_ERRORS_PER_HOUR = 500;
 app.post('/api/client-errors', errorLimiter, async (req, res) => {
+  if (!req.session || !req.session.userId) return res.status(204).end();   // not stored
   const b = req.body || {};
   const message = clip(b.message, 500).trim();
   if (!message) return res.status(400).json({ error: 'no_message' });
+  const recent = await pool.query("SELECT count(*)::int AS n FROM client_errors WHERE first_at > now() - interval '1 hour'");
+  if (recent.rows[0] && recent.rows[0].n >= CLIENT_ERRORS_PER_HOUR) return res.json({ ok: true, dropped: true });
   const source = clip(b.source, 300), stack = clip(b.stack, 4000), page = clip(b.page, 60), ua = clip(req.headers['user-agent'], 300);
   const line = Number.isFinite(+b.line) ? Math.max(0, Math.min(10000000, Math.round(+b.line))) : null;
   const userId = (req.session && req.session.userId) || null;
@@ -991,7 +1031,7 @@ app.get('/api/client-errors', requireRole('admin', 'admin_view'), async (req, re
   const hours = Math.min(24 * 30, Math.max(1, parseInt(req.query.hours, 10) || 24));
   const { rows } = await pool.query(
     `SELECT id, first_at, last_at, count, user_name, message, source, line, page FROM client_errors
-      WHERE last_at > now() - ($1 || ' hours')::interval AND (org_id = $2 OR org_id IS NULL)
+      WHERE last_at > now() - ($1 || ' hours')::interval AND org_id = $2
       ORDER BY last_at DESC LIMIT 200`, [String(hours), req.session.orgId]);
   res.json({ errors: rows });
 });

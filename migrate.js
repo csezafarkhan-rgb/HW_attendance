@@ -52,16 +52,32 @@ const pool = new Pool({
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery TEXT');
+  // Failed codes per account, and the 15-minute lock after too many.
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_fail_count INTEGER NOT NULL DEFAULT 0');
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_locked_until TIMESTAMPTZ');
+  /* One-off jobs that must not repeat. The app sleeps when idle on Render's free
+     tier and runs this on every wake, so a job keyed here runs once. */
+  await pool.query('CREATE TABLE IF NOT EXISTS maintenance_done (job TEXT PRIMARY KEY, done_at TIMESTAMPTZ NOT NULL DEFAULT now())');
   /* The last way back in: the only super admin lost the phone and the recovery
-     codes. Set RESET_TWO_STEP to their email in Render, deploy, sign in with
-     the password, then remove the variable. */
-  const resetEmail = (process.env.RESET_TWO_STEP || '').trim().toLowerCase();
+     codes. Set RESET_TWO_STEP to their email in Render and deploy; it switches
+     two-step off once. It used to fire on every restart - wiping it again each
+     time the app woke up - so it is recorded as done and skipped after that.
+     To reset the same account again later, add anything after a #, e.g.
+     "boss@x.com#2". */
+  const resetValue = (process.env.RESET_TWO_STEP || '').trim().toLowerCase();
+  const resetEmail = resetValue.split('#')[0].trim();
   if (resetEmail) {
-    const r = await pool.query(
-      'UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_last_step = NULL, totp_recovery = NULL WHERE lower(email) = $1 RETURNING id',
-      [resetEmail]);
-    console.log(r.rowCount ? 'two-step sign-in switched off for ' + resetEmail + ' - remove RESET_TWO_STEP now'
-                           : 'RESET_TWO_STEP: no account with that email');
+    const job = 'reset_two_step:' + resetValue;
+    const claimed = await pool.query('INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+    if (!claimed.rowCount) {
+      console.log('RESET_TWO_STEP: already done for ' + resetValue + ' - remove the variable');
+    } else {
+      const r = await pool.query(
+        'UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_last_step = NULL, totp_recovery = NULL, totp_fail_count = 0, totp_locked_until = NULL WHERE lower(email) = $1 RETURNING id',
+        [resetEmail]);
+      console.log(r.rowCount ? 'two-step sign-in switched off for ' + resetEmail + ' - remove RESET_TWO_STEP now'
+                             : 'RESET_TWO_STEP: no account with that email');
+    }
   }
   await pool.query("UPDATE users SET role = 'employee' WHERE org_id = $1 AND role IN ('viewer','editor')", [orgId]);
 

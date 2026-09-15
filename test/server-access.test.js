@@ -99,7 +99,24 @@ function query(sql, p) {
     return rows(db.users.filter(u => u.email === p[0] || u.email.split('@')[0] === p[0]));
   }
   if (s.startsWith('UPDATE users SET last_login_at')) return rows([]);
-  if (s.startsWith('SELECT totp_enabled, totp_secret, totp_last_step, totp_recovery FROM users WHERE id = $1')) return rows(db.users.filter(u => u.id === p[0]));
+  if (s.startsWith('SELECT totp_enabled, totp_secret, totp_last_step, totp_recovery, (totp_locked_until')) {
+    return rows(db.users.filter(u => u.id === p[0]).map(u => Object.assign({}, u, { locked: !!(u.totp_locked_until && u.totp_locked_until > Date.now()) })));
+  }
+  if (s.startsWith('UPDATE users SET totp_fail_count = COALESCE(totp_fail_count, 0) + 1')) {
+    const u = db.users.find(x => x.id === p[0]); u.totp_fail_count = (u.totp_fail_count || 0) + 1;
+    if (u.totp_fail_count >= p[1]) u.totp_locked_until = Date.now() + 15 * 60 * 1000;
+    return rows([]);
+  }
+  // The conditional save: only if the code state is still what was read.
+  if (s.startsWith('UPDATE users SET totp_last_step = $1, totp_recovery = $2, totp_fail_count = 0, totp_locked_until = NULL')) {
+    const u = db.users.find(x => x.id === p[2] && x.org_id === p[3]);
+    const same = u && (u.totp_last_step == null ? null : Number(u.totp_last_step)) === (p[4] == null ? null : Number(p[4]))
+      && (u.totp_recovery == null ? '' : String(u.totp_recovery)) === p[5];
+    if (!same) return rows([]);
+    u.totp_last_step = p[0]; u.totp_recovery = p[1]; u.totp_fail_count = 0; u.totp_locked_until = null;
+    return rows([{ id: u.id }]);
+  }
+  if (s.startsWith("SELECT count(*)::int AS n FROM client_errors")) return rows([{ n: db.errors.length }]);
   if (s.startsWith('SELECT id, email, name, role, org_id FROM users WHERE id = $1 AND is_active = TRUE')) return rows(db.users.filter(u => u.id === p[0] && u.is_active));
   if (s.startsWith('SELECT password_hash FROM users WHERE id = $1')) return rows(db.users.filter(u => u.id === p[0]));
   if (s.startsWith('UPDATE users SET password_hash = $1 WHERE id = $2')) { db.users.find(u => u.id === p[1]).password_hash = p[0]; return rows([]); }
@@ -337,13 +354,14 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
 
   // --- script errors ---
   const anon = client();
-  const e1 = await anon('POST', '/api/client-errors', { message: "TypeError: Cannot read properties of undefined (reading 'split')", source: 'about:srcdoc', line: 1234, page: 'dashboard' });
-  check('an error can be reported before signing in', e1.status === 200, e1.status);
-  await anon('POST', '/api/client-errors', { message: "TypeError: Cannot read properties of undefined (reading 'split')", source: 'about:srcdoc', line: 1234, page: 'dashboard' });
+  const e1 = await anon('POST', '/api/client-errors', { message: 'Spam from nowhere', source: 'x', line: 1 });
+  check('a report from someone not signed in is not stored', e1.status === 204 && db.errors.length === 0, { status: e1.status, n: db.errors.length });
+  await ravi('POST', '/api/client-errors', { message: "TypeError: Cannot read properties of undefined (reading 'split')", source: 'about:srcdoc', line: 1234, page: 'dashboard' });
+  await ravi('POST', '/api/client-errors', { message: "TypeError: Cannot read properties of undefined (reading 'split')", source: 'about:srcdoc', line: 1234, page: 'dashboard' });
   check('the same error again counts, not a new row', db.errors.length === 1 && db.errors[0].count === 2, db.errors);
   await boss('POST', '/api/client-errors', { message: 'ReferenceError: x is not defined', source: 'about:srcdoc', line: 9 });
   check('a signed-in report records who', db.errors.length === 2 && db.errors[1].user_name === 'Boss', db.errors[1]);
-  check('an empty report is refused', (await anon('POST', '/api/client-errors', { message: '  ' })).status === 400);
+  check('an empty report is refused', (await boss('POST', '/api/client-errors', { message: '  ' })).status === 400);
   const errList = await boss('GET', '/api/client-errors?hours=24');
   check('admins read the errors', errList.status === 200 && errList.body.errors.length === 2, errList.body);
   check('employees cannot read them', (await ravi('GET', '/api/client-errors')).status === 403);
@@ -491,6 +509,33 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('turning it off needs a code', bd.status === 401 && bd.body.error === 'invalid_code' && db.users[0].totp_enabled === true, [bl, bs, be, bd]);
   const off = await b2('POST', '/api/two-step/disable', { password: 'newpassword1', code: totp.codeAt(bs.body.secret, totp.stepNow() + 1) });
   check('password and a code turn it off', off.status === 200 && db.users[0].totp_enabled === false, off.body);
+
+  // --- one code cannot be used twice at once; failures lock the account, not the address ---
+  const s5 = client('10.0.1.1');
+  await s5('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  const setup2 = await s5('POST', '/api/two-step/setup', { password: 'password123' });
+  const st2 = totp.stepNow();
+  const en2 = await s5('POST', '/api/two-step/enable', { code: totp.codeAt(setup2.body.secret, st2) });
+  const ra = client('10.0.1.2'), rb = client('10.0.1.3');
+  await ra('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  await rb('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  const sameCode = totp.codeAt(setup2.body.secret, st2 + 1);
+  const race = await Promise.all([ra('POST', '/api/login/two-step', { code: sameCode }), rb('POST', '/api/login/two-step', { code: sameCode })]);
+  check('the same code sent twice at once signs in only once', race.filter(x => x.status === 200).length === 1, race.map(x => x.status));
+  const recRace = [client('10.0.1.4'), client('10.0.1.5')];
+  for (const c of recRace) await c('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  const rr = await Promise.all(recRace.map(c => c('POST', '/api/login/two-step', { code: en2.body.recoveryCodes[1] })));
+  check('the same recovery code sent twice at once works once', rr.filter(x => x.status === 200).length === 1, rr.map(x => x.status));
+  let fails = 0;
+  for (let round = 0; round < 3 && fails < 10; round++) {
+    const c = client('10.0.2.' + round);
+    await c('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+    for (let i = 0; i < 5 && fails < 10; i++) { await c('POST', '/api/login/two-step', { code: '000000' }); fails++; }
+  }
+  const lockedTry = client('10.0.3.1');
+  await lockedTry('POST', '/api/login', { email: 'second@x.com', password: 'password123' });
+  const lk = await lockedTry('POST', '/api/login/two-step', { code: en2.body.recoveryCodes[2] });
+  check('ten wrong codes lock two-step sign-in for the account, from any address', lk.status === 429 && lk.body.error === 'two_step_locked', lk);
 
   srv.close();
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

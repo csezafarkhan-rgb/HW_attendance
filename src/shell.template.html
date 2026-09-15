@@ -2691,6 +2691,7 @@ function _initLoginGateReal(startWorkspace){
   function serverRenderUsers(){
     var list = document.getElementById('umList');
     if(!list) return;
+    if(!window.HWAuth || !window.HWAuth.user || window.HWAuth.user.role !== 'admin') return;   // the account list is the super admin's
     list.innerHTML = '<div class="um-count">Loading users…</div>';
     userApi('/api/users').then(function(data){
       var users = data.users || [];
@@ -2758,8 +2759,18 @@ function _initLoginGateReal(startWorkspace){
     }).catch(function(e){serverFlash(serverErrorMessage(e),false);});
   }
   function serverOpenUsers(){
-    if(!window.HWAuth || !window.HWAuth.user || window.HWAuth.user.role!=='admin') return;
+    var me = window.HWAuth && window.HWAuth.user;
+    if(!me || (me.role!=='admin' && me.role!=='admin_view')) return;
     var modal=document.getElementById('usersModal'); if(!modal) return;
+    /* A view admin gets only "Your sign-in": no account list, no adding users. */
+    var full = me.role === 'admin';
+    Array.prototype.forEach.call(modal.querySelectorAll('.um-card > .um-note, .um-card > .um-addbox:not(#umTwoStep), #umList, #umLegacy'), function(n){
+      if(!full){ n.dataset.hwHid = '1'; n.style.display = 'none'; }
+      else if(n.dataset.hwHid){ delete n.dataset.hwHid; n.style.display = ''; }
+    });
+    var h2 = modal.querySelector('.um-top h2');
+    if(h2) h2.textContent = full ? '👥 Users & Access' : '🔐 Your sign-in';
+    if(!full){ renderTwoStep(); modal.style.display='flex'; return; }
     var role=document.getElementById('umNewRole'), emp=document.getElementById('umNewAttEmp');
     function toggle(){ if(role && emp){ emp.style.display=role.value==='employee'?'':'none'; emp.placeholder=role.value==='employee'?'Employee name exactly as shown in Attendance':'Not required for admin'; } }
     if(role && !role.dataset.bound){role.dataset.bound='1';role.addEventListener('change',toggle);} toggle();
@@ -2772,7 +2783,7 @@ function _initLoginGateReal(startWorkspace){
     var box=document.getElementById('umTwoStep'); if(!box) return;
     function el(tag, props, kids){ var e=document.createElement(tag); Object.keys(props||{}).forEach(function(k){ if(k==='style') e.style.cssText=props[k]; else e[k]=props[k]; }); (kids||[]).forEach(function(c){ if(c) e.appendChild(typeof c==='string'?document.createTextNode(c):c); }); return e; }
     function msg(text, ok){ return el('div',{className:ok?'um-flash-ok':'',style:'display:block;margin-top:8px;font-size:12.5px;'+(ok?'':'color:#B42318;'),textContent:text}); }
-    function errText(e){ var m=e&&e.message; return m==='invalid_credentials'?'That password is not right.':m==='invalid_code'?'That code is not right. Use the one showing in the app now.':m==='already_enabled'?'Two-step sign-in is already on.':(m||'Something went wrong.'); }
+    function errText(e){ var m=e&&e.message; return m==='invalid_credentials'?'That password is not right.':m==='invalid_code'?'That code is not right. Use the one showing in the app now.':m==='already_enabled'?'Two-step sign-in is already on.':m==='two_step_locked'?'Too many wrong codes. Two-step is locked for 15 minutes.':m==='too_many_attempts'?'Too many attempts. Try again in 15 minutes.':(m||'Something went wrong.'); }
     box.style.display='block';
     box.innerHTML='';
     box.appendChild(el('div',{style:'font-weight:800;margin-bottom:4px;',textContent:'🔐 Your sign-in'}));

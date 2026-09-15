@@ -115,6 +115,15 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     check('browser setting back under its own name', r.ls['hw_leave_hidden'] === '["2026-01"]' && !r.ls['attDashboard_hw_leave_hidden'], Object.keys(r.ls));
   }
   {
+    const r = await restoreCtx({});
+    await r.ctx.restoreFullBackup({
+      attDashboard_lockedMonths: '{"2026-08":{"by":"boss"}}',
+      attDashboard_overrides: '{"Asha|2026-08-02":{"cat":"LEAVE"}}',
+      attDashboard_customDataset: JSON.stringify({ employees: [{ name: 'Asha' }], records: [{ e: 'Asha', d: '2026-08-01', st: 'PR' }] })
+    });
+    check('month locks are put back last, after the marks and the attendance', r.sets[r.sets.length - 1] === 'lockedMonths' && r.sets.indexOf('overrides') > -1 && r.replaced.length === 1, r.sets);
+  }
+  {
     const r = await restoreCtx({ failKey: 'overrides' });
     const done = await r.ctx.restoreFullBackup({ attDashboard_overrides: '{}' });
     check('a refused write -> resolves false, no reload, says so', done === false && r.reloads.length === 0 && r.statuses.some(s => /^ERR .*not fully restored/.test(s)), r.statuses);

@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS users (
   totp_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
   totp_last_step BIGINT,
   totp_recovery  TEXT,
+  totp_fail_count   INTEGER NOT NULL DEFAULT 0,   -- failed codes in a row
+  totp_locked_until TIMESTAMPTZ,                  -- two-step locked until then after too many
   UNIQUE (org_id, email)
 );
 CREATE INDEX IF NOT EXISTS users_email_idx ON users (lower(email));

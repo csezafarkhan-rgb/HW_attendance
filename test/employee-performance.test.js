@@ -8,6 +8,7 @@ const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html')
 const results = [];
 function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(detail))); }
 
+// computeEmployeeStats is stubbed by month: the month is the first date passed.
 const base = { presentDays: 12, absentDays: 0, attendancePct: 100, onTimePct: 90, totalLateMin: 24, earlyDays: 1,
   workedMin: 12 * 540, durDays: 12, avgInDurMin: 490, avgOutDurMin: 50, breakOkPct: 90, inOfficePct: 100 };
 let stats = {};
@@ -16,15 +17,20 @@ const ctx = {
   pad2: n => (n < 10 ? '0' : '') + n,
   fmtMin: m => (m < 0 ? '-' : '') + Math.floor(Math.abs(m) / 60) + ':' + String(Math.abs(m) % 60).padStart(2, '0'),
   monthLabel: ym => ({ '2026-08': 'August 2026', '2026-09': 'September 2026', '2025-12': 'December 2025' })[ym] || ym,
-  eachDateInMonth: ym => [ym],
-  computeEmployeeStats: (name, dates) => stats[dates[0]]
+  eachDateInMonth: ym => Array.from({ length: 28 }, (_, i) => ym + '-' + String(i + 1).padStart(2, '0')),
+  computeEmployeeStats: (name, dates) => stats[dates[0].slice(0, 7)]
 };
 vm.createContext(ctx);
 vm.runInContext('var LUNCH_BREAK_MIN = 45, TEA_BREAK_MIN = 15; var BREAK_ALLOW_MIN = 60;', ctx);
 vm.runInContext(lift(src, 'perfScore'), ctx);
 vm.runInContext(/var PERF_METRICS = \[[\s\S]*?\n  \];/.exec(src)[0], ctx);
+vm.runInContext('var EMP_PERF_CACHE = null, overrides = {}, halfDays = {}, RECORDS = []; function todayIsoNow(){ return todayISO_full; }', ctx);
+vm.runInContext(lift(src, 'empPerfCompute'), ctx);
 vm.runInContext(lift(src, 'empPerfChanges'), ctx);
-const run = () => ctx.empPerfChanges('A');
+let seenDates = [];
+const baseStats = ctx.computeEmployeeStats;
+ctx.computeEmployeeStats = (name, dates) => { seenDates.push(dates); return baseStats(name, dates); };
+const run = () => { vm.runInContext('EMP_PERF_CACHE = null;', ctx); return ctx.empPerfChanges('A'); };
 const keys = r => r.items.map(i => i.key + (i.good ? '+' : '-'));
 
 stats = { '2026-08': Object.assign({}, base), '2026-09': Object.assign({}, base) };
@@ -63,6 +69,10 @@ ctx.todayISO_full = '2026-01-10';
 r = run();
 check('January compares with the December before', r.prevYm === '2025-12' && keys(r).indexOf('ontime+') > -1, { prev: r.prevYm, k: keys(r) });
 check('each change has a stable signature for "seen"', r.items.every(i => /^2026-01\|[a-z]+\|(up|down)$/.test(i.sig)), r.items.map(i => i.sig));
+
+seenDates = []; ctx.todayISO_full = '2026-09-15'; stats = { '2026-08': Object.assign({}, base), '2026-09': Object.assign({}, base) }; run();
+const curDates = seenDates.find(ds => ds[0].startsWith('2026-09'));
+check('this month counts only days already over - not today, not later dates', curDates.length === 14 && curDates[curDates.length - 1] === '2026-09-14', curDates.slice(-2));
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

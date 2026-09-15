@@ -741,7 +741,9 @@ body{
 #requestsList .req-actions .btn[data-act="form"]{ color:#6D28D9 !important; border-color:#DDD0F7 !important; background:#F8F5FF !important; }
 #requestsList .req-actions .btn[data-act="archive"], #requestsList .req-actions .btn[data-act="unarchive"]{ color:#475569 !important; background:#F4F6FA !important; }
 /* "Sure? Removes the day" stays solid red over the colours above. */
-#requestsList .btn.req-armed, #requestsList .btn.req-armed:hover{ transform:none; background:#B3261E !important; border-color:#B3261E !important; color:#fff !important; }
+#requestsList .req-actions .btn.req-armed, #requestsList .req-actions .btn.req-armed:hover,
+#requestsList .unreq-row .btn.req-armed, #requestsList .unreq-row .btn.req-armed:hover{
+  transform:none; background:#B3261E !important; border-color:#B3261E !important; color:#fff !important; }
 #requestsList .req-bulk{ border-radius:14px; background:linear-gradient(135deg,#1E3A8A,#2563EB); box-shadow:0 8px 20px rgba(37,99,235,.25); }
 
 #requestsList .unreq{ border-radius:14px; border-color:#F0D58A; background:linear-gradient(135deg,#FFF8E1,#FFFDF6 60%);
@@ -771,6 +773,11 @@ body{
 @media (max-width:700px){
   #requestsList .req-card .req-msg, #requestsList .req-note, #requestsList .req-drift,
   #requestsList .req-acts{ margin-left:0; }
+  /* Phones: the card's top row wraps again, and the buttons are wide tap targets. */
+  #requestsList .req-card .req-top{ flex-wrap:wrap; }
+  #requestsList .req-actions .btn{ flex:1 1 auto !important; min-width:120px; }
+  #requestsList .unreq-row{ flex-wrap:wrap; }
+  #requestsList .unreq-row .btn{ flex:1 1 auto !important; }
 }
 .page{display:none;}
 /* Every page runs the full width of the content column. Requests, Official
@@ -813,8 +820,8 @@ body{
   box-shadow:0 4px 12px rgba(59,125,245,.30), inset 0 1px 0 rgba(255,255,255,.4); }
 .bk-btn.primary:hover{ box-shadow:0 8px 18px rgba(59,125,245,.36), inset 0 1px 0 rgba(255,255,255,.4); }
 .bk-btn.warn{ color:#5B4200; border-color:#EBC77A; background:linear-gradient(180deg,#FFF6DD,#FBE7AE); }
-.bk-btn.ghost{ color:#B42318; background:transparent; border-color:transparent; box-shadow:none; }
-.bk-btn.ghost:hover{ background:#FDECEA; border-color:#F5C2BC; box-shadow:none; }
+.bk-btn.quiet{ color:#B42318; background:transparent; border-color:transparent; box-shadow:none; }
+.bk-btn.quiet:hover{ background:#FDECEA; border-color:#F5C2BC; box-shadow:none; }
 .bk-btn.green{ color:#fff; border-color:transparent; background:linear-gradient(180deg,#34C27A,#16A34A);
   box-shadow:0 4px 12px rgba(22,163,74,.28), inset 0 1px 0 rgba(255,255,255,.4); }
 /* Take data out: the two exports side by side, each a card in its own colour. */
@@ -2457,7 +2464,8 @@ table.dash-table tr:hover td{background:#F7F9FC;}
   box-shadow:0 4px 14px color-mix(in srgb, var(--ihc) 14%, transparent); }
 .ih-ico{ width:38px; height:38px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:18px;
   background:color-mix(in srgb, var(--ihc) 15%, #fff); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ihc) 25%, transparent); }
-.ih-file{ display:flex; align-items:center; gap:8px; font-size:13px; }
+.ih-file{ display:flex; align-items:center; gap:8px; font-size:13px; min-width:0; }
+.ih-fname{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ih-pin{ font-family:'Inter',sans-serif; font-size:9.5px; font-weight:800; letter-spacing:.06em; padding:2px 8px; border-radius:20px;
   background:linear-gradient(180deg,#5b9bff,#3B7DF5); color:#fff; flex:none; }
 .ih-pin.old{ background:#EEF1F6; color:var(--ink-soft); }
@@ -2859,6 +2867,10 @@ body.is-view-only #bkExportAll,
 /* leave decisions */
 body.is-view-only .req-actions,
 body.is-view-only #reqBulk,
+body.is-view-only [data-unreq],
+body.is-view-only #reqArchiveSettled,
+body.is-view-only [data-remark],
+body.is-view-only .req-pick,
 /* holidays */
 body.is-view-only #holAddForm,
 body.is-view-only [data-del-hol],
@@ -3121,7 +3133,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
         <button type="button" class="bk-btn primary" id="impDirPick">📁 Choose folder</button>
         <button type="button" class="bk-btn" id="impDirCheck" style="display:none;">↻ Check now</button>
         <button type="button" class="bk-btn warn" id="impDirReconnect" style="display:none;">🔓 Reconnect</button>
-        <button type="button" class="bk-btn ghost" id="impDirForget" style="display:none;">Stop watching</button>
+        <button type="button" class="bk-btn quiet" id="impDirForget" style="display:none;">Stop watching</button>
       </span>
     </div>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">
@@ -3185,7 +3197,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <span class="bk-folder-btns">
         <button type="button" class="bk-btn primary" id="bkChooseFolder">📁 Choose backup folder</button>
         <button type="button" class="bk-btn warn" id="bkReconnect" style="display:none;">🔓 Reconnect folder</button>
-        <button type="button" class="bk-btn ghost" id="bkForgetFolder" style="display:none;">Forget folder</button>
+        <button type="button" class="bk-btn quiet" id="bkForgetFolder" style="display:none;">Forget folder</button>
       </span>
     </div>
     <div id="bkFolderStatus" style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">Each <b>📸 HD Screenshot</b> also saves an <b>Excel (.xlsx)</b> backup of all data to your <b>Downloads</b>. To send it straight to a specific folder instead (no download), pick one here (Chrome/Edge).</div>
@@ -3198,7 +3210,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Your signature for approved leave forms <span style="font-weight:500;text-transform:none;">— signed in as <b id="signWho">—</b></span></label>
     <div class="bk-sign-row">
       <!-- Click or drop an image here; the preview sits inside the zone. -->
-      <div class="bk-drop bk-sign-drop" id="signDrop" role="button" tabindex="0" title="Choose a signature image, or drop one here">
+      <div class="bk-drop bk-sign-drop" id="signDrop" title="Choose a signature image, or drop one here">
         <div id="signPreview" class="bk-sign-preview">none set</div>
         <span class="bk-drop-txt"><b>Signature image</b> <span>drop it here, or</span></span>
         <button type="button" class="bk-btn primary" id="signPick">🖼 Choose image</button>
@@ -3210,7 +3222,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
         </label>
         <span class="bk-folder-btns">
           <button type="button" class="bk-btn" id="signMake">✍ Generate from name</button>
-          <button type="button" class="bk-btn ghost" id="signClear" style="display:none;">Remove</button>
+          <button type="button" class="bk-btn quiet" id="signClear" style="display:none;">Remove</button>
         </span>
       </div>
     </div>
@@ -4638,7 +4650,7 @@ function renderSignSetting(){
     });
   })();
 function renderImportFolder(){
-  var lapsed = !!IMPORT_DIR && IMPORT_DIR_PERM === 'prompt';
+  var lapsed = !!IMPORT_DIR && IMPORT_DIR_PERM !== 'granted';   // 'denied' as well as 'prompt'
   var fnote = document.getElementById('updFolderNote');
   if(fnote) fnote.textContent = !IMPORT_DIR
     ? 'No folder set \u2014 choose one on the Backup tab.'
@@ -4702,6 +4714,18 @@ function ensureDirPerm(dir, byClick, mode){
       .catch(function(){ return false; });
   });
 }
+  /* One permission request for the backup folder at a time, shared by the
+     Excel backup and the JSON snapshot that the same click starts. */
+  var BACKUP_DIR_ASK = null;
+  function askBackupDirPerm(dir){
+    if(!BACKUP_DIR_ASK){
+      BACKUP_DIR_ASK = Promise.resolve(ensureDirPerm(dir, true)).then(function(ok){
+        setTimeout(function(){ BACKUP_DIR_ASK = null; }, 0);
+        return ok;
+      }, function(){ setTimeout(function(){ BACKUP_DIR_ASK = null; }, 0); return false; });
+    }
+    return BACKUP_DIR_ASK;
+  }
   // Called from the HD Screenshot click: hand over an Excel backup of all data.
   // If a folder was chosen it's written there silently; otherwise it just downloads.
   function autoExcelBackup(){
@@ -4722,7 +4746,7 @@ function ensureDirPerm(dir, byClick, mode){
       }
       /* This runs from the HD Screenshot click, so there is a gesture to ask on
          the back of if permission lapsed over a refresh. */
-      ensureDirPerm(dir, true).then(function(ok){
+      askBackupDirPerm(dir).then(function(ok){
         if(!ok){ downloadBlob(b.blob, b.fname); return; }
         dir.getFileHandle(b.fname, {create:true})
           .then(function(fh){ return fh.createWritable(); })
@@ -4850,7 +4874,7 @@ function ensureDirPerm(dir, byClick, mode){
      when it could not be. Callers wait for it: they used to reload on a timer of
      their own, part-way through a multi-MB write. */
   function restoreFullBackup(data){
-    var jobs=[], n=0, dataset=null;
+    var jobs=[], n=0, dataset=null, lockedText=null;
     data = unwrapLegacySnapshot(data);
     /* Two shapes reach here. The older export prefixes every key with
        "attDashboard_"; the daily snapshot writes the plain key names. Only the
@@ -4871,6 +4895,10 @@ function ensureDirPerm(dir, byClick, mode){
         return;
       }
       n++;
+      /* Locks go back last, once everything else is in. Written first, a month
+         the backup has locked stopped its own marks and rows being restored
+         (423, or rows silently skipped). */
+      if(key === 'lockedMonths'){ lockedText = text; return; }
       if(key === 'customDataset'){
         /* The attendance. The browser copy is only a fallback now - the server
            decides what loads - so it goes to the server as a replacement, not
@@ -4890,6 +4918,10 @@ function ensureDirPerm(dir, byClick, mode){
     bkStatus('Restoring '+n+' data sets…', false);
     showUploadStatus('Restoring '+n+' data sets…', false);
     return Promise.all(jobs).then(function(){
+      if(lockedText == null) return;
+      try{ localStorage.setItem('attDashboard_lockedMonths', lockedText); }catch(_){}
+      return storage.set('lockedMonths', lockedText, true);
+    }).then(function(){
       bkStatus('Full backup restored ('+n+' data sets) — reloading…', false);
       showUploadStatus('Restored — reloading…', false);
       setTimeout(function(){ location.reload(); }, 700);
@@ -5315,8 +5347,12 @@ function ensureDirPerm(dir, byClick, mode){
          the Excel file and no JSON. */
       return idbDir('get').then(function(dir){
         if(!dir) return viaDownload();
-        return dirPermState(dir).then(function(p){
-          if(p !== 'granted') return viaDownload();
+        /* Called from a click (screenshot or export), so permission can be asked
+           for - through the same request the Excel backup makes, not a second
+           one racing it. Just checking read "prompt" after every reload and fell
+           back to a download, the case this was meant to fix. */
+        return askBackupDirPerm(dir).then(function(ok){
+          if(!ok) return viaDownload();
           return dir.getFileHandle(fname, {create:true})
             .then(function(fh){ return fh.createWritable(); })
             .then(function(w){ return Promise.resolve(w.write(blob)).then(function(){ return w.close(); }); })
@@ -5547,6 +5583,10 @@ function restoreSettingsFromSheets(sheets){
     var key = String(row[0] == null ? '' : row[0]).trim();
     var raw = row[1];
     if(!key || raw == null || raw === '') continue;
+    /* Month locks are not taken from an edited workbook: one exported before a
+       month was locked would quietly unlock it, and the reverse would block the
+       very rows being uploaded. Locks are set on the Payroll page. */
+    if(key === 'lockedMonths') continue;
     var text = String(raw);
     try{ JSON.parse(text); }catch(e){ continue; }      // skip anything unreadable
     try{ localStorage.setItem('attDashboard_' + key, text); }catch(e){}
@@ -5775,9 +5815,25 @@ function buildExcelBackup(){
   }
   function backupImport(file){
     var rd=new FileReader();
+    /* A full restore replaces every setting and all attendance, so it asks
+       first and keeps a restore point, like an Excel or CSV import does. A
+       file dropped on the Backup card by accident used to go straight in. */
+    var confirmFull = function(data){
+      var when = (data && (data._savedAt || data.exportedAt)) || '';
+      hwConfirm({ title: 'Restore everything from "' + (file.name || 'this file') + '"?',
+                  message: 'Every setting and all attendance are replaced with the backup'
+                    + (when ? (' saved ' + String(when).slice(0, 10)) : '')
+                    + '. A restore point is kept first, so you can go back under Import history.',
+                  confirmLabel: 'Restore', danger: true }).then(function(ok){
+        if(!ok){ bkStatus('Restore cancelled.', false); return; }
+        Promise.resolve(savePreImportPoint(file.name)).catch(function(){}).then(function(){
+          restoreFullBackup(data);
+        });
+      });
+    };
     rd.onload=function(e){ try{
       var obj=JSON.parse(e.target.result);
-      if(obj && obj._type==='ally-attendance-full-backup' && obj.data){ restoreFullBackup(obj.data); return; }
+      if(obj && obj._type==='ally-attendance-full-backup' && obj.data){ confirmFull(obj.data); return; }
       if(obj && obj._type==='ally-attendance-employee-backup'){ importEmployeeBackup(obj); return; }
       /* The daily snapshot written alongside a screenshot or an export. Its
          keys sit at the top level rather than under .data, and it was not
@@ -5785,7 +5841,8 @@ function buildExcelBackup(){
       if(obj && obj._type==='homeweavers-attendance-backup'){
         var data = {};
         Object.keys(obj).forEach(function(k){ if(k.charAt(0) !== '_') data[k] = obj[k]; });
-        restoreFullBackup(data);
+        data._savedAt = obj._savedAt;
+        confirmFull(data);
         return;
       }
       /* A whole-project backup covers every dashboard, so it has to be restored
@@ -6068,20 +6125,20 @@ function buildExcelBackup(){
       var k = kind(e.file);
       return '<div class="ih-row' + (i === 0 ? ' is-latest' : '') + '" style="--ihc:' + k.c + '">'
         + '<span class="ih-ico" title="' + k.t + '">' + k.i + '</span>'
-        + '<span class="ih-main"><span class="ih-file">' + escapeHtml(e.file || '(file)')
+        + '<span class="ih-main"><span class="ih-file"><span class="ih-fname" title="' + escapeHtml(e.file || '') + '">' + escapeHtml(e.file || '(file)') + '</span>'
         +   '<span class="ih-pin' + (i === 0 ? '' : ' old') + '">' + (i === 0 ? 'Latest' : ('#' + (i + 1))) + '</span></span>'
         + '<span class="ih-meta"><span class="ih-when">\ud83d\udd52 ' + escapeHtml(when(e.at)) + '</span>'
         + counts.join('') + '</span></span>'
         + '<span class="ih-act">'
         +   '<button type="button" class="bk-btn primary" data-ih-restore="' + escapeHtml(e.id) + '">\u21ba Restore</button>'
-        +   '<button type="button" class="bk-btn ghost" data-ih-drop="' + escapeHtml(e.id) + '">Remove</button>'
+        +   '<button type="button" class="bk-btn quiet" data-ih-drop="' + escapeHtml(e.id) + '">Remove</button>'
         + '</span></div>';
     }).join('');
     var pct = Math.min(100, Math.round(log.length / MAX_RESTORE_POINTS * 100));
     box.innerHTML = '<div class="ih-bar">'
       + '<span class="ih-count"><b>' + log.length + '</b> of ' + MAX_RESTORE_POINTS + ' restore points kept'
       +   '<i class="ih-meter"><i style="width:' + pct + '%"></i></i></span>'
-      + '<button type="button" class="bk-btn ghost" id="ihClear">\ud83d\uddd1 Clear import log</button>'
+      + '<button type="button" class="bk-btn quiet" id="ihClear">\ud83d\uddd1 Clear import log</button>'
       + '</div><div class="ih-list">' + rows + '</div>';
 
     var byId = function(id){ for(var i=0;i<log.length;i++) if(log[i].id === id) return log[i]; return null; };
@@ -6094,15 +6151,16 @@ function buildExcelBackup(){
                     message: 'Anything changed since will be lost.',
                     confirmLabel: 'Restore', danger: true }).then(function(ok){
           if(!ok) return;
+          var label = b.textContent;
           b.disabled = true; b.textContent = 'Restoring\u2026';
           getRestoreSnapshot(e).then(function(snap){
             if(!snap){
-              b.disabled = false; b.textContent = 'Restore';
+              b.disabled = false; b.textContent = label;
               showUploadStatus('That restore point is no longer stored in this browser.', true);
               return;
             }
             restoreFullBackup(snap).then(function(done){
-              if(!done){ b.disabled = false; b.textContent = 'Restore'; }
+              if(!done){ b.disabled = false; b.textContent = label; }
             });
           });
         });
@@ -7184,11 +7242,33 @@ function buildExcelBackup(){
      counts past a threshold, so a single day does not raise a flag. Both
      directions are reported: a drop as a warning, a rise as good news. */
   var PERF_SEEN = null;                      // "YYYY-MM|metric|up/down" already shown in the bell
+  /* null means "not loaded (yet)". A failed load stays null rather than
+     becoming [], so the next save cannot write a near-empty list over the
+     real one on the server; saves re-read and merge instead (mergeSaveList). */
   function loadPerfSeen(){
     return storage.get('perfAlertsSeen', false).then(function(res){
-      try{ PERF_SEEN = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ PERF_SEEN = []; }
+      try{ PERF_SEEN = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ PERF_SEEN = null; }
       renderEmpAlerts();
-    }).catch(function(){ PERF_SEEN = []; });
+    }).catch(function(){ PERF_SEEN = null; });
+  }
+  /* Add entries to a personal list on the server: read what is there, merge,
+     write. Returns the merged list. */
+  function mergeSaveList(key, add, cap){
+    return storage.get(key, false).then(function(res){
+      var have = [];
+      try{ have = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ have = []; }
+      return have;
+    }, function(){ return null; }).then(function(have){
+      if(have === null) return null;                     // could not read: do not overwrite
+      add.forEach(function(s){ if(s && have.indexOf(s) === -1) have.push(s); });
+      have = have.slice(-(cap || 300));
+      return storage.set(key, JSON.stringify(have), false).then(function(){ return have; }, function(){ return have; });
+    });
+  }
+  // Today's date now, not when the page loaded - a tab left open overnight moves on.
+  function todayIsoNow(){
+    var d = new Date();
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
   }
   var PERF_METRICS = [
     { k:'score',    t:'Performance score',     better:'high', min:3,
@@ -7210,15 +7290,30 @@ function buildExcelBackup(){
     { k:'breaks',   t:'Days within the 1:00 break', better:'high', min:10, dur:true,
       v:function(s){ return s.breakOkPct; },                                          f:function(v){ return Math.round(v) + '%'; }, unit:' points' }
   ];
+  /* Worked out once and shared by the panel and the bell: one render used to
+     compute both months several times over. Kept for a moment, keyed on who,
+     which day and how much data there is. */
+  var EMP_PERF_CACHE = null;
   function empPerfChanges(name, todayIso){
-    todayIso = todayIso || todayISO_full;
+    todayIso = todayIso || todayIsoNow();
+    var ck = name + '|' + todayIso + '|' + ((typeof RECORDS !== 'undefined' && RECORDS) ? RECORDS.length : 0)
+           + '|' + Object.keys(overrides || {}).length + '|' + Object.keys(halfDays || {}).length;
+    if(EMP_PERF_CACHE && EMP_PERF_CACHE.key === ck && Date.now() - EMP_PERF_CACHE.at < 2000) return EMP_PERF_CACHE.val;
+    var val = empPerfCompute(name, todayIso);
+    EMP_PERF_CACHE = { key: ck, at: Date.now(), val: val };
+    return val;
+  }
+  function empPerfCompute(name, todayIso){
     var ym = String(todayIso).slice(0, 7);
     var y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1;
     if(m < 1){ m = 12; y -= 1; }
     var prevYm = y + '-' + pad2(m);
     var s, q;
     try{
-      s = computeEmployeeStats(name, eachDateInMonth(ym));
+      /* Only days already over. Today's out time is just the latest punch (it
+         read as leaving early and short hours every morning), and an approved
+         WFH or visit later in the month counted as a day already worked. */
+      s = computeEmployeeStats(name, eachDateInMonth(ym).filter(function(d){ return d < todayIso; }));
       q = computeEmployeeStats(name, eachDateInMonth(prevYm));
     }catch(e){ return { ym:ym, prevYm:prevYm, items:[], ready:false }; }
     // Too few days either side and any change is noise.
@@ -7260,19 +7355,25 @@ function buildExcelBackup(){
   var ALERTS_CLEARED = null;
   function loadAlertsCleared(){
     return storage.get('alertsCleared', false).then(function(res){
-      try{ ALERTS_CLEARED = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ ALERTS_CLEARED = []; }
+      try{ ALERTS_CLEARED = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ ALERTS_CLEARED = null; }
       try{ if(viewRole && viewRole.role === 'employee'){ renderEmpPerf(viewRole.name); } }catch(e){}
       renderEmpAlerts();
-    }).catch(function(){ ALERTS_CLEARED = []; });
+    }).catch(function(){ ALERTS_CLEARED = null; });
   }
   function isAlertCleared(sig){ return !!sig && (ALERTS_CLEARED || []).indexOf(sig) > -1; }
   function clearAlerts(sigs){
+    // Hidden at once on screen; saved by merging with what the server holds.
     var list = (ALERTS_CLEARED || []).slice();
     sigs.forEach(function(s){ if(s && list.indexOf(s) === -1) list.push(s); });
     ALERTS_CLEARED = list.slice(-300);                    // older ones have long since expired anyway
-    storage.set('alertsCleared', JSON.stringify(ALERTS_CLEARED), false).catch(function(){});
-    try{ if(viewRole && viewRole.name){ renderEmpPerf(viewRole.name); } }catch(e){}
-    renderEmpAlerts();
+    var rerender = function(){
+      try{ if(viewRole && viewRole.name){ renderEmpPerf(viewRole.name); } }catch(e){}
+      renderEmpAlerts();
+    };
+    rerender();
+    mergeSaveList('alertsCleared', sigs, 300).then(function(merged){
+      if(merged){ ALERTS_CLEARED = merged; rerender(); }
+    });
   }
   /* The panel starts folded to one line with its counts; a click opens it. */
   var EMP_PERF_OPEN = false;
@@ -7353,7 +7454,8 @@ function buildExcelBackup(){
       var nm = viewRole && viewRole.name;
       var p = (nm && viewRole.role === 'employee') ? empPerfChanges(nm) : null;
       if(p && p.ready){
-        perf = p.items.filter(function(it){ return !isAlertCleared(it.sig); }).map(function(it){
+        // The score itself is in the panel's header, so the bell and the panel list the same alerts.
+        perf = p.items.filter(function(it){ return it.key !== 'score' && !isAlertCleared(it.sig); }).map(function(it){
           return { level: it.good ? 'good' : 'warn', fresh: PERF_SEEN !== null && PERF_SEEN.indexOf(it.sig) === -1,
                    title: it.title, detail: it.detail, sig: it.sig, perf: true, go: true };
         });
@@ -7392,10 +7494,11 @@ function buildExcelBackup(){
       NOTIF_SEEN = new Date().toISOString();               // ...and opening it counts as seen
       storage.set('notifSeenAt', NOTIF_SEEN, false).catch(function(){});
       if(EMP_PERF_ITEMS.length){
+        var sigs = EMP_PERF_ITEMS.map(function(a){ return a.sig; });
         var seen = (PERF_SEEN || []).slice();
-        EMP_PERF_ITEMS.forEach(function(a){ if(seen.indexOf(a.sig) === -1) seen.push(a.sig); });
+        sigs.forEach(function(s){ if(seen.indexOf(s) === -1) seen.push(s); });
         PERF_SEEN = seen.slice(-200);                      // a year of signatures is plenty
-        storage.set('perfAlertsSeen', JSON.stringify(PERF_SEEN), false).catch(function(){});
+        mergeSaveList('perfAlertsSeen', sigs, 200).then(function(merged){ if(merged) PERF_SEEN = merged; });
       }
       var badge = document.getElementById('empAlertsCount');
       if(badge) badge.style.display = 'none';
@@ -7920,7 +8023,7 @@ function buildExcelBackup(){
       +   'Approve to accept it, or reject to remove the day from the record.</span></div>'
       + list.slice(0, 40).map(function(it, i){
           return '<div class="unreq-row">'
-            + reqAvatar(it.empName)
+            + reqAvatar(dispName(it.empName))
             + '<div><b>' + shotEsc(dispName(it.empName)) + '</b>'
             +   '<div class="unreq-d">' + fmtDateRange(it.dateFrom, it.dateTo)
             +     ' \u00b7 ' + shotEsc(reqTypeName(it.type, it.half))
@@ -9564,7 +9667,11 @@ function buildExcelBackup(){
     /* The page's height now decides where the sidebar stops, and it changes on
        every tab switch and render. The observer only reports while the frame is
        being drawn, so a light check keeps them in step regardless. */
-    setInterval(syncEdges, 400);
+    setInterval(function(){
+      // Nothing to follow in a background tab or while the admin view is hidden (employee view, sign-in).
+      if(document.hidden || layout.offsetParent === null) return;
+      syncEdges();
+    }, 1000);
     document.addEventListener('click', function(e){
       if(e.target.closest && e.target.closest('.page-tab')) setTimeout(syncEdges, 0);
     });
@@ -11156,7 +11263,7 @@ function buildExcelBackup(){
        out, in is the reader's own worked figure, out is the difference - time
        away from the desk. Only days where all three are real: not a manual
        entry (no break data), not a mispunch, not today (still running). */
-    var totalDurMin=0, inDurMin=0, outDurMin=0, durDays=0, breakOkDays=0, breakOverDays=0, breakOverMin=0;
+    var totalDurMin=0, inDurMin=0, outDurMin=0, durDays=0, breakOkDays=0, breakOverDays=0, breakOverMin=0, inOfficeSum=0;
     dates.forEach(function(dateStr){
       if(getOfficialLeave(dateStr)) return; // holiday isn't a working day
       var ov = getOverride(empName, dateStr);
@@ -11190,6 +11297,8 @@ function buildExcelBackup(){
           var du = computeDurations(rec);
           if(du.totalMin > 0 && du.inMin > 0){
             durDays++; totalDurMin += du.totalMin; inDurMin += du.inMin; outDurMin += du.outMin;
+            // Each day on its own, so a day with no break cannot hide one with a long one.
+            inOfficeSum += Math.min(100, du.inMin / Math.max(1, du.totalMin - BREAK_ALLOW_MIN) * 100);
             if(du.outMin <= BREAK_ALLOW_MIN) breakOkDays++;
             else { breakOverDays++; breakOverMin += du.outMin - BREAK_ALLOW_MIN; }
           }
@@ -11235,7 +11344,7 @@ function buildExcelBackup(){
       /* Time at the desk against what the day allows: the total span less the
          allowance. Taking exactly the allowance is 100%; every minute beyond it
          lowers the figure. */
-      inOfficePct: durDays ? Math.min(100, Math.round(inDurMin / Math.max(1, totalDurMin - BREAK_ALLOW_MIN*durDays) * 100)) : 100
+      inOfficePct: durDays ? Math.round(inOfficeSum / durDays) : 100
     };
   }
   /* Lunch and tea, the same for every employee: out duration within this is
@@ -11284,9 +11393,11 @@ function buildExcelBackup(){
     absent:  {t:'Absences',          unit:'days',better:'low',  get:function(x){ return x.absentDays; },    fmt:function(v){ return Math.round(v); }},
     wfh:     {t:'WFH Days',          unit:'days',better:'high', get:function(x){ return x.wfhDays; },       fmt:function(v){ return Math.round(v); }},
     excused: {t:'Excused Time',      unit:'hrs', better:'low',  get:function(x){ return x.excusedMin||0; },  fmt:function(v){ return fmtMin(Math.round(v)); }},
-    avgin:   {t:'Avg In Duration',   unit:'avg', better:'high', get:function(x){ return x.avgInDurMin||0; }, fmt:function(v){ return fmtMin(Math.round(v)); }},
-    avgout:  {t:'Avg Out Duration',  unit:'avg', better:'low',  get:function(x){ return x.avgOutDurMin||0; }, fmt:function(v){ return fmtMin(Math.round(v)); }},
-    breakover:{t:'Breaks Over 1:00', unit:'days',better:'low',  get:function(x){ return x.breakOverDays||0; }, fmt:function(v){ return Math.round(v); }}
+    /* No punch days (all WFH, say) means no figure - not 0:00, which ranked
+       them best on time out and worst on time in. */
+    avgin:   {t:'Avg In Duration',   unit:'avg', better:'high', get:function(x){ return x.durDays ? x.avgInDurMin : null; }, fmt:function(v){ return fmtMin(Math.round(v)); }},
+    avgout:  {t:'Avg Out Duration',  unit:'avg', better:'low',  get:function(x){ return x.durDays ? x.avgOutDurMin : null; }, fmt:function(v){ return fmtMin(Math.round(v)); }},
+    breakover:{t:'Breaks Over 1:00', unit:'days',better:'low',  get:function(x){ return x.durDays ? (x.breakOverDays||0) : null; }, fmt:function(v){ return Math.round(v); }}
   };
   function kpiBreakdown(key, stats, prevBy){
     var d = KPI_DEFS[key];
@@ -11294,7 +11405,7 @@ function buildExcelBackup(){
     return stats.map(function(x){
       var q = prevBy[x.name];
       return {name:x.name, v:d.get(x), was:(q ? d.get(q) : null)};
-    }).sort(function(a,b){
+    }).filter(function(r){ return r.v != null; }).sort(function(a,b){
       return d.better === 'high' ? b.v - a.v : a.v - b.v;
     });
   }
@@ -11730,7 +11841,10 @@ function buildExcelBackup(){
           (dDays && qDays) ? delta(dIn/dDays, qIn/qDays, true, function(v){ return fmtMin(Math.round(v)); }) : '', 'avgin')
       + K(dDays ? fmtMin(Math.round(dOut/dDays)) : '—', 'Avg Out Duration',
           (dDays && qDays) ? delta(dOut/dDays, qOut/qDays, false, function(v){ return fmtMin(Math.round(v)); }) : '', 'avgout')
-      + K(dOver, 'Breaks Over 1:00', delta(dOver, hasPrev?qOver:null, false), 'breakover')
+      /* The change is per punch day: a month under way has fewer days than a
+         finished one, so its raw count always looked like an improvement. */
+      + K(dOver, 'Breaks Over 1:00', (dDays && qDays)
+          ? delta(dOver/dDays*100, qOver/qDays*100, false, function(v){ return Math.round(v)+' pts'; }) : '', 'breakover')
       + '</div>';
     stats.forEach(function(x){
       x.onTimePct  = x.presentDays>0 ? Math.round(x.onTimeDays/x.presentDays*100) : 100;
