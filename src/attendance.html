@@ -474,6 +474,34 @@ body{
 .al-go{ margin-top:6px; font-size:11px; font-weight:700; padding:4px 10px; border-radius:7px;
   border:1px solid var(--line-dk); background:#fff; color:var(--ink); cursor:pointer; }
 .al-empty{ font-size:12px; color:var(--ink-soft); padding:10px 6px; }
+.al-sec{ font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); padding:8px 6px 5px; }
+.al-item.al-good{ background:#EAF7EF; border-left-color:#16A34A; }
+.al-item.al-new .al-t::after{ content:'NEW'; margin-left:7px; padding:0 6px; border-radius:20px; font-size:9px; font-weight:800;
+  letter-spacing:.05em; vertical-align:middle; background:#3B7DF5; color:#fff; }
+/* The employee's own performance panel: this month against last. */
+.emp-perf{ border-radius:14px; border:1px solid #E3E9F3; background:linear-gradient(160deg,#F5F8FF,#fff 60%);
+  box-shadow:0 4px 14px rgba(26,40,72,.07); padding:11px 12px; margin-bottom:12px; }
+.ep-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.ep-head b{ display:block; font-size:12.5px; color:var(--ink); }
+.ep-head span{ font-size:10.5px; color:var(--ink-soft); }
+.ep-score{ flex:none; display:flex; flex-direction:column; align-items:center; padding:5px 10px; border-radius:12px; min-width:62px;
+  background:#EEF2F7; color:#334155; }
+.ep-score i{ font-style:normal; font:800 18px/1.1 'IBM Plex Mono',monospace; }
+.ep-score em{ font-style:normal; font-size:9.5px; font-weight:800; letter-spacing:.02em; }
+.ep-score.up{ background:linear-gradient(160deg,#DCFCE7,#BBF7D0); color:#14532D; }
+.ep-score.down{ background:linear-gradient(160deg,#FEE2E2,#FECACA); color:#991B1B; }
+.ep-list{ display:flex; flex-direction:column; gap:6px; }
+.ep-item{ display:flex; gap:9px; align-items:flex-start; padding:7px 9px; border-radius:10px; border:1px solid transparent; }
+.ep-item.bad{ background:#FEF2F2; border-color:#FECACA; }
+.ep-item.good{ background:#F0FDF4; border-color:#BBF7D0; }
+.ep-ico{ flex:none; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font:800 12px/1 'Inter',sans-serif; color:#fff; }
+.ep-item.bad .ep-ico{ background:linear-gradient(145deg,#F87171,#DC2626); }
+.ep-item.good .ep-ico{ background:linear-gradient(145deg,#4ADE80,#16A34A); }
+.ep-txt{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ep-txt b{ font-size:12px; color:var(--ink); }
+.ep-txt span{ font-size:11px; color:var(--ink-soft); line-height:1.35; }
+.ep-steady{ font-size:11.5px; color:#166534; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:10px; padding:8px 10px; }
 /* A day's change history, in the day popup. */
 .dh-list{ margin-top:8px; font-size:11.5px; }
 .dh-row{ padding:7px 0; border-top:1px solid var(--line); }
@@ -3199,6 +3227,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <div class="emp-split">
     <div class="emp-split-main"><div class="emp-cal-grid" id="empCalGrid"></div></div>
     <aside class="emp-split-side">
+      <!-- This month against last on every measure: what went down, and what went up. -->
+      <div class="emp-perf" id="empPerf" style="display:none;"></div>
       <div class="emp-leave-strip" id="empLeaveStrip"></div>
       <!-- Weekly hours sits with the other figures, not in a band of its own:
            it is the same kind of reading, and it keeps this column from ending
@@ -7075,7 +7105,10 @@ function buildExcelBackup(){
   function renderAlertList(dd, heading, items, empty, onGo){
     dd.innerHTML = '<div class="al-head">' + escapeHtml(heading) + '</div>'
       + (items.length ? items.map(function(a, i){
-          return '<div class="al-item al-' + (a.fresh ? 'fresh' : a.level) + '">'
+          if(a.section) return '<div class="al-sec">' + escapeHtml(a.section) + '</div>';
+          // A new request decision is green; a performance change keeps its own colour and gains a "new" mark.
+          var lvl = (a.fresh && !a.perf) ? 'fresh' : a.level;
+          return '<div class="al-item al-' + lvl + (a.fresh && a.perf ? ' al-new' : '') + '">'
             + '<div class="al-t">' + escapeHtml(a.title) + '</div>'
             + (a.detail ? ('<div class="al-d">' + escapeHtml(a.detail) + '</div>') : '')
             + ((a.page || a.go) ? ('<button type="button" class="al-go" data-al="' + i + '">Open</button>') : '')
@@ -7108,6 +7141,107 @@ function buildExcelBackup(){
       renderEmpAlerts();
     }).catch(function(){ NOTIF_SEEN = ''; });
   }
+
+  /* ---- Performance, this month against last, for the employee themselves ----
+     Every figure the dashboard scores on, as a rate or a daily average so a
+     month still under way compares fairly with a finished one. A change only
+     counts past a threshold, so a single day does not raise a flag. Both
+     directions are reported: a drop as a warning, a rise as good news. */
+  var PERF_SEEN = null;                      // "YYYY-MM|metric|up/down" already shown in the bell
+  function loadPerfSeen(){
+    return storage.get('perfAlertsSeen', false).then(function(res){
+      try{ PERF_SEEN = (res && res.value) ? (JSON.parse(res.value) || []) : []; }catch(e){ PERF_SEEN = []; }
+      renderEmpAlerts();
+    }).catch(function(){ PERF_SEEN = []; });
+  }
+  var PERF_METRICS = [
+    { k:'score',    t:'Performance score',     better:'high', min:3,
+      v:function(s){ return perfScore(s); },                                          f:function(v){ return Math.round(v) + ''; }, unit:' points' },
+    { k:'attend',   t:'Attendance',            better:'high', min:5,
+      v:function(s){ return s.attendancePct; },                                       f:function(v){ return Math.round(v) + '%'; }, unit:' points' },
+    { k:'ontime',   t:'On-time arrivals',      better:'high', min:5,
+      v:function(s){ return s.onTimePct; },                                           f:function(v){ return Math.round(v) + '%'; }, unit:' points' },
+    { k:'latemin',  t:'Minutes late a day',    better:'low',  min:5,
+      v:function(s){ return s.presentDays ? s.totalLateMin / s.presentDays : 0; },    f:function(v){ return fmtMin(Math.round(v)); } },
+    { k:'early',    t:'Days leaving early',    better:'low',  min:10,
+      v:function(s){ return s.presentDays ? s.earlyDays / s.presentDays * 100 : 0; }, f:function(v){ return Math.round(v) + '% of days'; }, unit:' points' },
+    { k:'worked',   t:'Hours worked a day',    better:'high', min:15,
+      v:function(s){ return s.presentDays ? s.workedMin / s.presentDays : 0; },       f:function(v){ return fmtMin(Math.round(v)); } },
+    { k:'indur',    t:'In duration a day',     better:'high', min:15, dur:true,
+      v:function(s){ return s.avgInDurMin; },                                         f:function(v){ return fmtMin(Math.round(v)); } },
+    { k:'outdur',   t:'Out duration a day',    better:'low',  min:10, dur:true,
+      v:function(s){ return s.avgOutDurMin; },                                        f:function(v){ return fmtMin(Math.round(v)); } },
+    { k:'breaks',   t:'Days within the 1:00 break', better:'high', min:10, dur:true,
+      v:function(s){ return s.breakOkPct; },                                          f:function(v){ return Math.round(v) + '%'; }, unit:' points' }
+  ];
+  function empPerfChanges(name, todayIso){
+    todayIso = todayIso || todayISO_full;
+    var ym = String(todayIso).slice(0, 7);
+    var y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1;
+    if(m < 1){ m = 12; y -= 1; }
+    var prevYm = y + '-' + pad2(m);
+    var s, q;
+    try{
+      s = computeEmployeeStats(name, eachDateInMonth(ym));
+      q = computeEmployeeStats(name, eachDateInMonth(prevYm));
+    }catch(e){ return { ym:ym, prevYm:prevYm, items:[], ready:false }; }
+    // Too few days either side and any change is noise.
+    if(s.presentDays < 3 || q.presentDays < 3) return { ym:ym, prevYm:prevYm, items:[], ready:false, now:s, was:q };
+    var prevLbl = monthLabel(prevYm).split(' ')[0];
+    var items = [];
+    PERF_METRICS.forEach(function(mt){
+      if(mt.dur && ((s.durDays || 0) < 3 || (q.durDays || 0) < 3)) return;
+      var now = mt.v(s), was = mt.v(q);
+      if(now == null || was == null || isNaN(now) || isNaN(was)) return;
+      var diff = now - was;
+      if(Math.abs(diff) < mt.min) return;
+      var good = mt.better === 'high' ? diff > 0 : diff < 0;
+      var word = mt.better === 'high' ? (diff > 0 ? 'up' : 'down') : (diff > 0 ? 'up' : 'down');
+      var by = mt.unit ? (Math.round(Math.abs(diff)) + mt.unit) : fmtMin(Math.round(Math.abs(diff)));
+      items.push({ key:mt.k, good:good, word:word,
+        sig: ym + '|' + mt.k + '|' + (good ? 'up' : 'down'),
+        title: mt.t + ' ' + word + ' by ' + by,
+        detail: mt.f(now) + ' this month, ' + mt.f(was) + ' in ' + prevLbl
+          + (good ? ' — well done.' : ' — worth a look.'),
+        now: mt.f(now), was: mt.f(was) });
+    });
+    // Over the break allowance is worth saying even when it has not moved.
+    if((s.durDays || 0) >= 3 && s.avgOutDurMin > BREAK_ALLOW_MIN
+       && !items.some(function(it){ return it.key === 'outdur' && !it.good; })){
+      items.push({ key:'outallow', good:false, word:'over', sig: ym + '|outallow|down',
+        title: 'Time out is over the 1:00 allowance',
+        detail: 'Averaging ' + fmtMin(s.avgOutDurMin) + ' out a day this month; lunch ' + LUNCH_BREAK_MIN + ' + tea ' + TEA_BREAK_MIN + ' min is allowed.',
+        now: fmtMin(s.avgOutDurMin), was: fmtMin(BREAK_ALLOW_MIN) });
+    }
+    // Drops first: they are the ones to act on.
+    items.sort(function(a, b){ return (a.good === b.good) ? 0 : (a.good ? 1 : -1); });
+    return { ym:ym, prevYm:prevYm, prevLbl:prevLbl, items:items, ready:true, now:s, was:q };
+  }
+  /* The same changes on the employee's own page, above their leave figures. */
+  function renderEmpPerf(name){
+    var box = document.getElementById('empPerf');
+    if(!box) return;
+    var p = empPerfChanges(name);
+    if(!p.ready){
+      box.innerHTML = '';
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = '';
+    var scoreNow = perfScore(p.now), scoreWas = perfScore(p.was);
+    var d = scoreNow - scoreWas;
+    var head = '<div class="ep-head"><div><b>This month so far</b><span>compared with ' + escapeHtml(p.prevLbl) + '</span></div>'
+      + '<div class="ep-score ' + (d >= 3 ? 'up' : (d <= -3 ? 'down' : 'flat')) + '" title="Performance score out of 100">'
+      +   '<i>' + scoreNow + '</i><em>' + (Math.abs(d) < 1 ? 'no change' : ((d > 0 ? '↑ ' : '↓ ') + Math.abs(Math.round(d)))) + '</em></div></div>';
+    var list = p.items.filter(function(it){ return it.key !== 'score'; });
+    box.innerHTML = head + (list.length
+      ? '<div class="ep-list">' + list.map(function(it){
+          return '<div class="ep-item ' + (it.good ? 'good' : 'bad') + '">'
+            + '<span class="ep-ico">' + (it.good ? '↑' : (it.word === 'over' ? '!' : '↓')) + '</span>'
+            + '<span class="ep-txt"><b>' + escapeHtml(it.title) + '</b><span>' + escapeHtml(it.detail) + '</span></span></div>';
+        }).join('') + '</div>'
+      : '<div class="ep-steady">Holding steady on every measure — nothing has moved much since ' + escapeHtml(p.prevLbl) + '.</div>');
+  }
   function empAlerts(){
     var name = viewRole && viewRole.name;
     if(!name) return [];
@@ -7127,17 +7261,33 @@ function buildExcelBackup(){
                  title:t, detail:d, go:true };
       });
   }
+  var EMP_PERF_ITEMS = [];                   // what the bell last showed, to mark seen on open
   function renderEmpAlerts(){
     var btn = document.getElementById('empAlertsBtn'), dd = document.getElementById('empAlertsDropdown');
     var badge = document.getElementById('empAlertsCount');
     if(!btn || !dd || !badge) return;
-    var items = empAlerts();
+    var reqItems = empAlerts();
+    var perf = [];
+    try{
+      var nm = viewRole && viewRole.name;
+      var p = (nm && viewRole.role === 'employee') ? empPerfChanges(nm) : null;
+      if(p && p.ready){
+        perf = p.items.map(function(it){
+          return { level: it.good ? 'good' : 'warn', fresh: PERF_SEEN !== null && PERF_SEEN.indexOf(it.sig) === -1,
+                   title: it.title, detail: it.detail, sig: it.sig, perf: true, go: true };
+        });
+        if(perf.length) perf.unshift({ section: 'Your performance · this month vs ' + p.prevLbl });
+      }
+    }catch(e){ console.error('performance alerts', e); }
+    EMP_PERF_ITEMS = perf.filter(function(a){ return a.sig; });
+    var items = perf.concat(reqItems.length ? [{ section: 'Your requests' }] : []).concat(reqItems);
     var n = items.filter(function(a){ return a.fresh; }).length;
     badge.textContent = n;
     badge.style.display = n ? 'inline-block' : 'none';
-    renderAlertList(dd, 'Your requests', items, 'No decisions on your requests in the last 30 days.', function(){
-      var l = document.getElementById('myRequestsList');
-      if(l) try{ l.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
+    btn.title = 'Your performance and decisions on your requests';
+    renderAlertList(dd, 'Updates', items, 'Nothing new — no changes in your performance and no decisions on your requests in the last 30 days.', function(a){
+      var target = document.getElementById((a && a.perf) ? 'empPerf' : 'myRequestsList');
+      if(target) try{ target.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
     });
   }
   (function(){
@@ -7159,10 +7309,17 @@ function buildExcelBackup(){
       renderEmpAlerts();                                   // list shows what was new...
       NOTIF_SEEN = new Date().toISOString();               // ...and opening it counts as seen
       storage.set('notifSeenAt', NOTIF_SEEN, false).catch(function(){});
+      if(EMP_PERF_ITEMS.length){
+        var seen = (PERF_SEEN || []).slice();
+        EMP_PERF_ITEMS.forEach(function(a){ if(seen.indexOf(a.sig) === -1) seen.push(a.sig); });
+        PERF_SEEN = seen.slice(-200);                      // a year of signatures is plenty
+        storage.set('perfAlertsSeen', JSON.stringify(PERF_SEEN), false).catch(function(){});
+      }
       var badge = document.getElementById('empAlertsCount');
       if(badge) badge.style.display = 'none';
     });
     loadNotifSeen();
+    loadPerfSeen();
     loadDeviceStatus();
     setInterval(loadDeviceStatus, 5 * 60 * 1000);
     setTimeout(loadClientErrors, 8000);                    // once the session has said who this is
@@ -13977,6 +14134,7 @@ function buildExcelBackup(){
     if(!name) return;
     if(!empCalMonth) empCalMonth = defaultMonth;
     document.getElementById('empCalMonthLbl').textContent = monthLabel(empCalMonth);
+    try{ renderEmpPerf(name); renderEmpAlerts(); }catch(e){ console.error('performance panel', e); }
     renderEmployeeLeaveStrip(name);
     renderMyRequests();
 

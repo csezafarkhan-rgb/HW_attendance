@@ -22,7 +22,7 @@ const listOf = name => {
   const read = new Set([...src.matchAll(/storage\.get\('([A-Za-z_]+)'/g)].map(m => m[1]));
   const notBacked = [...read].filter(k => BACKUP_KEYS.indexOf(k) === -1);
   check('every setting the dashboard stores is in the backup (except server status and read receipts)',
-    notBacked.every(k => k === 'deviceStatus' || k === 'notifSeenAt'), notBacked);
+    notBacked.every(k => k === 'deviceStatus' || k === 'notifSeenAt' || k === 'perfAlertsSeen'), notBacked);
   check('the wrapper keys of an old snapshot are never restored', ['json', 'fname', 'n'].every(k => SKIP.indexOf(k) > -1), SKIP);
 
   const ls = { hw_leave_hidden: '["2026-01"]', hw_side_w: '260' };
