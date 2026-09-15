@@ -7701,8 +7701,11 @@ function buildExcelBackup(){
     // Late only needs an in-punch — don't wait on an out-punch that may not
     // exist yet (e.g. the employee is still at work today).
     var late = rec['in'] ? Math.max(0, toMin(rec['in']) - sh.startMin) : toMin(rec.late);
-    // Early-departure genuinely can't be known without an out-punch.
-    var early = rec.out ? Math.max(0, sh.endMin - toMin(rec.out)) : 0;
+    // Early-departure genuinely can't be known without an out-punch. On a day
+    // flagged as a mispunch the out time on file is not when they left, so the
+    // day is taken to end at the shift's out time: never early.
+    var early = (rec.out && !getMispunch(empName, rec.d))
+      ? Math.max(0, sh.endMin - toMin(rec.out)) : 0;
     return {late: late, early: early};
   }
   function isShortLeave(empName, rec){
@@ -7814,6 +7817,16 @@ function buildExcelBackup(){
           // for past days, today returned first and read afternoon leave as late.
           if(getHalfDay(empName, dateStr)) return;
           if(isToday){
+            net += getLateExcuse(empName, dateStr) ? 0 : (sh.startMin - toMin(rec['in']));
+            counted++;
+            return;
+          }
+          /* A mispunch means the out time on file is not when they left (a
+             missed swipe leaves an earlier punch, or none). The day is taken to
+             end at the shift's out time, so it is judged on the arrival alone:
+             late costs, early credits, an excused late arrival makes it met. */
+          if(getMispunch(empName, dateStr)){
+            if(rec.st === 'HD') return;                  // half the shift, with no real out time: nothing to measure
             net += getLateExcuse(empName, dateStr) ? 0 : (sh.startMin - toMin(rec['in']));
             counted++;
             return;
@@ -12505,6 +12518,7 @@ function buildExcelBackup(){
       mispunchHtml = '<div class="override-section" style="border-top:1px dashed var(--line-dk);margin-top:16px;padding-top:14px;">'+
         '<label class="lbl">Data correction</label>'+
         '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;font-weight:600;"><input type="checkbox" id="mispunchChk" '+(mp?'checked':'')+'/> Mark as Mispunch (missing / incorrect punch)</label>'+
+        '<div style="font-size:11.5px;color:var(--ink-soft);margin:-4px 0 8px;">Weekly hours then count the day as ending at the shift’s out time, and it is not marked as leaving early.</div>'+
         '<textarea class="ov-reason" id="mispunchNote" placeholder="Optional note, e.g. forgot to swipe out">'+(mp&&mp.note?mp.note:'')+'</textarea>'+
         '<button class="btn primary" id="mispunchSave" style="width:100%;">Save Data Flag</button>'+
       '</div>';
