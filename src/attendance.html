@@ -3985,11 +3985,13 @@ function showUploadStatus(msg, isError){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures'];
+    'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
+    'lockedMonths'];
   /* Settings kept in localStorage rather than the shared store - they belong in
      the backup too, or a restore comes back subtly different. */
   var BACKUP_LOCAL_KEYS = ['hw_leave_hidden','hw_nm_cols','hw_nm_w','hw_trk_tpl',
-    'hw_req_compact','hw_myreq_compact','hw_emp_cal_compact','attDashboard_autoBackupShot'];
+    'hw_req_compact','hw_myreq_compact','hw_emp_cal_compact','hw_side_w','hw_side_collapsed',
+    'attDashboard_autoBackupShot'];
   function buildFullBackup(){
     return Promise.all(BACKUP_KEYS.map(function(k){
       return storage.get(k, true)
@@ -4760,12 +4762,41 @@ function ensureDirPerm(dir, byClick, mode){
   /* Kept in a backup's localStorage sweep but not data: the restore points
      themselves (each one used to contain the one before it, so every import
      made them bigger) and the import log. */
-  var BACKUP_SKIP_KEYS = ['preImportRestore', 'importLog', 'hasBackupDir'];
+  /* Not data. The last three are the wrapper of an older daily snapshot
+     ({json, fname, n}): restoring one wrote them back as settings, and the next
+     backup then carried the whole previous backup inside it - every day's file
+     holding the one before, 2.6 MB growing to 37 MB in two weeks. */
+  var BACKUP_SKIP_KEYS = ['preImportRestore', 'importLog', 'hasBackupDir', 'json', 'fname', 'n'];
+  /* An older snapshot is {json:"<the full backup as text>", fname, n}. Open it
+     up so its data restores, rather than the wrapper. */
+  function unwrapLegacySnapshot(d){
+    if(!d || typeof d.json !== 'string') return d;
+    try{
+      var inner = JSON.parse(d.json);
+      if(!inner || !inner.data || typeof inner.data !== 'object') return d;
+      var out = {};
+      Object.keys(inner.data).forEach(function(k){ out[k] = inner.data[k]; });
+      Object.keys(d).forEach(function(k){ if(k !== 'json' && k !== 'fname' && k !== 'n') out[k] = d[k]; });
+      return out;
+    }catch(e){ return d; }
+  }
+  /* Clear what those snapshots left behind: the wrapper keys in this browser,
+     and on the server where a restore saved them as shared settings. */
+  function cleanBackupLeftovers(){
+    ['json','fname','n'].forEach(function(k){
+      try{ localStorage.removeItem('attDashboard_' + k); }catch(e){}
+      try{
+        var c = (window.HWSync && window.HWSync.cached) ? window.HWSync.cached() : null;
+        if(c && Object.prototype.hasOwnProperty.call(c, k) && storage.delete) storage.delete(k, true).catch(function(){});
+      }catch(e){}
+    });
+  }
   /* Resolves true once everything is written and the page is reloading, false
      when it could not be. Callers wait for it: they used to reload on a timer of
      their own, part-way through a multi-MB write. */
   function restoreFullBackup(data){
     var jobs=[], n=0, dataset=null;
+    data = unwrapLegacySnapshot(data);
     /* Two shapes reach here. The older export prefixes every key with
        "attDashboard_"; the daily snapshot writes the plain key names. Only the
        prefixed form was accepted, so a snapshot imported as "no data to
@@ -5183,8 +5214,15 @@ function ensureDirPerm(dir, byClick, mode){
      override, excuse, shift, part-day approval and hand-typed figure. Written
      alongside a screenshot or an export so there is always a same-day copy. */
   function buildRestoreSnapshot(){
-    return buildFullBackup().then(function(obj){
-      var out = obj || {};
+    return buildFullBackup().then(function(b){
+      /* buildFullBackup hands back {json, fname, n} - the file, not the data.
+         Using that object as the snapshot saved the whole backup as a string
+         inside it, which is what made these files balloon. Take its data. */
+      var out = {};
+      try{
+        var parsed = b && b.json ? JSON.parse(b.json) : null;
+        if(parsed && parsed.data) Object.keys(parsed.data).forEach(function(k){ out[k] = parsed.data[k]; });
+      }catch(e){ console.error('snapshot: backup unreadable', e); }
       BACKUP_LOCAL_KEYS.forEach(function(k){
         try{ var v = localStorage.getItem(k); if(v != null) out[k] = v; }catch(e){}
       });
@@ -5206,13 +5244,31 @@ function ensureDirPerm(dir, byClick, mode){
     }catch(e){}
     return buildRestoreSnapshot().then(function(obj){
       var blob = new Blob([JSON.stringify(obj)], {type:'application/json'});
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'Attendance_Backup_' + today + '.json';
-      document.body.appendChild(a); a.click();
-      setTimeout(function(){ try{ a.remove(); }catch(_){ } URL.revokeObjectURL(a.href); }, 1500);
-      try{ localStorage.setItem('hw_att_snap_day', today); }catch(e){}
-      return true;
+      var fname = 'Attendance_Backup_' + today + '.json';
+      var viaDownload = function(){
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fname;
+        document.body.appendChild(a); a.click();
+        setTimeout(function(){ try{ a.remove(); }catch(_){ } URL.revokeObjectURL(a.href); }, 1500);
+        try{ localStorage.setItem('hw_att_snap_day', today); }catch(e){}
+        return true;
+      };
+      /* Into the chosen backup folder, beside the Excel copy, when there is one
+         the browser still lets us write to. A second automatic download from
+         one click is what Chrome tends to block, which is why some days had
+         the Excel file and no JSON. */
+      return idbDir('get').then(function(dir){
+        if(!dir) return viaDownload();
+        return dirPermState(dir).then(function(p){
+          if(p !== 'granted') return viaDownload();
+          return dir.getFileHandle(fname, {create:true})
+            .then(function(fh){ return fh.createWritable(); })
+            .then(function(w){ return Promise.resolve(w.write(blob)).then(function(){ return w.close(); }); })
+            .then(function(){ try{ localStorage.setItem('hw_att_snap_day', today); }catch(e){} return true; })
+            .catch(function(){ return viaDownload(); });
+        });
+      }).catch(function(){ return viaDownload(); });
     }).catch(function(e){ console.error('daily snapshot failed', e); return false; });
   }
   /* Everything that is not an attendance row: shifts, joining dates, order,
@@ -5383,13 +5439,17 @@ function ensureDirPerm(dir, byClick, mode){
    sheets, not a spreadsheet rendering of a settings object. */
 function backupSettingsSheet(){
   var rows = [], skipped = [];
+  /* What the server holds comes first. The browser's attDashboard_ copies are
+     only a fallback now and can be days old, so reading them first put stale
+     marks, requests and salaries into the Excel backup. */
+  var srv = null;
+  try{ srv = (window.HWSync && window.HWSync.cached) ? window.HWSync.cached() : null; }catch(e){}
   BACKUP_KEYS.forEach(function(k){
     if(k === 'customDataset') return;        // the punches have their own sheets
     var raw = null;
-    try{ raw = localStorage.getItem('attDashboard_' + k); }catch(e){}
+    if(srv && srv[k] != null) raw = String(srv[k]);
     if(raw == null){
-      /* Read it from the live value when localStorage has not been written
-         yet, so a fresh session still backs up what is on screen. */
+      /* Then what is on screen, and only then the browser copy. */
       var live = {
         overrides: overrides, halfDays: halfDays, manualLeave: manualLeave,
         leaveRequests: leaveRequests, officialLeaves: officialLeaves,
@@ -5399,10 +5459,16 @@ function backupSettingsSheet(){
         dayShifts: dayShifts, customShifts: customShifts, salaries: salaries,
         joinDates: joinDates, empNames: empNames, payRules: payRules,
         satPolicy: satPolicy, employeeOrder: employeeOrder,
-        signatures: (typeof SIGNS !== 'undefined' ? SIGNS : null)
+        signatures: (typeof SIGNS !== 'undefined' ? SIGNS : null),
+        lockedMonths: (typeof lockedMonths !== 'undefined' ? lockedMonths : null),
+        lateThresholdMin: lateThresholdMin, earlyThresholdMin: earlyThresholdMin, weeklyLeverageMin: weeklyLeverageMin,
+        showWeekStatus: state.showWeekStatus, hideSunday: state.hideSunday,
+        visibleEmployees: (typeof visibleEmpSet !== 'undefined' ? visibleEmpSet : null),
+        authAccounts: (typeof authAccounts !== 'undefined' ? authAccounts : null)
       }[k];
       if(live != null) raw = JSON.stringify(live);
     }
+    if(raw == null){ try{ raw = localStorage.getItem('attDashboard_' + k); }catch(e){} }
     if(raw == null){ skipped.push(k); return; }
     rows.push([k, raw]);
   });
@@ -14048,6 +14114,7 @@ function buildExcelBackup(){
     try{ renderSignSetting(); }catch(e){ console.error('signature panel', e); }
     if(adminInitDone){ renderTable(); if(currentPage==='leave') renderLeavePage(); if(currentPage==='requests') renderRequestsPage(); renderReqBadge(); return; }
     adminInitDone = true;
+    try{ cleanBackupLeftovers(); }catch(e){ console.error('backup leftovers', e); }
     renderMonthLabel();
     renderMonthDropdown();
     renderLegend();

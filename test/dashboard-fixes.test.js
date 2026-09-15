@@ -91,7 +91,8 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       window: { HWSync: { replaceDataset: d => { replaced.push(d); return Promise.resolve(); } } }
     };
     vm.createContext(ctx);
-    vm.runInContext("var BACKUP_SKIP_KEYS = ['preImportRestore', 'importLog', 'hasBackupDir'];", ctx);
+    vm.runInContext("var BACKUP_SKIP_KEYS = ['preImportRestore', 'importLog', 'hasBackupDir', 'json', 'fname', 'n'];", ctx);
+    vm.runInContext(grab('unwrapLegacySnapshot'), ctx);
     vm.runInContext(grab('restoreFullBackup'), ctx);
     return { ctx, ls, sets, statuses, reloads, replaced };
   }
