@@ -7727,6 +7727,11 @@ function buildExcelBackup(){
   /* A round badge with the person's initials, in a colour of their own, so a
      long list of requests can be scanned by who at a glance. */
   var REQ_AVATAR_COLOURS = ['#2563EB','#16A34A','#D97706','#7C3AED','#DC2626','#0D9488','#DB2777','#4F46E5','#0284C7','#65A30D'];
+  function empColour(name){
+    var n = String(name || '').trim(), h = 0;
+    for(var i=0;i<n.length;i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    return REQ_AVATAR_COLOURS[h % REQ_AVATAR_COLOURS.length];
+  }
   function reqAvatar(name){
     var n = String(name || '').trim();
     var parts = n.split(/\s+/).filter(Boolean);
@@ -12822,9 +12827,14 @@ function buildExcelBackup(){
       var pctUsed = accrued>0 ? Math.max(0, Math.min(100, Math.round(within/accrued*100))) : 0;
       var pctOver = accrued>0 ? Math.max(0, Math.min(100 - pctUsed, Math.round(charged/accrued*100))) : (charged>0?100:0);
       var capUsed = Math.round(Math.min(used, accrued)*100)/100;
-      html += '<th colspan="2" class="leave-emp emp-block-start lv-hcell"'+SH_EMP
+      // The person's own colour and initials (drawn by CSS, so an export's header text stays the name).
+      var ecol = empColour(e.name);
+      var eini = String(dispName(e.name)||'').trim().split(/\s+/).filter(Boolean);
+      eini = ((eini[0]||'?').charAt(0) + (eini.length>1 ? eini[eini.length-1].charAt(0) : '')).toUpperCase();
+      html += '<th colspan="2" class="leave-emp emp-block-start lv-hcell"'+SH_EMP.replace('"',
+                '"--ec:'+ecol+';')
            +  ' data-emp="'+e.name.replace(/"/g,'&quot;')+'">'
-           +  '<span class="lv-emp-name">'+dispName(e.name)+'</span>'
+           +  '<span class="lv-emp-name" data-ini="'+shotEsc(eini)+'">'+dispName(e.name)+'</span>'
            +  '<span class="lv-meter" title="'+num(within)+' of '+num(accrued)+' days used'
            +    (charged>0 ? ('&#10;'+num(charged)+' beyond the balance, charged to salary') : '')+'">'
            +    '<i style="width:'+pctUsed+'%"></i>'
@@ -12835,7 +12845,7 @@ function buildExcelBackup(){
            +  '</th>';
     });
     html += '</tr><tr>';
-    emps.forEach(function(){ html += '<th class="leave-sub emp-block-start"'+SH_SUB+'>Casual Leave</th><th class="leave-sub"'+SH_SUB+'>Sick Leave</th>'; });
+    emps.forEach(function(){ html += '<th class="leave-sub lv-cl emp-block-start"'+SH_SUB+'>Casual Leave</th><th class="leave-sub lv-sl"'+SH_SUB+'>Sick Leave</th>'; });
     html += '</tr></thead><tbody>';
 
     // Leave Assign
@@ -12872,10 +12882,10 @@ function buildExcelBackup(){
         } else {
           var dEmp = e.name.replace(/"/g,'&quot;');
           var hasCl = filled && m.clM[mi] > 0, hasSl = filled && m.slM[mi] > 0;
-          html += '<td class="leave-mon'+fc+' emp-block-start'+(hasCl?' lv-cell':'')+'"'
+          html += '<td class="leave-mon lv-cl'+fc+' emp-block-start'+(hasCl?' lv-cell':'')+'"'
                +  (hasCl?(' data-emp="'+dEmp+'" data-ym="'+ymRow+'" data-kind="CL"'):'')
                +  '>'+(filled?cell(m.clM[mi]):'')+'</td>'
-               +  '<td class="leave-mon'+fc+(hasSl?' lv-cell':'')+'"'
+               +  '<td class="leave-mon lv-sl'+fc+(hasSl?' lv-cell':'')+'"'
                +  (hasSl?(' data-emp="'+dEmp+'" data-ym="'+ymRow+'" data-kind="SL"'):'')
                +  '>'+(filled?cell(m.slM[mi]):'')+'</td>';
         }
@@ -12905,14 +12915,14 @@ function buildExcelBackup(){
     // Remaining Leave
     html += '<tr class="lv-band-rem"><td class="date-col leave-label"'+SH_LABEL+'>Remaining Leave</td>';
     emps.forEach(function(e){ var m=mtx[e.name];
-      html += '<td class="leave-rem emp-block-start" style="color:'+(m.clRem<0?'var(--alert)':'#1B7A3D')+'">'+num(m.clRem)+'</td>'+
-              '<td class="leave-rem" style="color:'+(m.slRem<0?'var(--alert)':'#1B7A3D')+'">'+num(m.slRem)+'</td>';
+      html += '<td class="leave-rem emp-block-start'+(m.clRem<0?' lv-negv':'')+'" style="color:'+(m.clRem<0?'var(--alert)':'#1B7A3D')+'">'+num(m.clRem)+'</td>'+
+              '<td class="leave-rem'+(m.slRem<0?' lv-negv':'')+'" style="color:'+(m.slRem<0?'var(--alert)':'#1B7A3D')+'">'+num(m.slRem)+'</td>';
     });
     html += '</tr>';
 
     // Remaining CL + Sick
     html += '<tr class="lv-band-comb"><td class="date-col leave-label"'+SH_LABEL+'>Remaining CL + Sick</td>';
-    emps.forEach(function(e){ var m=mtx[e.name]; html += '<td colspan="2" class="leave-comb emp-block-start" style="color:'+(m.combinedRem<0?'var(--alert)':'var(--ink)')+'">'+num(m.combinedRem)+'</td>'; });
+    emps.forEach(function(e){ var m=mtx[e.name]; html += '<td colspan="2" class="leave-comb emp-block-start'+(m.combinedRem<0?' lv-negv':'')+'" style="color:'+(m.combinedRem<0?'var(--alert)':'var(--ink)')+'">'+num(m.combinedRem)+'</td>'; });
     html += '</tr>';
 
     // Salary Deductions section
@@ -14479,6 +14489,68 @@ function buildExcelBackup(){
   button, .btn, .tbtn, .month-btn{ min-height: 36px; }
   table td, table th{ padding: 6px 8px !important; font-size: 11.5px !important; }
 }
+
+/* ---- Leave Record, in colour ----
+   Last in the sheet, and !important where the cells carry inline colours (kept
+   for Excel and the screenshot). Each person's header has their own colour
+   (--ec) and initials; casual leave reads blue and sick leave teal throughout;
+   the bands take the colour of what they say. */
+#page-leave .table-scroll{ padding:16px 20px 0; }
+#page-leave #leaveHint{ border-radius:14px !important; background:linear-gradient(135deg,#FFF8E1,#FFFDF6 70%) !important;
+  border:1px solid #F0D58A !important; box-shadow:0 4px 14px rgba(217,119,6,.10) !important; padding:10px 14px !important; }
+#page-leave .month-btn{ border-radius:10px; box-shadow:0 2px 6px rgba(26,40,72,.06); }
+#page-leave #leaveTable{ box-shadow:0 10px 28px rgba(26,40,72,.10); border-radius:14px; }
+#page-leave #leaveTable th.leave-corner{ background:linear-gradient(160deg,#1E293B,#334155) !important; color:#fff !important;
+  letter-spacing:.06em; border-top-left-radius:14px; }
+#page-leave #leaveTable th.leave-emp{ background:linear-gradient(165deg,#1E293B 0%,#2C3B57 100%) !important; color:#fff !important;
+  box-shadow:inset 0 4px 0 var(--ec,#3B7DF5); padding-top:12px !important; }
+#page-leave #leaveTable th.leave-emp:last-child{ border-top-right-radius:14px; }
+#page-leave .lv-emp-name{ display:flex !important; align-items:center; gap:8px; }
+#page-leave .lv-emp-name::before{ content:attr(data-ini); flex:none; width:26px; height:26px; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center; font:800 10.5px 'Inter',sans-serif; color:#fff;
+  background:linear-gradient(145deg, color-mix(in srgb, var(--ec,#3B7DF5) 65%, #fff), var(--ec,#3B7DF5));
+  box-shadow:0 0 0 2px rgba(255,255,255,.22); }
+#page-leave .lv-meter{ background:rgba(255,255,255,.16) !important; height:8px !important; border-radius:8px !important; }
+#page-leave .lv-meter i{ background:linear-gradient(90deg, color-mix(in srgb, var(--ec,#3B7DF5) 55%, #fff), var(--ec,#3B7DF5)) !important; border-radius:8px; }
+#page-leave .lv-meter b{ background:linear-gradient(90deg,#FB7185,#E11D48) !important; }
+#page-leave .lv-meter-c{ color:rgba(255,255,255,.75) !important; }
+#page-leave .lv-meter-c em{ color:#FDA4AF !important; }
+#page-leave #leaveTable th.leave-sub.lv-cl{ background:#DBEAFE !important; color:#1E40AF !important; }
+#page-leave #leaveTable th.leave-sub.lv-sl{ background:#CCFBF1 !important; color:#0F766E !important; }
+
+/* month rows */
+#page-leave #leaveTable td.lv-mlabel{ background:#fff !important; }
+#page-leave #leaveTable .lv-mname{ font-weight:700; color:#1E293B; }
+#page-leave #leaveTable .lv-myy{ padding:0 6px; border-radius:20px; background:#EEF2F7; color:#64748B; margin-left:5px; }
+#page-leave #leaveTable tr.lv-mrow td.leave-mon.filled{ background:#fff !important; }
+#page-leave #leaveTable tr.lv-mrow.lv-alt td.leave-mon.filled, #page-leave #leaveTable tr.lv-mrow.lv-alt td.lv-mlabel{ background:#FAFBFD !important; }
+#page-leave #leaveTable tr.lv-mrow td.leave-mon.filled.lv-cl.lv-cell{ background:linear-gradient(180deg,#EFF6FF,#DBEAFE) !important; color:#1D4ED8 !important; font-weight:800 !important; }
+#page-leave #leaveTable tr.lv-mrow td.leave-mon.filled.lv-sl.lv-cell{ background:linear-gradient(180deg,#F0FDFA,#CCFBF1) !important; color:#0F766E !important; font-weight:800 !important; }
+#page-leave #leaveTable tr.lv-mrow:hover td{ background:#F5F8FF !important; }
+#page-leave #leaveTable tr.lv-mrow:hover td.leave-mon.filled.lv-cl.lv-cell{ background:#DBEAFE !important; }
+#page-leave #leaveTable tr.lv-mrow:hover td.leave-mon.filled.lv-sl.lv-cell{ background:#CCFBF1 !important; }
+
+/* bands */
+#page-leave #leaveTable tr.lv-band-assign td.leave-label{ background:linear-gradient(90deg,#E0E7FF,#EEF2FF) !important; color:#3730A3 !important; }
+#page-leave #leaveTable tr.lv-band-assign td.leave-assign{ background:#F5F7FF !important; color:#3730A3 !important; font-weight:800 !important; }
+#page-leave #leaveTable tr.lv-band-pend td.leave-label{ background:linear-gradient(90deg,#FDE68A,#FEF3C7) !important; color:#78350F !important; }
+#page-leave #leaveTable tr.lv-band-taken td.leave-label{ background:linear-gradient(90deg,#FED7AA,#FFEDD5) !important; color:#9A3412 !important; }
+#page-leave #leaveTable tr.lv-band-taken td.leave-assign{ background:#FFF7ED !important; color:#9A3412 !important; font-weight:800 !important; }
+#page-leave #leaveTable tr.lv-band-rem td.leave-label{ background:linear-gradient(90deg,#BBF7D0,#DCFCE7) !important; color:#14532D !important; }
+#page-leave #leaveTable tr.lv-band-rem td{ background:#F0FDF4 !important; color:#15803D !important; }
+#page-leave #leaveTable tr.lv-band-comb td.leave-label{ background:linear-gradient(90deg,#99F6E4,#CCFBF1) !important; color:#134E4A !important; }
+#page-leave #leaveTable tr.lv-band-comb td{ background:#ECFDF8 !important; color:#0F766E !important; font-size:13px; }
+#page-leave #leaveTable td.lv-negv{ color:#DC2626 !important; background:#FEF2F2 !important; }
+#page-leave #leaveTable td.leave-section{ background:linear-gradient(90deg,#DC2626,#F43F5E) !important; color:#fff !important;
+  letter-spacing:.06em; border-top:0 !important; }
+#page-leave #leaveTable td.leave-ded{ color:#15803D !important; }
+#page-leave #leaveTable td.leave-ded.hasded{ background:linear-gradient(180deg,#FFF7ED,#FFEDD5) !important; color:#C2410C !important; font-weight:800; }
+#page-leave #leaveTable tr.lv-band-final td.leave-final:first-child{ background:linear-gradient(135deg,#065F46,#10B981) !important; color:#fff !important;
+  border-bottom-left-radius:14px; }
+#page-leave #leaveTable tr.lv-band-final td.leave-final:first-child .lv-final-b{ color:rgba(255,255,255,.8) !important; }
+#page-leave #leaveTable tr.lv-band-final td.lv-pos{ background:linear-gradient(180deg,#DCFCE7,#BBF7D0) !important; color:#14532D !important; }
+#page-leave #leaveTable tr.lv-band-final td.lv-neg{ background:linear-gradient(180deg,#FEE2E2,#FECACA) !important; color:#991B1B !important; }
+#page-leave #leaveTable tr.lv-band-final td:last-child{ border-bottom-right-radius:14px; }
 </style>
 
 <style id="__hwDropdownClipFix">
