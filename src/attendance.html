@@ -621,13 +621,9 @@ body{
 .req-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
 .req-actions .btn{flex:none;padding:7px 14px;font-size:12px;}
 .page{display:none;}
-/* The attendance grid and the dashboards earn the full window - they are wide
-   by nature. These three are a column of cards and forms, so on a large screen
-   they left a narrow strip of content marooned in the middle of the page.
-   Cap them and centre, the way a document reads. */
-#page-requests.active,
-#page-holidays.active,
-#page-backup.active{ max-width:1600px; margin:0 auto; width:100%; }
+/* Every page runs the full width of the content column. Requests, Official
+   Leaves and Backup used to be capped at 1600px and centred, which on a wide
+   screen left an empty band on each side that the other tabs do not have. */
 .page.active{display:block;}
 .search-box, .month-btn{
   font-family:'Inter',sans-serif;
