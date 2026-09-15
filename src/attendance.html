@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <style id="hw-shared-theme">
@@ -231,7 +231,9 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
     max-width:none !important;
     flex:none !important;
     align-self:auto !important;
-    height:calc(100vh - var(--hw-side-y, 0px) - 8px) !important;
+    /* To the bottom of the window, or of the page when the page ends sooner
+       (--hw-side-b, which JS follows). */
+    height:calc(var(--hw-side-b, calc(100vh - 8px)) - var(--hw-side-y, 0px)) !important;
     min-height:0 !important;
     max-height:none !important;
     overflow-x:hidden !important;   /* labels still clip while collapsing */
@@ -239,9 +241,10 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
   }
   /* The column the sidebar no longer occupies. */
   .att-layout, .layout{ padding-left:var(--hw-side-w, 210px) !important; }
-  /* A short page should still fill the window, or the card ends mid-screen with
-     the sidebar running past it. */
-  .att-layout{ min-height:calc(100vh - 18px) !important; }
+  /* A short page ends where its content ends - it used to be stretched to the
+     window, leaving a blank card below. It is never shorter than the sidebar's
+     own tabs (--hw-side-need, measured in JS), and the sidebar stops with it. */
+  .att-layout{ min-height:var(--hw-side-need, 0px) !important; }
 
   /* The seam, and the grip on it. Its own element rather than a border, since a
      6px target is the difference between resizing and missing. */
@@ -249,7 +252,7 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
     position:fixed; z-index:210;
     top:var(--hw-side-y, 0px);
     left:calc(var(--hw-side-x, 21px) + var(--hw-side-w, 210px) - 3px);
-    width:6px; height:calc(100vh - var(--hw-side-y, 0px) - 8px);
+    width:6px; height:calc(var(--hw-side-b, calc(100vh - 8px)) - var(--hw-side-y, 0px));
     cursor:col-resize; background:transparent;
     transition:background .15s;
   }
@@ -625,6 +628,23 @@ body{
    Leaves and Backup used to be capped at 1600px and centred, which on a wide
    screen left an empty band on each side that the other tabs do not have. */
 .page.active{display:block;}
+/* Restore from a backup file: a drop zone rather than the browser's bare file
+   input, which drew clipped inside the rounded field. */
+.bk-drop{ position:relative; display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:14px 16px; border:1.5px dashed #B8C4D8; border-radius:14px; cursor:pointer;
+  background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(243,246,252,.9));
+  transition:border-color .15s, background .15s, box-shadow .15s; max-width:640px; }
+.bk-drop:hover, .bk-drop.over{ border-color:#3B7DF5; background:#EEF4FF; box-shadow:0 6px 18px rgba(59,125,245,.14); }
+.bk-drop input[type=file]{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.bk-drop:focus-within{ outline:2px solid #3B7DF5; outline-offset:2px; }
+.bk-drop-ico{ font-size:22px; line-height:1; flex:none; width:40px; height:40px; display:flex; align-items:center; justify-content:center;
+  border-radius:11px; background:#fff; box-shadow:0 2px 8px rgba(26,40,72,.10), inset 0 1px 0 #fff; }
+.bk-drop-txt{ flex:1 1 180px; font-size:13px; color:var(--ink); }
+.bk-drop-txt span{ color:var(--ink-soft); }
+.bk-drop-btn{ flex:none; font:700 12.5px 'Inter',sans-serif; color:#fff; padding:8px 16px; border-radius:10px;
+  background:linear-gradient(180deg,#5b9bff,#3B7DF5); box-shadow:0 4px 12px rgba(59,125,245,.30), inset 0 1px 0 rgba(255,255,255,.4); }
+.bk-drop-name{ flex-basis:100%; font-size:11.5px; font-weight:600; color:#0F6B3A; }
+.bk-drop-name:empty{ display:none; }
 .search-box, .month-btn{
   font-family:'Inter',sans-serif;
   font-size:12.5px;
@@ -2813,7 +2833,13 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 
   <div style="padding:12px 18px 8px;border-top:1px solid var(--line);margin-top:8px;">
     <label style="font-size:11px;font-weight:700;color:var(--ink-soft);display:block;margin-bottom:5px;">Restore from a backup file</label>
-    <input type="file" id="bkImportInput" accept=".json,.xlsx,.csv" style="font-size:13px;"/>
+    <label class="bk-drop" id="bkDrop" for="bkImportInput">
+      <input type="file" id="bkImportInput" accept=".json,.xlsx,.csv"/>
+      <span class="bk-drop-ico">📂</span>
+      <span class="bk-drop-txt"><b>Choose a backup file</b> <span>or drop it here</span></span>
+      <span class="bk-drop-btn">Browse…</span>
+      <span class="bk-drop-name" id="bkDropName"></span>
+    </label>
     <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.45;">Accepts an <b>Excel (.xlsx)</b> or <b>.csv</b> export (restores that attendance), or a <b>backup (.json)</b> — a full backup or a daily snapshot (restores everything and reloads). The file is identified by its contents, so a renamed extension is fine.</div>
   </div>
   </div>
@@ -5955,6 +5981,32 @@ function buildExcelBackup(){
     }).catch(function(){});
   }); })();
   (function(){ var b=document.getElementById('bkForgetFolder'); if(b) b.addEventListener('click', function(){ idbDir('del').then(function(){ localStorage.removeItem('attDashboard_hasBackupDir'); renderAutoBackupUI(null); bkStatus('Backup folder forgotten. The Excel backup will now go to your Downloads on each screenshot.', false); }).catch(function(){}); }); })();
+  /* The drop zone around it: name the chosen file (read in the capture phase,
+     before the handler below clears the input), and accept a dropped file as
+     if it had been chosen. */
+  (function(){
+    var zone = document.getElementById('bkDrop'), input = document.getElementById('bkImportInput'), nameEl = document.getElementById('bkDropName');
+    if(!zone || !input) return;
+    zone.addEventListener('change', function(){
+      var f = input.files && input.files[0];
+      if(nameEl) nameEl.textContent = f ? ('✓ ' + f.name) : '';
+    }, true);
+    ['dragenter','dragover'].forEach(function(t){
+      zone.addEventListener(t, function(e){ e.preventDefault(); zone.classList.add('over'); });
+    });
+    ['dragleave','dragend','drop'].forEach(function(t){
+      zone.addEventListener(t, function(){ zone.classList.remove('over'); });
+    });
+    zone.addEventListener('drop', function(e){
+      e.preventDefault();
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if(!f) return;
+      try{
+        var dt = new DataTransfer(); dt.items.add(f); input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles:true }));
+      }catch(_){}
+    });
+  })();
   document.getElementById('bkImportInput').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -8813,19 +8865,40 @@ function buildExcelBackup(){
        to 0 once the page has scrolled past the layout, which is what lets the
        sidebar reach the full height of the window without ever depending on how
        tall the page happens to be - the thing that used to move it. */
+    var tabsEl = document.getElementById('pageTabs');
+    function setVar(name, value){ if(root.style.getPropertyValue(name) !== value) root.style.setProperty(name, value); }
     function syncEdges(){
       var r = layout.getBoundingClientRect();
-      root.style.setProperty('--hw-side-x', Math.round(r.left + 1) + 'px');
-      root.style.setProperty('--hw-side-y', Math.max(0, Math.round(r.top)) + 'px');
+      if(!r.height) return;                          // not on screen yet (signed out, employee view)
+      setVar('--hw-side-x', Math.round(r.left + 1) + 'px');
+      setVar('--hw-side-y', Math.max(0, Math.round(r.top)) + 'px');
+      // The sidebar stops at the page's bottom edge when that comes before the window's.
+      setVar('--hw-side-b', Math.round(Math.min(window.innerHeight - 8, r.bottom - 1)) + 'px');
+      /* The tabs' own height, so a short page is never cut shorter than them.
+         Added up from the children, since the sidebar's box is sized by the page. */
+      if(tabsEl){
+        var cs = getComputedStyle(tabsEl), gap = parseFloat(cs.rowGap || cs.gap) || 0, need = 0, n = 0;
+        Array.prototype.forEach.call(tabsEl.children, function(c){
+          if(getComputedStyle(c).display === 'none') return;
+          need += c.getBoundingClientRect().height; n++;
+        });
+        need += (n > 1 ? gap * (n - 1) : 0) + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) + 4;
+        setVar('--hw-side-need', Math.ceil(need) + 'px');
+      }
     }
     /* This runs on every scroll event, so it is throttled - but by the clock,
        not by a flag waiting on a frame callback. A flag cleared inside
        requestAnimationFrame latches on forever anywhere that callback does not
        arrive, and the sidebar would stop following the page for good. */
-    var lastEdgeSync = 0;
+    var lastEdgeSync = 0, edgeTimer = null;
     function queueEdges(){
       var now = Date.now();
-      if(now - lastEdgeSync < 16) return;
+      if(now - lastEdgeSync < 16){
+        /* Skipped calls still get one run at the end, or the last change (the
+           page appearing, a tab switch) would never be measured. */
+        if(!edgeTimer) edgeTimer = setTimeout(function(){ edgeTimer = null; lastEdgeSync = Date.now(); syncEdges(); }, 20);
+        return;
+      }
       lastEdgeSync = now;
       syncEdges();
     }
@@ -8838,6 +8911,7 @@ function buildExcelBackup(){
       if(tog) tog.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
       try{ localStorage.setItem('hw_side_collapsed', collapsed ? '1' : '0'); }catch(e){}
       applyWidth();
+      syncEdges();                                  // collapsed, the filter box goes and the tabs are shorter
     }
 
     applyCollapsed(collapsed);
@@ -8849,6 +8923,13 @@ function buildExcelBackup(){
     if(window.ResizeObserver){
       try{ new ResizeObserver(queueEdges).observe(layout); }catch(e){}
     }
+    /* The page's height now decides where the sidebar stops, and it changes on
+       every tab switch and render. The observer only reports while the frame is
+       being drawn, so a light check keeps them in step regardless. */
+    setInterval(syncEdges, 400);
+    document.addEventListener('click', function(e){
+      if(e.target.closest && e.target.closest('.page-tab')) setTimeout(syncEdges, 0);
+    });
 
     /* Dragging the seam. Pointer capture keeps the drag alive when the cursor
        outruns the 6px strip, which it will. */
