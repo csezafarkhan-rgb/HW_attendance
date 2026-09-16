@@ -42,12 +42,18 @@ const ALLOWED = [
 
 let running = null;          // the in-flight rebuild, if any
 
-/*  Live Sync asks for a quick build: the readers are asked for two days instead
-    of three and the file is rebuilt over ten days rather than thirty. What the
-    dashboard wants from a Sync is today's punches, and the database already
-    holds everything older. The scheduled run stays on the full thirty. */
-const QUICK = { days: '10', pullDays: '2' };
-const FULL  = { days: '30', pullDays: '3' };
+/*  Live Sync asks for a quick build: ten days rebuilt instead of thirty, the
+    readers asked for two days instead of three, and - the part that actually
+    decides how long a Sync takes - the readers skipped altogether when eSSL's
+    downloader has already put a punch from the last twelve minutes into the
+    database, or they were read less than four minutes ago. Reading both readers
+    takes over a minute; the database usually has the same punches within a few.
+    Four is under the five minutes between the dashboard's own checks, so the
+    readers still get read on each of those - what it saves is the wait when
+    someone presses Sync just after one. The scheduled run always reads them,
+    over thirty days. */
+const QUICK = { days: '10', pullDays: '2', pullTimeout: '90000', skipPullMin: '12', pulledWithin: '4' };
+const FULL  = { days: '30', pullDays: '3', pullTimeout: '180000', skipPullMin: '0', pulledWithin: '0' };
 
 function rebuild(quick) {
   if (running) return running;               // one at a time; latecomers join it
@@ -56,7 +62,8 @@ function rebuild(quick) {
     const started = Date.now();
     const child = execFile('powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT,
-       '-Days', mode.days, '-PullDays', mode.pullDays],
+       '-Days', mode.days, '-PullDays', mode.pullDays, '-PullTimeoutMs', mode.pullTimeout,
+       '-SkipPullIfDbFresherThanMin', mode.skipPullMin, '-SkipPullIfPulledWithinMin', mode.pulledWithin],
       { cwd: HERE, windowsHide: true },
       (err, stdout, stderr) => {
         clearTimeout(limit);

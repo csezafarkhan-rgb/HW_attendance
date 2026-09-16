@@ -44,13 +44,35 @@ param(
         a Live Sync, where only today matters and the database has the rest. #>
     [string[]] $Readers = @('192.168.1.112', '192.168.1.111'),
     [int]    $PullDays = 3,
-    [int]    $PullTimeoutMs = 180000,
+    [int]    $PullTimeoutMs = 180000,   # a stuck reader must not hold the whole build
+    <#  Reading both readers takes over a minute, and eSSL's own downloader is
+        already putting their punches into the database every few minutes. So a
+        Live Sync skips the readers when the database itself is this fresh, and
+        falls back to reading them when it is not. 0 = always read them. #>
+    [int]    $SkipPullIfDbFresherThanMin = 0,
+    <#  And skip them when they were read this recently anyway: the dashboard
+        asks every five minutes on its own, so a Sync pressed straight after one
+        of those has nothing to gain from another minute at the readers. #>
+    [int]    $SkipPullIfPulledWithinMin = 0,
     [switch] $NoDeviceRead,          # skip the readers, use the database alone
     [switch] $NoPush,                # write the file but do not send it to the server
     [switch] $WhatIfOnly
 )
 
 $ErrorActionPreference = 'Stop'
+
+<#  A background run must never stop on a message box. When Windows cannot start
+    a program - which it could not at 09:32 on 16 September, seconds after logon,
+    for the 32-bit reader pull - it shows "The operating system is not presently
+    configured to run this application" and waits for OK. Nobody is there to
+    press it: the run sat on that dialog for hours, the box could not be closed,
+    and no attendance was rebuilt. This turns those dialogs into plain errors,
+    for this process and for anything it starts. #>
+try {
+    Add-Type -Namespace HWSync -Name Win -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);' -ErrorAction Stop
+    # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+    [void] [HWSync.Win]::SetErrorMode(0x8003)
+} catch { }
 
 <#  One build at a time. The schedule and the dashboard's Live Sync button can
     start one together; two copies then both call the readers (which take one
@@ -214,57 +236,75 @@ $devicePunches = @()
 if (-not $NoDeviceRead) {
     $puller = Join-Path (Split-Path -Parent $PSCommandPath) 'Pull-DeviceLogs.ps1'   # code, beside this
     $ps32   = Join-Path $env:SystemRoot 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
-    if ((Test-Path -LiteralPath $puller) -and (Test-Path -LiteralPath $ps32)) {
-        <#  One process per reader, started together rather than one after the
-            other. Each reader hands over its whole log buffer, which takes the
-            better part of half a minute; done in turn that was most of the wait
-            before the dashboard saw anything. They are separate devices on
-            separate sockets, so there is nothing to share and nothing to queue.
+    <#  How recent the newest punch in the database is. The downloader service
+        feeds it continuously, so when it is minutes old the readers have nothing
+        to add and a Live Sync need not spend a minute asking them. #>
+    $dbNewest = $null
+    foreach ($p in $punches) {
+        $w = $p.LogDate -as [datetime]
+        if ($w -and (-not $dbNewest -or $w -gt $dbNewest)) { $dbNewest = $w }
+    }
+    $dbFresh = $SkipPullIfDbFresherThanMin -gt 0 -and $dbNewest -and `
+               $dbNewest -ge (Get-Date).AddMinutes(-$SkipPullIfDbFresherThanMin)
+    if ($dbFresh) {
+        Write-Output ('readers not asked: the database already has a punch from {0}' -f $dbNewest.ToString('HH:mm'))
+    }
+    # Or because they were read a moment ago, by the schedule or a sync just before this one.
+    $lastDump = Join-Path $DataDir 'device-punches.csv'
+    $justPulled = $false
+    if (-not $dbFresh -and $SkipPullIfPulledWithinMin -gt 0 -and (Test-Path -LiteralPath $lastDump)) {
+        $age = (Get-Date) - (Get-Item -LiteralPath $lastDump).LastWriteTime
+        if ($age.TotalMinutes -lt $SkipPullIfPulledWithinMin) {
+            $justPulled = $true
+            Write-Output ('readers not asked: they were read {0} minute(s) ago' -f [int] $age.TotalMinutes)
+        }
+    }
+    $dbFresh = $dbFresh -or $justPulled
+    if (-not $dbFresh -and (Test-Path -LiteralPath $puller) -and (Test-Path -LiteralPath $ps32)) {
+        <#  One process for both readers, one after the other. Pulling them at
+            the same time looked like the obvious way to halve the wait, and it
+            is not: on 16 September the second reader stopped answering for as
+            long as the first was being read, so its punches went stale and the
+            build sat out the whole timeout waiting for it. The SDK talks to one
+            device at a time. What is safe to cut is how far back each reader is
+            asked for (-PullDays), which Live Sync sets to two days.
 
-            Each writes its own dump - a reader that was unreachable this time
-            leaves its last one untouched, and the two are read back together.
-            Started as their own processes with a time limit: called inline, a
-            reader that was off made the whole build fail, and one stalling
-            mid-transfer left it waiting for ever. #>
-        $pulls = @()
-        foreach ($ip in $Readers) {
-            $safe = ($ip -replace '[^0-9A-Za-z]', '-')
-            $dump = Join-Path $DataDir ('device-punches-{0}.csv' -f $safe)           # data, kept out of the repo
-            $pullOut = Join-Path $env:TEMP ('ett_pull_{0}_{1}.out' -f $PID, $safe)
-            $pullErr = Join-Path $env:TEMP ('ett_pull_{0}_{1}.err' -f $PID, $safe)
-            try {
-                $pullArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Devices {1} -Days {2} -OutFile "{3}"' -f $puller, $ip, $PullDays, $dump
-                $proc = Start-Process -FilePath $ps32 -ArgumentList $pullArgs -NoNewWindow -PassThru `
-                                      -RedirectStandardOutput $pullOut -RedirectStandardError $pullErr
-                $pulls += [pscustomobject]@{ Ip = $ip; Proc = $proc; Dump = $dump; Out = $pullOut; Err = $pullErr }
-            } catch {
-                Write-Output ('reader pull could not run for {0}: {1}' -f $ip, $_.Exception.Message)
+            Started as its own process with a time limit: called inline, a reader
+            being off made the whole build fail, and one stalling mid-transfer
+            left it waiting for ever. #>
+        $dump    = Join-Path $DataDir 'device-punches.csv'                              # data, kept out of the repo
+        $pullOut = Join-Path $env:TEMP ('ett_pull_{0}.out' -f $PID)
+        $pullErr = Join-Path $env:TEMP ('ett_pull_{0}.err' -f $PID)
+        try {
+            # One quoted value: -File hands arguments over as strings, and two bare
+            # ones would bind the second to -Port. The puller splits it again.
+            $pullArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Devices "{1}" -Days {2} -OutFile "{3}"' -f `
+                        $puller, ($Readers -join ','), $PullDays, $dump
+            $pull = Start-Process -FilePath $ps32 -ArgumentList $pullArgs -NoNewWindow -PassThru `
+                                  -RedirectStandardOutput $pullOut -RedirectStandardError $pullErr
+            if (-not $pull.WaitForExit($PullTimeoutMs)) {
+                try { $pull.Kill() } catch { }
+                Write-Output ('reader pull took over {0}s and was stopped; using the punches already on file' -f [int]($PullTimeoutMs / 1000))
             }
+        } catch {
+            Write-Output ('reader pull could not run: ' + $_.Exception.Message)
+        } finally {
+            Remove-Item -LiteralPath $pullOut, $pullErr -Force -ErrorAction SilentlyContinue
         }
-        # They run side by side; the limit is on the slowest, not on the sum.
-        $deadline = (Get-Date).AddMilliseconds($PullTimeoutMs)
-        foreach ($pl in $pulls) {
-            $left = [int][Math]::Max(1000, ($deadline - (Get-Date)).TotalMilliseconds)
-            if (-not $pl.Proc.WaitForExit($left)) {
-                try { $pl.Proc.Kill() } catch { }
-                Write-Output ('reader {0} took too long and was stopped; using the punches already on file' -f $pl.Ip)
-            }
-            Remove-Item -LiteralPath $pl.Out, $pl.Err -Force -ErrorAction SilentlyContinue
-        }
-        <#  An older run wrote both readers into one file. Read it too, so the
-            punches it holds are not lost on the first run after this change. #>
-        $dumps = @($pulls | ForEach-Object { $_.Dump })
-        $legacy = Join-Path $DataDir 'device-punches.csv'
-        if (Test-Path -LiteralPath $legacy) { $dumps += $legacy }
-        $seenPunch = @{}
-        foreach ($d in $dumps) {
-            if (-not (Test-Path -LiteralPath $d)) { continue }
-            foreach ($row in @(Import-Csv -LiteralPath $d)) {
-                $key = '{0}|{1}|{2}' -f $row.UserId, $row.LogDate, $row.Device
-                if ($seenPunch.ContainsKey($key)) { continue }      # both files can hold the same punch
-                $seenPunch[$key] = $true
-                $devicePunches += $row
-            }
+    }
+    <#  Whatever the last pull left is still worth reading, even when the readers
+        were skipped this time - and the per-reader files the short-lived
+        parallel version wrote hold punches too. #>
+    $dump  = Join-Path $DataDir 'device-punches.csv'
+    $dumps = @($dump) + @(Get-ChildItem -LiteralPath $DataDir -Filter 'device-punches-*.csv' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $seenPunch = @{}
+    foreach ($d in $dumps) {
+        if (-not (Test-Path -LiteralPath $d)) { continue }
+        foreach ($row in @(Import-Csv -LiteralPath $d)) {
+            $key = '{0}|{1}|{2}' -f $row.UserId, $row.LogDate, $row.Device
+            if ($seenPunch.ContainsKey($key)) { continue }      # the same punch can be in two files
+            $seenPunch[$key] = $true
+            $devicePunches += $row
         }
     }
 }

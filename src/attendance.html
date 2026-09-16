@@ -4362,7 +4362,7 @@ function offerImportFile(file, stamp){
       capped short of full - a bar sitting at 100% while nothing has happened
       reads as stuck, where one still creeping reads as working. It only reaches
       the end when the answer actually arrives. */
-  var SYNC_EXPECTED_MS = 32000;   // both readers together, ten days rebuilt
+  var SYNC_EXPECTED_MS = 30000;   // seconds when the readers were read recently, ~70s when they are read
   var syncTimer = null;
   function syncProgress(stage){
     var box = document.getElementById('syncProgress');

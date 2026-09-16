@@ -23,6 +23,24 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+
+<#  -File passes everything as plain strings, so a caller can only hand an array
+    over as one comma-separated value ("a,b"); given two bare values the second
+    binds to -Port instead. Accept either and end up with a list. #>
+$Devices = @($Devices | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
+<#  A background run must never stop on a message box. When Windows cannot start
+    a program - which it could not at 09:32 on 16 September, seconds after logon,
+    for the 32-bit reader pull - it shows "The operating system is not presently
+    configured to run this application" and waits for OK. Nobody is there to
+    press it: the run sat on that dialog for hours, the box could not be closed,
+    and no attendance was rebuilt. This turns those dialogs into plain errors,
+    for this process and for anything it starts. #>
+try {
+    Add-Type -Namespace HWSync -Name Win -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);' -ErrorAction Stop
+    # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+    [void] [HWSync.Win]::SetErrorMode(0x8003)
+} catch { }
 $since = (Get-Date).Date.AddDays(-$Days)
 
 # $PSScriptRoot is not filled in yet while the param block is being bound, so

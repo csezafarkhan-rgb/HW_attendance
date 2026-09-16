@@ -97,14 +97,25 @@ Rules the builder keeps, learned the hard way:
 - **One build at a time.** It holds the `Global\HWAttendanceBuild` lock, so a
   scheduled run and a Live Sync press can't both hit the readers or write the
   file at once. A second copy waits up to four minutes for the first.
-- **Readers can fail; the build carries on.** Each reader is pulled by its own
-  32-bit process, all started together, under one three-minute limit. Readers
-  being off, the SDK missing or a stalled transfer costs freshness, not the
-  whole run - and one slow reader no longer adds to the wait for the other.
-- **Live Sync asks for a quick build.** `/sync?quick=1` rebuilds ten days and
-  asks the readers for two, which is all a Sync needs; the scheduled run still
-  does thirty days and three. That is what takes a Sync from about a minute to
-  roughly half of it.
+- **Readers can fail; the build carries on.** The reader pull runs as its own
+  32-bit process with a time limit. Readers being off, the SDK missing or a
+  stalled transfer costs freshness, not the whole run.
+- **One reader at a time.** Pulling both at once was tried on 16 September and
+  does not work: while one reader is being read the other stops answering, so
+  its punches went stale and the build sat out the timeout waiting for it.
+- **Live Sync asks for a quick build.** `/sync?quick=1` rebuilds ten days, asks
+  the readers for two, and skips the readers altogether when eSSL's downloader
+  has already put a punch from the last twelve minutes into the database, or
+  when they were read less than four minutes ago. That turns a Sync pressed
+  just after an automatic check into about four seconds instead of seventy;
+  when the readers do have to be read it is the same minute or so as before.
+  The scheduled run always reads them, over thirty days.
+- **No message boxes in a background run.** Both scripts set the process error
+  mode, so a failure to start a program returns an error instead of a dialog.
+  On 16 September the logon run hit "The operating system is not presently
+  configured to run this application" seconds after logon, and sat on that
+  dialog for hours with nothing rebuilt. The logon trigger also waits two
+  minutes now, so Windows is ready before the build starts.
 - **A month's punch table is read or the run stops.** It first lists the tables
   that exist, skips a month with none, and treats any other read error as fatal.
   Failing leaves yesterday's good file in place instead of writing a short one.
