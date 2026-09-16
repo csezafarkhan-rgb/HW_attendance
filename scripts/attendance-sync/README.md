@@ -97,9 +97,14 @@ Rules the builder keeps, learned the hard way:
 - **One build at a time.** It holds the `Global\HWAttendanceBuild` lock, so a
   scheduled run and a Live Sync press can't both hit the readers or write the
   file at once. A second copy waits up to four minutes for the first.
-- **Readers can fail; the build carries on.** The reader pull runs as its own
-  process with a three-minute limit. Readers being off, the SDK missing or a
-  stalled transfer costs freshness, not the whole run.
+- **Readers can fail; the build carries on.** Each reader is pulled by its own
+  32-bit process, all started together, under one three-minute limit. Readers
+  being off, the SDK missing or a stalled transfer costs freshness, not the
+  whole run - and one slow reader no longer adds to the wait for the other.
+- **Live Sync asks for a quick build.** `/sync?quick=1` rebuilds ten days and
+  asks the readers for two, which is all a Sync needs; the scheduled run still
+  does thirty days and three. That is what takes a Sync from about a minute to
+  roughly half of it.
 - **A month's punch table is read or the run stops.** It first lists the tables
   that exist, skips a month with none, and treats any other read error as fatal.
   Failing leaves yesterday's good file in place instead of writing a short one.
@@ -112,7 +117,15 @@ Rules the builder keeps, learned the hard way:
   which blocks drive-by pages and DNS rebinding. A build running past five
   minutes is killed with its whole process tree.
 
-`Pull-DeviceLogs.ps1` adds to `device-punches.csv` instead of replacing it. If
+The dashboard keeps itself up to date: with **Keep attendance up to date by
+itself** ticked (Update Attendance menu, on by default) an open dashboard asks
+the helper every five minutes and imports a new punch file on its own - no Live
+Sync press, no Import button. It backs off to half-hourly when the helper does
+not answer, and does nothing while the tab is in the background. Every import
+still keeps a restore point, so Import history can undo one.
+
+`Pull-DeviceLogs.ps1` writes one file per reader (`device-punches-<ip>.csv`) and
+adds to it instead of replacing it. If
 a reader can't be reached, or a read stops partway, the punches from earlier
 runs stay in the file, so a bad run no longer takes the day's in-times out of
 the dashboard.

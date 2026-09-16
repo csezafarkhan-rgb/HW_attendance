@@ -42,12 +42,21 @@ const ALLOWED = [
 
 let running = null;          // the in-flight rebuild, if any
 
-function rebuild() {
+/*  Live Sync asks for a quick build: the readers are asked for two days instead
+    of three and the file is rebuilt over ten days rather than thirty. What the
+    dashboard wants from a Sync is today's punches, and the database already
+    holds everything older. The scheduled run stays on the full thirty. */
+const QUICK = { days: '10', pullDays: '2' };
+const FULL  = { days: '30', pullDays: '3' };
+
+function rebuild(quick) {
   if (running) return running;               // one at a time; latecomers join it
+  const mode = quick ? QUICK : FULL;
   running = new Promise(resolve => {
     const started = Date.now();
     const child = execFile('powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, '-Days', '30'],
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT,
+       '-Days', mode.days, '-PullDays', mode.pullDays],
       { cwd: HERE, windowsHide: true },
       (err, stdout, stderr) => {
         clearTimeout(limit);
@@ -119,7 +128,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === '/sync') {
-    return rebuild().then(result => {
+    const quick = /(^|[?&])quick=1(&|$)/.test(req.url || '');
+    return rebuild(quick).then(result => {
       res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     }).catch(e => {

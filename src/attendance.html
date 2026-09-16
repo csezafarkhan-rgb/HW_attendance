@@ -2964,6 +2964,11 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="month-option" id="syncNowBtn" title="Fetch from the punch readers now, then bring in anything new">↻ Live Sync</button>
       <button class="month-option" id="updUploadOpt">⭱ Upload a file…</button>
       <button class="month-option" id="updFolderOpt">📁 Check the watched folder</button>
+      <!-- On by default: the punch file is brought in as soon as it appears,
+           and every import keeps a restore point, so nothing needs a click. -->
+      <label class="month-option" id="autoSyncRow" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="autoSyncChk" checked style="width:15px;height:15px;"> Keep attendance up to date by itself
+      </label>
       <div id="updFolderNote" style="font-size:10.5px;color:var(--ink-soft);padding:4px 10px 2px;line-height:1.4;"></div>
     </div>
     <input type="file" id="uploadInput" accept=".csv,.xlsx" style="display:none;"/>
@@ -4181,6 +4186,13 @@ function forgetImportFolder(){
    anything else in the folder - otherwise an Excel backup saved into the same
    folder could be newer and get imported instead. */
 var PUNCH_FILE_BASENAME = 'dailyattendancelogsdetails';
+/* Keeping attendance current without anyone pressing anything: the readers are
+   asked every few minutes while the dashboard is open, and a new punch file is
+   brought straight in. Off only if the box in Update Attendance is unticked. */
+var AUTOSYNC_KEY = 'hw_auto_sync';
+function autoSyncOn(){
+  try{ return localStorage.getItem(AUTOSYNC_KEY) !== '0'; }catch(e){ return true; }
+}
 function isPunchFileName(name){
   return name.replace(/\.(csv|xlsx|xls)$/i, '').trim().toLowerCase() === PUNCH_FILE_BASENAME;
 }
@@ -4234,6 +4246,18 @@ function checkImportFolder(quiet){
       if(stamp === seen){
         if(!quiet) bkStatus('Already imported "' + found.file.name + '" \u2014 nothing newer in that folder.');
         return null;
+      }
+      /* The punch file is the one this folder is watched for, and every import
+         keeps a restore point, so it is brought in as soon as it appears -
+         nobody has to press Import. Anything else in the folder still asks:
+         a stray workbook could be anything. */
+      if(autoSyncOn() && isPunchFileName(found.file.name)){
+        try{ localStorage.setItem(IMPDIR_KEY, stamp); }catch(e){}
+        var bar0 = document.getElementById('impFound');
+        if(bar0) bar0.style.display = 'none';
+        showUploadStatus('New punches found — bringing in "' + found.file.name + '"…', false);
+        handleUploadFile(found.file);
+        return found.file;
       }
       offerImportFile(found.file, stamp);
       return found.file;
@@ -4306,7 +4330,7 @@ function offerImportFile(file, stamp){
        of that minute with nothing to show for it. */
     return withTimeout(
       fetch(SYNC_HELPER + '/ping', {cache:'no-store'}).then(function(r){ return r.json(); }),
-      6000, null
+      3000, null
     ).then(function(pong){
       if(!pong || !pong.ok){
         return helperPermission().then(function(state){
@@ -4314,7 +4338,10 @@ function offerImportFile(file, stamp){
         });
       }
       return withTimeout(
-        fetch(SYNC_HELPER + '/sync', {cache:'no-store'}).then(function(r){ return r.json(); }),
+        /* quick=1: the readers are asked for two days and the file is rebuilt
+           over ten, which is what a Sync is for. The scheduled run still does
+           the full thirty. */
+        fetch(SYNC_HELPER + '/sync?quick=1', {cache:'no-store'}).then(function(r){ return r.json(); }),
         180000, {ok:false, reason:'timeout'}
       ).then(function(j){
         return (j && j.ok) ? j : {ok:false, reason:(j && j.reason) || 'failed', detail:(j && j.error) || ''};
@@ -4335,7 +4362,7 @@ function offerImportFile(file, stamp){
       capped short of full - a bar sitting at 100% while nothing has happened
       reads as stuck, where one still creeping reads as working. It only reaches
       the end when the answer actually arrives. */
-  var SYNC_EXPECTED_MS = 65000;
+  var SYNC_EXPECTED_MS = 32000;   // both readers together, ten days rebuilt
   var syncTimer = null;
   function syncProgress(stage){
     var box = document.getElementById('syncProgress');
@@ -4432,6 +4459,58 @@ function offerImportFile(file, stamp){
       });
     }).catch(function(){ if(bar) bar.done(); restore(); });
   }
+  /* ---- keeping up to date by itself ----
+     The office PC rebuilds the punch file on its own schedule, but a dashboard
+     left open would sit on whatever it loaded. This asks the helper for a quick
+     read of the readers every few minutes and brings in anything new, which is
+     what people were pressing Live Sync and then Import for.
+
+     Quiet by design: no progress bar, no message when there is nothing new, and
+     nothing at all while the tab is in the background, someone is mid-edit, or
+     the helper is not there. */
+  var AUTO_SYNC_EVERY_MS = 5 * 60 * 1000;
+  var autoSyncBusy = false, autoSyncLast = 0, autoSyncMisses = 0;
+  function autoSyncTick(){
+    if(!autoSyncOn() || autoSyncBusy || !IMPORT_DIR) return;
+    if(document.hidden) return;                                  // not while the tab is put away
+    if(IMPORT_DIR_PERM !== 'granted') return;                    // asking needs a click; Reconnect has it
+    if(!viewRole || viewRole.role !== 'admin') return;           // the employee view imports nothing
+    if(document.getElementById('modalOverlay') && document.getElementById('modalOverlay').classList.contains('open')) return;
+    if(Date.now() - autoSyncLast < AUTO_SYNC_EVERY_MS - 5000) return;
+    autoSyncBusy = true;
+    autoSyncLast = Date.now();
+    askHelperToFetch().then(function(pull){
+      /* The helper is not always there (the PC is off, or this is someone's
+         laptop). Back off rather than knock every five minutes for ever. */
+      if(!pull || !pull.ok){
+        autoSyncMisses++;
+        if(autoSyncMisses >= 3) autoSyncLast = Date.now() + 25 * 60 * 1000;   // try again in half an hour
+        return;
+      }
+      autoSyncMisses = 0;
+      return checkImportFolder(true);      // quiet: it imports a new punch file by itself
+    }).catch(function(){}).then(function(){ autoSyncBusy = false; });
+  }
+  setInterval(autoSyncTick, 60 * 1000);
+  setTimeout(autoSyncTick, 45 * 1000);                           // once the page has settled
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden) setTimeout(autoSyncTick, 2000);         // coming back to the tab is a good moment
+  });
+  var autoChk = document.getElementById('autoSyncChk');
+  if(autoChk){
+    autoChk.checked = autoSyncOn();
+    autoChk.addEventListener('change', function(){
+      try{ localStorage.setItem(AUTOSYNC_KEY, autoChk.checked ? '1' : '0'); }catch(e){}
+      showUploadStatus(autoChk.checked
+        ? 'Attendance will keep itself up to date: the readers are checked every few minutes and new punches come in on their own.'
+        : 'Automatic updates are off. Use Live Sync when you want the latest punches.', false);
+      if(autoChk.checked){ autoSyncLast = 0; autoSyncMisses = 0; setTimeout(autoSyncTick, 500); }
+    });
+    // A label wrapping a checkbox inside a dropdown: keep the menu open on click.
+    var row = document.getElementById('autoSyncRow');
+    if(row) row.addEventListener('click', function(e){ e.stopPropagation(); });
+  }
+
   var fb = document.getElementById('updFolderOpt');
   if(fb) fb.addEventListener('click', function(){ runFolderSync(fb, false); });   // folder only
   var sb = document.getElementById('syncNowBtn');

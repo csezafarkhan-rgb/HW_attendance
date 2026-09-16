@@ -1,4 +1,4 @@
-<#
+﻿<#
     Build DailyAttendanceLogsDetails.csv straight from eTimeTrackLite's database,
     so the daily export-and-copy step is not needed.
 
@@ -39,6 +39,12 @@ param(
         data along, and a log written by a scheduled run never lands in a commit. #>
     [string] $DataDir = 'E:\Drive H- Desktop\ZAFAR LISTING\AI Projects\Attendance backup',
     [int]    $Days    = 30,
+    <#  The readers, read side by side. Days is how far back the CSV covers;
+        PullDays how far back each reader is asked for - two days is plenty for
+        a Live Sync, where only today matters and the database has the rest. #>
+    [string[]] $Readers = @('192.168.1.112', '192.168.1.111'),
+    [int]    $PullDays = 3,
+    [int]    $PullTimeoutMs = 180000,
     [switch] $NoDeviceRead,          # skip the readers, use the database alone
     [switch] $NoPush,                # write the file but do not send it to the server
     [switch] $WhatIfOnly
@@ -207,32 +213,58 @@ function Read-PunchRecord($record, [datetime] $day) {
 $devicePunches = @()
 if (-not $NoDeviceRead) {
     $puller = Join-Path (Split-Path -Parent $PSCommandPath) 'Pull-DeviceLogs.ps1'   # code, beside this
-    $dump   = Join-Path $DataDir 'device-punches.csv'                                # data, kept out of the repo
     $ps32   = Join-Path $env:SystemRoot 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
     if ((Test-Path -LiteralPath $puller) -and (Test-Path -LiteralPath $ps32)) {
-        <#  Started as its own process with a time limit. Called with & and 2>&1
-            under ErrorActionPreference Stop, any error the puller wrote - both
-            readers off, the SDK missing - became fatal here, so the whole build
-            died and the file was not refreshed from the database either. And a
-            reader stalling mid-transfer left the build waiting forever, which
-            made the scheduler skip every run after it. #>
-        $pullOut = Join-Path $env:TEMP ('ett_pull_{0}.out' -f $PID)
-        $pullErr = Join-Path $env:TEMP ('ett_pull_{0}.err' -f $PID)
-        try {
-            $pullArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Days 3 -OutFile "{1}"' -f $puller, $dump
-            $pull = Start-Process -FilePath $ps32 -ArgumentList $pullArgs -NoNewWindow -PassThru `
-                                  -RedirectStandardOutput $pullOut -RedirectStandardError $pullErr
-            if (-not $pull.WaitForExit(180000)) {
-                try { $pull.Kill() } catch { }
-                Write-Output 'reader pull took over 3 minutes and was stopped; using the punches already on file'
+        <#  One process per reader, started together rather than one after the
+            other. Each reader hands over its whole log buffer, which takes the
+            better part of half a minute; done in turn that was most of the wait
+            before the dashboard saw anything. They are separate devices on
+            separate sockets, so there is nothing to share and nothing to queue.
+
+            Each writes its own dump - a reader that was unreachable this time
+            leaves its last one untouched, and the two are read back together.
+            Started as their own processes with a time limit: called inline, a
+            reader that was off made the whole build fail, and one stalling
+            mid-transfer left it waiting for ever. #>
+        $pulls = @()
+        foreach ($ip in $Readers) {
+            $safe = ($ip -replace '[^0-9A-Za-z]', '-')
+            $dump = Join-Path $DataDir ('device-punches-{0}.csv' -f $safe)           # data, kept out of the repo
+            $pullOut = Join-Path $env:TEMP ('ett_pull_{0}_{1}.out' -f $PID, $safe)
+            $pullErr = Join-Path $env:TEMP ('ett_pull_{0}_{1}.err' -f $PID, $safe)
+            try {
+                $pullArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Devices {1} -Days {2} -OutFile "{3}"' -f $puller, $ip, $PullDays, $dump
+                $proc = Start-Process -FilePath $ps32 -ArgumentList $pullArgs -NoNewWindow -PassThru `
+                                      -RedirectStandardOutput $pullOut -RedirectStandardError $pullErr
+                $pulls += [pscustomobject]@{ Ip = $ip; Proc = $proc; Dump = $dump; Out = $pullOut; Err = $pullErr }
+            } catch {
+                Write-Output ('reader pull could not run for {0}: {1}' -f $ip, $_.Exception.Message)
             }
-        } catch {
-            Write-Output ('reader pull could not run: ' + $_.Exception.Message)
-        } finally {
-            Remove-Item -LiteralPath $pullOut, $pullErr -Force -ErrorAction SilentlyContinue
         }
-        if (Test-Path -LiteralPath $dump) {
-            $devicePunches = @(Import-Csv -LiteralPath $dump)
+        # They run side by side; the limit is on the slowest, not on the sum.
+        $deadline = (Get-Date).AddMilliseconds($PullTimeoutMs)
+        foreach ($pl in $pulls) {
+            $left = [int][Math]::Max(1000, ($deadline - (Get-Date)).TotalMilliseconds)
+            if (-not $pl.Proc.WaitForExit($left)) {
+                try { $pl.Proc.Kill() } catch { }
+                Write-Output ('reader {0} took too long and was stopped; using the punches already on file' -f $pl.Ip)
+            }
+            Remove-Item -LiteralPath $pl.Out, $pl.Err -Force -ErrorAction SilentlyContinue
+        }
+        <#  An older run wrote both readers into one file. Read it too, so the
+            punches it holds are not lost on the first run after this change. #>
+        $dumps = @($pulls | ForEach-Object { $_.Dump })
+        $legacy = Join-Path $DataDir 'device-punches.csv'
+        if (Test-Path -LiteralPath $legacy) { $dumps += $legacy }
+        $seenPunch = @{}
+        foreach ($d in $dumps) {
+            if (-not (Test-Path -LiteralPath $d)) { continue }
+            foreach ($row in @(Import-Csv -LiteralPath $d)) {
+                $key = '{0}|{1}|{2}' -f $row.UserId, $row.LogDate, $row.Device
+                if ($seenPunch.ContainsKey($key)) { continue }      # both files can hold the same punch
+                $seenPunch[$key] = $true
+                $devicePunches += $row
+            }
         }
     }
 }
