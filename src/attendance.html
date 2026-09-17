@@ -1025,6 +1025,13 @@ body{
   overflow:auto;
   max-width:100%;
 }
+/* Click and hold, then move: the wide tables pan like a map. Cells keep their
+   own pointer cursor; the grab hand shows on the rest, and while dragging it
+   is the closed hand everywhere with no text being selected. */
+@media (hover:hover) and (pointer:fine){
+  .table-scroll{ cursor:grab; }
+  .table-scroll.is-dragging, .table-scroll.is-dragging *{ cursor:grabbing !important; user-select:none !important; }
+}
 .table-scroll-top{
   overflow-x:auto;
   overflow-y:hidden;
@@ -12574,6 +12581,72 @@ function buildExcelBackup(){
     grid.style.maxHeight = Math.max(240, avail) + 'px';
   }
   window.addEventListener('resize', sizeGridToViewport);
+
+  /* ---- drag to scroll ----
+     Hold the left mouse button anywhere on a wide table and move: it scrolls
+     left-right and up-down with the hand, the way a map does. Set once on the
+     document, so every table that is redrawn later works too.
+
+     A plain click still does what it did: nothing moves until the mouse has
+     travelled a few pixels, and a click that ends a drag is swallowed so it
+     does not open the day under the pointer. Form fields, buttons and links
+     are left alone, so typing into a box or selecting in it still works.
+     Mouse only: touch screens already pan with a finger. */
+  (function(){
+    var DRAG_START_PX = 6;
+    var drag = null;               // {el, x, y, left, top, pageY, moved}
+    var skipClick = false;
+    function scrollable(el){
+      return el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+    }
+    document.addEventListener('mousedown', function(e){
+      if(e.button !== 0 || e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
+      var el = e.target && e.target.closest ? e.target.closest('.table-scroll') : null;
+      if(!el) return;
+      if(e.target.closest('input, textarea, select, button, a, label, [contenteditable="true"], .month-dropdown')) return;
+      if(!scrollable(el) && document.documentElement.scrollHeight <= window.innerHeight) return;
+      drag = { el: el, x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop,
+               pageY: window.pageYOffset || document.documentElement.scrollTop || 0, moved: false };
+    }, true);
+    document.addEventListener('mousemove', function(e){
+      if(!drag) return;
+      if(!(e.buttons & 1)){ end(); return; }            // the button was let go outside the window
+      var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if(!drag.moved){
+        if(Math.abs(dx) < DRAG_START_PX && Math.abs(dy) < DRAG_START_PX) return;
+        drag.moved = true;
+        drag.el.classList.add('is-dragging');
+        try{ window.getSelection().removeAllRanges(); }catch(_){}
+      }
+      e.preventDefault();
+      drag.el.scrollLeft = drag.left - dx;
+      /* Up-down moves the table when it scrolls on its own (the grid does), and
+         the page when the table is shown in full and the page is what scrolls. */
+      if(drag.el.scrollHeight > drag.el.clientHeight + 1){
+        drag.el.scrollTop = drag.top - dy;
+      } else {
+        window.scrollTo(window.pageXOffset || 0, drag.pageY - dy);
+      }
+    }, true);
+    function end(){
+      if(!drag) return;
+      if(drag.moved){
+        drag.el.classList.remove('is-dragging');
+        skipClick = true;
+        setTimeout(function(){ skipClick = false; }, 0);    // only the click this mouseup makes
+      }
+      drag = null;
+    }
+    document.addEventListener('mouseup', end, true);
+    window.addEventListener('blur', end);
+    // The click at the end of a drag is not a click on the cell under the pointer.
+    document.addEventListener('click', function(e){
+      if(!skipClick) return;
+      skipClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  })();
 
   function fixStickyHeaderOffsets(table){
     var row1 = table.querySelector('.emp-header-row th.date-col');
