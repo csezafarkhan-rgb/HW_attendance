@@ -66,6 +66,11 @@ try {
 $rows = [System.Collections.ArrayList]::new()
 $reached = 0
 
+<#  A reader answers one session at a time. Asked while it is busy - the other
+    reader being read, or eSSL's downloader talking to it - it connects happily
+    and then reports an empty log, which looks exactly like "nothing to fetch".
+    On 21 September that is how a day's in-punches went missing. So an empty
+    read is tried once more after a pause before it is believed. #>
 foreach ($ip in $Devices) {
     if (-not $zk.Connect_Net($ip, $Port)) {
         $err = 0; [void] $zk.GetLastError([ref] $err)
@@ -83,6 +88,15 @@ foreach ($ip in $Devices) {
         line missed because the buffer moved is picked up on the next run, and
         the database has it regardless. #>
     $kept = 0; $seen = 0
+    for ($try = 1; $try -le 2; $try++) {
+    if ($try -eq 2) {
+        # Nothing at all came back. Let go, wait, and ask once more before
+        # believing a reader that has 26,000 punches on it is empty.
+        Write-Output ("{0}: read came back empty, trying again in 8s" -f $ip)
+        try { $zk.Disconnect() } catch { }
+        Start-Sleep -Seconds 8
+        if (-not $zk.Connect_Net($ip, $Port)) { break }
+    }
     try {
         if ($zk.ReadGeneralLogData(1)) {
             $id = ''; $vfy = 0; $inout = 0
@@ -106,9 +120,12 @@ foreach ($ip in $Devices) {
                 $kept++
             }
         }
-    } finally {
-        $zk.Disconnect()
+    } catch {
+        Write-Output ('{0}: {1}' -f $ip, $_.Exception.Message)
     }
+    if ($seen -gt 0) { break }
+    }
+    try { $zk.Disconnect() } catch { }
     Write-Output ("{0}: {1} records on device, {2} within the last {3} day(s)" -f $ip, $seen, $kept, $Days)
 }
 

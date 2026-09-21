@@ -2976,6 +2976,15 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <label class="month-option" id="autoSyncRow" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
         <input type="checkbox" id="autoSyncChk" checked style="width:15px;height:15px;"> Keep attendance up to date by itself
       </label>
+      <!-- How far back a sync rewrites. Punches can reach the office PC days
+           late, and the day they belong to has to be built again for them to
+           show, so a sync goes back over the last fortnight by default. -->
+      <label class="month-option" id="syncDaysRow" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        Update the last
+        <input type="number" id="syncDaysInp" min="1" max="60" step="1" value="14"
+               style="width:56px;padding:3px 6px;border:1px solid var(--line-dk);border-radius:7px;font:inherit;font-size:12px;text-align:center;">
+        days
+      </label>
       <div id="updFolderNote" style="font-size:10.5px;color:var(--ink-soft);padding:4px 10px 2px;line-height:1.4;"></div>
     </div>
     <input type="file" id="uploadInput" accept=".csv,.xlsx" style="display:none;"/>
@@ -4200,6 +4209,17 @@ var AUTOSYNC_KEY = 'hw_auto_sync';
 function autoSyncOn(){
   try{ return localStorage.getItem(AUTOSYNC_KEY) !== '0'; }catch(e){ return true; }
 }
+/* How many days back a sync rewrites. A fortnight by default: punches can reach
+   the office PC days late - on 16 September a reader stopped being downloaded
+   and its in-punches only arrived later - and the day they belong to has to be
+   built again for them to show. */
+var SYNC_DAYS_KEY = 'hw_sync_days', SYNC_DAYS_DEFAULT = 14;
+function syncDays(){
+  var n = 0;
+  try{ n = parseInt(localStorage.getItem(SYNC_DAYS_KEY), 10); }catch(e){}
+  if(!n || isNaN(n)) n = SYNC_DAYS_DEFAULT;
+  return Math.max(1, Math.min(60, n));
+}
 function isPunchFileName(name){
   return name.replace(/\.(csv|xlsx|xls)$/i, '').trim().toLowerCase() === PUNCH_FILE_BASENAME;
 }
@@ -4348,7 +4368,7 @@ function offerImportFile(file, stamp){
         /* quick=1: the readers are asked for two days and the file is rebuilt
            over ten, which is what a Sync is for. The scheduled run still does
            the full thirty. */
-        fetch(SYNC_HELPER + '/sync?quick=1', {cache:'no-store'}).then(function(r){ return r.json(); }),
+        fetch(SYNC_HELPER + '/sync?quick=1&days=' + syncDays(), {cache:'no-store'}).then(function(r){ return r.json(); }),
         180000, {ok:false, reason:'timeout'}
       ).then(function(j){
         return (j && j.ok) ? j : {ok:false, reason:(j && j.reason) || 'failed', detail:(j && j.error) || ''};
@@ -4449,7 +4469,7 @@ function offerImportFile(file, stamp){
           showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". This only reads the folder \u2014 '
             + 'use Live Sync to fetch from the punch readers first.');
         } else if(pull.ok){
-          showUploadStatus('Read the punch readers just now \u2014 nothing new to import. '
+          showUploadStatus('Read the punch readers and rebuilt the last ' + (pull.days || syncDays()) + ' days \u2014 nothing new to import. '
             + 'Everything on them is already here.');
         } else if(pull.reason === 'permission'){
           showUploadStatus('Chrome is waiting for your permission to reach the office PC. '
@@ -4503,6 +4523,21 @@ function offerImportFile(file, stamp){
   document.addEventListener('visibilitychange', function(){
     if(!document.hidden) setTimeout(autoSyncTick, 2000);         // coming back to the tab is a good moment
   });
+  var daysInp = document.getElementById('syncDaysInp');
+  if(daysInp){
+    daysInp.value = syncDays();
+    var saveDays = function(){
+      var n = Math.max(1, Math.min(60, parseInt(daysInp.value, 10) || SYNC_DAYS_DEFAULT));
+      daysInp.value = n;
+      try{ localStorage.setItem(SYNC_DAYS_KEY, String(n)); }catch(e){}
+      showUploadStatus('Sync will bring the last ' + n + ' day' + (n === 1 ? '' : 's')
+        + ' up to date, along with anything new.', false);
+    };
+    daysInp.addEventListener('change', saveDays);
+    daysInp.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ saveDays(); daysInp.blur(); } });
+    var dRow = document.getElementById('syncDaysRow');
+    if(dRow) dRow.addEventListener('click', function(e){ e.stopPropagation(); });   // typing must not close the menu
+  }
   var autoChk = document.getElementById('autoSyncChk');
   if(autoChk){
     autoChk.checked = autoSyncOn();

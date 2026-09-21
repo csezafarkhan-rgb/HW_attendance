@@ -42,22 +42,34 @@ const ALLOWED = [
 
 let running = null;          // the in-flight rebuild, if any
 
-/*  Live Sync asks for a quick build: ten days rebuilt instead of thirty, the
-    readers asked for two days instead of three, and - the part that actually
-    decides how long a Sync takes - the readers skipped altogether when eSSL's
-    downloader has already put a punch from the last twelve minutes into the
-    database, or they were read less than four minutes ago. Reading both readers
-    takes over a minute; the database usually has the same punches within a few.
-    Four is under the five minutes between the dashboard's own checks, so the
-    readers still get read on each of those - what it saves is the wait when
-    someone presses Sync just after one. The scheduled run always reads them,
-    over thirty days. */
-const QUICK = { days: '10', pullDays: '2', pullTimeout: '90000', skipPullMin: '12', pulledWithin: '4' };
-const FULL  = { days: '30', pullDays: '3', pullTimeout: '180000', skipPullMin: '0', pulledWithin: '0' };
+/*  Live Sync asks for a quick build: a fortnight rebuilt instead of thirty
+    days, and the readers skipped when there is nothing to gain - eSSL's
+    downloader already has a punch from the last twelve minutes, or they were
+    read under twenty minutes ago. A reader answers one session at a time, so
+    asking it every five minutes would crowd out eSSL's own downloader (which
+    is how a reader stopped feeding the database in September); every twenty is
+    plenty, and the rebuild in between still picks up whatever the downloader
+    has put in.
 
-function rebuild(quick) {
+    The dashboard can ask for a different window: /sync?quick=1&days=15 rebuilds
+    the last fifteen days and asks the readers for the same fifteen. Asking a
+    reader for more days costs nothing - it hands over its whole log either way
+    and the filtering happens here - so the window is only about how far back
+    the file is rewritten. That is what brings a day back when its punches
+    arrive late, as 16 September's did. */
+const QUICK = { days: '14', pullDays: '14', pullTimeout: '120000', skipPullMin: '12', pulledWithin: '20' };
+const FULL  = { days: '30', pullDays: '30', pullTimeout: '180000', skipPullMin: '0', pulledWithin: '0' };
+const MAX_DAYS = 60;
+
+function rebuild(quick, days) {
   if (running) return running;               // one at a time; latecomers join it
-  const mode = quick ? QUICK : FULL;
+  const mode = Object.assign({}, quick ? QUICK : FULL);
+  const asked = Math.round(Number(days));
+  if (Number.isFinite(asked) && asked >= 1) {
+    const d = String(Math.min(MAX_DAYS, asked));
+    mode.days = d;
+    mode.pullDays = d;
+  }
   running = new Promise(resolve => {
     const started = Date.now();
     const child = execFile('powershell.exe',
@@ -73,6 +85,7 @@ function rebuild(quick) {
         resolve({
           ok: !err,
           seconds: Math.round((Date.now() - started) / 1000),
+          days: Number(mode.days),
           rows: pick(/rows\s*:\s*(\d+)/),
           fromReaders: pick(/straight off the readers:\s*(\d+)/),
           wrote: /written\s*:/.test(text),
@@ -135,8 +148,10 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === '/sync') {
-    const quick = /(^|[?&])quick=1(&|$)/.test(req.url || '');
-    return rebuild(quick).then(result => {
+    const q = (req.url || '').split('?')[1] || '';
+    const quick = /(^|&)quick=1(&|$)/.test(q);
+    const days = (/(^|&)days=(\d{1,3})(&|$)/.exec(q) || [])[2];
+    return rebuild(quick, days).then(result => {
       res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     }).catch(e => {

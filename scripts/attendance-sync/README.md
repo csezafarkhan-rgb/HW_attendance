@@ -103,13 +103,20 @@ Rules the builder keeps, learned the hard way:
 - **One reader at a time.** Pulling both at once was tried on 16 September and
   does not work: while one reader is being read the other stops answering, so
   its punches went stale and the build sat out the timeout waiting for it.
-- **Live Sync asks for a quick build.** `/sync?quick=1` rebuilds ten days, asks
-  the readers for two, and skips the readers altogether when eSSL's downloader
-  has already put a punch from the last twelve minutes into the database, or
-  when they were read less than four minutes ago. That turns a Sync pressed
-  just after an automatic check into about four seconds instead of seventy;
-  when the readers do have to be read it is the same minute or so as before.
-  The scheduled run always reads them, over thirty days.
+- **Live Sync asks for a quick build.** `/sync?quick=1&days=14` rebuilds the
+  last fortnight and asks the readers for the same fortnight; the dashboard
+  sends whatever "Update the last N days" is set to (1-60, a fortnight by
+  default). Asking a reader for more days costs nothing - it hands over its
+  whole log either way - so the window only decides how far back the file is
+  rewritten, which is what brings a day back when its punches arrive late.
+  The readers are skipped when there is nothing to gain: eSSL's downloader
+  already has a punch from the last twelve minutes, or they were read under
+  twenty minutes ago. A Sync then takes about four seconds instead of a
+  minute. The scheduled run always reads them, over thirty days.
+- **Don't crowd the readers.** A reader answers one session at a time. Ours
+  pull at most every twenty minutes so eSSL's own downloader can still get in;
+  a reader that answers an empty log - which is what a busy one does - is
+  asked again after eight seconds rather than believed.
 - **No message boxes in a background run.** Both scripts set the process error
   mode, so a failure to start a program returns an error instead of a dialog.
   On 16 September the logon run hit "The operating system is not presently
@@ -127,6 +134,11 @@ Rules the builder keeps, learned the hard way:
   Origin, and every request must be addressed to `127.0.0.1` or `localhost`,
   which blocks drive-by pages and DNS rebinding. A build running past five
   minutes is killed with its whole process tree.
+
+If a day looks wrong (out-punches missing, say), press Live Sync with the days
+box set wide enough to cover it: the file is rebuilt over that window from the
+database and the readers, and the dashboard merges it day by day, so older days
+are corrected and nothing else is touched.
 
 The dashboard keeps itself up to date: with **Keep attendance up to date by
 itself** ticked (Update Attendance menu, on by default) an open dashboard asks
