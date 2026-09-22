@@ -19,6 +19,8 @@ param(
     [string[]] $Devices = @('192.168.1.112', '192.168.1.111'),
     [int]      $Port    = 4370,
     [int]      $Days    = 3,
+    <#  How long punches already on file are kept, whatever Days says. #>
+    [int]      $RetainDays = 45,
     [string]   $OutFile = ''
 )
 
@@ -42,6 +44,10 @@ try {
     [void] [HWSync.Win]::SetErrorMode(0x8003)
 } catch { }
 $since = (Get-Date).Date.AddDays(-$Days)
+<#  How long a punch stays on file once seen. The readers are asked for $Days,
+    but the file is rewritten in full, so carrying forward only $Days would let
+    a two-day pull throw away a fortnight of punches the build still needs. #>
+$retainSince = (Get-Date).Date.AddDays(-$RetainDays)
 
 # $PSScriptRoot is not filled in yet while the param block is being bound, so
 # the default lands here instead of beside the parameter. It writes to the data
@@ -147,7 +153,7 @@ if (Test-Path -LiteralPath $OutFile) {
     try {
         foreach ($p in @(Import-Csv -LiteralPath $OutFile)) {
             $when = $p.LogDate -as [datetime]
-            if (-not $when -or $when -lt $since) { continue }
+            if (-not $when -or $when -lt $retainSince) { continue }
             $key = '{0}|{1}|{2}' -f $p.UserId, $p.LogDate, $p.Device
             if ($known.ContainsKey($key)) { continue }
             $known[$key] = $true

@@ -6907,6 +6907,24 @@ function buildExcelBackup(){
     }
     var rec = getRecord(emp, dateStr);
     if(!rec || (rec.st !== 'PR' && rec.st !== 'HD')) return 0;
+    /* A flagged mispunch means the time on file is not when they left (or
+       arrived). The weekly status and the late/early marks already take such a
+       day to run to the edge of the shift; the hours totals did not, so one
+       day read "full hours" in the week and half a shift in the meter, the
+       grand total, the Excel export and the hours-met figure. The day is
+       credited from whichever punch is real to the shift's edge, and never
+       more than the shift itself. */
+    if(getMispunch(emp, dateStr)){
+      var owed = owedMinutes(emp, dateStr);
+      if(rec.st === 'HD') return Math.round(owed / 2);
+      var msh = parseShift(getShift(emp, dateStr));
+      var inM = rec['in'] ? toMin(rec['in']) : NaN;
+      var outM = rec.out ? toMin(rec.out) : NaN;
+      var got = !isNaN(inM) ? (msh.endMin - inM)
+              : (!isNaN(outM) ? (outM - msh.startMin) : owed);
+      if(isNaN(got) || got > owed) got = owed;
+      return got > 0 ? got : 0;
+    }
     var d = computeDurations(rec);
     if(d.totalMin != null && !isNaN(d.totalMin)) return d.totalMin;
     var f = rec.dur ? toMin(rec.dur) : 0;
@@ -7129,7 +7147,10 @@ function buildExcelBackup(){
          halfDays where the leave maths already counts it as 0.5. */
       if(isPartDay(req.leaveType)){
         var curH = halfDays[key];
-        if(curH && curH.reqId !== req.id && curH.kind !== req.leaveType){ kept++; return; }
+        /* Anything this request did not write is left exactly as it is - even
+           the same kind, which used to be replaced and then deleted on a
+           revert, taking its half (AM/PM) and note with it. */
+        if(curH && curH.reqId !== req.id){ kept++; return; }
         halfDays[key] = {
           reqId: req.id,
           kind: req.leaveType,
@@ -7145,7 +7166,7 @@ function buildExcelBackup(){
               : (req.leaveType === 'VISIT') ? 'VISIT'
               : 'LEAVE';
       var cur = overrides[key];
-      if(cur && cur.reqId !== req.id && cur.cat !== cat){ kept++; return; }
+      if(cur && cur.reqId !== req.id){ kept++; return; }
       overrides[key] = {
         cat: cat,
         detail: (cat === 'LEAVE') ? req.leaveType : '',
@@ -7155,7 +7176,7 @@ function buildExcelBackup(){
       };
     });
     if(kept){
-      showUploadStatus(kept + ' day(s) of ' + dispName(req.empName) + '’s request already carried a different mark '
+      showUploadStatus(kept + ' day(s) of ' + dispName(req.empName) + '’s request already carried a mark '
         + 'and were left as they were. Change them on the Attendance Record if the request should replace them.');
     }
     // a half day writes to halfDays, everything else to overrides - save both
@@ -7804,22 +7825,21 @@ function buildExcelBackup(){
       return Promise.resolve(pm ? 1 : 0);
     }
     var kept = 0;
-    /* Only a mark this request wrote. Marks written before request ids were
-       stamped have none, and fall back to matching the kind as before. */
-    var mine = function(m, sameKind){ return !!m && (m.reqId ? m.reqId === req.id : sameKind); };
+    /* Only a mark this request wrote. A mark made by hand carries no request
+       id, and matching it by kind alone deleted days nobody asked to remove -
+       a hand-marked CL vanished when any leave request covering it was undone.
+       Such a day is counted as kept and reported instead. */
+    var mine = function(m){ return !!m && m.reqId === req.id; };
     eachDateBetween(req.dateFrom, req.dateTo).forEach(function(d){
       var key = req.empName + '|' + d;
       if(isPartDay(req.leaveType)){
         var hd = halfDays[key];
-        if(mine(hd, hd && hd.kind === req.leaveType)) delete halfDays[key];
+        if(mine(hd)) delete halfDays[key];
         else if(hd) kept++;
         return;
       }
-      var want = (req.leaveType === 'WFH')   ? 'WFH'
-               : (req.leaveType === 'VISIT') ? 'VISIT'
-               : 'LEAVE';
       var ov = overrides[key];
-      if(mine(ov, ov && ov.cat === want)) delete overrides[key];
+      if(mine(ov)) delete overrides[key];
       else if(ov) kept++;
     });
     return Promise.all([saveOverrides(), saveHalfDays()]).then(function(){ return kept; });
@@ -9784,12 +9804,20 @@ function buildExcelBackup(){
   }
   /* Statutory amounts for one person, from gross. Kept separate from the
      unpaid-days figure so a slip can show what each is for. */
-  function statutory(gross){
+  /* gross is the monthly salary, earned is what is actually being paid for
+     this month (the salary less days before joining and days of unpaid leave).
+     ESI's ceiling is a property of the wage, so it is tested on the salary -
+     tested on the prorated figure, somebody who joined mid-month paid ESI
+     while a colleague on the same salary paid none. Both contributions are
+     then worked out on what was earned, so unpaid days lower them. */
+  function statutory(gross, earned){
     var out = {pf:0, esi:0, other:0, total:0};
-    if(!gross) return out;
-    if(payRules.pf)  out.pf  = Math.round(gross * (+payRules.pfPct||0) / 100 * 100) / 100;
+    if(earned == null) earned = gross;
+    if(earned < 0) earned = 0;
+    if(!gross && !earned) return out;
+    if(payRules.pf)  out.pf  = Math.round(earned * (+payRules.pfPct||0) / 100 * 100) / 100;
     if(payRules.esi && gross <= (+payRules.esiCap||0))
-      out.esi = Math.round(gross * (+payRules.esiPct||0) / 100 * 100) / 100;
+      out.esi = Math.round(earned * (+payRules.esiPct||0) / 100 * 100) / 100;
     out.other = Math.round((+payRules.other||0) * 100) / 100;
     out.total = Math.round((out.pf + out.esi + out.other) * 100) / 100;
     return out;
@@ -9839,6 +9867,12 @@ function buildExcelBackup(){
         // is owed - but if they worked it, that is time over and above the month.
         var xw = workedMinutes(emp, ds);
         if(xw > 0){ extraMin += xw; extraDays++; }
+        /* Leave marked on such a day still comes off the balance on the Leave
+           Record, so the slip has to show it too: it used to print three days
+           of leave beside a Leave Record that had drained five. */
+        var xov = getOverride(emp, ds), xhd = getHalfDay(emp, ds);
+        if(xov && xov.cat === 'LEAVE') leaveDays++;
+        else if(xhd) leaveDays += hdQty(xhd.kind);
         return;
       }
       workDays++;
@@ -9902,7 +9936,13 @@ function buildExcelBackup(){
        which is always nothing: the row resets the balance to zero as it charges.
        So the Leave Record read "3.33 charged to salary" while pay deducted 0.
        Each month's row is charged in that month's pay, once. */
-    var lop = payRules.allLeaveUnpaid ? leaveDays : monthDed;
+    /* Every day of leave the Leave Record charged this month, its own count -
+       computePay's own tally skipped days nothing was owed on (a Sunday, a
+       holiday, a Saturday off), so leave taken over a long weekend was drained
+       from the balance but never deducted from the pay. */
+    var takenThisMonth = Math.round((((mtxDed.clM && mtxDed.clM[mi]) || 0)
+                                   + ((mtxDed.slM && mtxDed.slM[mi]) || 0)) * 100) / 100;
+    var lop = payRules.allLeaveUnpaid ? takenThisMonth : monthDed;
     lop = Math.round(lop * 100) / 100;
     // Days the punch file calls absent with nothing marked against them. They are
     // not deducted - that is a decision, not a default - but pay should not be
@@ -9921,7 +9961,7 @@ function buildExcelBackup(){
        Shown as its own deduction so the salary itself stays the monthly figure. */
     var preJoinDays = dates.filter(function(ds){ return beforeJoining(emp, ds); }).length;
     var preJoinAmt  = Math.round(perDay * preJoinDays * 100) / 100;
-    var stat    = statutory(Math.max(0, gross - preJoinAmt)); // PF / ESI / fixed, on what was earned
+    var stat    = statutory(gross, gross - preJoinAmt - lopAmt);  // PF / ESI / fixed, on what was earned
     /* Work on a holiday, a Sunday, or a Saturday that is off for this person is
        paid. The hourly rate follows the day rate over the shift length, so a
        shorter shift earns proportionally more per hour, as it should. */

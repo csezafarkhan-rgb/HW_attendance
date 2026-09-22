@@ -39,6 +39,8 @@ param(
         data along, and a log written by a scheduled run never lands in a commit. #>
     [string] $DataDir = 'E:\Drive H- Desktop\ZAFAR LISTING\AI Projects\Attendance backup',
     [int]    $Days    = 30,
+    <#  Never write a shorter file than this, whatever Days says. #>
+    [int]    $MinCsvDays = 30,
     <#  The readers, read side by side. Days is how far back the CSV covers;
         PullDays how far back each reader is asked for - two days is plenty for
         a Live Sync, where only today matters and the database has the rest. #>
@@ -85,7 +87,13 @@ try   { $haveLock = $buildLock.WaitOne([TimeSpan]::FromMinutes(4)) }
 catch [System.Threading.AbandonedMutexException] { $haveLock = $true }   # previous run died holding it
 if (-not $haveLock) { Write-Output 'another build is still running - skipped'; exit 0 }
 
-$from = (Get-Date).Date.AddDays(-$Days)
+<#  The file is rewritten in full each build, so its window is how much of the
+    record the dashboard, the push to the site and the health check can see. A
+    quick sync asks for a few days at the readers; that must not shrink the
+    file to a few days with it. So the file always covers at least $MinCsvDays,
+    and $Days only ever widens it. #>
+$csvDays = [Math]::Max($Days, $MinCsvDays)
+$from = (Get-Date).Date.AddDays(-$csvDays)
 $to   = (Get-Date).Date
 
 $work = Join-Path $env:TEMP ('ett_build_{0}.mdb' -f $PID)

@@ -62,14 +62,15 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     check('hand-set visit kept', ctx.overrides['Asha|2026-09-12'].cat === 'VISIT' && ctx.overrides['Asha|2026-09-12'].duration === '7:30');
     check('person told a day was left alone', notices.length === 1 && /1 day/.test(notices[0]), notices);
     const reqB = { id: 'req_b', empName: 'Asha', dateFrom: '2026-09-11', dateTo: '2026-09-11', leaveType: 'Sick', message: '' };
-    await ctx.applyApprovedRequestToAttendance(reqB);   // same kind on 11th -> taken over by B
+    await ctx.applyApprovedRequestToAttendance(reqB);   // 11th is already A's: left as it is
+    check("a day another request wrote is not taken over", ctx.overrides['Asha|2026-09-11'].reqId === 'req_a');
     await ctx.revertApprovedRequest(reqA);
     check("undoing A removes A's own day", !ctx.overrides['Asha|2026-09-10']);
-    check("undoing A keeps B's day", ctx.overrides['Asha|2026-09-11'] && ctx.overrides['Asha|2026-09-11'].reqId === 'req_b');
+    check("undoing A removes the day B was refused", !ctx.overrides['Asha|2026-09-11']);
     check('undoing A keeps the visit', ctx.overrides['Asha|2026-09-12'] && ctx.overrides['Asha|2026-09-12'].cat === 'VISIT');
-    vm.runInContext("overrides['Ravi|2026-09-01'] = {cat:'LEAVE', detail:'CL'};", ctx);   // an old mark, no id
-    await ctx.revertApprovedRequest({ id: 'req_old', empName: 'Ravi', dateFrom: '2026-09-01', dateTo: '2026-09-01', leaveType: 'CL' });
-    check('old marks without an id still revert by kind', !ctx.overrides['Ravi|2026-09-01']);
+    vm.runInContext("overrides['Ravi|2026-09-01'] = {cat:'LEAVE', detail:'CL'};", ctx);   // marked by hand, no id
+    const keptOld = await ctx.revertApprovedRequest({ id: 'req_old', empName: 'Ravi', dateFrom: '2026-09-01', dateTo: '2026-09-01', leaveType: 'CL' });
+    check('a mark made by hand is kept, not deleted by kind', !!ctx.overrides['Ravi|2026-09-01'] && keptOld === 1, keptOld);
     const half = { id: 'req_h', empName: 'Neha', dateFrom: '2026-09-15', dateTo: '2026-09-15', leaveType: 'HALF', half: 'PM', message: '' };
     vm.runInContext("halfDays['Neha|2026-09-15'] = {kind:'SHORT', note:'by hand'};", ctx);
     await ctx.applyApprovedRequestToAttendance(half);
