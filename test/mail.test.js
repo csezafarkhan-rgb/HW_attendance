@@ -5,6 +5,7 @@ const path = require('path');
 const Module = require('module');
 const REPO = path.resolve(__dirname, '..');
 const mailer = require(path.join(REPO, 'mailer.js'));
+const bcrypt = require(path.join(REPO, 'node_modules', 'bcryptjs'));
 
 const results = [];
 function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(detail))); }
@@ -25,19 +26,36 @@ const SECRET = 'test-secret-for-signing-links';
 
 /* ---------------- what the messages say ---------------- */
 {
+  check('times carry am and pm', mailer.clock('9:33') === '9:33 AM' && mailer.clock('16:17') === '4:17 PM'
+    && mailer.clock('12:04') === '12:04 PM' && mailer.clock('0:20') === '12:20 AM', mailer.clock('16:17'));
   const mail = mailer.dailyEmail({
     orgName: 'Test Co', dateLabel: 'Tue, 22 Sep',
     rows: [
       { name: 'Asha Test', 'in': '9:28', out: '18:31', state: 'present', label: 'Present' },
       { name: 'Ravi <b>Test</b>', 'in': '', out: '', state: 'missing', label: 'No punch' }
     ],
-    pending: [{ req: { empName: 'Asha Test', leaveType: 'CL', dateFrom: '2026-09-25', dateTo: '2026-09-25', message: 'Family' },
-                links: { approve: 'https://x/e/aaa', reject: 'https://x/e/bbb' } }],
-    unrequested: [], siteUrl: 'https://x'
+    hidden: 4, attached: true, siteUrl: 'https://x'
   });
   check('the subject counts who has no punch', /1 with no punch/.test(mail.subject), mail.subject);
-  check('both buttons are in the message', /https:\/\/x\/e\/aaa/.test(mail.html) && /https:\/\/x\/e\/bbb/.test(mail.html));
+  check('the daily message writes its times as am and pm',
+    /9:28 AM/.test(mail.html) && /6:31 PM/.test(mail.html), mail.html.slice(0, 40));
+  check('it says how many are hidden on the portal', /4 more on the roster are hidden/.test(mail.html));
+  check('and that the record is attached', /attached as a picture/.test(mail.html));
+  check('leave is not in the daily message', !/Waiting for a decision/.test(mail.html));
   check('a name with markup in it is escaped', /Ravi &lt;b&gt;Test&lt;\/b&gt;/.test(mail.html));
+
+  const leave = mailer.leaveEmail({
+    orgName: 'Test Co',
+    pending: [{ req: { empName: 'Asha Test', leaveType: 'CL', dateFrom: '2026-09-25', dateTo: '2026-09-25', message: 'Family' },
+                links: { approve: 'https://x/e/aaa', reject: 'https://x/e/bbb' } }],
+    unrequested: [{ req: { empName: 'Ravi Test', leaveType: 'CL', dateFrom: '2026-09-18', dateTo: '2026-09-18' },
+                    links: { approve: 'https://x/e/ccc', reject: 'https://x/e/ddd' } }],
+    siteUrl: 'https://x'
+  });
+  check('the leave message counts what needs a decision', /2 need a decision/.test(leave.subject), leave.subject);
+  check('every button is in it', ['aaa', 'bbb', 'ccc', 'ddd'].every(t => leave.html.indexOf('https://x/e/' + t) > -1));
+  check('nothing waiting means no leave message',
+    mailer.leaveEmail({ orgName: 'Test Co', pending: [], unrequested: [] }) === null);
   const page = mailer.confirmPage({ action: 'reject', unrequested: true, summary: 'Asha · 10 Sep', postTo: '/e/tok' });
   check('the page a link opens asks before it acts', /<form method="POST" action="\/e\/tok">/.test(page));
   check('and says a rejection removes the day', /removes the day/.test(page));
@@ -51,7 +69,10 @@ const SECRET = 'test-secret-for-signing-links';
 /* ---------------- pressing a button ---------------- */
 const db = {
   kv: [],
-  users: [{ id: 1, org_id: 1, email: 'boss@x.com', name: 'Boss', role: 'admin', is_active: true }],
+  users: [{ id: 1, org_id: 1, email: 'boss@x.com', name: 'Boss', role: 'admin', is_active: true,
+             password_hash: bcrypt.hashSync('password123', 4) }],
+  employees: [{ name: 'Asha Test' }, { name: 'Ravi Test' }, { name: 'Hidden Person' }],
+  records: [{ employee: 'Asha Test', data: { 'in': '9:33', out: '16:17', st: 'PR' } }],
   history: [], changes: []
 };
 function kvFind(org, key) { return db.kv.find(r => r.org_id === org && r.key === key && r.user_id === null); }
@@ -64,8 +85,11 @@ function query(sql, p) {
   const s = String(sql).replace(/\s+/g, ' ').trim();
   const rows = x => Promise.resolve({ rows: x, rowCount: x.length });
   if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(s)) return rows([]);
-  if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths'")) {
-    const r = kvFind(p[0], 'lockedMonths'); return rows(r ? [{ value: r.value }] : []);
+  const literal = /^SELECT value FROM kv WHERE org_id = \$1 AND key = '([a-zA-Z]+)'/.exec(s);
+  if (literal) { const r = kvFind(p[0], literal[1]); return rows(r ? [{ value: r.value }] : []); }
+  if (s.startsWith('SELECT key, value FROM kv WHERE org_id = $1 AND user_id IS NULL AND key = ANY($2)')) {
+    return rows(db.kv.filter(x => x.org_id === p[0] && x.user_id === null && p[1].indexOf(x.key) > -1)
+                  .map(x => ({ key: x.key, value: x.value })));
   }
   if (s.startsWith('SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL')) {
     const r = kvFind(p[0], p[1]); return rows(r ? [{ value: r.value }] : []);
@@ -76,6 +100,27 @@ function query(sql, p) {
   if (s.startsWith('INSERT INTO change_log')) { db.changes.push(p); return rows([]); }
   if (s.startsWith('INSERT INTO history')) { db.history.push({ area: p[3], item: p[4] }); return rows([]); }
   if (s.startsWith('SELECT id FROM orgs')) return rows([{ id: 1 }]);
+  if (s.startsWith('SELECT id, org_id, email, password_hash, name, role, is_active FROM users')) {
+    return rows(db.users.filter(u => u.email === p[0]));
+  }
+  if (s.startsWith('UPDATE users SET last_login_at')) return rows([]);
+  if (s.startsWith('SELECT totp_enabled, totp_secret')) return rows([{ totp_enabled: false }]);
+  if (s.startsWith('SELECT role, is_active, org_id, name FROM users WHERE id = $1')) {
+    return rows(db.users.filter(u => u.id === p[0]).map(u => ({ role: u.role, is_active: u.is_active, org_id: u.org_id, name: u.name })));
+  }
+  if (s.startsWith('SELECT name FROM employees')) return rows(db.employees.slice());
+  if (s.startsWith('SELECT employee, data FROM records')) return rows(db.records.slice());
+  if (s.startsWith('SELECT kv.value FROM kv JOIN users u')) {
+    const r = db.kv.find(x => x.key === 'visibleEmployees' && x.user_id === 1);
+    return rows(r ? [{ value: r.value }] : []);
+  }
+  if (s.startsWith('SELECT email FROM users')) {
+    return rows(db.users.filter(u => u.org_id === p[0] && u.is_active && u.role === 'admin').map(u => ({ email: u.email })));
+  }
+  if (s.startsWith('SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id = $3')) {
+    const r = db.kv.find(x => x.key === p[1] && x.user_id === p[2]);
+    return rows(r ? [{ value: r.value }] : []);
+  }
   throw new Error('fake db: unhandled SQL: ' + s.slice(0, 120));
 }
 const fakeClient = { query, release() {} };
@@ -99,6 +144,14 @@ process.env.SESSION_SECRET = SECRET;
   const srv = app.listen(0);
   await new Promise(r => srv.once('listening', r));
   const base = 'http://127.0.0.1:' + srv.address().port;
+  let adminCookie = '';
+  {
+    const r = await fetch(base + '/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'boss@x.com', password: 'password123' })
+    });
+    adminCookie = String(r.headers.get('set-cookie') || '').split(';')[0];
+  }
   const hit = async (method, url) => {
     const r = await fetch(base + url, { method, redirect: 'manual' });
     return { status: r.status, body: await r.text() };
@@ -160,6 +213,51 @@ process.env.SESSION_SECRET = SECRET;
   const locked = await hit('POST', '/e/' + tok({ k: 'unreq', org: 1, e: 'Ravi Test', d: '2026-08-10', t: 'CL', h: '', act: 'reject' }));
   const ovs3 = JSON.parse(kvFind(1, 'overrides').value);
   check('a locked month keeps its day', !!ovs3['Ravi Test|2026-08-10'] && /locked month/.test(locked.body), locked.body.slice(0, 300));
+
+  // --- what the dashboard's Email button sends ---
+  db.kv.push({ org_id: 1, user_id: 1, key: 'visibleEmployees', version: '1',
+               value: JSON.stringify({ 'Asha Test': true, 'Ravi Test': true, 'Hidden Person': false }) });
+  process.env.RESEND_API_KEY = 'test-key';
+  process.env.RESEND_FROM = 'Attendance <a@b.test>';
+  const sent = [];
+  const realFetch = global.fetch;
+  global.fetch = function (url, opts) {
+    if (String(url).indexOf('api.resend.com') > -1) {
+      sent.push(JSON.parse(opts.body));
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: 'mail_1' }) });
+    }
+    return realFetch(url, opts);
+  };
+  const asAdmin = async (method, url, body) => {
+    const r = await realFetch(base + url, {
+      method, headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    return { status: r.status, body: await r.json().catch(() => null) };
+  };
+  const onePng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const dayOut = await asAdmin('POST', '/api/mail/daily', { png: 'data:image/png;base64,' + onePng });
+  const daily = sent[sent.length - 1];
+  check('the daily message goes out', dayOut.status === 200 && !!daily, dayOut);
+  check('only the employees shown on the portal are in it',
+    daily && /Asha Test/.test(daily.html) && /Ravi Test/.test(daily.html) && !/Hidden Person/.test(daily.html));
+  check('with their times as am and pm', daily && /9:33 AM/.test(daily.html) && /4:17 PM/.test(daily.html));
+  check('and the screenshot attached',
+    daily && daily.attachments && daily.attachments.length === 1 && daily.attachments[0].content === onePng, daily && daily.attachments);
+  const pickOut = await asAdmin('POST', '/api/mail/daily', { names: ['Ravi Test'] });
+  const picked = sent[sent.length - 1];
+  check('a message can name the employees itself',
+    pickOut.status === 200 && !/Asha Test/.test(picked.html) && /Ravi Test/.test(picked.html));
+  // Everything raised above has been decided by now, so give it one to carry.
+  const waiting = JSON.parse(kvFind(1, 'leaveRequests').value);
+  waiting.push({ id: 'req_3', empName: 'Ravi Test', dateFrom: '2026-10-01', dateTo: '2026-10-01',
+                 leaveType: 'CL', status: 'pending', createdAt: '2026-09-22T06:00:00Z', updatedAt: '2026-09-22T06:00:00Z' });
+  kvSet(1, 'leaveRequests', JSON.stringify(waiting));
+  const leaveOut = await asAdmin('POST', '/api/mail/leave', {});
+  check('the leave message is separate, and carries its buttons',
+    leaveOut.status === 200 && /need/.test(sent[sent.length - 1].subject), leaveOut.body);
+  global.fetch = realFetch;
+  delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 
   // --- bad links ---
   const bad = await hit('POST', '/e/' + approveTok.slice(0, -3) + 'zzz');

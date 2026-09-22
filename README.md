@@ -148,17 +148,24 @@ authenticator app (Google Authenticator, Microsoft Authenticator or similar).
 
 ## Email
 
-With `RESEND_API_KEY` and `RESEND_FROM` set, the server sends:
+With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
 
-- **A daily summary** of the day's attendance, at the time set in **Users → Email**
-  (7:30 pm India time by default): who was in, who worked from home or was
-  visiting, who was on leave, and who has no punch. It also lists the requests
-  waiting for a decision and any leave taken without a request.
-- **A note as each request is raised**, with the same buttons.
+- **Attendance**, daily at the time set in the panel (7:30 pm India time by
+  default): the day's figures and a row per person — in, out and what the day
+  was — with times as am/pm. Only the employees **shown on the portal** are
+  listed; the rest are counted at the foot of the list. Sent from the dashboard
+  it also carries the picture the HD Screenshot button makes, of that same
+  record.
+- **Leave**: what is waiting for a decision and any leave taken without a
+  request, each with **Approve** and **Reject**. Sent beside the daily message,
+  and again on its own as each request is raised.
 
-Every active Super Admin is written to, plus any address added in **Users → Email**.
-The same panel turns each message on or off, sets the daily time, sends a test
-message, and sends today's summary immediately.
+Every active Super Admin is written to, plus any address added in the panel.
+
+The controls are on the Attendance Record, under **📧 Email** beside HD
+Screenshot: send today's attendance (with the screenshot), send the leave
+message, turn each message on or off, set the daily time, add recipients, and
+send a test message to yourself.
 
 **Approve and Reject in an email** are signed links (HMAC over `SESSION_SECRET`),
 good for 14 days. Opening one shows a page that asks once and acts on that

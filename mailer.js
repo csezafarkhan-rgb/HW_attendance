@@ -1,10 +1,12 @@
 'use strict';
 /* Email, through Resend.
  *
- * Three things go out: a daily attendance summary, a note when somebody raises
- * a leave request, and a note when leave was taken with no request behind it.
- * The last two carry Approve and Reject buttons, so a decision can be made from
- * the phone without signing in.
+ * Two kinds of message go out. The daily one is attendance alone: the day's
+ * figures, the people shown on the portal and their times, with the same
+ * picture the HD Screenshot button makes attached. The other is leave: what is
+ * waiting for a decision and what was taken without a request, each with
+ * Approve and Reject buttons, so a decision can be made from the phone without
+ * signing in. A request raised during the day is sent on its own the same way.
  *
  * A button is a signed link, not a session: the link says which request, which
  * decision, which organisation and when it expires, and it is signed with
@@ -49,6 +51,13 @@ async function send(msg) {
     text: msg.text || stripHtml(msg.html || '')
   };
   if (c.replyTo) body.reply_to = c.replyTo;
+  /* Resend takes an attachment as base64 in `content`. The daily message
+     carries the same picture the HD Screenshot button makes. */
+  if (Array.isArray(msg.attachments) && msg.attachments.length) {
+    body.attachments = msg.attachments.slice(0, 3).map(function (a) {
+      return { filename: String(a.filename || 'attachment'), content: String(a.content || '') };
+    });
+  }
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 15000);
@@ -136,6 +145,16 @@ function pill(text, colour) {
     + 'background:' + colour + '22;color:' + colour + ';">' + esc(text) + '</span>';
 }
 function dateRange(from, to) { return from === to ? from : (from + ' → ' + to); }
+/* Times are read at a glance on a phone, so they carry am/pm as the grid does:
+   9:33 reads as 9:33 AM, 16:17 as 4:17 PM. */
+function clock(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '').trim());
+  if (!m) return String(t || '');
+  let h = +m[1];
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return h + ':' + m[2] + ' ' + ap;
+}
 
 const KIND_NAME = {
   CL: 'Casual leave', Sick: 'Sick leave', Other: 'Leave', WFH: 'Work from home',
@@ -158,8 +177,9 @@ function requestCard(req, links, heading) {
     + '</div>';
 }
 
-/* The daily summary. rows: {name, in, out, state} already worked out by the
-   caller, so this file stays free of attendance rules. */
+/* The daily attendance message: the day's figures and the people shown on the
+   portal, nothing else. Leave is a message of its own. rows are worked out by
+   the caller, so this file stays free of attendance rules. */
 function dailyEmail(o) {
   const rows = o.rows || [];
   const count = function (st) { return rows.filter(function (r) { return r.state === st; }).length; };
@@ -186,21 +206,20 @@ function dailyEmail(o) {
       const colour = r.state === 'present' ? '#137A3B' : r.state === 'remote' ? '#2F6FE4'
                    : r.state === 'leave' ? '#B45309' : '#B3261E';
       return '<tr><td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + esc(r.name) + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + esc(r['in'] || '—') + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + esc(r.out || '—') + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';white-space:nowrap;">' + esc(clock(r['in']) || '—') + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';white-space:nowrap;">' + esc(clock(r.out) || '—') + '</td>'
         + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + pill(r.label || '', colour) + '</td></tr>';
     }).join('')
     + '</table>');
 
-  if ((o.pending || []).length) {
-    body.push('<h3 style="font-size:14px;margin:22px 0 10px;">Waiting for a decision</h3>');
-    o.pending.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
+  if (o.hidden) {
+    body.push('<div style="margin-top:10px;font-size:12px;color:' + SOFT + ';">'
+      + esc(o.hidden + ' more on the roster ' + (o.hidden === 1 ? 'is' : 'are') + ' hidden on the portal and left out of this list.')
+      + '</div>');
   }
-  if ((o.unrequested || []).length) {
-    body.push('<h3 style="font-size:14px;margin:22px 0 4px;">Taken without a request</h3>'
-      + '<div style="font-size:12.5px;color:' + SOFT + ';margin-bottom:10px;">'
-      + 'Marked on the record but never approved. Rejecting removes the day.</div>');
-    o.unrequested.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
+  if (o.attached) {
+    body.push('<div style="margin-top:12px;font-size:12.5px;color:' + SOFT + ';">'
+      + 'The month’s record is attached as a picture, exactly as the portal shows it.</div>');
   }
   if (o.siteUrl) {
     body.push('<div style="margin-top:20px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
@@ -208,6 +227,30 @@ function dailyEmail(o) {
   return {
     subject: 'Attendance · ' + o.dateLabel + (count('missing') ? (' · ' + count('missing') + ' with no punch') : ''),
     html: layout(o.orgName || 'Attendance', o.dateLabel, body)
+  };
+}
+
+/* The leave message: what is waiting for a decision, and leave taken with no
+   request behind it. Both carry their two buttons. */
+function leaveEmail(o) {
+  const pending = o.pending || [], unreq = o.unrequested || [];
+  const body = [];
+  if (pending.length) {
+    body.push('<h3 style="font-size:14px;margin:0 0 10px;">Waiting for a decision</h3>');
+    pending.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
+  }
+  if (unreq.length) {
+    body.push('<h3 style="font-size:14px;margin:' + (pending.length ? '22px' : '0') + ' 0 4px;">Taken without a request</h3>'
+      + '<div style="font-size:12.5px;color:' + SOFT + ';margin-bottom:10px;">'
+      + 'Marked on the record but never approved. Rejecting removes the day.</div>');
+    unreq.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
+  }
+  if (!body.length) return null;                       // nothing to say: no message
+  if (o.siteUrl) body.push('<div style="margin-top:20px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const n = pending.length + unreq.length;
+  return {
+    subject: 'Leave · ' + n + ' need' + (n === 1 ? 's' : '') + ' a decision',
+    html: layout(o.orgName || 'Attendance', o.dateLabel || 'Leave waiting for a decision', body)
   };
 }
 
@@ -255,5 +298,5 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange,
-  dailyEmail, requestEmail, requestCard, confirmPage, resultPage
+  dailyEmail, leaveEmail, requestEmail, requestCard, confirmPage, resultPage, clock
 };

@@ -1245,6 +1245,19 @@ function orgNameOf(companyInfo) {
   return (c && (c.name || c.company)) ? String(c.name || c.company) : 'Attendance';
 }
 
+/* Who the portal is showing. The selection lives per person (`visibleEmployees`,
+   a name -> true/false map), so the scheduled message follows the most recently
+   saved admin selection; a message sent from the dashboard carries its own list.
+   An employee missing from the map is hidden, exactly as the dashboard reads it. */
+async function shownEmployees(orgId) {
+  const r = await pool.query(
+    `SELECT kv.value FROM kv JOIN users u ON u.id = kv.user_id
+      WHERE kv.org_id = $1 AND kv.key = 'visibleEmployees' AND u.role = 'admin' AND u.is_active
+      ORDER BY kv.updated_at DESC LIMIT 1`, [orgId]);
+  const v = r.rows[0] ? parseJson(r.rows[0].value) : null;
+  return isPlainObject(v) ? v : null;
+}
+
 async function sharedKeys(orgId, keys) {
   const r = await pool.query(
     'SELECT key, value FROM kv WHERE org_id = $1 AND user_id IS NULL AND key = ANY($2)', [orgId, keys]);
@@ -1296,10 +1309,20 @@ function unrequestedFrom(overrides, halfDays, requests, sinceDay) {
 
 /* The day's summary, as the email will read. Returns null when there is
    nothing to say (no employees on file). */
-async function buildDailyEmail(orgId, day) {
+async function buildDailyEmail(orgId, day, opts) {
+  opts = opts || {};
   const emps = await pool.query(
     'SELECT name FROM employees WHERE org_id = $1 AND is_active ORDER BY lower(name)', [orgId]);
   if (!emps.rows.length) return null;
+  let names = emps.rows.map(e => e.name);
+  const picked = Array.isArray(opts.names) && opts.names.length ? opts.names.map(String) : null;
+  if (picked) names = names.filter(n => picked.indexOf(n) > -1);
+  else {
+    const shown = await shownEmployees(orgId);
+    if (shown) names = names.filter(n => shown[n] === true);
+  }
+  if (!names.length) names = emps.rows.map(e => e.name);      // nothing selected: send the lot
+  const hidden = emps.rows.length - names.length;
   const recs = await pool.query(
     'SELECT employee, data FROM records WHERE org_id = $1 AND day = $2', [orgId, day]);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'empNames', 'leaveRequests', 'companyInfo']);
@@ -1307,11 +1330,11 @@ async function buildDailyEmail(orgId, day) {
   recs.rows.forEach(r => { byEmp[r.employee] = r.data || {}; });
   const overrides = parseJson(kv.overrides) || {};
   const halfDays = parseJson(kv.halfDays) || {};
-  const names = parseJson(kv.empNames) || {};
-  const requests = parseJson(kv.leaveRequests) || [];
 
-  const rows = emps.rows.map(e => {
-    const name = names[e.name] || e.name;
+  const shownNames = parseJson(kv.empNames) || {};
+  const rows = names.map(empName => {
+    const e = { name: empName };
+    const name = shownNames[e.name] || e.name;
     const ov = overrides[e.name + '|' + day];
     const rec = byEmp[e.name] || {};
     let state = 'missing', label = 'No punch';
@@ -1324,7 +1347,19 @@ async function buildDailyEmail(orgId, day) {
     return { name, 'in': rec['in'] || '', out: rec.out || '', state, label };
   });
 
+  return mailer.dailyEmail({
+    orgName: orgNameOf(kv.companyInfo),
+    dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
+    rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl()
+  });
+}
+
+/* The leave message: everything waiting for a decision, with its buttons.
+   Returns null when there is nothing to decide. */
+async function buildLeaveEmail(orgId) {
   const settings = await mailSettings(orgId);
+  const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'companyInfo']);
+  const requests = parseJson(kv.leaveRequests) || [];
   const pending = requests.filter(r => r && (r.status === 'pending' || r.status === 'query'))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
@@ -1332,28 +1367,44 @@ async function buildDailyEmail(orgId, day) {
                  links: linksFor({ k: 'req', org: orgId, id: r.id }) }));
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
   const unreq = settings.unrequested
-    ? unrequestedFrom(overrides, halfDays, requests, since).slice(0, 15).map(u => ({
-        req: u, heading: 'No request on file',
-        links: linksFor({ k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
-                          t: u.leaveType, h: u.half || '' })
-      }))
+    ? unrequestedFrom(parseJson(kv.overrides) || {}, parseJson(kv.halfDays) || {}, requests, since)
+        .slice(0, 15).map(u => ({
+          req: u, heading: 'No request on file',
+          links: linksFor({ k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
+                            t: u.leaveType, h: u.half || '' })
+        }))
     : [];
-
-  const mail = mailer.dailyEmail({
-    orgName: orgNameOf(kv.companyInfo),
-    dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
-    rows, pending, unrequested: unreq, siteUrl: mailer.baseUrl()
+  return mailer.leaveEmail({
+    orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl()
   });
-  return mail;
 }
 
-async function sendDailyEmail(orgId, day) {
+async function sendDailyEmail(orgId, day, opts) {
+  opts = opts || {};
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
   const to = await mailRecipients(orgId, settings);
   if (!to.length) return { ok: false, error: 'nobody to send to' };
-  const mail = await buildDailyEmail(orgId, day || istParts().day);
+  /* The picture the dashboard took of the record, as the HD Screenshot button
+     makes it: a PNG, base64, and nothing else. */
+  let attachments = [];
+  const png = typeof opts.png === 'string' ? opts.png.replace(/^data:image\/png;base64,/, '').replace(/\s+/g, '') : '';
+  if (png && /^[A-Za-z0-9+/=]+$/.test(png) && png.length < 11 * 1024 * 1024) {
+    attachments = [{ filename: 'attendance-' + (day || istParts().day) + '.png', content: png }];
+  }
+  const mail = await buildDailyEmail(orgId, day || istParts().day,
+    { names: opts.names, attached: attachments.length > 0 });
   if (!mail) return { ok: false, error: 'no employees on file' };
+  const r = await mailer.send({ to, subject: mail.subject, html: mail.html, attachments });
+  return Object.assign({ to: to.length, attached: attachments.length > 0 }, r);
+}
+async function sendLeaveEmail(orgId) {
+  if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
+  const settings = await mailSettings(orgId);
+  const to = await mailRecipients(orgId, settings);
+  if (!to.length) return { ok: false, error: 'nobody to send to' };
+  const mail = await buildLeaveEmail(orgId);
+  if (!mail) return { ok: true, nothing: true };          // nothing waiting: no message
   const r = await mailer.send({ to, subject: mail.subject, html: mail.html });
   return Object.assign({ to: to.length }, r);
 }
@@ -1578,8 +1629,16 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   });
   res.status(r.ok ? 200 : 502).json(r);
 });
-app.post('/api/mail/daily', requireRole('admin'), async (req, res) => {
-  const r = await sendDailyEmail(req.session.orgId, istParts().day);
+/* Sent from the dashboard's Email button: it hands over the picture it has just
+   rendered and the employees it is showing, so the message matches the screen. */
+app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
+  const body = req.body || {};
+  const r = await sendDailyEmail(req.session.orgId, istParts().day,
+    { png: body.png, names: Array.isArray(body.names) ? body.names.slice(0, 200) : null });
+  res.status(r.ok ? 200 : 502).json(r);
+});
+app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {
+  const r = await sendLeaveEmail(req.session.orgId);
   res.status(r.ok ? 200 : 502).json(r);
 });
 
@@ -1601,6 +1660,8 @@ async function dailyEmailTick() {
         'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
       if (!claimed.rows.length) continue;                 // already sent today
       const r = await sendDailyEmail(org.id, day);
+      // The leave message goes out beside it, and only when something is waiting.
+      if (r.ok) { try { await sendLeaveEmail(org.id); } catch (e) { console.error('leave email:', e && e.message); } }
       if (!r.ok) {
         // Let tomorrow's run try again rather than leave the day marked as done.
         await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);

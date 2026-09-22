@@ -754,6 +754,21 @@ body{
   #requestsList .unreq-row{ flex-wrap:wrap; }
   #requestsList .unreq-row .btn{ flex:1 1 auto !important; }
 }
+/* The Email panel: two things to send, then what goes out on its own. */
+.em-dropdown{ min-width:330px; }
+.em-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
+.em-note{ font-size:11.5px; color:var(--ink-soft); padding:2px 4px 8px; }
+.em-go{ display:block; width:100%; text-align:left; margin-bottom:7px; padding:9px 12px; cursor:pointer;
+  border:1px solid #DCE3ED; border-radius:9px; background:#fff; font:600 12.5px/1.2 'Inter',sans-serif; color:var(--ink); }
+.em-go:hover{ background:#F4F7FB; border-color:#C5D0DE; }
+.em-go span{ display:block; margin-top:3px; font-weight:500; font-size:11px; color:var(--ink-soft); }
+.em-sep{ height:1px; background:var(--line); margin:8px 2px; }
+.em-row{ display:flex; align-items:center; gap:8px; padding:4px 4px; }
+.em-row.em-indent{ padding-left:24px; font-size:11.5px; color:var(--ink-soft); }
+.em-row input[type=text]{ flex:1 1 auto; min-width:0; padding:5px 8px; font-size:12px;
+  border:1px solid #CFD8E5; border-radius:7px; }
+.em-row.em-btns{ gap:6px; padding-top:8px; }
+.em-row.em-btns .btn{ width:auto !important; flex:none !important; padding:5px 12px; font-size:12px; }
 .page{display:none;}
 /* Every page runs the full width of the content column. Requests, Official
    Leaves and Backup used to be capped at 1600px and centred, which on a wide
@@ -2986,6 +3001,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     </div>
   </div>
   <button class="month-btn" id="screenshotBtn">📸 HD Screenshot</button>
+  <div class="month-picker">
+    <button class="month-btn" id="emailBtn" title="Send the record by email">📧 Email</button>
+    <div class="month-dropdown em-dropdown" id="emailDropdown"></div>
+  </div>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
 </div>
 <!-- Live Sync closes the menu it was clicked in, so the button's own label was
@@ -9061,6 +9080,133 @@ function buildExcelBackup(){
     captureScreenshot(); // render the image + copy to clipboard / show popup
   });
 
+  /* ---- Email: send the record, and say what goes out on its own ----
+     The daily message carries the same picture the HD Screenshot button makes
+     and lists only the employees shown here, so it matches the screen it was
+     sent from. Leave is a message of its own. */
+  var MAIL_CFG = null;
+  function mailEscape(s){ return escapeHtml(String(s == null ? '' : s)); }
+  function renderEmailDropdown(){
+    var dd = document.getElementById('emailDropdown');
+    if(!dd) return;
+    if(!MAIL_CFG){
+      dd.innerHTML = '<div class="em-pane"><div class="em-note">Loading…</div></div>';
+      fetch('/api/mail', {credentials:'same-origin'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(j){ MAIL_CFG = j || {configured:false}; renderEmailDropdown(); })
+        .catch(function(){ MAIL_CFG = {configured:false, error:true}; renderEmailDropdown(); });
+      return;
+    }
+    if(!MAIL_CFG.configured){
+      dd.innerHTML = '<div class="em-pane"><div class="em-note">'
+        + (MAIL_CFG.error ? 'Could not reach the server.'
+            : 'Email is off. RESEND_API_KEY and RESEND_FROM have to be set on the server.')
+        + '</div></div>';
+      return;
+    }
+    var s = MAIL_CFG.settings || {};
+    var shown = visibleEmployees().length, all = EMPLOYEES.length;
+    dd.innerHTML = '<div class="em-pane">'
+      + '<div class="em-note">Sent to ' + mailEscape((MAIL_CFG.to || []).join(', ')) + '</div>'
+      + '<button type="button" class="em-go" id="emSendDay">📨 Send today’s attendance'
+      +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
+      + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
+      +   '<span>What is waiting for a decision, with Approve and Reject</span></button>'
+      + '<div class="em-sep"></div>'
+      + '<label class="em-row"><input type="checkbox" id="emDaily"' + (s.daily !== false ? ' checked' : '') + '>'
+      +   '<span>Send the attendance message every day at</span></label>'
+      + '<div class="em-row em-indent"><input type="text" id="emAt" value="' + mailEscape(s.dailyAt || '19:30') + '" size="5"><span>India time</span></div>'
+      + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
+      +   '<span>Send a note as each request is raised</span></label>'
+      + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
+      +   '<span>Include leave taken without a request</span></label>'
+      + '<div class="em-row"><input type="text" id="emTo" placeholder="more addresses, comma separated" value="'
+      +   mailEscape((s.to || []).join(', ')) + '"></div>'
+      + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
+      +   '<button type="button" class="btn ghost" id="emTest">Send a test to me</button></div>'
+      + '<div class="em-note" id="emMsg"></div>'
+      + '</div>';
+
+    var msg = function(text, bad){
+      var m = document.getElementById('emMsg');
+      if(m){ m.textContent = text; m.style.color = bad ? '#B3261E' : '#137A3B'; }
+    };
+    var post = function(url, body, btn, label, done){
+      if(btn){ btn.disabled = true; btn.dataset.was = btn.dataset.was || btn.textContent; }
+      msg(label);
+      return fetch(url, {method:'POST', credentials:'same-origin',
+                         headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {})})
+        .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+        .then(function(out){
+          if(btn) btn.disabled = false;
+          if(!out.ok || (out.j && out.j.ok === false)) msg((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+          else done(out.j);
+        })
+        .catch(function(e){ if(btn) btn.disabled = false; msg(e.message || 'It did not go out.', true); });
+    };
+
+    var dayBtn = document.getElementById('emSendDay');
+    if(dayBtn) dayBtn.onclick = function(){
+      dayBtn.disabled = true;
+      msg('Rendering the record…');
+      var names = visibleEmployees().map(function(e){ return e.name; });
+      renderShotCanvas(2).then(function(canvas){
+        var png = '';
+        try{ png = canvas.toDataURL('image/png'); }catch(e){ png = ''; }
+        return post('/api/mail/daily', {png:png, names:names}, dayBtn, 'Sending…', function(j){
+          msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + (j.attached ? ', screenshot attached.' : '.'));
+        });
+      }).catch(function(err){
+        dayBtn.disabled = false;
+        // The picture is a nicety; the figures are the message. Send it anyway.
+        post('/api/mail/daily', {names:names}, dayBtn, 'Sending without the picture…', function(j){
+          msg('Sent to ' + (j.to || 0) + ' address(es) — the screenshot could not be made.');
+        });
+      });
+    };
+    var leaveBtn = document.getElementById('emSendLeave');
+    if(leaveBtn) leaveBtn.onclick = function(){
+      post('/api/mail/leave', {}, leaveBtn, 'Sending…', function(j){
+        msg(j.nothing ? 'Nothing is waiting for a decision — no message sent.'
+                      : ('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + '.'));
+      });
+    };
+    var testBtn = document.getElementById('emTest');
+    if(testBtn) testBtn.onclick = function(){
+      post('/api/mail/test', {}, testBtn, 'Sending…', function(){ msg('Test message sent.'); });
+    };
+    var saveBtn = document.getElementById('emSave');
+    if(saveBtn) saveBtn.onclick = function(){
+      saveBtn.disabled = true;
+      var value = {
+        daily: document.getElementById('emDaily').checked,
+        dailyAt: document.getElementById('emAt').value.trim() || '19:30',
+        requests: document.getElementById('emReq').checked,
+        unrequested: document.getElementById('emUnreq').checked,
+        to: document.getElementById('emTo').value.split(',').map(function(x){ return x.trim(); }).filter(Boolean)
+      };
+      storage.set('mailSettings', JSON.stringify(value), true).then(function(){
+        saveBtn.disabled = false;
+        MAIL_CFG = null;                       // read it back, recipients and all
+        msg('Saved.');
+        setTimeout(renderEmailDropdown, 400);
+      }).catch(function(e){ saveBtn.disabled = false; msg(e.message || 'Not saved.', true); });
+    };
+  }
+  (function(){
+    var btn = document.getElementById('emailBtn'), dd = document.getElementById('emailDropdown');
+    if(!btn || !dd) return;
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var opening = !dd.classList.contains('open');
+      dd.classList.toggle('open');
+      if(opening){ renderEmailDropdown(); positionDropdown(btn, dd); }
+    });
+    dd.addEventListener('click', function(e){ e.stopPropagation(); });
+    document.addEventListener('click', function(){ dd.classList.remove('open'); });
+  })();
+
+
   function domNodeToCanvas(node, targetScale){
     return new Promise(function(resolve, reject){
       try{
@@ -9403,24 +9549,12 @@ function buildExcelBackup(){
     return restore;
   }
 
-  function captureScreenshot(){
-    // A screenshot is a daily habit here, so it is a good moment to make sure a
-    // same-day restorable copy exists. Once per day, and never blocking.
-    try{ downloadDailySnapshot(false); }catch(e){ console.error(e); }
-    var btn = document.getElementById('screenshotBtn');
-    var originalLabel = btn.textContent;
+  /* The image the HD Screenshot button makes: an off-screen, unclipped copy of
+     the toolbar, letterhead and the whole table, rendered to a canvas. The
+     email button sends the same picture, so it is built in one place. */
+  function renderShotCanvas(scale){
     var wrap = null;
-    try{
-      btn.textContent = 'Rendering…';
-      btn.disabled = true;
-
-      // Build an off-screen, unclipped copy of the toolbar + letterhead + full
-      // table (all rows/columns, not just what's visible on screen) so the
-      // exported image is the complete record, not a cropped viewport.
-      // Sticky positioning is flattened via the .shot-clone CSS class — a
-      // static image has nothing to scroll, so a "frozen" header serves no
-      // purpose there anyway.
-      // This month only, whatever is picked on screen - see pinCurrentMonthForShot.
+    return new Promise(function(resolve, reject){
       var restoreView = pinCurrentMonthForShot();
       var source = (currentPage === 'leave') ? document.getElementById('leaveTable') : document.getElementById('attTable');
       var toolbar = document.querySelector('.toolbar');
@@ -9480,32 +9614,42 @@ function buildExcelBackup(){
       wrap.appendChild(tableClone);
       if(restoreView) restoreView();   // every copy is taken; put the view back
       document.body.appendChild(wrap);
-
-      renderNodeToCanvas(wrap, 2.5).then(function(canvas){
-        document.body.removeChild(wrap);
-        btn.textContent = originalLabel;
-        btn.disabled = false;
-
-        var filename = 'attendance-' + (state.selectedMonths.join('_') || 'record') + '-' + todayISO_full + '.png';
-
-        canvas.toBlob(function(blob){
-          if(!blob){ showUploadStatus('Screenshot failed: the browser could not produce an image file.', true); return; }
-          copyOrShare(blob, filename);
-        }, 'image/png', 1.0);
+      renderNodeToCanvas(wrap, scale || 2.5).then(function(canvas){
+        if(wrap && wrap.parentNode) document.body.removeChild(wrap);
+        resolve(canvas);
       }).catch(function(err){
         if(wrap && wrap.parentNode) document.body.removeChild(wrap);
-        btn.textContent = originalLabel;
-        btn.disabled = false;
-        console.error(err);
-        showUploadStatus('Screenshot failed: ' + err.message, true);
+        reject(err);
       });
-    }catch(setupErr){
+    }).catch(function(err){
       if(wrap && wrap.parentNode) document.body.removeChild(wrap);
-      console.error(setupErr);
+      throw err;
+    });
+  }
+  function shotFileName(){
+    return 'attendance-' + (state.selectedMonths.join('_') || 'record') + '-' + todayISO_full + '.png';
+  }
+  function captureScreenshot(){
+    // A screenshot is a daily habit here, so it is a good moment to make sure a
+    // same-day restorable copy exists. Once per day, and never blocking.
+    try{ downloadDailySnapshot(false); }catch(e){ console.error(e); }
+    var btn = document.getElementById('screenshotBtn');
+    var originalLabel = btn.textContent;
+    btn.textContent = 'Rendering…';
+    btn.disabled = true;
+    renderShotCanvas(2.5).then(function(canvas){
       btn.textContent = originalLabel;
       btn.disabled = false;
-      showUploadStatus('Screenshot failed before rendering: ' + setupErr.message, true);
-    }
+      canvas.toBlob(function(blob){
+        if(!blob){ showUploadStatus('Screenshot failed: the browser could not produce an image file.', true); return; }
+        copyOrShare(blob, shotFileName());
+      }, 'image/png', 1.0);
+    }).catch(function(err){
+      btn.textContent = originalLabel;
+      btn.disabled = false;
+      console.error(err);
+      showUploadStatus('Screenshot failed: ' + err.message, true);
+    });
   }
   function copyOrShare(blob, filename){
     // 1) Try to copy straight to the clipboard (best for WhatsApp Web / Desktop).
@@ -11197,7 +11341,7 @@ function buildExcelBackup(){
      them, but that is not discoverable, and on a wide panel the outside is a
      long way from where you are working. */
   (function(){
-    var PANELS = ['empDropdown','orderDropdown','shiftDropdown','monthDropdown','usersDropdown','leaveAsOfDropdown','leaveMonthsDropdown','payMonthDropdown','payRulesDropdown'];
+    var PANELS = ['empDropdown','orderDropdown','shiftDropdown','monthDropdown','usersDropdown','leaveAsOfDropdown','leaveMonthsDropdown','payMonthDropdown','payRulesDropdown','emailDropdown'];
     function addClose(el){
       if(!el || el.querySelector('.pnl-x')) return;
       var b = document.createElement('button');
