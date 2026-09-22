@@ -105,8 +105,9 @@ function query(sql, p) {
   }
   if (s.startsWith('UPDATE users SET last_login_at')) return rows([]);
   if (s.startsWith('SELECT totp_enabled, totp_secret')) return rows([{ totp_enabled: false }]);
-  if (s.startsWith('SELECT role, is_active, org_id, name FROM users WHERE id = $1')) {
-    return rows(db.users.filter(u => u.id === p[0]).map(u => ({ role: u.role, is_active: u.is_active, org_id: u.org_id, name: u.name })));
+  if (s.startsWith('SELECT role, is_active, org_id, name, email FROM users WHERE id = $1')) {
+    return rows(db.users.filter(u => u.id === p[0])
+      .map(u => ({ role: u.role, is_active: u.is_active, org_id: u.org_id, name: u.name, email: u.email })));
   }
   if (s.startsWith('SELECT name FROM employees')) return rows(db.employees.slice());
   if (s.startsWith('SELECT employee, data FROM records')) return rows(db.records.slice());
@@ -248,6 +249,10 @@ process.env.SESSION_SECRET = SECRET;
   const picked = sent[sent.length - 1];
   check('a message can name the employees itself',
     pickOut.status === 200 && !/Asha Test/.test(picked.html) && /Ravi Test/.test(picked.html));
+  const testOut = await asAdmin('POST', '/api/mail/test', {});
+  check('a test message goes to whoever pressed the button',
+    testOut.status === 200 && sent[sent.length - 1].to[0] === 'boss@x.com', testOut.body);
+
   // Everything raised above has been decided by now, so give it one to carry.
   const waiting = JSON.parse(kvFind(1, 'leaveRequests').value);
   waiting.push({ id: 'req_3', empName: 'Ravi Test', dateFrom: '2026-10-01', dateTo: '2026-10-01',

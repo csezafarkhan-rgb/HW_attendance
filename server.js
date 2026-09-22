@@ -105,7 +105,7 @@ app.use(session({
 app.use('/api', function (req, res, next) {
   if (!req.session || !req.session.userId) return next();
   if (req.path === '/login' || req.path === '/logout') return next();
-  pool.query('SELECT role, is_active, org_id, name FROM users WHERE id = $1', [req.session.userId])
+  pool.query('SELECT role, is_active, org_id, name, email FROM users WHERE id = $1', [req.session.userId])
     .then(function (result) {
       const u = result.rows[0];
       if (!u || !u.is_active) {
@@ -1620,8 +1620,8 @@ app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
 });
 app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });
-  const to = req.user && req.user.email;
-  if (!to) return res.status(400).json({ error: 'no_address' });
+  const to = (req.user && req.user.email) || '';
+  if (!to) return res.status(400).json({ error: 'your account has no email address on it' });
   const r = await mailer.send({
     to, subject: 'Attendance email is working',
     html: mailer.layout('Attendance', 'Test message', ['<p>This is the test message from the dashboard. '

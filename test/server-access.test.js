@@ -92,8 +92,9 @@ function query(sql, p) {
   if (s.startsWith("SELECT employee, to_char(day,'YYYY-MM-DD') AS day, data, updated_at FROM records WHERE org_id = $1")) {
     return rows(db.records.map(r => ({ employee: r.e, day: r.d, data: JSON.parse(r.data) })));
   }
-  if (s.startsWith('SELECT role, is_active, org_id, name FROM users WHERE id = $1')) {
-    return rows(db.users.filter(u => u.id === p[0]).map(u => ({ role: u.role, is_active: u.is_active, org_id: u.org_id, name: u.name })));
+  if (s.startsWith('SELECT role, is_active, org_id, name, email FROM users WHERE id = $1')) {
+    return rows(db.users.filter(u => u.id === p[0])
+      .map(u => ({ role: u.role, is_active: u.is_active, org_id: u.org_id, name: u.name, email: u.email })));
   }
   if (s.startsWith('SELECT id, org_id, email, password_hash, name, role, is_active FROM users WHERE lower(email) = $1')) {
     return rows(db.users.filter(u => u.email === p[0] || u.email.split('@')[0] === p[0]));
