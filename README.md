@@ -49,6 +49,12 @@ For automatic first-admin creation:
 - `ADMIN_NAME=<optional display name>`
 - `ORG_NAME=<optional organization name>`
 
+Email (Resend), for the daily summary and leave requests:
+
+- `RESEND_API_KEY=<key from resend.com>`
+- `RESEND_FROM=Attendance <attendance@yourdomain>` (the domain must be verified in Resend)
+- `RESEND_REPLY_TO=<optional address replies go to>`
+
 Occasional:
 
 - `SYNC_TOKEN=<long random string>` lets the office PC upload attendance and take backups (`scripts/attendance-sync/README.md`)
@@ -139,6 +145,31 @@ authenticator app (Google Authenticator, Microsoft Authenticator or similar).
   from any address. A view admin sets up two-step from the 🔐 Sign-in button.
 - Codes are checked on the server (`totp.js`, RFC 6238); a code cannot be reused,
   five wrong codes end the attempt, and recovery codes are stored only as hashes.
+
+## Email
+
+With `RESEND_API_KEY` and `RESEND_FROM` set, the server sends:
+
+- **A daily summary** of the day's attendance, at the time set in **Users → Email**
+  (7:30 pm India time by default): who was in, who worked from home or was
+  visiting, who was on leave, and who has no punch. It also lists the requests
+  waiting for a decision and any leave taken without a request.
+- **A note as each request is raised**, with the same buttons.
+
+Every active Super Admin is written to, plus any address added in **Users → Email**.
+The same panel turns each message on or off, sets the daily time, sends a test
+message, and sends today's summary immediately.
+
+**Approve and Reject in an email** are signed links (HMAC over `SESSION_SECRET`),
+good for 14 days. Opening one shows a page that asks once and acts on that
+button, so a mail scanner following links decides nothing. A link for a request
+already decided is refused, a locked month is never touched, and an approval
+writes the same marks the dashboard writes — including leaving a day alone when
+it already carries a mark from elsewhere. Rejecting leave that was never
+requested removes that day from the record, as it does in the dashboard.
+
+Decisions made this way are recorded as `approvedBy: email` and appear in the
+history like any other change.
 
 ## Security notes
 

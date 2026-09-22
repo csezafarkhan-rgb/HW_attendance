@@ -7818,7 +7818,11 @@ function buildExcelBackup(){
      leave they were never granted and the balance stays wrong. Only days that
      still match what approval created are cleared - anything since changed by
      hand is left alone rather than silently discarded. */
-  function revertApprovedRequest(req){
+  /* removeUnstamped is for a day that was never requested in the first place:
+     rejecting one of those is exactly "take this mark off the record", and the
+     mark it has to remove carries no request id. Everywhere else, undoing an
+     approval removes only what that approval wrote. */
+  function revertApprovedRequest(req, removeUnstamped){
     if(req.leaveType === 'PUNCH'){
       var pk = req.empName + '|' + req.dateFrom, pm = manualRecords[pk];
       if(pm && pm.reqId === req.id){ delete manualRecords[pk]; return saveManualRecords().then(function(){ return 0; }); }
@@ -7829,17 +7833,24 @@ function buildExcelBackup(){
        id, and matching it by kind alone deleted days nobody asked to remove -
        a hand-marked CL vanished when any leave request covering it was undone.
        Such a day is counted as kept and reported instead. */
-    var mine = function(m){ return !!m && m.reqId === req.id; };
+    var mine = function(m, sameKind){
+      if(!m) return false;
+      if(m.reqId) return m.reqId === req.id;
+      return !!removeUnstamped && !!sameKind;
+    };
     eachDateBetween(req.dateFrom, req.dateTo).forEach(function(d){
       var key = req.empName + '|' + d;
       if(isPartDay(req.leaveType)){
         var hd = halfDays[key];
-        if(mine(hd)) delete halfDays[key];
+        if(mine(hd, hd && hd.kind === req.leaveType)) delete halfDays[key];
         else if(hd) kept++;
         return;
       }
+      var want = (req.leaveType === 'WFH')   ? 'WFH'
+               : (req.leaveType === 'VISIT') ? 'VISIT'
+               : 'LEAVE';
       var ov = overrides[key];
-      if(mine(ov)) delete overrides[key];
+      if(mine(ov, ov && ov.cat === want)) delete overrides[key];
       else if(ov) kept++;
     });
     return Promise.all([saveOverrides(), saveHalfDays()]).then(function(){ return kept; });
@@ -8002,7 +8013,7 @@ function buildExcelBackup(){
     if(decision === 'rejected'){
       /* Clear the mark so the day reverts to whatever the punches say. Only the
          mark that matches this entry is touched. */
-      work = revertApprovedRequest(req);
+      work = revertApprovedRequest(req, true);   // the mark it removes was never stamped
     }
     return work.then(function(kept){
       return saveLeaveRequests().then(function(){

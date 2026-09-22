@@ -118,7 +118,15 @@ const parseShift = () => ({ startMin: 570, endMin: 1110 });          // 9:30 - 6
       check('this request’s own day is removed', !ctx.overrides['A|2026-03-11'], ctx.overrides);
       check('another request’s day is left alone', !!ctx.overrides['A|2026-03-12'], ctx.overrides);
       check('both are reported back as kept', kept === 2, kept);
-      done();
+      /* Rejecting leave that was never requested is the one case that does
+         remove an unstamped mark - that is what "removes the day" means. */
+      return ctx.revertApprovedRequest({ id: 'req_new', empName: 'A', leaveType: 'CL',
+                                         dateFrom: '2026-03-10', dateTo: '2026-03-10' }, true)
+        .then(() => {
+          check('rejecting leave taken without a request does remove the day',
+            !ctx.overrides['A|2026-03-10'], ctx.overrides);
+          done();
+        });
     });
 }
 

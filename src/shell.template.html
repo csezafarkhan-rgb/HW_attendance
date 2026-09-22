@@ -238,6 +238,7 @@
     <div class="um-card">
       <div class="um-top"><h2>👥 Users &amp; Access</h2><button id="umClose" class="um-btn">✕ Close</button></div>
       <div id="umTwoStep" class="um-addbox" style="display:none"></div>
+      <div id="umMail" class="um-addbox" style="display:none"></div>
       <div class="um-note">Accounts are stored securely in PostgreSQL. Create either an Admin account (full access) or an Employee account (their own attendance only). Passwords are never stored in plain text.</div>
       <div class="um-addbox">
         <div class="um-addrow">
@@ -2774,8 +2775,70 @@ function _initLoginGateReal(startWorkspace){
     var role=document.getElementById('umNewRole'), emp=document.getElementById('umNewAttEmp');
     function toggle(){ if(role && emp){ emp.style.display=role.value==='employee'?'':'none'; emp.placeholder=role.value==='employee'?'Employee name exactly as shown in Attendance':'Not required for admin'; } }
     if(role && !role.dataset.bound){role.dataset.bound='1';role.addEventListener('change',toggle);} toggle();
-    serverRenderUsers(); renderTwoStep(); modal.style.display='flex';
+    serverRenderUsers(); renderTwoStep(); renderMailCard(); modal.style.display='flex';
   }
+
+  /* Email (Resend): who the daily summary and the request notes go to, and
+     when. The keys themselves are set on the server; this says what is sent. */
+  function renderMailCard(){
+    var box=document.getElementById('umMail'); if(!box) return;
+    function el(tag, props, kids){ var e=document.createElement(tag); Object.keys(props||{}).forEach(function(k){ if(k==='style') e.style.cssText=props[k]; else e[k]=props[k]; }); (kids||[]).forEach(function(c){ if(c) e.appendChild(typeof c==='string'?document.createTextNode(c):c); }); return e; }
+    box.style.display='block';
+    box.innerHTML='';
+    box.appendChild(el('div',{style:'font-weight:800;margin-bottom:4px;',textContent:'📧 Email'}));
+    var body=el('div',{className:'um-note',textContent:'Loading…'}); box.appendChild(body);
+    userApi('/api/mail').then(function(st){
+      body.innerHTML='';
+      if(!st.configured){
+        body.appendChild(el('div',{textContent:'Email is off. Set RESEND_API_KEY and RESEND_FROM on the server to turn it on.'}));
+        return;
+      }
+      var s=st.settings||{};
+      var daily=el('input',{type:'checkbox',checked:s.daily!==false});
+      var at=el('input',{type:'text',className:'um-pwin',value:s.dailyAt||'19:30',style:'width:78px;'});
+      var reqs=el('input',{type:'checkbox',checked:s.requests!==false});
+      var unreq=el('input',{type:'checkbox',checked:s.unrequested!==false});
+      var extra=el('input',{type:'text',className:'um-pwin',placeholder:'more addresses, comma separated',
+                            value:(s.to||[]).join(', '),style:'min-width:260px;'});
+      function line(ctrl, text){ var l=el('label',{style:'display:flex;align-items:center;gap:8px;margin:6px 0;font-size:12.5px;cursor:pointer;'},[ctrl]); l.appendChild(document.createTextNode(text)); return l; }
+      body.appendChild(el('div',{style:'font-size:12.5px;margin-bottom:6px;',
+        textContent:'Sent from '+st.from+' to '+(st.to||[]).join(', ')+'.'}));
+      body.appendChild(line(daily,'A summary of the day’s attendance'));
+      var atRow=el('div',{style:'display:flex;align-items:center;gap:8px;margin:0 0 6px 26px;font-size:12.5px;'},[at]);
+      atRow.appendChild(document.createTextNode('sent at this time, India time'));
+      body.appendChild(atRow);
+      body.appendChild(line(reqs,'A note when somebody raises a leave request'));
+      body.appendChild(line(unreq,'Leave taken without a request, in the daily summary'));
+      body.appendChild(el('div',{style:'margin:8px 0 2px;font-size:12px;color:#5B6675;',textContent:'Every Super Admin is written to. Anyone else:'}));
+      body.appendChild(el('div',{className:'um-pw'},[extra]));
+      var save=el('button',{className:'um-btn um-add',textContent:'Save'});
+      var test=el('button',{className:'um-btn',textContent:'Send a test to me'});
+      var now=el('button',{className:'um-btn',textContent:'Send today’s summary now'});
+      body.appendChild(el('div',{className:'um-pw',style:'margin-top:10px;'},[save,test,now]));
+      save.onclick=function(){
+        save.disabled=true;
+        var value={ daily:daily.checked, dailyAt:at.value.trim()||'19:30', requests:reqs.checked,
+                    unrequested:unreq.checked,
+                    to:extra.value.split(',').map(function(x){return x.trim();}).filter(Boolean) };
+        userApi('/api/kv/mailSettings',{method:'PUT',body:JSON.stringify({value:JSON.stringify(value),shared:true})})
+          .then(function(){ serverFlash('✓ Email settings saved.',true); renderMailCard(); })
+          .catch(function(e){ save.disabled=false; serverFlash(serverErrorMessage(e),false); });
+      };
+      test.onclick=function(){
+        test.disabled=true;
+        userApi('/api/mail/test',{method:'POST',body:'{}'})
+          .then(function(){ test.disabled=false; serverFlash('✓ Test message sent.',true); })
+          .catch(function(e){ test.disabled=false; serverFlash(serverErrorMessage(e),false); });
+      };
+      now.onclick=function(){
+        now.disabled=true;
+        userApi('/api/mail/daily',{method:'POST',body:'{}'})
+          .then(function(r){ now.disabled=false; serverFlash('✓ Sent to '+((r&&r.to)||0)+' address(es).',true); })
+          .catch(function(e){ now.disabled=false; serverFlash(serverErrorMessage(e),false); });
+      };
+    }).catch(function(){ body.textContent='Could not read the email settings.'; });
+  }
+
 
   /* Your own two-step sign-in: turn on (password, add the key to an app,
      confirm with a code, save the recovery codes) or off (password and a code). */

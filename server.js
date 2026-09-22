@@ -17,6 +17,7 @@ const compression = require('compression');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const totp = require('./totp');
+const mailer = require('./mailer');
 
 const PORT = process.env.PORT || 3000;
 const REMEMBER_MS = 1000 * 60 * 60 * 24 * 30;   // "keep me signed in" window
@@ -775,6 +776,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   const base = req.body && req.body.baseVersion;
   const baseVersion = (typeof base === 'number' && Number.isFinite(base)) ? base : null;
   let version = null;
+  let requestsBefore = null;                 // for the email about a new request
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -785,6 +787,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         [req.session.orgId, key]);
       const row = cur.rows[0];
       if (key === 'leaveRequests') {
+        requestsBefore = row ? row.value : '[]';
         // Merged on the server rather than refused - see mergeEmployeeRequests.
         const stored = row ? row.value : '[]';
         if (req.session.role === 'employee') {
@@ -841,6 +844,13 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
     await client.query('COMMIT');
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
+  /* A request that has just been raised is emailed to the admins, with its
+     Approve and Reject buttons. After the commit and not awaited: the save has
+     already succeeded, and a slow mail server must not hold the answer up. */
+  if (shared && key === 'leaveRequests' && requestsBefore !== null) {
+    const fresh = newPendingRequests(requestsBefore, value);
+    if (fresh.length) notifyNewRequests(req.session.orgId, fresh);
+  }
   // Answer with what this account may see - the merged array holds everyone's requests.
   if (shared && req.session.role === 'employee') {
     value = valueForEmployee(key, value, (req.user && req.user.name) || '', null);
@@ -1189,6 +1199,419 @@ app.get('/healthz', async (req, res) => {
   catch (e) { res.status(500).json({ ok: false }); }
 });
 
+/* ------------------------------------------------------------------
+   Email (Resend)
+
+   A daily summary of the day's attendance, a note when somebody raises a
+   request, and a note when leave was taken without one. The request notes
+   carry Approve and Reject buttons: a signed link that opens a page asking
+   once, so a decision can be made from a phone without signing in.
+
+   Nothing is sent unless RESEND_API_KEY and RESEND_FROM are set. What goes
+   where is in the shared key `mailSettings`; recipients default to every
+   active admin account.
+   ------------------------------------------------------------------ */
+const MAIL_DEFAULTS = { daily: true, dailyAt: '19:30', requests: true, unrequested: true, to: [] };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+async function mailSettings(orgId) {
+  const r = await pool.query("SELECT value FROM kv WHERE org_id = $1 AND key = 'mailSettings' AND user_id IS NULL", [orgId]);
+  const v = r.rows[0] ? parseJson(r.rows[0].value) : null;
+  const s = Object.assign({}, MAIL_DEFAULTS, isPlainObject(v) ? v : {});
+  s.to = (Array.isArray(s.to) ? s.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20);
+  if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
+  return s;
+}
+/* Every active super admin, plus anyone named in the settings. A view admin is
+   left out: they cannot act on the buttons anyway. */
+async function mailRecipients(orgId, settings) {
+  const r = await pool.query(
+    "SELECT email FROM users WHERE org_id = $1 AND is_active AND role = 'admin' ORDER BY id", [orgId]);
+  const out = [];
+  r.rows.forEach(x => { if (EMAIL_RE.test(String(x.email || '')) && out.indexOf(x.email) === -1) out.push(x.email); });
+  (settings.to || []).forEach(e => { if (out.indexOf(e) === -1) out.push(e); });
+  return out;
+}
+/* The office is in India and the server is on UTC, so the day an email is
+   about - and the hour it is due - are worked out at +05:30. */
+const IST_MS = 5.5 * 3600 * 1000;
+function istParts(now) {
+  const d = new Date((now || Date.now()) + IST_MS);
+  return { day: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+function hhmmToMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s)); return m ? (+m[1]) * 60 + (+m[2]) : 19 * 60 + 30; }
+function orgNameOf(companyInfo) {
+  const c = parseJson(companyInfo);
+  return (c && (c.name || c.company)) ? String(c.name || c.company) : 'Attendance';
+}
+
+async function sharedKeys(orgId, keys) {
+  const r = await pool.query(
+    'SELECT key, value FROM kv WHERE org_id = $1 AND user_id IS NULL AND key = ANY($2)', [orgId, keys]);
+  const out = {};
+  r.rows.forEach(x => { out[x.key] = x.value; });
+  return out;
+}
+function linksFor(payload) {
+  const base = mailer.baseUrl();
+  const secret = process.env.SESSION_SECRET || 'dev-secret';
+  const mk = act => base + '/e/' + mailer.actionToken(Object.assign({ act }, payload), secret);
+  return { approve: mk('approve'), reject: mk('reject') };
+}
+/* Leave marked on the record that no request accounts for, newest first. The
+   dashboard's own rule: a rejected request or a punch correction covers nothing,
+   and a part-day is only covered by a part-day request of the same size. */
+function unrequestedFrom(overrides, halfDays, requests, sinceDay) {
+  const coveredFull = {}, coveredPart = {};
+  const PART = ['HALF', 'SHORT', 'THREEQ'];
+  (Array.isArray(requests) ? requests : []).forEach(r => {
+    if (!r || r.status === 'rejected' || r.leaveType === 'PUNCH') return;
+    const part = PART.indexOf(r.leaveType) > -1;
+    for (let d = new Date(r.dateFrom + 'T00:00:00Z'); d <= new Date(r.dateTo + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = r.empName + '|' + d.toISOString().slice(0, 10);
+      if (part) coveredPart[key] = r.leaveType; else coveredFull[key] = true;
+    }
+  });
+  const out = [];
+  Object.keys(overrides || {}).forEach(key => {
+    const ov = overrides[key];
+    if (!ov || ov.cat !== 'LEAVE' || coveredFull[key]) return;
+    const day = key.split('|')[1] || '';
+    if (day < sinceDay) return;
+    out.push({ empName: key.split('|')[0], dateFrom: day, dateTo: day,
+               leaveType: ov.detail === 'Sick' ? 'Sick' : 'CL', message: ov.reason || '' });
+  });
+  Object.keys(halfDays || {}).forEach(key => {
+    const hd = halfDays[key];
+    if (!hd) return;
+    const kind = hd.kind || 'HALF';
+    if (coveredPart[key] === kind || coveredFull[key]) return;
+    const day = key.split('|')[1] || '';
+    if (day < sinceDay) return;
+    out.push({ empName: key.split('|')[0], dateFrom: day, dateTo: day,
+               leaveType: kind, half: hd.half || '', message: hd.note || '' });
+  });
+  return out.sort((a, b) => b.dateFrom.localeCompare(a.dateFrom));
+}
+
+/* The day's summary, as the email will read. Returns null when there is
+   nothing to say (no employees on file). */
+async function buildDailyEmail(orgId, day) {
+  const emps = await pool.query(
+    'SELECT name FROM employees WHERE org_id = $1 AND is_active ORDER BY lower(name)', [orgId]);
+  if (!emps.rows.length) return null;
+  const recs = await pool.query(
+    'SELECT employee, data FROM records WHERE org_id = $1 AND day = $2', [orgId, day]);
+  const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'empNames', 'leaveRequests', 'companyInfo']);
+  const byEmp = {};
+  recs.rows.forEach(r => { byEmp[r.employee] = r.data || {}; });
+  const overrides = parseJson(kv.overrides) || {};
+  const halfDays = parseJson(kv.halfDays) || {};
+  const names = parseJson(kv.empNames) || {};
+  const requests = parseJson(kv.leaveRequests) || [];
+
+  const rows = emps.rows.map(e => {
+    const name = names[e.name] || e.name;
+    const ov = overrides[e.name + '|' + day];
+    const rec = byEmp[e.name] || {};
+    let state = 'missing', label = 'No punch';
+    if (ov && ov.cat === 'LEAVE') { state = 'leave'; label = 'Leave' + (ov.detail ? (' · ' + ov.detail) : ''); }
+    else if (ov && ov.cat === 'WFH') { state = 'remote'; label = 'From home'; }
+    else if (ov && ov.cat === 'VISIT') { state = 'remote'; label = 'Visit' + (ov.detail ? (' · ' + ov.detail) : ''); }
+    else if (rec['in']) { state = 'present'; label = rec.out ? 'Present' : 'In, not out yet'; }
+    const hd = halfDays[e.name + '|' + day];
+    if (hd && state !== 'leave') label += ' · part day';
+    return { name, 'in': rec['in'] || '', out: rec.out || '', state, label };
+  });
+
+  const settings = await mailSettings(orgId);
+  const pending = requests.filter(r => r && (r.status === 'pending' || r.status === 'query'))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, 15)
+    .map(r => ({ req: r, heading: r.status === 'query' ? 'A query was raised' : 'Waiting since ' + String(r.createdAt || '').slice(0, 10),
+                 links: linksFor({ k: 'req', org: orgId, id: r.id }) }));
+  const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
+  const unreq = settings.unrequested
+    ? unrequestedFrom(overrides, halfDays, requests, since).slice(0, 15).map(u => ({
+        req: u, heading: 'No request on file',
+        links: linksFor({ k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
+                          t: u.leaveType, h: u.half || '' })
+      }))
+    : [];
+
+  const mail = mailer.dailyEmail({
+    orgName: orgNameOf(kv.companyInfo),
+    dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
+    rows, pending, unrequested: unreq, siteUrl: mailer.baseUrl()
+  });
+  return mail;
+}
+
+async function sendDailyEmail(orgId, day) {
+  if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
+  const settings = await mailSettings(orgId);
+  const to = await mailRecipients(orgId, settings);
+  if (!to.length) return { ok: false, error: 'nobody to send to' };
+  const mail = await buildDailyEmail(orgId, day || istParts().day);
+  if (!mail) return { ok: false, error: 'no employees on file' };
+  const r = await mailer.send({ to, subject: mail.subject, html: mail.html });
+  return Object.assign({ to: to.length }, r);
+}
+
+/* One new request, emailed as it is raised. Never throws: a request must be
+   saved whether or not the email goes out. */
+async function notifyNewRequests(orgId, added) {
+  try {
+    if (!mailer.ready() || !added.length) return;
+    const settings = await mailSettings(orgId);
+    if (!settings.requests) return;
+    const to = await mailRecipients(orgId, settings);
+    if (!to.length) return;
+    const kv = await sharedKeys(orgId, ['companyInfo']);
+    for (const r of added.slice(0, 5)) {
+      const mail = mailer.requestEmail({
+        orgName: orgNameOf(kv.companyInfo), req: r,
+        links: linksFor({ k: 'req', org: orgId, id: r.id }),
+        siteUrl: mailer.baseUrl()
+      });
+      await mailer.send({ to, subject: mail.subject, html: mail.html });
+    }
+  } catch (e) {
+    console.error('request email failed (request itself was saved):', e && e.message);
+  }
+}
+/* Which requests are new and still waiting, comparing what was stored with
+   what was just saved. */
+function newPendingRequests(beforeText, afterText) {
+  const before = parseJson(beforeText), after = parseJson(afterText);
+  if (!Array.isArray(after)) return [];
+  const had = {};
+  (Array.isArray(before) ? before : []).forEach(r => { if (r && r.id) had[String(r.id)] = true; });
+  return after.filter(r => r && r.id && !had[String(r.id)] && r.status === 'pending');
+}
+
+/* ---- acting on a button in an email ---- */
+
+const PART_KINDS = ['HALF', 'SHORT', 'THREEQ'];
+function markForRequest(req) {
+  if (PART_KINDS.indexOf(req.leaveType) > -1) {
+    return { key: 'halfDays', value: {
+      reqId: req.id, kind: req.leaveType, half: req.half || '', leave: 'CL',
+      note: (req.half === 'PM' ? 'Second half' : 'First half') + (req.message ? (' · ' + req.message) : ''),
+      at: new Date().toISOString() } };
+  }
+  const cat = req.leaveType === 'WFH' ? 'WFH' : req.leaveType === 'VISIT' ? 'VISIT' : 'LEAVE';
+  return { key: 'overrides', value: {
+    cat, detail: cat === 'LEAVE' ? req.leaveType : '', reason: req.message || '',
+    reqId: req.id, at: new Date().toISOString() } };
+}
+function daysBetween(from, to) {
+  const out = [];
+  for (let d = new Date(from + 'T00:00:00Z'); d <= new Date(to + 'T00:00:00Z') && out.length < 400; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+/* Applies one emailed decision inside a single transaction, writing exactly what
+   the dashboard writes: the request's new status, and the marks an approval puts
+   on the record. A day already carrying somebody else's mark is left alone, and
+   a locked month is not touched at all. */
+async function applyEmailDecision(p) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await lockedMonthsOf(client, p.org);
+    const read = async key => {
+      const r = await client.query(
+        'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE', [p.org, key]);
+      return r.rows[0] ? r.rows[0].value : null;
+    };
+    const write = async (key, before, after) => {
+      await client.query(
+        `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, NULL)
+         ON CONFLICT (org_id, key) WHERE user_id IS NULL
+         DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
+        [p.org, key, after]);
+      await logChange(client, p.org, 'kv', key, null);
+      const changes = diffValue(before, after);
+      if (changes.length) await addHistory(client, p.org, null, 'email decision', key, changes);
+    };
+    const now = new Date().toISOString();
+    const reqsText = await read('leaveRequests');
+    const reqs = parseJson(reqsText) || [];
+    let skipped = 0, kept = 0, summary = '';
+
+    if (p.k === 'req') {
+      const req = reqs.filter(r => r && r.id === p.id)[0];
+      if (!req) { await client.query('ROLLBACK'); return { ok: false, title: 'That request is gone', detail: 'It is no longer on file.' }; }
+      if (req.status !== 'pending' && req.status !== 'query') {
+        await client.query('ROLLBACK');
+        return { ok: false, title: 'Already decided',
+                 detail: dispReq(req) + ' was already ' + req.status + '. Open the dashboard to change it.' };
+      }
+      req.status = p.act === 'approve' ? 'approved' : 'rejected';
+      req.updatedAt = now;
+      if (p.act === 'approve') req.approvedBy = 'email';
+      else delete req.approvedBy;
+      summary = dispReq(req);
+
+      if (p.act === 'approve') {
+        if (req.leaveType === 'PUNCH') {
+          const beforeM = await read('manualRecords');
+          const man = parseJson(beforeM) || {};
+          const key = req.empName + '|' + req.dateFrom;
+          if (locked[req.dateFrom.slice(0, 7)]) skipped++;
+          else if (man[key] && man[key].reqId !== req.id) kept++;
+          else {
+            man[key] = { 'in': req.punchIn || '', out: req.punchOut || '',
+                         st: (req.punchIn || req.punchOut) ? 'PR' : 'AB', reqId: req.id };
+            await write('manualRecords', beforeM, JSON.stringify(man));
+          }
+        } else {
+          const mark = markForRequest(req);
+          const beforeK = await read(mark.key);
+          const map = parseJson(beforeK) || {};
+          let wrote = 0;
+          daysBetween(req.dateFrom, req.dateTo).forEach(d => {
+            const key = req.empName + '|' + d;
+            if (locked[d.slice(0, 7)]) { skipped++; return; }
+            if (map[key] && map[key].reqId !== req.id) { kept++; return; }
+            map[key] = mark.value;
+            wrote++;
+          });
+          if (wrote) await write(mark.key, beforeK, JSON.stringify(map));
+        }
+      }
+      await write('leaveRequests', reqsText, JSON.stringify(reqs));
+    } else if (p.k === 'unreq') {
+      const covered = reqs.some(r => r && r.empName === p.e && r.status !== 'rejected'
+                                  && r.dateFrom <= p.d && r.dateTo >= p.d
+                                  && (PART_KINDS.indexOf(r.leaveType) > -1) === (PART_KINDS.indexOf(p.t) > -1));
+      if (covered) {
+        await client.query('ROLLBACK');
+        return { ok: false, title: 'Already settled', detail: p.e + '’s ' + p.d + ' now has a request against it.' };
+      }
+      const fresh = {
+        id: 'req_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex'),
+        empName: p.e, dateFrom: p.d, dateTo: p.d, leaveType: p.t, half: p.h || '',
+        message: 'Taken without a request', status: p.act === 'approve' ? 'approved' : 'rejected',
+        adminNote: p.act === 'approve' ? 'Approved by email' : 'Not authorised — the day was removed from the record.',
+        employeeReply: '', createdAt: now, updatedAt: now
+      };
+      if (p.act === 'approve') fresh.approvedBy = 'email';
+      reqs.push(fresh);
+      summary = dispReq(fresh);
+      if (p.act === 'reject') {
+        if (locked[p.d.slice(0, 7)]) skipped++;
+        else {
+          const key = p.e + '|' + p.d;
+          const part = PART_KINDS.indexOf(p.t) > -1;
+          const mapKey = part ? 'halfDays' : 'overrides';
+          const beforeK = await read(mapKey);
+          const map = parseJson(beforeK) || {};
+          const cur = map[key];
+          const sameKind = cur && (part ? (cur.kind || 'HALF') === p.t : cur.cat === 'LEAVE');
+          if (cur && !cur.reqId && sameKind) { delete map[key]; await write(mapKey, beforeK, JSON.stringify(map)); }
+          else if (cur) kept++;
+        }
+      }
+      await write('leaveRequests', reqsText, JSON.stringify(reqs));
+    } else {
+      await client.query('ROLLBACK');
+      return { ok: false, title: 'That link is not valid', detail: 'Open the dashboard and decide there.' };
+    }
+    await client.query('COMMIT');
+    const notes = [];
+    if (kept) notes.push(kept + ' day(s) already carried another mark and were left alone.');
+    if (skipped) notes.push(skipped + ' day(s) are in a locked month and were not changed.');
+    return { ok: true,
+             title: p.act === 'approve' ? 'Approved' : 'Rejected',
+             detail: summary + '. ' + (notes.join(' ') || 'The dashboard shows it now.') };
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally { client.release(); }
+}
+function dispReq(r) {
+  return r.empName + ' · ' + mailer.kindName(r.leaveType) + ' · ' + mailer.dateRange(r.dateFrom, r.dateTo);
+}
+
+/* The page a button in an email opens. GET asks; POST acts - so a mail scanner
+   following every link cannot decide anything. */
+const mailActionLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+app.get('/e/:token', mailActionLimiter, (req, res) => {
+  const p = mailer.verifyAction(req.params.token, process.env.SESSION_SECRET || 'dev-secret');
+  res.set('Cache-Control', 'no-store').type('html');
+  if (!p) return res.status(400).send(mailer.resultPage('That link has expired',
+    'Links in an email are good for ' + mailer.ACTION_DAYS + ' days. Open the dashboard and decide there.', false));
+  const what = p.k === 'unreq'
+    ? (p.e + ' · ' + mailer.kindName(p.t) + ' · ' + p.d)
+    : 'the request in the email';
+  res.send(mailer.confirmPage({
+    action: p.act, unrequested: p.k === 'unreq', summary: what,
+    postTo: '/e/' + req.params.token
+  }));
+});
+app.post('/e/:token', mailActionLimiter, async (req, res) => {
+  const p = mailer.verifyAction(req.params.token, process.env.SESSION_SECRET || 'dev-secret');
+  res.set('Cache-Control', 'no-store').type('html');
+  if (!p) return res.status(400).send(mailer.resultPage('That link has expired',
+    'Open the dashboard and decide there.', false));
+  const out = await applyEmailDecision(p);
+  res.status(out.ok ? 200 : 409).send(mailer.resultPage(out.title, out.detail, out.ok));
+});
+
+/* Admin controls: what is configured, a test email, and "send today's now". */
+app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
+  const s = await mailSettings(req.session.orgId);
+  const to = await mailRecipients(req.session.orgId, s);
+  res.json({ configured: mailer.ready(), from: mailer.conf().from, siteUrl: mailer.baseUrl(), settings: s, to });
+});
+app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
+  if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });
+  const to = req.user && req.user.email;
+  if (!to) return res.status(400).json({ error: 'no_address' });
+  const r = await mailer.send({
+    to, subject: 'Attendance email is working',
+    html: mailer.layout('Attendance', 'Test message', ['<p>This is the test message from the dashboard. '
+      + 'Daily summaries and leave requests will arrive here.</p>'])
+  });
+  res.status(r.ok ? 200 : 502).json(r);
+});
+app.post('/api/mail/daily', requireRole('admin'), async (req, res) => {
+  const r = await sendDailyEmail(req.session.orgId, istParts().day);
+  res.status(r.ok ? 200 : 502).json(r);
+});
+
+/* The daily summary goes out once, at the hour in the settings, India time.
+   Checked every five minutes: Render restarts the service when it wakes, so a
+   timer set once at boot would never fire. `maintenance_done` marks the day as
+   sent, so a restart cannot send it twice. */
+const DAILY_CHECK_MS = 5 * 60 * 1000;
+async function dailyEmailTick() {
+  if (!mailer.ready()) return;
+  const { day, min } = istParts();
+  const orgs = await pool.query('SELECT id FROM orgs ORDER BY id');
+  for (const org of orgs.rows) {
+    try {
+      const s = await mailSettings(org.id);
+      if (!s.daily || min < hhmmToMin(s.dailyAt)) continue;
+      const job = 'daily-email:' + org.id + ':' + day;
+      const claimed = await pool.query(
+        'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+      if (!claimed.rows.length) continue;                 // already sent today
+      const r = await sendDailyEmail(org.id, day);
+      if (!r.ok) {
+        // Let tomorrow's run try again rather than leave the day marked as done.
+        await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
+        console.error('daily email not sent:', r.error);
+      }
+    } catch (e) {
+      console.error('daily email tick failed:', e && e.message);
+    }
+  }
+}
+
 app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html'],
   setHeaders: (res, filePath) => {
@@ -1224,5 +1647,11 @@ process.on('unhandledRejection', function (err) {
 
 if (require.main === module) {
   app.listen(PORT, () => console.log('listening on ' + PORT));
+  if (mailer.ready()) {
+    setTimeout(dailyEmailTick, 30000).unref();
+    setInterval(dailyEmailTick, DAILY_CHECK_MS).unref();
+  } else {
+    console.log('email is off: set RESEND_API_KEY and RESEND_FROM to turn it on');
+  }
 }
 module.exports = { app, pool };
