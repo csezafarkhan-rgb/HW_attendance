@@ -245,6 +245,20 @@ process.env.SESSION_SECRET = SECRET;
   check('with their times as am and pm', daily && /9:33 AM/.test(daily.html) && /4:17 PM/.test(daily.html));
   check('and the screenshot attached',
     daily && daily.attachments && daily.attachments.length === 1 && daily.attachments[0].content === onePng, daily && daily.attachments);
+  /* A day worked from home has no punches: the times say so rather than
+     showing two dashes. */
+  const todayIst = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const ovNow = JSON.parse(kvFind(1, 'overrides').value);
+  ovNow['Ravi Test|' + todayIst] = { cat: 'WFH' };
+  kvSet(1, 'overrides', JSON.stringify(ovNow));
+  const jpegOut = await asAdmin('POST', '/api/mail/daily',
+    { png: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==' });
+  const withJpeg = sent[sent.length - 1];
+  check('a JPEG is attached as a JPEG',
+    jpegOut.status === 200 && withJpeg.attachments[0].filename.slice(-4) === '.jpg', withJpeg.attachments);
+  check('a day from home reads WFH in the times, not dashes',
+    /WFH/.test(withJpeg.html) && /From home/.test(withJpeg.html));
+
   const pickOut = await asAdmin('POST', '/api/mail/daily', { names: ['Ravi Test'] });
   const picked = sent[sent.length - 1];
   check('a message can name the employees itself',
@@ -252,6 +266,18 @@ process.env.SESSION_SECRET = SECRET;
   const testOut = await asAdmin('POST', '/api/mail/test', {});
   check('a test message goes to whoever pressed the button',
     testOut.status === 200 && sent[sent.length - 1].to[0] === 'boss@x.com', testOut.body);
+
+  /* An account can sign in by name, so what is stored as its email is not
+     always an address - Resend answered such a send with "Invalid `to` field". */
+  db.users.push({ id: 2, org_id: 1, email: 'zafar@example.com', name: 'Z', role: 'admin', is_active: true });
+  db.users[0].email = 'Boss';
+  const oddOut = await asAdmin('POST', '/api/mail/test', {});
+  check('an account whose email is not an address falls back to one that is',
+    oddOut.status === 200 && sent[sent.length - 1].to[0] === 'zafar@example.com', oddOut.body);
+  check('and nothing invalid is ever handed to Resend',
+    sent.every(m => m.to.every(a => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(a))), sent.map(m => m.to));
+  db.users[0].email = 'boss@x.com';
+  db.users.pop();
 
   // Everything raised above has been decided by now, so give it one to carry.
   const waiting = JSON.parse(kvFind(1, 'leaveRequests').value);

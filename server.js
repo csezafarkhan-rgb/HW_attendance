@@ -1212,6 +1212,7 @@ app.get('/healthz', async (req, res) => {
    active admin account.
    ------------------------------------------------------------------ */
 const MAIL_DEFAULTS = { daily: true, dailyAt: '19:30', requests: true, unrequested: true, to: [] };
+const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 async function mailSettings(orgId) {
@@ -1337,14 +1338,16 @@ async function buildDailyEmail(orgId, day, opts) {
     const name = shownNames[e.name] || e.name;
     const ov = overrides[e.name + '|' + day];
     const rec = byEmp[e.name] || {};
-    let state = 'missing', label = 'No punch';
+    let state = 'missing', label = 'No punch', away = '';
     if (ov && ov.cat === 'LEAVE') { state = 'leave'; label = 'Leave' + (ov.detail ? (' · ' + ov.detail) : ''); }
-    else if (ov && ov.cat === 'WFH') { state = 'remote'; label = 'From home'; }
-    else if (ov && ov.cat === 'VISIT') { state = 'remote'; label = 'Visit' + (ov.detail ? (' · ' + ov.detail) : ''); }
+    else if (ov && ov.cat === 'WFH') { state = 'remote'; label = 'From home'; away = 'WFH'; }
+    else if (ov && ov.cat === 'VISIT') { state = 'remote'; label = 'Visit' + (ov.detail ? (' · ' + ov.detail) : ''); away = 'Visit'; }
     else if (rec['in']) { state = 'present'; label = rec.out ? 'Present' : 'In, not out yet'; }
     const hd = halfDays[e.name + '|' + day];
     if (hd && state !== 'leave') label += ' · part day';
-    return { name, 'in': rec['in'] || '', out: rec.out || '', state, label };
+    /* A day worked from home or at a customer has no punches, and two dashes
+       said nothing about it: the times read WFH or Visit instead. */
+    return { name, 'in': rec['in'] || away, out: rec.out || away, state, label };
   });
 
   return mailer.dailyEmail({
@@ -1384,13 +1387,16 @@ async function sendDailyEmail(orgId, day, opts) {
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
   const to = await mailRecipients(orgId, settings);
-  if (!to.length) return { ok: false, error: 'nobody to send to' };
+  if (!to.length) return { ok: false, error: NO_ADDRESS };
   /* The picture the dashboard took of the record, as the HD Screenshot button
      makes it: a PNG, base64, and nothing else. */
   let attachments = [];
-  const png = typeof opts.png === 'string' ? opts.png.replace(/^data:image\/png;base64,/, '').replace(/\s+/g, '') : '';
-  if (png && /^[A-Za-z0-9+/=]+$/.test(png) && png.length < 11 * 1024 * 1024) {
-    attachments = [{ filename: 'attendance-' + (day || istParts().day) + '.png', content: png }];
+  const raw = typeof opts.png === 'string' ? opts.png : '';
+  const head = /^data:image\/(png|jpeg);base64,/.exec(raw);
+  const picture = raw.replace(/^data:image\/[a-z]+;base64,/, '').replace(/\s+/g, '');
+  if (picture && /^[A-Za-z0-9+/=]+$/.test(picture) && picture.length < 11 * 1024 * 1024) {
+    const ext = (head && head[1] === 'jpeg') ? 'jpg' : 'png';
+    attachments = [{ filename: 'attendance-' + (day || istParts().day) + '.' + ext, content: picture }];
   }
   const mail = await buildDailyEmail(orgId, day || istParts().day,
     { names: opts.names, attached: attachments.length > 0 });
@@ -1402,7 +1408,7 @@ async function sendLeaveEmail(orgId) {
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
   const to = await mailRecipients(orgId, settings);
-  if (!to.length) return { ok: false, error: 'nobody to send to' };
+  if (!to.length) return { ok: false, error: NO_ADDRESS };
   const mail = await buildLeaveEmail(orgId);
   if (!mail) return { ok: true, nothing: true };          // nothing waiting: no message
   const r = await mailer.send({ to, subject: mail.subject, html: mail.html });
@@ -1616,18 +1622,31 @@ app.post('/e/:token', mailActionLimiter, async (req, res) => {
 app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
   const s = await mailSettings(req.session.orgId);
   const to = await mailRecipients(req.session.orgId, s);
-  res.json({ configured: mailer.ready(), from: mailer.conf().from, siteUrl: mailer.baseUrl(), settings: s, to });
+  const mine = String((req.user && req.user.email) || '');
+  res.json({ configured: mailer.ready(), from: mailer.conf().from, siteUrl: mailer.baseUrl(),
+             settings: s, to, you: EMAIL_RE.test(mine) ? mine : '' });
 });
 app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });
-  const to = (req.user && req.user.email) || '';
-  if (!to) return res.status(400).json({ error: 'your account has no email address on it' });
+  /* An account can sign in by name or by the part before the @, so what is
+     stored as its email is not always an address. Resend answers such a send
+     with "Invalid `to` field", which says nothing about whose address is
+     wrong; the address is checked here and the answer names it. */
+  let to = String((req.user && req.user.email) || '').trim();
+  if (!EMAIL_RE.test(to)) {
+    const fallback = await mailRecipients(req.session.orgId, await mailSettings(req.session.orgId));
+    if (!fallback.length) {
+      return res.status(400).json({ error: 'Your account has no email address on it ('
+        + (to || 'blank') + '), and no other admin has one either. Put an address on the account in Users.' });
+    }
+    to = fallback[0];
+  }
   const r = await mailer.send({
     to, subject: 'Attendance email is working',
     html: mailer.layout('Attendance', 'Test message', ['<p>This is the test message from the dashboard. '
       + 'Daily summaries and leave requests will arrive here.</p>'])
   });
-  res.status(r.ok ? 200 : 502).json(r);
+  res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to }, r));
 });
 /* Sent from the dashboard's Email button: it hands over the picture it has just
    rendered and the employees it is showing, so the message matches the screen. */

@@ -9107,7 +9107,9 @@ function buildExcelBackup(){
     var s = MAIL_CFG.settings || {};
     var shown = visibleEmployees().length, all = EMPLOYEES.length;
     dd.innerHTML = '<div class="em-pane">'
-      + '<div class="em-note">Sent to ' + mailEscape((MAIL_CFG.to || []).join(', ')) + '</div>'
+      + '<div class="em-note">Sent to ' + (((MAIL_CFG.to || []).length)
+            ? mailEscape(MAIL_CFG.to.join(', '))
+            : 'nobody yet — no admin account has an address on it') + '</div>'
       + '<button type="button" class="em-go" id="emSendDay">📨 Send today’s attendance'
       +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
       + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
@@ -9123,7 +9125,8 @@ function buildExcelBackup(){
       + '<div class="em-row"><input type="text" id="emTo" placeholder="more addresses, comma separated" value="'
       +   mailEscape((s.to || []).join(', ')) + '"></div>'
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
-      +   '<button type="button" class="btn ghost" id="emTest">Send a test to me</button></div>'
+      +   '<button type="button" class="btn ghost" id="emTest">'
+      +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button></div>'
       + '<div class="em-note" id="emMsg"></div>'
       + '</div>';
 
@@ -9156,7 +9159,8 @@ function buildExcelBackup(){
             + (j.attached ? ', screenshot attached.' : ' — without the screenshot.'));
       };
       renderShotCanvas(1.5).then(function(canvas){
-        var png = pngUnder(canvas, 6 * 1024 * 1024);      // 6MB of picture is plenty
+        var png = imageUnder(canvas, 6 * 1024 * 1024);    // 6MB of picture is plenty
+        if(!png) msg('The record is too big to attach — sending the figures…');
         return post('/api/mail/daily', {png:png, names:names}, dayBtn, 'Sending…', told)
           .then(function(out){
             // Still too big for the server: the figures matter more than the picture.
@@ -9649,15 +9653,31 @@ function buildExcelBackup(){
     ctx.drawImage(canvas, 0, 0, c.width, c.height);
     return c;
   }
-  function pngUnder(canvas, maxBytes){
-    var cur = canvas, url = '';
-    for(var i = 0; i < 6; i++){
-      try{ url = cur.toDataURL('image/png'); }catch(e){ return ''; }
-      // base64 carries three bytes in four characters, so this is the real size.
-      if(url.length * 0.75 <= maxBytes) return url;
+  /* base64 carries three bytes in four characters, so this is the real size. */
+  function dataUrlBytes(url){ return Math.round(String(url).length * 0.75); }
+  function tryDataUrl(canvas, type, quality){
+    try{
+      var url = canvas.toDataURL(type, quality);
+      // A canvas too large for the browser comes back as "data:," rather than
+      // throwing, and that is not a picture.
+      return (url && url.length > 1000 && url.indexOf('base64,') > -1) ? url : '';
+    }catch(e){ return ''; }
+  }
+  /* The whole record at screenshot quality is far too big to email. A PNG is
+     tried first because the grid is flat colour and reads best that way; if it
+     will not fit, the same picture as a high-quality JPEG; and failing that,
+     drawn smaller a step at a time. Returns '' when nothing fits. */
+  function imageUnder(canvas, maxBytes){
+    var cur = canvas;
+    for(var i = 0; i < 7; i++){
+      var png = tryDataUrl(cur, 'image/png');
+      if(png && dataUrlBytes(png) <= maxBytes) return png;
+      var jpg = tryDataUrl(cur, 'image/jpeg', 0.9);
+      if(jpg && dataUrlBytes(jpg) <= maxBytes) return jpg;
       cur = shrinkCanvas(cur, 0.7);
+      if(cur.width < 400) break;                       // below this nothing is readable
     }
-    return url.length * 0.75 <= maxBytes * 2 ? url : '';
+    return '';
   }
   function shotFileName(){
     return 'attendance-' + (state.selectedMonths.join('_') || 'record') + '-' + todayISO_full + '.png';
