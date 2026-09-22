@@ -9141,8 +9141,9 @@ function buildExcelBackup(){
           if(btn) btn.disabled = false;
           if(!out.ok || (out.j && out.j.ok === false)) msg((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
           else done(out.j);
+          return out;
         })
-        .catch(function(e){ if(btn) btn.disabled = false; msg(e.message || 'It did not go out.', true); });
+        .catch(function(e){ if(btn) btn.disabled = false; msg(e.message || 'It did not go out.', true); return {ok:false, j:null}; });
     };
 
     var dayBtn = document.getElementById('emSendDay');
@@ -9150,12 +9151,19 @@ function buildExcelBackup(){
       dayBtn.disabled = true;
       msg('Rendering the record…');
       var names = visibleEmployees().map(function(e){ return e.name; });
-      renderShotCanvas(2).then(function(canvas){
-        var png = '';
-        try{ png = canvas.toDataURL('image/png'); }catch(e){ png = ''; }
-        return post('/api/mail/daily', {png:png, names:names}, dayBtn, 'Sending…', function(j){
-          msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + (j.attached ? ', screenshot attached.' : '.'));
-        });
+      var told = function(j){
+        msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
+            + (j.attached ? ', screenshot attached.' : ' — without the screenshot.'));
+      };
+      renderShotCanvas(1.5).then(function(canvas){
+        var png = pngUnder(canvas, 6 * 1024 * 1024);      // 6MB of picture is plenty
+        return post('/api/mail/daily', {png:png, names:names}, dayBtn, 'Sending…', told)
+          .then(function(out){
+            // Still too big for the server: the figures matter more than the picture.
+            if(out && out.j && out.j.error === 'payload_too_large'){
+              return post('/api/mail/daily', {names:names}, dayBtn, 'The picture was too big — sending the figures…', told);
+            }
+          });
       }).catch(function(err){
         dayBtn.disabled = false;
         // The picture is a nicety; the figures are the message. Send it anyway.
@@ -9625,6 +9633,31 @@ function buildExcelBackup(){
       if(wrap && wrap.parentNode) document.body.removeChild(wrap);
       throw err;
     });
+  }
+  /* An email attachment has to be small. A month of the record at screenshot
+     quality runs to tens of megabytes, which the server refuses outright
+     (payload_too_large), so the picture is drawn down a step at a time until
+     it fits - text stays readable long before the limit is reached. */
+  function shrinkCanvas(canvas, ratio){
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(canvas.width * ratio));
+    c.height = Math.max(1, Math.round(canvas.height * ratio));
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, 0, 0, c.width, c.height);
+    return c;
+  }
+  function pngUnder(canvas, maxBytes){
+    var cur = canvas, url = '';
+    for(var i = 0; i < 6; i++){
+      try{ url = cur.toDataURL('image/png'); }catch(e){ return ''; }
+      // base64 carries three bytes in four characters, so this is the real size.
+      if(url.length * 0.75 <= maxBytes) return url;
+      cur = shrinkCanvas(cur, 0.7);
+    }
+    return url.length * 0.75 <= maxBytes * 2 ? url : '';
   }
   function shotFileName(){
     return 'attendance-' + (state.selectedMonths.join('_') || 'record') + '-' + todayISO_full + '.png';

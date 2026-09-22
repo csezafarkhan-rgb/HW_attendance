@@ -1633,6 +1633,9 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
    rendered and the employees it is showing, so the message matches the screen. */
 app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
   const body = req.body || {};
+  /* A picture too big to send is not a reason to lose the message: the figures
+     go out without it, and the answer says so. */
+  if (typeof body.png === 'string' && body.png.length > 9 * 1024 * 1024) body.png = '';
   const r = await sendDailyEmail(req.session.orgId, istParts().day,
     { png: body.png, names: Array.isArray(body.names) ? body.names.slice(0, 200) : null });
   res.status(r.ok ? 200 : 502).json(r);
