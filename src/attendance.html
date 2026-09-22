@@ -241,10 +241,11 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
   }
   /* The column the sidebar no longer occupies. */
   .att-layout, .layout{ padding-left:var(--hw-side-w, 210px) !important; }
-  /* A short page ends where its content ends - it used to be stretched to the
-     window, leaving a blank card below. It is never shorter than the sidebar's
-     own tabs (--hw-side-need, measured in JS), and the sidebar stops with it. */
-  .att-layout{ min-height:var(--hw-side-need, 0px) !important; }
+  /* Every page fills the window, so Backup, Official Leaves and the other short
+     ones look like the grid rather than stopping halfway down with the ground
+     showing beneath them. --hw-side-y is where the card starts (JS follows it),
+     and the sidebar runs to the same foot. */
+  .att-layout{ min-height:max(var(--hw-side-need, 0px), calc(100vh - var(--hw-side-y, 0px) - 10px)) !important; }
 
   /* The seam, and the grip on it. Its own element rather than a border, since a
      6px target is the difference between resizing and missing. */
