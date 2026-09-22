@@ -209,7 +209,7 @@ function client(ip) {
     const sc = res.headers.get('set-cookie');
     if (sc) cookie = sc.split(';')[0];
     let json = null; try { json = await res.json(); } catch (e) {}
-    return { status: res.status, body: json, cookie };
+    return { status: res.status, body: json, cookie, headers: res.headers };
   };
 }
 let base = '';
@@ -438,6 +438,21 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('last upload recorded for the dashboard', status.rows === 2 && status.newestPunch === '2026-09-14' && !!status.at, status);
   // Ravi: Asha was signed out everywhere by the disable check above.
   check('employees cannot see the office-PC status', !('deviceStatus' in (await ravi('GET', '/api/kv-all')).body.values));
+
+  /* Bandwidth: the dashboard page and the two big reads must revalidate, not
+     be fetched whole every time. Serving index.html `no-store` used up the
+     plan's 5GB in three weeks and the service was suspended. */
+  const pageRes = await fetch(base + '/', { headers: { cookie: (await boss('GET', '/api/me')).cookie } });
+  const pageCc = String(pageRes.headers.get('cache-control') || '');
+  check('the dashboard page revalidates instead of downloading again',
+    /no-cache/.test(pageCc) && !/no-store/.test(pageCc), pageCc);
+  check('the page carries an ETag to revalidate against', !!pageRes.headers.get('etag'));
+  const dsHead = (await boss('GET', '/api/dataset')).headers;
+  check('the dataset revalidates too',
+    /no-cache/.test(String(dsHead.get('cache-control') || '')) && !!dsHead.get('etag'),
+    String(dsHead.get('cache-control')));
+  const kvHead = (await boss('GET', '/api/kv-all')).headers;
+  check('and so do the settings', /no-cache/.test(String(kvHead.get('cache-control') || '')), String(kvHead.get('cache-control')));
   check('backup needs the token', (await device('GET', '/api/device/backup')).status === 401);
   const bk = await device('GET', '/api/device/backup', undefined, DEVICE_TOKEN);
   let dump = null; try { dump = JSON.parse(require('zlib').gunzipSync(bk.buf).toString()); } catch (e) {}

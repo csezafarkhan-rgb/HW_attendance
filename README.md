@@ -178,6 +178,22 @@ requested removes that day from the record, as it does in the dashboard.
 Decisions made this way are recorded as `approvedBy: email` and appear in the
 history like any other change.
 
+## Bandwidth
+
+The free plan allows 5GB of responses a month, and going over it suspends the
+service. Two things used to spend it:
+
+- `index.html` carries the whole dashboard (over a megabyte) and was served
+  `no-store`, so every open, reload and second tab downloaded all of it again.
+  It is served `no-cache` now: the browser still checks on every load, so a new
+  build appears at once, but an unchanged one answers 304 with no body.
+- The change feed was polled every two seconds by every open tab. It is five
+  seconds now, easing to twenty on a screen nobody is touching, and it stops
+  while the tab is in the background.
+
+`/api/dataset` and `/api/kv-all` also revalidate, so a hydrate after someone
+else's edit costs a 304 unless something really changed.
+
 ## Security notes
 
 - **Keep the repo private.** Employee names and attendance times are personal data.

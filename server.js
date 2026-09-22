@@ -888,6 +888,7 @@ app.get('/api/kv', requireAuth, async (req, res) => {
 
 /* Bulk read — one request at boot instead of ~30 sequential gets. */
 app.get('/api/kv-all', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-cache');
   const { rows } = await pool.query(
     `SELECT key, value, version, (user_id IS NULL) AS shared FROM kv WHERE org_id = $1 AND (user_id IS NULL OR user_id = $2)
      ORDER BY (user_id IS NULL) DESC`,  // personal overrides shared
@@ -909,6 +910,11 @@ app.get('/api/kv-all', requireAuth, async (req, res) => {
 /* ---------------- employees + records ---------------- */
 
 app.get('/api/dataset', requireAuth, async (req, res) => {
+  /* Every attendance row the browser can see, re-read whenever anyone edits
+     anything. Express hashes the answer into an ETag; this asks the browser to
+     check it each time, so an unchanged dataset costs a 304 rather than the
+     whole table again. */
+  res.set('Cache-Control', 'no-cache');
   const orgId = req.session.orgId;
   const emp = req.session.role === 'employee'
     ? await pool.query(
@@ -1695,17 +1701,27 @@ async function dailyEmailTick() {
   }
 }
 
+/* index.html carries the whole dashboard and runs to well over a megabyte.
+   It was served `no-store`, so every open, every reload and every tab fetched
+   the lot again - the free plan's 5GB of bandwidth went in three weeks and the
+   service was suspended. `no-cache` still revalidates on every load, so a new
+   build is picked up at once, but an unchanged one answers 304 with no body. */
 app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html'],
+  etag: true,
+  lastModified: true,
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-store, max-age=0');
+    if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
   }
 }));
 /* The SPA catch-all must not swallow the API: without this an unknown
    /api/... path returned the dashboard HTML with status 200, so client code
    saw success and failed further along. */
 app.use('/api', (req, res) => res.status(404).json({ error: 'not_found' }));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('*', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.use((err, req, res, next) => {
   /* A body that is too large, or malformed JSON, is the caller's mistake, not a

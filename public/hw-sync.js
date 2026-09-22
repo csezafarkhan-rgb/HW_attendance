@@ -250,10 +250,26 @@
       api('GET', '/api/changes?since=0').then(function (r) { cursor = (r && r.cursor) || 0; })
         .catch(function () { /* the next poll starts from 0 and catches up */ });
 
+      /* The feed used to be asked every two seconds, all day, from every open
+         tab: 43,000 requests a day each, which is most of a bandwidth
+         allowance on its own. Five seconds is still live to the eye, and a
+         screen nobody is editing backs off to twenty until something happens
+         or the person touches the page. */
+      var quiet = 0;
+      var nextAt = 0;
+      ['click', 'keydown', 'visibilitychange'].forEach(function (ev) {
+        document.addEventListener(ev, function () { quiet = 0; }, true);
+      });
       setInterval(function () {
         if (document.hidden) return;   // don't poll a background tab
+        var wait = quiet > 60 ? 20000 : 5000;          // ~5 minutes of quiet, then ease off
+        var now = Date.now();
+        if (now < nextAt) return;
+        nextAt = now + wait;
+        quiet++;
         api('GET', '/api/changes?since=' + cursor).then(function (r) {
           if (!r || !r.changes || !r.changes.length) return;
+          quiet = 0;                                   // something happened: back to lively
           // Ignore changes this user made themselves - their UI is already right.
           var fromOthers = r.changes.filter(function (c) { return c.changed_by !== r.self; });
           cursor = r.cursor;
