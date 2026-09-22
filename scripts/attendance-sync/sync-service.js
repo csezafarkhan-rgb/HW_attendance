@@ -43,13 +43,15 @@ const ALLOWED = [
 let running = null;          // the in-flight rebuild, if any
 
 /*  Live Sync asks for a quick build: a fortnight rebuilt instead of thirty
-    days, and the readers skipped when there is nothing to gain - eSSL's
-    downloader already has a punch from the last twelve minutes, or they were
-    read under twenty minutes ago. A reader answers one session at a time, so
+    days, and the readers skipped only when they were read under eight minutes
+    ago. (Freshness in eSSL's database is no longer taken as proof there is
+    nothing to fetch: one of the two readers stopped feeding it in September,
+    so a recent punch there says nothing about the other one's in-punches.) A reader answers one session at a time, so
     asking it every five minutes would crowd out eSSL's own downloader (which
-    is how a reader stopped feeding the database in September); every twenty is
-    plenty, and the rebuild in between still picks up whatever the downloader
-    has put in.
+    is how a reader stopped feeding the database in September); every eight
+    leaves it room while keeping an arrival on screen within minutes, and the
+    rebuild in between still picks up whatever the downloader has put in.
+    A pressed Sync ignores all of this and reads the readers there and then.
 
     The dashboard can ask for a different window: /sync?quick=1&days=15 rebuilds
     the last fifteen days and asks the readers for the same fifteen. Asking a
@@ -57,13 +59,18 @@ let running = null;          // the in-flight rebuild, if any
     and the filtering happens here - so the window is only about how far back
     the file is rewritten. That is what brings a day back when its punches
     arrive late, as 16 September's did. */
-const QUICK = { days: '14', pullDays: '14', pullTimeout: '120000', skipPullMin: '12', pulledWithin: '20' };
+const QUICK = { days: '14', pullDays: '14', pullTimeout: '120000', skipPullMin: '0', pulledWithin: '8' };
 const FULL  = { days: '30', pullDays: '30', pullTimeout: '180000', skipPullMin: '0', pulledWithin: '0' };
 const MAX_DAYS = 60;
 
-function rebuild(quick, days) {
+function rebuild(quick, days, force) {
   if (running) return running;               // one at a time; latecomers join it
   const mode = Object.assign({}, quick ? QUICK : FULL);
+  /*  Someone pressed Sync. Then the readers are read, whatever was read a
+      moment ago: that press means "show me what the machine has now", and
+      somebody standing at the desk after punching in is the whole point of it.
+      The five-minute automatic check is the one that spaces its pulls out. */
+  if (force) { mode.skipPullMin = '0'; mode.pulledWithin = '0'; }
   const asked = Math.round(Number(days));
   if (Number.isFinite(asked) && asked >= 1) {
     const d = String(Math.min(MAX_DAYS, asked));
@@ -151,7 +158,8 @@ const server = http.createServer((req, res) => {
     const q = (req.url || '').split('?')[1] || '';
     const quick = /(^|&)quick=1(&|$)/.test(q);
     const days = (/(^|&)days=(\d{1,3})(&|$)/.exec(q) || [])[2];
-    return rebuild(quick, days).then(result => {
+    const force = /(^|&)force=1(&|$)/.test(q);
+    return rebuild(quick, days, force).then(result => {
       res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     }).catch(e => {

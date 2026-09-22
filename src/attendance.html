@@ -4350,7 +4350,7 @@ function offerImportFile(file, stamp){
     });
   }
 
-  function askHelperToFetch(){
+  function askHelperToFetch(force){
     /* Knock first. Reading the readers takes about a minute and is worth
        waiting for, but only once we know something is there to answer - a
        blocked or absent helper otherwise leaves the button frozen for the whole
@@ -4368,7 +4368,7 @@ function offerImportFile(file, stamp){
         /* quick=1: the readers are asked for two days and the file is rebuilt
            over ten, which is what a Sync is for. The scheduled run still does
            the full thirty. */
-        fetch(SYNC_HELPER + '/sync?quick=1&days=' + syncDays(), {cache:'no-store'}).then(function(r){ return r.json(); }),
+        fetch(SYNC_HELPER + '/sync?quick=1&days=' + syncDays() + (force ? '&force=1' : ''), {cache:'no-store'}).then(function(r){ return r.json(); }),
         180000, {ok:false, reason:'timeout'}
       ).then(function(j){
         return (j && j.ok) ? j : {ok:false, reason:(j && j.reason) || 'failed', detail:(j && j.error) || ''};
@@ -4389,7 +4389,7 @@ function offerImportFile(file, stamp){
       capped short of full - a bar sitting at 100% while nothing has happened
       reads as stuck, where one still creeping reads as working. It only reaches
       the end when the answer actually arrives. */
-  var SYNC_EXPECTED_MS = 30000;   // seconds when the readers were read recently, ~70s when they are read
+  var SYNC_EXPECTED_MS = 55000;   // a pressed Sync always reads the readers, which takes about a minute
   var syncTimer = null;
   function syncProgress(stage){
     var box = document.getElementById('syncProgress');
@@ -4453,7 +4453,7 @@ function offerImportFile(file, stamp){
 
     say(live ? 'Reading the readers\u2026' : 'Looking\u2026');
     var bar = live ? syncProgress('Reading the punch readers\u2026') : null;
-    var step = live ? askHelperToFetch() : Promise.resolve({ok:false, reason:'skipped'});
+    var step = live ? askHelperToFetch(true) : Promise.resolve({ok:false, reason:'skipped'});
     step.then(function(pull){
       say('Looking\u2026');
       if(bar) bar.stage('Looking for new punches\u2026');
