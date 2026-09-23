@@ -233,6 +233,13 @@ answering, and how much of the month's responses have gone. Opening it shows
 - Attendance rows, employees and changes kept; when the office PC last sent
   anything; and how long the service has been running (a free instance is
   restarted whenever it wakes).
+- **When the free database runs out.** Render deletes a free database thirty
+  days after it is created. Postgres does not record its own creation date, so
+  the first time the app meets a database it writes the date into
+  `service_meta`; the expiry is thirty days on from there. Set `DB_EXPIRES_AT`
+  (a date) to state the real one, or `DB_FREE_DAYS` for a different term. The
+  chip turns amber ten days out and red at three, and counts down instead of
+  showing the month's percentage.
 
 Every response is weighed by the server and the month's total kept in
 `usage_bytes`, written once a minute rather than once a request. The table is

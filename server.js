@@ -1780,6 +1780,36 @@ async function flushUsage() {
   }
 }
 
+/* A free Render database is deleted thirty days after it is created, and the
+   only warning is a line on its Render page. Postgres does not record when a
+   database was made, so the first time this app meets one it writes the date
+   down; the expiry is thirty days on from there, or whatever DB_EXPIRES_AT
+   says if the real date is known. */
+const FREE_DB_DAYS = Number(process.env.DB_FREE_DAYS || 30);
+let firstSeenCache = null;
+async function dbFirstSeen() {
+  if (firstSeenCache) return firstSeenCache;
+  await pool.query(`CREATE TABLE IF NOT EXISTS service_meta (
+    key TEXT PRIMARY KEY, value TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+  /* The tables were made when the database was, give or take the minutes it
+     took to deploy, so the oldest thing we know about is close enough. */
+  const r = await pool.query(
+    `INSERT INTO service_meta (key, value) VALUES ('db_first_seen', to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SSZ'))
+     ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key
+     RETURNING value`);
+  firstSeenCache = r.rows[0] ? r.rows[0].value : null;
+  return firstSeenCache;
+}
+function dbExpiry(firstSeen) {
+  const set = String(process.env.DB_EXPIRES_AT || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(set)) return new Date(set).toISOString();
+  if (!firstSeen) return null;
+  const d = new Date(firstSeen);
+  if (isNaN(d)) return null;
+  d.setDate(d.getDate() + FREE_DB_DAYS);
+  return d.toISOString();
+}
+
 /* What the dashboard's indicator shows. Cheap enough to ask for every minute:
    one size query, one count, one row. */
 app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
@@ -1788,8 +1818,18 @@ app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
                 db: { ok: false }, plan: { bytes: FREE_BYTES, dbBytes: FREE_DB_BYTES } };
   const t0 = Date.now();
   try {
-    const r = await pool.query('SELECT pg_database_size(current_database())::bigint AS size, now() AS now');
-    out.db = { ok: true, ms: Date.now() - t0, size: Number(r.rows[0].size) };
+    const r = await pool.query(
+      `SELECT pg_database_size(current_database())::bigint AS size,
+              current_setting('server_version') AS version,
+              current_database() AS name`);
+    out.db = { ok: true, ms: Date.now() - t0, size: Number(r.rows[0].size),
+               version: r.rows[0].version, name: r.rows[0].name };
+    try {
+      const seen = await dbFirstSeen();
+      out.db.firstSeen = seen;
+      out.db.expiresAt = dbExpiry(seen);
+      out.db.freeDays = FREE_DB_DAYS;
+    } catch (e) { /* the date is a nicety; the size is not */ }
   } catch (e) {
     out.db = { ok: false, ms: Date.now() - t0, error: (e && e.message) || 'no answer' };
     return res.json(out);

@@ -49,7 +49,14 @@ function query(sql, p) {
   if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths' AND user_id IS NULL")) {
     const r = kvFind(p[0], 'lockedMonths', null); return rows(r ? [{ value: r.value }] : []);
   }
-  if (s.startsWith('SELECT pg_database_size')) return rows([{ size: '41943040', now: new Date() }]);
+  if (s.startsWith('SELECT pg_database_size')) {
+    return rows([{ size: '41943040', version: '18.1', name: 'hw_attendance' }]);
+  }
+  if (s.startsWith('CREATE TABLE IF NOT EXISTS service_meta')) return rows([]);
+  if (s.startsWith("INSERT INTO service_meta (key, value) VALUES ('db_first_seen'")) {
+    db.firstSeen = db.firstSeen || new Date(Date.now() - 5 * 86400000).toISOString();
+    return rows([{ value: db.firstSeen }]);
+  }
   if (s.startsWith('CREATE TABLE IF NOT EXISTS usage_bytes')) return rows([]);
   if (s.startsWith('INSERT INTO usage_bytes')) { db.usage = (db.usage || 0) + Number(p[1]); return rows([]); }
   if (s.startsWith('SELECT bytes, requests FROM usage_bytes')) return rows([{ bytes: String(db.usage || 0), requests: '12' }]);
@@ -456,6 +463,11 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
       && typeof health.body.usage.bytes === 'number' && health.body.usage.requests > 0, health.body);
   check('it counts what is on file',
     health.body.counts && typeof health.body.counts.records === 'number', health.body.counts);
+  /* A free Render database is deleted thirty days after it is made, and that
+     is the one thing here nobody can undo. */
+  const daysLeft = Math.round((new Date(health.body.db.expiresAt) - Date.now()) / 86400000);
+  check('it says when a free database runs out - thirty days from the first time it was seen',
+    daysLeft === 25 && health.body.db.version === '18.1', { expiresAt: health.body.db.expiresAt, daysLeft });
   check('employees cannot', (await ravi('GET', '/api/status')).status === 403);
 
   /* Bandwidth: the dashboard page and the two big reads must revalidate, not

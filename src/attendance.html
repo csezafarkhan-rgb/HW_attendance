@@ -769,8 +769,15 @@ body{
   border:1px solid #CFD8E5; border-radius:7px; }
 .em-row.em-btns{ gap:6px; padding-top:8px; }
 .em-row.em-btns .btn{ width:auto !important; flex:none !important; padding:5px 12px; font-size:12px; }
-/* The database / plan indicator and its panel. */
+/* The database / plan indicator and its panel. It sits at the right-hand end
+   of the toolbar row, away from the controls that change what is on screen. */
+.st-picker{ margin-left:auto; }
 .st-btn{ display:inline-flex; align-items:center; gap:7px; }
+.st-expiry{ margin:8px 2px 2px; padding:8px 10px; border-radius:9px; font-size:11.5px; font-weight:700;
+  border:1px solid #DDE5F0; background:#F7FAFF; color:#33415C; }
+.st-expiry.warn{ border-color:#F0DFB8; background:#FFFBF0; color:#8A5A00; }
+.st-expiry.bad{ border-color:#F3C9C4; background:#FFF6F5; color:#B3261E; }
+.st-expiry span{ display:block; margin-top:3px; font-weight:500; opacity:.85; }
 .st-dot{ width:8px; height:8px; border-radius:50%; background:#9AA6B6; flex:none; box-shadow:0 0 0 2px rgba(255,255,255,.6); }
 .st-dot.ok{ background:#16A34A; } .st-dot.warn{ background:#D97706; } .st-dot.bad{ background:#DC2626; }
 .st-dot.wait{ background:#9AA6B6; }
@@ -3024,7 +3031,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button class="month-btn" id="emailBtn" title="Send the record by email">📧 Email</button>
     <div class="month-dropdown em-dropdown" id="emailDropdown"></div>
   </div>
-  <div class="month-picker">
+  <div class="month-picker st-picker">
     <button class="month-btn st-btn" id="statusBtn" title="Is the database answering, and how much of the plan is left">
       <span class="st-dot wait" id="statusDot"></span><span id="statusLabel">Checking…</span></button>
     <div class="month-dropdown st-dropdown" id="statusDropdown"></div>
@@ -9258,8 +9265,14 @@ function buildExcelBackup(){
     if(!STATUS.db || !STATUS.db.ok){ dot.className = 'st-dot bad'; lab.textContent = 'No database'; return; }
     var u = STATUS.usage || {bytes:0}, plan = STATUS.plan || {};
     var pct = plan.bytes ? (u.bytes / plan.bytes * 100) : 0;
-    dot.className = 'st-dot ' + (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok');
-    lab.textContent = 'Database · ' + Math.round(pct) + '%';
+    var tone = pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok';
+    // A database about to be deleted outranks a quiet month.
+    var days = (STATUS.db && STATUS.db.expiresAt) ? Math.ceil((new Date(STATUS.db.expiresAt) - Date.now()) / 86400000) : null;
+    if(days != null && days <= 10) tone = days <= 3 ? 'bad' : 'warn';
+    dot.className = 'st-dot ' + tone;
+    lab.textContent = (days != null && days <= 10)
+      ? ('Database · ' + (days > 0 ? (days + 'd left') : 'expired'))
+      : ('Database · ' + Math.round(pct) + '%');
   }
   function renderStatusPanel(){
     var dd = document.getElementById('statusDropdown');
@@ -9274,7 +9287,22 @@ function buildExcelBackup(){
       html += meter(u.bytes || 0, plan.bytes || 0, 'Sent this month',
         (u.requests ? (u.requests.toLocaleString() + ' request' + (u.requests === 1 ? '' : 's') + ' · ') : '')
         + 'counted here since the site began keeping score; past 5GB the free plan is suspended');
-      html += meter(db.size || 0, plan.dbBytes || 0, 'Database', 'attendance, settings and history together');
+      html += meter(db.size || 0, plan.dbBytes || 0,
+        'Database' + (db.version ? (' \u00b7 PostgreSQL ' + String(db.version).split('.')[0]) : ''),
+        'attendance, settings and history together');
+      /* A free database is deleted on its thirtieth day. That is the one thing
+         here nobody can undo, so it is said plainly and gets louder as the day
+         approaches. */
+      if(db.expiresAt){
+        var left = Math.ceil((new Date(db.expiresAt) - Date.now()) / 86400000);
+        var tone = left <= 3 ? 'bad' : left <= 10 ? 'warn' : '';
+        html += '<div class="st-expiry ' + tone + '">'
+          + (left > 0
+              ? ('Free database expires ' + new Date(db.expiresAt).toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'})
+                 + ' \u00b7 ' + left + ' day' + (left === 1 ? '' : 's') + ' left')
+              : 'This database is past its free term')
+          + '<span>It is deleted on that day unless the plan is upgraded. Keep the daily backup on the office PC.</span></div>';
+      }
       html += '<div class="st-facts">'
         + '<div><b>' + ((c.records || 0).toLocaleString()) + '</b><span>attendance rows</span></div>'
         + '<div><b>' + (c.employees || 0) + '</b><span>employees</span></div>'
