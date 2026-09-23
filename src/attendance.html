@@ -9332,9 +9332,13 @@ function buildExcelBackup(){
       html += meter(db.size || 0, plan.dbBytes || 0,
         'Database' + (db.version ? (' \u00b7 PostgreSQL ' + String(db.version).split('.')[0]) : ''),
         /* The disk holds more than our own tables, and Render counts the disk. */
-        (db.own != null ? (fmtBytes(db.own) + ' of it is the attendance data; the rest is Postgres’s own'
-                           + (db.wal ? (' and ' + fmtBytes(db.wal) + ' of write-ahead log') : '')
-                           + '.') : 'attendance, settings and history together'));
+        (db.own != null
+          ? (fmtBytes(db.own) + ' of it is the attendance data'
+             + (db.databases && db.databases > db.own ? ('; ' + fmtBytes(db.databases - db.own) + ' is Postgres’s own') : '')
+             + ((db.wal || db.walFloor) ? ('; ' + fmtBytes(db.wal || db.walFloor) + ' of write-ahead log'
+                 + (db.wal ? '' : ' (the least Postgres keeps — Render counts what is really there, so it may read a little higher)')) : '')
+             + '.')
+          : 'attendance, settings and history together'));
       /* A free database is deleted on its thirtieth day. That is the one thing
          here nobody can undo, so it is said plainly and gets louder as the day
          approaches. */
