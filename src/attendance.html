@@ -789,7 +789,7 @@ body{
 .st-btn.warn .db-line{ stroke:#B4741A; }
 /* Nothing to report is not worth a colour; the number carries it. */
 .st-btn.off .db-ico{ color:#C4CCD8; }
-.st-expiry{ margin:8px 2px 2px; padding:8px 10px; border-radius:9px; font-size:11.5px; font-weight:700;
+.st-expiry{ margin:6px 1px 1px; padding:6px 9px; border-radius:8px; font-size:11px; font-weight:700;
   border:1px solid #DDE5F0; background:#F7FAFF; color:#33415C; }
 .st-expiry.warn{ border-color:#F0DFB8; background:#FFFBF0; color:#8A5A00; }
 .st-expiry.bad{ border-color:#F3C9C4; background:#FFF6F5; color:#B3261E; }
@@ -797,20 +797,20 @@ body{
 .st-dot{ width:8px; height:8px; border-radius:50%; background:#9AA6B6; flex:none; box-shadow:0 0 0 2px rgba(255,255,255,.6); }
 .st-dot.ok{ background:#16A34A; } .st-dot.warn{ background:#D97706; } .st-dot.bad{ background:#DC2626; }
 .st-dot.wait{ background:#9AA6B6; }
-.st-dropdown{ min-width:320px; }
-.st-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
-.st-head{ display:flex; align-items:center; gap:8px; font-weight:700; padding:2px 4px 10px; }
-.st-row{ padding:6px 4px 10px; }
-.st-row-top{ display:flex; justify-content:space-between; align-items:baseline; font-size:12px; margin-bottom:5px; }
+.st-dropdown{ min-width:0; width:288px; max-width:calc(100vw - 28px); }
+.st-pane{ padding:1px; font-size:11.5px; color:var(--ink); }
+.st-head{ display:flex; align-items:center; gap:7px; font-weight:700; font-size:12px; padding:1px 3px 8px; }
+.st-row{ padding:4px 3px 7px; }
+.st-row-top{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; font-size:11.5px; margin-bottom:4px; }
 .st-row-top b{ font-weight:700; } .st-row-top b span{ font-weight:500; color:var(--ink-soft); }
-.st-bar{ height:7px; border-radius:20px; background:#EDF1F7; overflow:hidden; }
+.st-bar{ height:6px; border-radius:20px; background:#EDF1F7; overflow:hidden; }
 .st-bar i{ display:block; height:100%; border-radius:20px; background:#16A34A; transition:width .3s ease; }
 .st-bar i.warn{ background:#D97706; } .st-bar i.bad{ background:#DC2626; }
-.st-note{ font-size:11px; color:var(--ink-soft); margin-top:5px; line-height:1.45; }
-.st-facts{ display:flex; gap:8px; margin:8px 2px 4px; }
-.st-facts > div{ flex:1 1 0; text-align:center; padding:7px 4px; border:1px solid #E6EBF4; border-radius:9px; background:#FBFCFE; }
-.st-facts b{ display:block; font-size:14px; font-weight:800; }
-.st-facts span{ font-size:10.5px; color:var(--ink-soft); }
+.st-note{ font-size:10.5px; color:var(--ink-soft); margin-top:4px; line-height:1.4; }
+.st-facts{ display:flex; gap:6px; margin:7px 1px 3px; }
+.st-facts > div{ flex:1 1 0; text-align:center; padding:5px 3px; border:1px solid #E6EBF4; border-radius:8px; background:#FBFCFE; }
+.st-facts b{ display:block; font-size:12.5px; font-weight:800; }
+.st-facts span{ font-size:9.5px; color:var(--ink-soft); line-height:1.25; display:block; }
 .page{display:none;}
 /* Every page runs the full width of the content column. Requests, Official
    Leaves and Backup used to be capped at 1600px and centred, which on a wide
@@ -9327,16 +9327,16 @@ function buildExcelBackup(){
                : ('Database not answering' + (db.error ? (' — ' + escapeHtml(String(db.error).slice(0, 80))) : ''))) + '</div>';
     if(db.ok){
       html += meter(u.bytes || 0, plan.bytes || 0, 'Sent this month',
-        (u.requests ? (u.requests.toLocaleString() + ' request' + (u.requests === 1 ? '' : 's') + ' · ') : '')
-        + 'counted here since the site began keeping score; past 5GB the free plan is suspended');
+        (u.requests ? (u.requests.toLocaleString() + ' requests since the site began counting · ') : '')
+        + 'the free plan stops at 5GB');
       html += meter(db.size || 0, plan.dbBytes || 0,
         'Database' + (db.version ? (' \u00b7 PostgreSQL ' + String(db.version).split('.')[0]) : ''),
         /* The disk holds more than our own tables, and Render counts the disk. */
         (db.own != null
-          ? (fmtBytes(db.own) + ' of it is the attendance data'
-             + (db.databases && db.databases > db.own ? ('; ' + fmtBytes(db.databases - db.own) + ' is Postgres’s own') : '')
-             + (db.walKnown ? ('; ' + fmtBytes(db.wal) + ' of write-ahead log.')
-                            : '. Render counts the write-ahead log on the same disk as well, which this account cannot read, so its percentage runs a few points higher.'))
+          ? (fmtBytes(db.own) + ' attendance'
+             + (db.databases && db.databases > db.own ? (' · ' + fmtBytes(db.databases - db.own) + ' Postgres’s own') : '')
+             + (db.walKnown ? (' · ' + fmtBytes(db.wal) + ' log')
+                            : '. Render counts the log too, so it reads higher.'))
           : 'attendance, settings and history together'));
       /* A free database is deleted on its thirtieth day. That is the one thing
          here nobody can undo, so it is said plainly and gets louder as the day
@@ -9349,7 +9349,7 @@ function buildExcelBackup(){
               ? ('Free database expires ' + new Date(db.expiresAt).toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'})
                  + ' \u00b7 ' + left + ' day' + (left === 1 ? '' : 's') + ' left')
               : 'This database is past its free term')
-          + '<span>It is deleted on that day unless the plan is upgraded. Keep the daily backup on the office PC.</span></div>';
+          + '<span>Deleted that day unless the plan is upgraded — keep the daily backup.</span></div>';
       }
       html += '<div class="st-facts">'
         + '<div><b>' + ((c.records || 0).toLocaleString()) + '</b><span>attendance rows</span></div>'
@@ -9357,10 +9357,14 @@ function buildExcelBackup(){
         + '<div><b>' + ((c.history || 0).toLocaleString()) + '</b><span>changes kept</span></div>'
         + '</div>';
       var office = STATUS.office;
+      var short = function(iso){
+        var d = new Date(iso);
+        return d.toLocaleDateString(undefined, {day:'numeric', month:'short'}) + ', '
+             + d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+      };
       html += '<div class="st-note">Office PC: '
-        + (office && office.at ? ('last sent ' + new Date(office.at).toLocaleString()) : 'has never sent anything to the site')
-        + '</div>';
-      html += '<div class="st-note">Service running since ' + new Date(STATUS.startedAt).toLocaleString() + '</div>';
+        + (office && office.at ? ('last sent ' + short(office.at)) : 'has never sent anything')
+        + ' · service up since ' + short(STATUS.startedAt) + '</div>';
     }
     dd.innerHTML = html + '</div>';
   }
