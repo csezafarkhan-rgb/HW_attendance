@@ -201,8 +201,8 @@ function noticeList(title, items, colour) {
    shows, the picture of the record, and the line at the foot. */
 function dailyEmail(o) {
   const rows = o.rows || [];
-  const on = Object.assign({ tally: true, late: true, shifts: true, wfh: true, table: true, shot: true },
-                           o.sections || {});
+  const on = Object.assign({ tally: true, late: true, shifts: true, wfh: true, visits: true,
+                            table: true, shot: true }, o.sections || {});
   const count = function (st) { return rows.filter(function (r) { return r.state === st; }).length; };
   const body = [];
 
@@ -212,40 +212,40 @@ function dailyEmail(o) {
   }
 
   if (on.tally) {
-    /* One card a kind, with the names under the number: "3 from home" says
-       less than knowing which three. Work from home and a customer visit are
-       different days, so they are counted apart. */
+    /* One card a kind, all on one line, with the names under the number: "3
+       from home" says less than knowing which three. Work from home and a
+       customer visit are different days, so they are counted apart, and a kind
+       nobody is on is left out rather than standing there as a nought. */
     const kindOf = function (r) { return r.kind || (r.state === 'remote' ? 'wfh' : r.state); };
     const who = function (k) { return rows.filter(function (r) { return kindOf(r) === k; }); };
-    const card = function (label, list, colour) {
-      if (!list.length) return '';
-      return '<td width="50%" valign="top" style="padding:3px;">'
-        + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:9px 11px;">'
-        + '<div style="font-size:19px;font-weight:700;color:' + colour + ';line-height:1.1;">' + list.length + '</div>'
-        + '<div style="font-size:11.5px;font-weight:600;color:' + SOFT + ';margin-bottom:4px;">' + esc(label) + '</div>'
-        + '<div style="font-size:12px;line-height:1.5;">'
-        +   list.map(function (r) { return esc(r.name); }).join('<br>')
-        + '</div></div></td>';
-    };
-    const cards = [
-      card('Present', who('present'), '#137A3B'),
-      card('From home', who('wfh'), '#2F6FE4'),
-      card('Visiting', who('visit'), '#7C3AED'),
-      card('On leave', who('leave'), '#B45309'),
-      card('No punch yet', who('missing'), '#B3261E')
-    ].filter(Boolean);
-    const rowsOut = [];
-    for (let i = 0; i < cards.length; i += 2) {
-      rowsOut.push('<tr>' + cards[i] + (cards[i + 1] || '<td width="50%"></td>') + '</tr>');
+    const kinds = [
+      ['Present', who('present'), '#137A3B'],
+      ['From home', who('wfh'), '#2F6FE4'],
+      ['Visiting', who('visit'), '#7C3AED'],
+      ['On leave', who('leave'), '#B45309'],
+      ['No punch', who('missing'), '#B3261E']
+    ].filter(function (k) { return k[1].length; });
+    if (kinds.length) {
+      const w = Math.floor(100 / kinds.length);
+      const cells = kinds.map(function (k) {
+        return '<td width="' + w + '%" valign="top" style="padding:0 3px;">'
+          + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:8px 6px;text-align:center;">'
+          + '<div style="font-size:18px;font-weight:700;color:' + k[2] + ';line-height:1.1;">' + k[1].length + '</div>'
+          + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
+          + '<div style="font-size:11px;line-height:1.45;color:' + INK + ';">'
+          +   k[1].map(function (r) { return esc(r.name); }).join('<br>')
+          + '</div></div></td>';
+      }).join('');
+      body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
+        + '<tr>' + cells + '</tr></table>');
     }
-    body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:6px;">'
-      + rowsOut.join('') + '</table>');
   }
 
   /* The day's exceptions, as the banner over the record states them. */
   if (on.late) body.push(noticeList('Late today', o.late, '#E8B931'));
   if (on.shifts) body.push(noticeList('Shift changed today', o.shifts, '#D97706'));
   if (on.wfh) body.push(noticeList('Working from home', o.wfh, '#93A4BC'));
+  if (on.visits) body.push(noticeList('Visiting today', o.visits, '#7C3AED'));
 
   if (on.table) {
     body.push('<div style="height:16px;"></div>');

@@ -51,6 +51,17 @@ const SECRET = 'test-secret-for-signing-links';
       && !/From home \/ visiting/.test(cards.html)
       && /Ravi Test/.test(cards.html) && /Priya Test/.test(cards.html), cards.html.slice(0, 60));
   check('a kind nobody is on is left out', !/On leave/.test(cards.html));
+  check('the cards sit on one line',
+    (((cards.html.match(/<table[^>]*table-layout:fixed[^>]*>[\s\S]*?<\/table>/) || [''])[0]).match(/<tr>/g) || []).length === 1);
+  const lists = mailer.dailyEmail({
+    orgName: 'Test Co', dateLabel: 'Tue, 22 Sep', rows: [], sections: { table: false },
+    wfh: [{ name: 'Ravi Test', detail: 'no start recorded yet' }],
+    visits: [{ name: 'Priya Test', detail: 'Panipat · no start recorded yet' }]
+  });
+  const home = lists.html.slice(lists.html.indexOf('Working from home'), lists.html.indexOf('Visiting today'));
+  check('somebody at a customer is not listed as working from home',
+    home.indexOf('Priya Test') === -1 && home.indexOf('Ravi Test') > -1
+      && /Visiting today[\s\S]*Priya Test/.test(lists.html));
 
   check('the daily message writes its times as am and pm',
     /9:28 AM/.test(mail.html) && /6:31 PM/.test(mail.html), mail.html.slice(0, 40));

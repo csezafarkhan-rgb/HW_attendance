@@ -1236,7 +1236,7 @@ const MAIL_DEFAULTS = {
      did; {date} {present} {remote} {leave} {missing} {late} {org} stand in for
      the day's figures in the subject. */
   subject: '', intro: '', footer: '',
-  sections: { tally: true, late: true, shifts: true, wfh: true, table: true, shot: true }
+  sections: { tally: true, late: true, shifts: true, wfh: true, visits: true, table: true, shot: true }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1404,7 +1404,7 @@ async function buildDailyEmail(orgId, day, opts) {
   const assigned = parseJson(kv.shiftAssignments) || {};
   const excuses = parseJson(kv.lateExcuses) || {};
   const threshold = Number(parseJson(kv.lateThresholdMin)) || Number(kv.lateThresholdMin) || 10;
-  const late = [], shifts = [], wfh = [];
+  const late = [], shifts = [], wfh = [], visits = [];
   names.forEach(empName => {
     const shown = shownNames[empName] || empName;
     const key = empName + '|' + day;
@@ -1415,9 +1415,12 @@ async function buildDailyEmail(orgId, day, opts) {
     if (todayShift && usual && todayShift !== usual) {
       shifts.push({ name: shown, detail: todayShift + ' today \u00b7 usual ' + usual });
     }
+    /* A day at a customer is not a day at home, and saying so in one list put
+       somebody on a visit under "working from home". */
     if (ov && (ov.cat === 'WFH' || ov.cat === 'VISIT')) {
-      wfh.push({ name: shown, detail: rec['in'] ? ('started ' + mailer.clock(rec['in']))
-                                                : 'no start recorded yet' });
+      const started = rec['in'] ? ('started ' + mailer.clock(rec['in'])) : 'no start recorded yet';
+      if (ov.cat === 'VISIT') visits.push({ name: shown, detail: (ov.detail ? (ov.detail + ' · ') : '') + started });
+      else wfh.push({ name: shown, detail: started });
       return;
     }
     const start = shiftStartMin(todayShift || usual || '9:30-6:30');
@@ -1434,7 +1437,7 @@ async function buildDailyEmail(orgId, day, opts) {
     orgName: orgNameOf(kv.companyInfo),
     dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
     rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl(),
-    late, shifts, wfh,
+    late, shifts, wfh, visits,
     sections: settings.sections, subject: settings.subject,
     intro: settings.intro, footer: settings.footer,
     shotUrl: opts.shotUrl || ''
