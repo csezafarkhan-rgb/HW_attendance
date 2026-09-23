@@ -784,6 +784,17 @@ body{
 .em-row input[type=text]{ flex:1 1 auto; min-width:0; padding:5px 8px; font-size:12px;
   border:1px solid #CFD8E5; border-radius:7px; }
 .em-row.em-btns{ gap:6px; padding-top:8px; }
+/* The settings, one set of fields a message. */
+.em-lab{ padding:8px 4px 2px; font:700 10.5px/1.3 'Inter',sans-serif; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--ink-soft); }
+.em-lab span{ font-weight:500; text-transform:none; letter-spacing:0; opacity:.8; }
+.em-row textarea{ flex:1 1 auto; min-width:0; padding:5px 8px; font-size:12px; font-family:inherit;
+  border:1px solid #CFD8E5; border-radius:7px; resize:vertical; }
+.em-set{ max-height:52vh; overflow:auto; }
+.em-tabs{ display:flex; gap:4px; padding:2px 2px 6px; }
+.em-tab{ flex:1 1 0; padding:5px 8px; cursor:pointer; border:1px solid #DCE3ED; border-radius:8px;
+  background:#F4F7FB; color:var(--ink-soft); font:600 11.5px/1.2 'Inter',sans-serif; }
+.em-tab.on{ background:#fff; color:var(--ink); border-color:#B9C7DB; box-shadow:0 1px 2px rgba(16,24,40,.06); }
 .em-row.em-btns .btn{ width:auto !important; flex:none !important; padding:5px 12px; font-size:12px; }
 /* The database / plan indicator and its panel. It sits at the right-hand end
    of the toolbar row, away from the controls that change what is on screen. */
@@ -9196,6 +9207,12 @@ function buildExcelBackup(){
          behind a line of text rather than filling the menu. */
       + '<button type="button" class="em-more" id="emMore">Settings</button>'
       + '<div class="em-set" id="emSet" style="display:none;">'
+      /* The two messages go to different people and say different things, so
+         each keeps its own settings; the leave one falls back to these when a
+         field is left empty. */
+      + '<div class="em-tabs"><button type="button" class="em-tab on" data-em-tab="att">Attendance</button>'
+      +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button></div>'
+      + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
       + '<div class="em-lab">To</div>'
       + '<div class="em-row"><input type="text" id="emTo" placeholder="more addresses, comma separated" value="'
@@ -9228,15 +9245,46 @@ function buildExcelBackup(){
       + '<label class="em-row"><input type="checkbox" id="emDaily"' + (s.daily !== false ? ' checked' : '') + '>'
       +   '<span>Every day at</span></label>'
       + '<div class="em-row em-indent"><input type="text" id="emAt" value="' + mailEscape(s.dailyAt || '19:30') + '" size="5"><span>India time</span></div>'
+      + '</div>'
+      /* ---- the leave message ---- */
+      + '<div data-em-pane="lv" style="display:none;">'
+      + '<div class="em-lab">To <span>blank: the same as the attendance message</span></div>'
+      + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
+      +   mailEscape(((s.leave || {}).to || []).join(', ')) + '"></div>'
+      + '<div class="em-lab">Cc</div>'
+      + '<div class="em-row"><input type="text" id="emLvCc" placeholder="comma separated" value="'
+      +   mailEscape(((s.leave || {}).cc || []).join(', ')) + '"></div>'
+      + '<div class="em-lab">Subject <span>{n} {waiting} {unrequested} {org}</span></div>'
+      + '<div class="em-row"><input type="text" id="emLvSubject" placeholder="Leave \u00b7 {n} need a decision" value="'
+      +   mailEscape((s.leave || {}).subject || '') + '"></div>'
+      + '<div class="em-lab">Message at the top</div>'
+      + '<div class="em-row"><textarea id="emLvIntro" rows="3" placeholder="A line before the requests">'
+      +   mailEscape((s.leave || {}).intro || '') + '</textarea></div>'
+      + '<div class="em-lab">Note at the foot</div>'
+      + '<div class="em-row"><textarea id="emLvFooter" rows="2" placeholder="e.g. Decide from the buttons above">'
+      +   mailEscape((s.leave || {}).footer || '') + '</textarea></div>'
+      + '<div class="em-lab">When it goes on its own</div>'
       + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
       +   '<span>A note as each request is raised</span></label>'
       + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
       +   '<span>Leave taken without a request</span></label>'
+      + '</div>'
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
       +   '<button type="button" class="btn ghost" id="emTest">'
       +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button></div>'
       + '</div></div>';
 
+    Array.prototype.forEach.call(document.querySelectorAll('[data-em-tab]'), function(t){
+      t.onclick = function(){
+        var which = t.getAttribute('data-em-tab');
+        Array.prototype.forEach.call(document.querySelectorAll('[data-em-tab]'), function(x){
+          x.classList.toggle('on', x === t);
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-em-pane]'), function(p){
+          p.style.display = (p.getAttribute('data-em-pane') === which) ? '' : 'none';
+        });
+      };
+    });
     var more = document.getElementById('emMore'), set = document.getElementById('emSet');
     if(more && set) more.onclick = function(){
       var open = set.style.display !== 'none';
@@ -9418,7 +9466,13 @@ function buildExcelBackup(){
         subject: document.getElementById('emSubject').value.trim(),
         intro: document.getElementById('emIntro').value,
         footer: document.getElementById('emFooter').value,
-        sections: sections
+        sections: sections,
+        leave: {
+          to: list('emLvTo'), cc: list('emLvCc'),
+          subject: document.getElementById('emLvSubject').value.trim(),
+          intro: document.getElementById('emLvIntro').value,
+          footer: document.getElementById('emLvFooter').value
+        }
       };
       storage.set('mailSettings', JSON.stringify(value), true).then(function(){
         saveBtn.disabled = false;

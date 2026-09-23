@@ -328,7 +328,12 @@ function dailyEmail(o) {
    request behind it. Both carry their two buttons. */
 function leaveEmail(o) {
   const pending = o.pending || [], unreq = o.unrequested || [];
+  if (!pending.length && !unreq.length) return null;   // nothing to say: no message
   const body = [];
+  if (o.intro) {
+    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+      + esc(o.intro) + '</div>');
+  }
   if (pending.length) {
     body.push('<h3 style="font-size:14px;margin:0 0 10px;">Waiting for a decision</h3>');
     pending.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
@@ -339,11 +344,22 @@ function leaveEmail(o) {
       + 'Marked on the record but never approved. Rejecting removes the day.</div>');
     unreq.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
   }
-  if (!body.length) return null;                       // nothing to say: no message
-  if (o.siteUrl) body.push('<div style="margin-top:20px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  if (o.footer) {
+    body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>');
+  }
+  if (o.siteUrl) body.push('<div style="margin-top:18px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const n = pending.length + unreq.length;
+  /* The subject can be written on the portal: {n} everything waiting, {waiting}
+     the requests, {unrequested} the days taken without one. */
+  const subject = (o.subject && o.subject.trim())
+    ? o.subject.replace(/\{(\w+)\}/g, function (m, k) {
+        return k === 'n' ? String(n) : k === 'waiting' ? String(pending.length)
+             : k === 'unrequested' ? String(unreq.length) : k === 'org' ? (o.orgName || '') : m;
+      })
+    : ('Leave · ' + n + ' need' + (n === 1 ? 's' : '') + ' a decision');
   return {
-    subject: 'Leave · ' + n + ' need' + (n === 1 ? 's' : '') + ' a decision',
+    subject: subject,
     html: layout(o.orgName || 'Attendance', o.dateLabel || 'Leave waiting for a decision', body)
   };
 }
@@ -355,7 +371,11 @@ function requestEmail(o) {
     subject: (r.leaveType === 'PUNCH' ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
              + ' · ' + dateRange(r.dateFrom, r.dateTo),
     html: layout(o.orgName || 'Attendance', 'A request is waiting for a decision', [
+      o.intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+                 + esc(o.intro) + '</div>') : '',
       requestCard(r, o.links, 'Raised ' + (r.createdAt ? String(r.createdAt).slice(0, 10) : 'just now')),
+      o.footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+                  + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>') : '',
       o.siteUrl ? ('<div style="margin-top:8px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>') : ''
     ])
   };

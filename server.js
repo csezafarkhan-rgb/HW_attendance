@@ -1236,7 +1236,11 @@ const MAIL_DEFAULTS = {
      did; {date} {present} {remote} {leave} {missing} {late} {org} stand in for
      the day's figures in the subject. */
   subject: '', intro: '', footer: '',
-  sections: { tally: true, late: true, shifts: true, wfh: true, visits: true, table: true, shot: true }
+  sections: { tally: true, late: true, shifts: true, wfh: true, visits: true, table: true, shot: true },
+  /* The leave message goes to different people and says a different thing, so
+     it keeps its own address list and wording. Anything left blank here falls
+     back to the attendance settings above. */
+  leave: { to: [], cc: [], subject: '', intro: '', footer: '' }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1251,17 +1255,29 @@ async function mailSettings(orgId) {
   s.intro = String(s.intro || '').slice(0, 2000);
   s.footer = String(s.footer || '').slice(0, 2000);
   s.sections = Object.assign({}, MAIL_DEFAULTS.sections, isPlainObject(s.sections) ? s.sections : {});
+  const lv = isPlainObject(s.leave) ? s.leave : {};
+  s.leave = {
+    to: (Array.isArray(lv.to) ? lv.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    cc: (Array.isArray(lv.cc) ? lv.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    subject: String(lv.subject || '').slice(0, 200),
+    intro: String(lv.intro || '').slice(0, 2000),
+    footer: String(lv.footer || '').slice(0, 2000)
+  };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
 }
 /* Every active super admin, plus anyone named in the settings. A view admin is
    left out: they cannot act on the buttons anyway. */
-async function mailRecipients(orgId, settings) {
+async function mailRecipients(orgId, settings, which) {
   const r = await pool.query(
     "SELECT email FROM users WHERE org_id = $1 AND is_active AND role = 'admin' ORDER BY id", [orgId]);
   const out = [];
   r.rows.forEach(x => { if (EMAIL_RE.test(String(x.email || '')) && out.indexOf(x.email) === -1) out.push(x.email); });
-  (settings.to || []).forEach(e => { if (out.indexOf(e) === -1) out.push(e); });
+  /* The leave message can be addressed to its own people; with none named it
+     goes where the attendance message goes. */
+  const own = (which === 'leave' && settings.leave && settings.leave.to.length)
+    ? settings.leave.to : (settings.to || []);
+  own.forEach(e => { if (out.indexOf(e) === -1) out.push(e); });
   return out;
 }
 /* The office is in India and the server is on UTC, so the day an email is
@@ -1469,7 +1485,8 @@ async function buildLeaveEmail(orgId) {
         }))
     : [];
   return mailer.leaveEmail({
-    orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl()
+    orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
+    subject: settings.leave.subject, intro: settings.leave.intro, footer: settings.leave.footer
   });
 }
 
@@ -1544,12 +1561,13 @@ async function sendDailyEmail(orgId, day, opts) {
 async function sendLeaveEmail(orgId) {
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
-  const to = await mailRecipients(orgId, settings);
+  const to = await mailRecipients(orgId, settings, 'leave');
   if (!to.length) return { ok: false, error: NO_ADDRESS };
   const mail = await buildLeaveEmail(orgId);
   if (!mail) return { ok: true, nothing: true };          // nothing waiting: no message
-  const r = await mailer.send({ to, cc: settings.cc, subject: mail.subject, html: mail.html });
-  return Object.assign({ to: to.length, cc: (settings.cc || []).length }, r);
+  const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+  const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+  return Object.assign({ to: to.length, cc: cc.length }, r);
 }
 
 /* One new request, emailed as it is raised. Never throws: a request must be
@@ -1559,16 +1577,18 @@ async function notifyNewRequests(orgId, added) {
     if (!mailer.ready() || !added.length) return;
     const settings = await mailSettings(orgId);
     if (!settings.requests) return;
-    const to = await mailRecipients(orgId, settings);
+    const to = await mailRecipients(orgId, settings, 'leave');
     if (!to.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
       const mail = mailer.requestEmail({
         orgName: orgNameOf(kv.companyInfo), req: r,
         links: linksFor({ k: 'req', org: orgId, id: r.id }),
-        siteUrl: mailer.baseUrl()
+        siteUrl: mailer.baseUrl(),
+        intro: settings.leave.intro, footer: settings.leave.footer
       });
-      await mailer.send({ to, subject: mail.subject, html: mail.html });
+      await mailer.send({ to, cc: (settings.leave.cc.length ? settings.leave.cc : settings.cc),
+                          subject: mail.subject, html: mail.html });
     }
   } catch (e) {
     console.error('request email failed (request itself was saved):', e && e.message);
