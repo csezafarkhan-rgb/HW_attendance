@@ -356,6 +356,28 @@ process.env.SESSION_SECRET = SECRET;
   const trimmed = sent[sent.length - 1];
   check('a section switched off is left out',
     !/Late today/.test(trimmed.html) && !/<img src=/.test(trimmed.html) && /Asha Test/.test(trimmed.html));
+  /* A word before a holiday, with its own settings and its own address list. */
+  const soon = new Date(Date.now() + 5.5 * 3600 * 1000 + 2 * 86400000).toISOString().slice(0, 10);
+  kvSet(1, 'officialLeaves', JSON.stringify({ [soon]: { name: 'Dussehra', note: 'Entire building closed' } }));
+  kvSet(1, 'mailSettings', JSON.stringify({
+    to: ['boss@x.com'],
+    holiday: { on: true, days: 2, at: '00:01', to: ['second@x.com'],
+               subject: 'Holiday · {name} · in {days} days',
+               intro: 'Please plan your work.', footer: 'Best regards' }
+  }));
+  const holPv = await asAdmin('POST', '/api/mail/holiday', { preview: true });
+  check('the holiday reminder names the holiday and how far off it is',
+    holPv.status === 200 && /Dussehra/.test(holPv.body.preview.subject)
+      && /in 2 days/.test(holPv.body.preview.subject)
+      && /Entire building closed/.test(holPv.body.preview.html)
+      && /Please plan your work/.test(holPv.body.preview.html), holPv.body && holPv.body.error);
+  check('it goes to its own address', (holPv.body.to || []).indexOf('second@x.com') > -1, holPv.body.to);
+  const holSent = await asAdmin('POST', '/api/mail/holiday', { send: 'preview' });
+  check('and it sends', holSent.status === 200 && /Dussehra/.test(sent[sent.length - 1].subject), holSent.body);
+  kvSet(1, 'officialLeaves', JSON.stringify({}));
+  const none = await asAdmin('POST', '/api/mail/holiday', { preview: true });
+  check('with no holiday on the calendar, nothing is built', none.body && none.body.nothing === true, none.body);
+
   kvSet(1, 'mailSettings', JSON.stringify({ to: [], cc: [] }));
 
   const pickOut = await asAdmin('POST', '/api/mail/daily', { names: ['Ravi Test'] });

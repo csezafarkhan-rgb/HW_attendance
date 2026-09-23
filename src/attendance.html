@@ -9201,6 +9201,8 @@ function buildExcelBackup(){
       +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
       + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
       +   '<span>What is waiting for a decision, with Approve and Reject</span></button>'
+      + '<button type="button" class="em-go" id="emSendHol">🏖 Send the holiday reminder'
+      +   '<span>The next holiday on the calendar, and what is closed</span></button>'
       + '<div class="em-note" id="emMsg"></div>'
       /* Everything else is set once and then left alone - a request raised
          sends its own message without being asked - so it is folded away
@@ -9211,7 +9213,8 @@ function buildExcelBackup(){
          each keeps its own settings; the leave one falls back to these when a
          field is left empty. */
       + '<div class="em-tabs"><button type="button" class="em-tab on" data-em-tab="att">Attendance</button>'
-      +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button></div>'
+      +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button>'
+      +   '<button type="button" class="em-tab" data-em-tab="hol">Holiday</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
       + '<div class="em-lab">To</div>'
@@ -9269,6 +9272,32 @@ function buildExcelBackup(){
       + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
       +   '<span>Leave taken without a request</span></label>'
       + '</div>'
+      /* ---- the holiday reminder ---- */
+      + (function(){
+          var h = s.holiday || {};
+          return '<div data-em-pane="hol" style="display:none;">'
+            + '<label class="em-row"><input type="checkbox" id="emHolOn"' + (h.on !== false ? ' checked' : '') + '>'
+            +   '<span>Remind everyone before a holiday</span></label>'
+            + '<div class="em-row em-indent"><input type="text" id="emHolDays" value="'
+            +   mailEscape(String(h.days == null ? 2 : h.days)) + '" size="3"><span>days before, at</span>'
+            +   '<input type="text" id="emHolAt" value="' + mailEscape(h.at || '10:00') + '" size="5"><span>India time</span></div>'
+            + '<div class="em-lab">To <span>blank: the same as the attendance message</span></div>'
+            + '<div class="em-row"><input type="text" id="emHolTo" placeholder="comma separated" value="'
+            +   mailEscape((h.to || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Cc</div>'
+            + '<div class="em-row"><input type="text" id="emHolCc" placeholder="comma separated" value="'
+            +   mailEscape((h.cc || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Subject <span>{name} {date} {days} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emHolSubject" placeholder="Holiday \u00b7 {name} \u00b7 {date}" value="'
+            +   mailEscape(h.subject || '') + '"></div>'
+            + '<div class="em-lab">Message at the top</div>'
+            + '<div class="em-row"><textarea id="emHolIntro" rows="3" placeholder="e.g. The office will be closed \u2014 please plan your work">'
+            +   mailEscape(h.intro || '') + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emHolFooter" rows="2" placeholder="e.g. Best regards">'
+            +   mailEscape(h.footer || '') + '</textarea></div>'
+            + '</div>';
+        })()
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
       +   '<button type="button" class="btn ghost" id="emTest">'
       +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button></div>'
@@ -9436,6 +9465,28 @@ function buildExcelBackup(){
         });
       });
     };
+    var holBtn = document.getElementById('emSendHol');
+    if(holBtn) holBtn.onclick = function(){
+      post('/api/mail/holiday', {preview:true}, holBtn, 'Building the message\u2026', function(j){
+        if(j.nothing){ msg('No holiday on the calendar to remind anybody about.', true); return; }
+        msg('');
+        showPreview(j, function(done){
+          fetch('/api/mail/holiday', {method:'POST', credentials:'same-origin',
+                                      headers:{'Content-Type':'application/json'},
+                                      body: JSON.stringify({send:'preview'})})
+            .then(function(r){ return r.json().then(function(x){ return {ok:r.ok, j:x}; }); })
+            .then(function(out){
+              if(!out.ok || (out.j && out.j.ok === false)){
+                done((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+                return;
+              }
+              done();
+              msg('Sent to ' + (out.j.to || 0) + ' address' + ((out.j.to === 1) ? '' : 'es') + '.');
+            })
+            .catch(function(e){ done(e.message || 'It did not go out.', true); });
+        });
+      });
+    };
     var leaveBtn = document.getElementById('emSendLeave');
     if(leaveBtn) leaveBtn.onclick = function(){
       post('/api/mail/leave', {}, leaveBtn, 'Sending…', function(j){
@@ -9472,6 +9523,15 @@ function buildExcelBackup(){
           subject: document.getElementById('emLvSubject').value.trim(),
           intro: document.getElementById('emLvIntro').value,
           footer: document.getElementById('emLvFooter').value
+        },
+        holiday: {
+          on: document.getElementById('emHolOn').checked,
+          days: parseInt(document.getElementById('emHolDays').value, 10) || 0,
+          at: document.getElementById('emHolAt').value.trim() || '10:00',
+          to: list('emHolTo'), cc: list('emHolCc'),
+          subject: document.getElementById('emHolSubject').value.trim(),
+          intro: document.getElementById('emHolIntro').value,
+          footer: document.getElementById('emHolFooter').value
         }
       };
       storage.set('mailSettings', JSON.stringify(value), true).then(function(){

@@ -186,6 +186,8 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
 - **Leave**: what is waiting for a decision and any leave taken without a
   request, each with **Approve** and **Reject**. Sent beside the daily message,
   and again on its own as each request is raised.
+- **A holiday reminder**, a set number of days before a date on the Official
+  Leaves calendar (two by default), naming the holiday and what is closed.
 
 Every active Super Admin is written to, plus any address added in the panel.
 
@@ -194,7 +196,10 @@ Screenshot. The menu is two things to do — email today's attendance, or send
 the leave message — and pressing the first one shows the message exactly as it
 will arrive, to be looked at before it goes.
 
-**Settings** (folded under the two buttons) is where the message is written:
+**Settings** (folded under the buttons) has a tab a message — Attendance,
+Leave and Holiday — each with its own addresses and wording; a field left
+blank on Leave or Holiday falls back to the Attendance one. The Attendance tab
+holds:
 
 - **To** and **Cc**, kept with the rest of the settings. Every active Super
   Admin is written to whatever is listed here.

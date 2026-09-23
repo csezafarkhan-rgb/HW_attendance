@@ -364,6 +364,39 @@ function leaveEmail(o) {
   };
 }
 
+/* The holiday reminder: what is closed, when, and how far off it is. */
+function holidayEmail(o) {
+  const list = o.holidays || [];
+  if (!list.length) return null;
+  const body = [];
+  if (o.intro) {
+    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+      + esc(o.intro) + '</div>');
+  }
+  list.forEach(function (h) {
+    body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid #B45309;border-radius:10px;'
+      + 'padding:12px 14px;margin:0 0 10px;">'
+      + '<div style="font-size:15px;font-weight:700;">' + esc(h.name || 'Holiday') + '</div>'
+      + '<div style="font-size:13px;color:' + SOFT + ';margin-top:3px;">' + esc(h.when)
+      +   (h.away != null ? (' \u00b7 ' + (h.away === 0 ? 'today' : h.away === 1 ? 'tomorrow'
+                             : ('in ' + h.away + ' days'))) : '') + '</div>'
+      + (h.note ? ('<div style="font-size:12.5px;margin-top:6px;">' + esc(h.note) + '</div>') : '')
+      + '</div>');
+  });
+  if (o.footer) {
+    body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>');
+  }
+  if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const first = list[0];
+  const fill = { name: first.name || 'Holiday', date: first.when, days: String(first.away == null ? '' : first.away),
+                 org: o.orgName || '' };
+  const subject = (o.subject && o.subject.trim())
+    ? o.subject.replace(/\{(\w+)\}/g, function (m, k) { return (k in fill) ? fill[k] : m; })
+    : ('Holiday \u00b7 ' + (first.name || 'Office closed') + ' \u00b7 ' + first.when);
+  return { subject: subject, html: layout(o.orgName || 'Attendance', 'A holiday is coming up', body) };
+}
+
 /* One new request, sent as it is raised. */
 function requestEmail(o) {
   const r = o.req;
@@ -412,5 +445,5 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange,
-  dailyEmail, leaveEmail, requestEmail, requestCard, confirmPage, resultPage, clock
+  dailyEmail, leaveEmail, holidayEmail, requestEmail, requestCard, confirmPage, resultPage, clock
 };

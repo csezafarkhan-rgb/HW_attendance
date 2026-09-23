@@ -1240,7 +1240,10 @@ const MAIL_DEFAULTS = {
   /* The leave message goes to different people and says a different thing, so
      it keeps its own address list and wording. Anything left blank here falls
      back to the attendance settings above. */
-  leave: { to: [], cc: [], subject: '', intro: '', footer: '' }
+  leave: { to: [], cc: [], subject: '', intro: '', footer: '' },
+  /* A word before a holiday, so nobody turns up to a closed building. `days`
+     is how far ahead it goes out; `at` is the hour of that day, India time. */
+  holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1255,6 +1258,17 @@ async function mailSettings(orgId) {
   s.intro = String(s.intro || '').slice(0, 2000);
   s.footer = String(s.footer || '').slice(0, 2000);
   s.sections = Object.assign({}, MAIL_DEFAULTS.sections, isPlainObject(s.sections) ? s.sections : {});
+  const hd = isPlainObject(s.holiday) ? s.holiday : {};
+  s.holiday = {
+    on: hd.on !== false,
+    days: Math.max(0, Math.min(30, Number(hd.days) >= 0 ? Number(hd.days) : 2)),
+    at: /^\d{1,2}:\d{2}$/.test(String(hd.at)) ? String(hd.at) : '10:00',
+    to: (Array.isArray(hd.to) ? hd.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    cc: (Array.isArray(hd.cc) ? hd.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    subject: String(hd.subject || '').slice(0, 200),
+    intro: String(hd.intro || '').slice(0, 2000),
+    footer: String(hd.footer || '').slice(0, 2000)
+  };
   const lv = isPlainObject(s.leave) ? s.leave : {};
   s.leave = {
     to: (Array.isArray(lv.to) ? lv.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
@@ -1275,8 +1289,9 @@ async function mailRecipients(orgId, settings, which) {
   r.rows.forEach(x => { if (EMAIL_RE.test(String(x.email || '')) && out.indexOf(x.email) === -1) out.push(x.email); });
   /* The leave message can be addressed to its own people; with none named it
      goes where the attendance message goes. */
-  const own = (which === 'leave' && settings.leave && settings.leave.to.length)
-    ? settings.leave.to : (settings.to || []);
+  const own = (which === 'leave' && settings.leave && settings.leave.to.length) ? settings.leave.to
+            : (which === 'holiday' && settings.holiday && settings.holiday.to.length) ? settings.holiday.to
+            : (settings.to || []);
   own.forEach(e => { if (out.indexOf(e) === -1) out.push(e); });
   return out;
 }
@@ -1558,6 +1573,57 @@ async function sendDailyEmail(orgId, day, opts) {
   const r = await mailer.send({ to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments });
   return Object.assign({ to: to.length, cc: (settings.cc || []).length, attached: attachments.length > 0 }, r);
 }
+/* The holidays on the calendar, as {day, name, note}, from the day given
+   onwards. The dashboard stores them by date, either as a name or as a name
+   with a note beside it. */
+async function holidaysFrom(orgId, fromDay, toDay) {
+  const kv = await sharedKeys(orgId, ['officialLeaves']);
+  const all = parseJson(kv.officialLeaves) || {};
+  return Object.keys(all).filter(d => DAY_RE.test(d) && d >= fromDay && (!toDay || d <= toDay)).sort()
+    .map(d => {
+      const v = all[d];
+      return { day: d,
+               name: (v && typeof v === 'object') ? (v.name || 'Holiday') : String(v || 'Holiday'),
+               note: (v && typeof v === 'object') ? (v.note || '') : '' };
+    });
+}
+function daysApart(a, b) {
+  return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+}
+/* `days` ahead exactly, for the scheduled run; the next one coming, for a
+   message sent by hand. */
+async function sendHolidayEmail(orgId, opts) {
+  opts = opts || {};
+  if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
+  const settings = await mailSettings(orgId);
+  const today = istParts().day;
+  let holidays = [];
+  if (opts.on) {
+    holidays = (await holidaysFrom(orgId, opts.on, opts.on));
+  } else {
+    const soon = await holidaysFrom(orgId, today);
+    holidays = soon.length ? [soon[0]] : [];
+  }
+  if (!holidays.length) return { ok: true, nothing: true };
+  const kv = await sharedKeys(orgId, ['companyInfo']);
+  const mail = mailer.holidayEmail({
+    orgName: orgNameOf(kv.companyInfo),
+    holidays: holidays.map(h => ({
+      name: h.name, note: h.note, away: daysApart(today, h.day),
+      when: new Date(h.day + 'T00:00:00Z').toUTCString().slice(0, 16)
+    })),
+    subject: settings.holiday.subject, intro: settings.holiday.intro,
+    footer: settings.holiday.footer, siteUrl: mailer.baseUrl()
+  });
+  if (!mail) return { ok: true, nothing: true };
+  const to = await mailRecipients(orgId, settings, 'holiday');
+  if (!to.length) return { ok: false, error: NO_ADDRESS };
+  const cc = (settings.holiday.cc.length ? settings.holiday.cc : settings.cc) || [];
+  if (opts.preview) return { ok: true, mail: { to, cc, subject: mail.subject, html: mail.html, attachments: [] } };
+  const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+  return Object.assign({ to: to.length, cc: cc.length, holiday: holidays[0].day }, r);
+}
+
 async function sendLeaveEmail(orgId) {
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
@@ -1844,6 +1910,23 @@ app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
   }
   res.status(r.ok ? 200 : 502).json(r);
 });
+app.post('/api/mail/holiday', requireRole('admin'), async (req, res) => {
+  const body = req.body || {};
+  if (body.send === 'preview') {
+    const held = previews.get(req.session.userId);
+    if (!held) return res.status(410).json({ error: 'that preview has expired - open it again' });
+    previews.delete(req.session.userId);
+    const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject, html: held.html });
+    return res.status(r.ok ? 200 : 502).json(Object.assign({ to: held.to.length }, r));
+  }
+  const out = await sendHolidayEmail(req.session.orgId, { preview: !!body.preview });
+  if (body.preview && out.ok && out.mail) {
+    keepPreview(req.session.userId, out.mail);
+    return res.json({ ok: true, preview: { subject: out.mail.subject, html: out.mail.html },
+                      to: out.mail.to, attached: false });
+  }
+  res.status(out.ok ? 200 : 502).json(out);
+});
 app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {
   const r = await sendLeaveEmail(req.session.orgId);
   res.status(r.ok ? 200 : 502).json(r);
@@ -1861,6 +1944,18 @@ async function dailyEmailTick() {
   for (const org of orgs.rows) {
     try {
       const s = await mailSettings(org.id);
+      /* A holiday that many days off gets its word first, once, whatever the
+         daily message is doing. */
+      if (s.holiday.on && min >= hhmmToMin(s.holiday.at)) {
+        const target = new Date(Date.now() + IST_MS + s.holiday.days * 86400000).toISOString().slice(0, 10);
+        const job = 'holiday-email:' + org.id + ':' + target;
+        const claimed = await pool.query(
+          'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+        if (claimed.rows.length) {
+          const hr = await sendHolidayEmail(org.id, { on: target });
+          if (!hr.ok || hr.nothing) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
+        }
+      }
       if (!s.daily || min < hhmmToMin(s.dailyAt)) continue;
       const job = 'daily-email:' + org.id + ':' + day;
       const claimed = await pool.query(
