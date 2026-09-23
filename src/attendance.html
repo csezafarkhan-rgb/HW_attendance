@@ -762,6 +762,22 @@ body{
   border:1px solid #DCE3ED; border-radius:9px; background:#fff; font:600 12.5px/1.2 'Inter',sans-serif; color:var(--ink); }
 .em-go:hover{ background:#F4F7FB; border-color:#C5D0DE; }
 .em-go span{ display:block; margin-top:3px; font-weight:500; font-size:11px; color:var(--ink-soft); }
+/* The preview window: the message itself, and the one button that sends it. */
+.em-prev{ position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center;
+  padding:24px; background:rgba(16,24,40,.45); }
+.em-prev-card{ width:min(680px, 100%); max-height:92vh; display:flex; flex-direction:column;
+  background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(16,24,40,.28); }
+.em-prev-top{ padding:13px 16px; border-bottom:1px solid var(--line); }
+.em-prev-top b{ display:block; font-size:13.5px; }
+.em-prev-top span{ display:block; margin-top:3px; font-size:11.5px; color:var(--ink-soft); }
+.em-prev-body{ flex:1 1 auto; width:100%; min-height:380px; border:0; background:#F3F6FB; }
+.em-prev-foot{ display:flex; align-items:center; gap:8px; padding:11px 14px; border-top:1px solid var(--line); }
+.em-prev-msg{ flex:1 1 auto; font-size:11.5px; color:#B3261E; }
+.em-prev-foot .btn{ width:auto !important; flex:none !important; padding:7px 16px; font-size:12.5px; }
+.em-more{ display:block; width:100%; margin-top:4px; padding:6px 4px; cursor:pointer;
+  border:0; border-top:1px solid var(--line); background:none; color:var(--ink-soft);
+  font:600 11.5px/1.2 'Inter',sans-serif; text-align:left; }
+.em-more:hover{ color:var(--ink); }
 .em-sep{ height:1px; background:var(--line); margin:8px 2px; }
 .em-row{ display:flex; align-items:center; gap:8px; padding:4px 4px; }
 .em-row.em-indent{ padding-left:24px; font-size:11.5px; color:var(--ink-soft); }
@@ -9166,11 +9182,16 @@ function buildExcelBackup(){
       + '<div class="em-note">Sent to ' + (((MAIL_CFG.to || []).length)
             ? mailEscape(MAIL_CFG.to.join(', '))
             : 'nobody yet — no admin account has an address on it') + '</div>'
-      + '<button type="button" class="em-go" id="emSendDay">📨 Send today’s attendance'
+      + '<button type="button" class="em-go" id="emSendDay">📨 Email today’s attendance'
       +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
       + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
       +   '<span>What is waiting for a decision, with Approve and Reject</span></button>'
-      + '<div class="em-sep"></div>'
+      + '<div class="em-note" id="emMsg"></div>'
+      /* Everything else is set once and then left alone - a request raised
+         sends its own message without being asked - so it is folded away
+         behind a line of text rather than filling the menu. */
+      + '<button type="button" class="em-more" id="emMore">Settings</button>'
+      + '<div class="em-set" id="emSet" style="display:none;">'
       + '<label class="em-row"><input type="checkbox" id="emDaily"' + (s.daily !== false ? ' checked' : '') + '>'
       +   '<span>Send the attendance message every day at</span></label>'
       + '<div class="em-row em-indent"><input type="text" id="emAt" value="' + mailEscape(s.dailyAt || '19:30') + '" size="5"><span>India time</span></div>'
@@ -9183,9 +9204,14 @@ function buildExcelBackup(){
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
       +   '<button type="button" class="btn ghost" id="emTest">'
       +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button></div>'
-      + '<div class="em-note" id="emMsg"></div>'
-      + '</div>';
+      + '</div></div>';
 
+    var more = document.getElementById('emMore'), set = document.getElementById('emSet');
+    if(more && set) more.onclick = function(){
+      var open = set.style.display !== 'none';
+      set.style.display = open ? 'none' : '';
+      more.textContent = open ? 'Settings' : 'Hide settings';
+    };
     var msg = function(text, bad){
       var m = document.getElementById('emMsg');
       if(m){ m.textContent = text; m.style.color = bad ? '#B3261E' : '#137A3B'; }
@@ -9205,6 +9231,67 @@ function buildExcelBackup(){
         .catch(function(e){ if(btn) btn.disabled = false; msg(e.message || 'It did not go out.', true); return {ok:false, j:null}; });
     };
 
+    /* The message as it will arrive, in a window of its own: the same HTML the
+       server would post, and a line saying who it goes to and whether the
+       picture is on it. Nothing is sent until the button here is pressed. */
+    var showPreview = function(pv, onSend){
+      var wrap = document.createElement('div');
+      wrap.className = 'em-prev';
+      wrap.innerHTML = '<div class="em-prev-card">'
+        + '<div class="em-prev-top"><b>' + escapeHtml(pv.preview.subject) + '</b>'
+        +   '<span>To ' + escapeHtml((pv.to || []).join(', '))
+        +     (pv.attached ? ' \u00b7 the record is attached' : ' \u00b7 without the picture') + '</span></div>'
+        + '<iframe class="em-prev-body" sandbox=""></iframe>'
+        + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
+        +   '<button type="button" class="btn ghost" data-em-x>Not now</button>'
+        +   '<button type="button" class="btn primary" data-em-send>Send it</button></div>'
+        + '</div>';
+      document.body.appendChild(wrap);
+      try{ wrap.querySelector('iframe').srcdoc = pv.preview.html; }catch(e){}
+      var close = function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+      wrap.addEventListener('click', function(e){ if(e.target === wrap) close(); });
+      wrap.querySelector('[data-em-x]').onclick = close;
+      var go = wrap.querySelector('[data-em-send]');
+      go.onclick = function(){
+        go.disabled = true;
+        wrap.querySelector('.em-prev-msg').textContent = 'Sending\u2026';
+        onSend(function(text, bad){
+          if(bad){ go.disabled = false; wrap.querySelector('.em-prev-msg').textContent = text; return; }
+          close();
+        });
+      };
+    };
+
+    /* The message as it will arrive, in a window of its own: the same HTML the
+       server would post, with a line saying who it goes to and whether the
+       picture is on it. Nothing is sent until the button here is pressed. */
+    var showPreview = function(pv, onSend){
+      var wrap = document.createElement('div');
+      wrap.className = 'em-prev';
+      wrap.innerHTML = '<div class="em-prev-card">'
+        + '<div class="em-prev-top"><b>' + escapeHtml(pv.preview.subject) + '</b>'
+        +   '<span>To ' + escapeHtml((pv.to || []).join(', '))
+        +     (pv.attached ? ' · the record is attached' : ' · without the picture') + '</span></div>'
+        + '<iframe class="em-prev-body" sandbox=""></iframe>'
+        + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
+        +   '<button type="button" class="btn ghost" data-em-x>Not now</button>'
+        +   '<button type="button" class="btn primary" data-em-send>Send it</button></div>'
+        + '</div>';
+      document.body.appendChild(wrap);
+      try{ wrap.querySelector('iframe').srcdoc = pv.preview.html; }catch(e){}
+      var close = function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+      wrap.addEventListener('click', function(e){ if(e.target === wrap) close(); });
+      wrap.querySelector('[data-em-x]').onclick = close;
+      var go = wrap.querySelector('[data-em-send]');
+      go.onclick = function(){
+        go.disabled = true;
+        wrap.querySelector('.em-prev-msg').textContent = 'Sending…';
+        onSend(function(text, bad){
+          if(bad){ go.disabled = false; wrap.querySelector('.em-prev-msg').textContent = text; return; }
+          close();
+        });
+      };
+    };
     var dayBtn = document.getElementById('emSendDay');
     if(dayBtn) dayBtn.onclick = function(){
       dayBtn.disabled = true;
@@ -9214,21 +9301,43 @@ function buildExcelBackup(){
         msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
             + (j.attached ? ', screenshot attached.' : ' — without the screenshot.'));
       };
+      /* Sending it is one press away, but not this press: the server builds the
+         message and hands it back to be looked at first. */
+      var confirmAndSend = function(j){
+        msg('');
+        showPreview(j, function(done){
+          fetch('/api/mail/daily', {method:'POST', credentials:'same-origin',
+                                    headers:{'Content-Type':'application/json'},
+                                    body: JSON.stringify({send:'preview'})})
+            .then(function(r){ return r.json().then(function(x){ return {ok:r.ok, j:x}; }); })
+            .then(function(out){
+              if(!out.ok || (out.j && out.j.ok === false)){
+                done((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+                return;
+              }
+              done();
+              told(out.j);
+            })
+            .catch(function(e){ done(e.message || 'It did not go out.', true); });
+        });
+      };
       renderShotCanvas(1.5).then(function(canvas){
         var png = imageUnder(canvas, 6 * 1024 * 1024);    // 6MB of picture is plenty
-        if(!png) msg('The record is too big to attach — sending the figures…');
-        return post('/api/mail/daily', {png:png, names:names}, dayBtn, 'Sending…', told)
+        if(!png) msg('The record is too big to attach — the figures will go on their own.');
+        return post('/api/mail/daily', {png:png, names:names, preview:true}, dayBtn,
+                    'Building the message…', confirmAndSend)
           .then(function(out){
             // Still too big for the server: the figures matter more than the picture.
             if(out && out.j && out.j.error === 'payload_too_large'){
-              return post('/api/mail/daily', {names:names}, dayBtn, 'The picture was too big — sending the figures…', told);
+              return post('/api/mail/daily', {names:names, preview:true}, dayBtn,
+                          'The picture was too big — building without it…', confirmAndSend);
             }
           });
       }).catch(function(err){
         dayBtn.disabled = false;
         // The picture is a nicety; the figures are the message. Send it anyway.
-        post('/api/mail/daily', {names:names}, dayBtn, 'Sending without the picture…', function(j){
-          msg('Sent to ' + (j.to || 0) + ' address(es) — the screenshot could not be made.');
+        post('/api/mail/daily', {names:names, preview:true}, dayBtn, 'The picture could not be made — building without it…', function(j){
+          confirmAndSend(j);
         });
       });
     };

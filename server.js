@@ -1419,6 +1419,10 @@ async function sendDailyEmail(orgId, day, opts) {
   const mail = await buildDailyEmail(orgId, day || istParts().day,
     { names: opts.names, attached: attachments.length > 0 });
   if (!mail) return { ok: false, error: 'no employees on file' };
+  // Asked for a preview: hand the finished message back instead of sending it.
+  if (opts.preview) {
+    return { ok: true, mail: { to, subject: mail.subject, html: mail.html, attachments } };
+  }
   const r = await mailer.send({ to, subject: mail.subject, html: mail.html, attachments });
   return Object.assign({ to: to.length, attached: attachments.length > 0 }, r);
 }
@@ -1666,6 +1670,16 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   });
   res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to }, r));
 });
+/* A message is looked at before it goes. The dashboard asks for a preview,
+   which builds exactly what would be sent and holds it here; pressing Send
+   then posts nothing but the word, so the picture crosses the wire once. The
+   copy is kept for ten minutes, per person. */
+const previews = new Map();
+function keepPreview(userId, mail) {
+  previews.set(userId, Object.assign({ at: Date.now() }, mail));
+  for (const [id, p] of previews) if (Date.now() - p.at > 10 * 60 * 1000) previews.delete(id);
+}
+
 /* Sent from the dashboard's Email button: it hands over the picture it has just
    rendered and the employees it is showing, so the message matches the screen. */
 app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
@@ -1673,8 +1687,25 @@ app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
   /* A picture too big to send is not a reason to lose the message: the figures
      go out without it, and the answer says so. */
   if (typeof body.png === 'string' && body.png.length > 9 * 1024 * 1024) body.png = '';
-  const r = await sendDailyEmail(req.session.orgId, istParts().day,
-    { png: body.png, names: Array.isArray(body.names) ? body.names.slice(0, 200) : null });
+
+  if (body.send === 'preview') {
+    const held = previews.get(req.session.userId);
+    if (!held) return res.status(410).json({ error: 'that preview has expired - open it again' });
+    previews.delete(req.session.userId);
+    const r = await mailer.send({ to: held.to, subject: held.subject, html: held.html,
+                                  attachments: held.attachments });
+    return res.status(r.ok ? 200 : 502).json(Object.assign(
+      { to: held.to.length, attached: (held.attachments || []).length > 0 }, r));
+  }
+
+  const opts = { png: body.png, names: Array.isArray(body.names) ? body.names.slice(0, 200) : null,
+                 preview: !!body.preview };
+  const r = await sendDailyEmail(req.session.orgId, istParts().day, opts);
+  if (body.preview && r.ok && r.mail) {
+    keepPreview(req.session.userId, r.mail);
+    return res.json({ ok: true, preview: { subject: r.mail.subject, html: r.mail.html },
+                      to: r.mail.to, attached: (r.mail.attachments || []).length > 0 });
+  }
   res.status(r.ok ? 200 : 502).json(r);
 });
 app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {

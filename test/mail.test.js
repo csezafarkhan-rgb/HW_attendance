@@ -267,6 +267,21 @@ process.env.SESSION_SECRET = SECRET;
     bigOut.status === 200 && sent[sent.length - 1].attachments
       && sent[sent.length - 1].attachments[0].content.length > 400 * 1024, bigOut.body);
 
+  /* A message is looked at before it goes: the preview builds it and sends
+     nothing, and the send that follows carries only the word. */
+  const before = sent.length;
+  const pv = await asAdmin('POST', '/api/mail/daily', { preview: true, png: 'data:image/png;base64,' + onePng });
+  check('a preview builds the message without sending it',
+    pv.status === 200 && sent.length === before && /Attendance/.test(pv.body.preview.subject)
+      && /Asha Test/.test(pv.body.preview.html) && pv.body.attached === true, pv.body && pv.body.error);
+  const confirmed = await asAdmin('POST', '/api/mail/daily', { send: 'preview' });
+  check('confirming sends exactly what was shown',
+    confirmed.status === 200 && sent.length === before + 1
+      && sent[sent.length - 1].subject === pv.body.preview.subject
+      && sent[sent.length - 1].attachments[0].content === onePng, confirmed.body);
+  const twice = await asAdmin('POST', '/api/mail/daily', { send: 'preview' });
+  check('the same preview cannot be sent twice', twice.status === 410, twice.body);
+
   const pickOut = await asAdmin('POST', '/api/mail/daily', { names: ['Ravi Test'] });
   const picked = sent[sent.length - 1];
   check('a message can name the employees itself',
