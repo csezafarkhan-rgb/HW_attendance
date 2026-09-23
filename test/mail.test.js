@@ -134,6 +134,22 @@ function query(sql, p) {
   if (s.startsWith('INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, NULL)')) {
     kvSet(p[0], p[1], p[2]); return rows([]);
   }
+  if (s.startsWith('CREATE TABLE IF NOT EXISTS mail_log')) return rows([]);
+  if (s.startsWith('CREATE INDEX IF NOT EXISTS mail_log_recent_idx')) return rows([]);
+  if (s.startsWith('INSERT INTO mail_log')) {
+    db.mailLog = (db.mailLog || []);
+    db.mailLog.unshift({ id: db.mailLog.length + 1, at: new Date(), kind: p[1], subject: p[2],
+                         recipients: p[3], cc: p[4], ok: p[5], detail: p[6], attached: p[7], html: p[8] });
+    return rows([]);
+  }
+  if (s.startsWith('DELETE FROM mail_log')) return rows([]);
+  if (s.startsWith('SELECT id, at, kind, subject, recipients, cc, ok, detail, attached FROM mail_log')) {
+    return rows((db.mailLog || []).map(x => Object.assign({}, x, { html: undefined })));
+  }
+  if (s.startsWith('SELECT id, at, kind, subject, recipients, cc, ok, detail, attached, html FROM mail_log')) {
+    const hit = (db.mailLog || []).find(x => x.id === p[1]);
+    return rows(hit ? [hit] : []);
+  }
   if (s.startsWith('CREATE TABLE IF NOT EXISTS mail_shots')) return rows([]);
   if (s.startsWith('INSERT INTO mail_shots')) { db.shots = (db.shots || []).concat([{ id: p[0], mime: p[1], data: p[2] }]); return rows([]); }
   if (s.startsWith('DELETE FROM mail_shots')) return rows([]);
@@ -421,6 +437,20 @@ process.env.SESSION_SECRET = SECRET;
     leaveOut.status === 200 && /waiting for a decision/.test(sent[sent.length - 1].subject), leaveOut.body);
   global.fetch = realFetch;
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
+
+  /* What has been sent is kept, so the Backup tab can show it later. */
+  const log = await asAdmin('GET', '/api/mail/log');
+  check('every message that goes out is written down',
+    log.status === 200 && log.body.sent.length > 0
+      && log.body.sent.some(x => x.kind === 'attendance')
+      && log.body.sent.some(x => x.kind === 'holiday'), (log.body.sent || []).map(x => x.kind));
+  const one = log.body.sent[0];
+  const opened = await asAdmin('GET', '/api/mail/log/' + one.id);
+  check('and can be read back exactly as it was sent',
+    opened.status === 200 && typeof opened.body.html === 'string' && opened.body.html.length > 100,
+    opened.body && opened.body.error);
+  check('a failure is written down too, with the reason',
+    log.body.sent.every(x => typeof x.ok === 'boolean'));
 
   // --- bad links ---
   const bad = await hit('POST', '/e/' + approveTok.slice(0, -3) + 'zzz');

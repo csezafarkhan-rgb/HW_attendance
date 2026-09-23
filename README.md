@@ -212,6 +212,11 @@ holds:
 - When each message goes on its own: the daily time, a note as each request is
   raised, and whether leave taken without a request is included.
 
+**Backup & Restore → Email history** lists every message the site has sent —
+what it was, when, who it went to, whether the record was attached, and whether
+it went at all — and any one of them opens exactly as it arrived. Kept ninety
+days (`mail_log`).
+
 The picture of the record is shown **inside** the message as well as attached.
 A mail client will not draw an image built into the HTML, so a phone-sized copy
 is kept on the server (`mail_shots`, cleared after sixty days) and fetched when

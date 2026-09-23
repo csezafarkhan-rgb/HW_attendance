@@ -1508,6 +1508,55 @@ async function buildLeaveEmail(orgId) {
   });
 }
 
+/* Every message that goes out is kept: what it was, when, who it went to and
+   the message itself, so the Backup tab can show what the office was told and
+   when. Kept ninety days; the picture inside a message is already kept
+   separately and outlives nothing. */
+let mailLogReady = false;
+async function logMail(orgId, kind, msg, result) {
+  try {
+    if (!mailLogReady) {
+      await pool.query(`CREATE TABLE IF NOT EXISTS mail_log (
+        id BIGSERIAL PRIMARY KEY, org_id INTEGER, at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        kind TEXT NOT NULL, subject TEXT, recipients TEXT, cc TEXT,
+        ok BOOLEAN NOT NULL DEFAULT TRUE, detail TEXT, attached BOOLEAN NOT NULL DEFAULT FALSE,
+        html TEXT)`);
+      await pool.query('CREATE INDEX IF NOT EXISTS mail_log_recent_idx ON mail_log (org_id, id DESC)');
+      mailLogReady = true;
+    }
+    await pool.query(
+      `INSERT INTO mail_log (org_id, kind, subject, recipients, cc, ok, detail, attached, html)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [orgId, kind, String(msg.subject || '').slice(0, 300),
+       (msg.to || []).join(', ').slice(0, 500), (msg.cc || []).join(', ').slice(0, 500),
+       !!(result && result.ok), String((result && (result.error || result.id)) || '').slice(0, 300),
+       !!(msg.attachments && msg.attachments.length), String(msg.html || '').slice(0, 400000)]);
+    await pool.query("DELETE FROM mail_log WHERE at < now() - interval '90 days'");
+  } catch (e) {
+    console.error('the message was sent but not written down:', e && e.message);
+  }
+}
+/* What was sent, newest first. The message itself is fetched a row at a time,
+   so the list stays small. */
+app.get('/api/mail/log', requireRole('admin', 'admin_view'), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const r = await pool.query(
+      `SELECT id, at, kind, subject, recipients, cc, ok, detail, attached
+         FROM mail_log WHERE org_id = $1 ORDER BY id DESC LIMIT 60`, [req.session.orgId]);
+    res.json({ sent: r.rows });
+  } catch (e) { res.json({ sent: [] }); }
+});
+app.get('/api/mail/log/:id', requireRole('admin', 'admin_view'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!(id > 0)) return res.status(400).json({ error: 'bad_id' });
+  const r = await pool.query(
+    'SELECT id, at, kind, subject, recipients, cc, ok, detail, attached, html FROM mail_log WHERE org_id = $1 AND id = $2',
+    [req.session.orgId, id]);
+  if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
+  res.json(r.rows[0]);
+});
+
 /* A mail client will not draw a picture built into the HTML, so the one shown
    in the message is kept here and fetched from the site when the message is
    opened. The name is thirty-two random characters; rows older than sixty days
@@ -1574,6 +1623,7 @@ async function sendDailyEmail(orgId, day, opts) {
     return { ok: true, mail: { to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments } };
   }
   const r = await mailer.send({ to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments });
+  await logMail(orgId, 'attendance', { to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments }, r);
   return Object.assign({ to: to.length, cc: (settings.cc || []).length, attached: attachments.length > 0 }, r);
 }
 /* The holidays on the calendar, as {day, name, note}, from the day given
@@ -1624,6 +1674,7 @@ async function sendHolidayEmail(orgId, opts) {
   const cc = (settings.holiday.cc.length ? settings.holiday.cc : settings.cc) || [];
   if (opts.preview) return { ok: true, mail: { to, cc, subject: mail.subject, html: mail.html, attachments: [] } };
   const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+  await logMail(orgId, 'holiday', { to, cc, subject: mail.subject, html: mail.html }, r);
   return Object.assign({ to: to.length, cc: cc.length, holiday: holidays[0].day }, r);
 }
 
@@ -1636,6 +1687,7 @@ async function sendLeaveEmail(orgId) {
   if (!mail) return { ok: true, nothing: true };          // nothing waiting: no message
   const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
   const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+  await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
   return Object.assign({ to: to.length, cc: cc.length }, r);
 }
 
@@ -1656,8 +1708,9 @@ async function notifyNewRequests(orgId, added) {
         siteUrl: mailer.baseUrl(),
         intro: settings.leave.intro, footer: settings.leave.footer
       });
-      await mailer.send({ to, cc: (settings.leave.cc.length ? settings.leave.cc : settings.cc),
-                          subject: mail.subject, html: mail.html });
+      const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+      const sentOne = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+      await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, sentOne);
     }
   } catch (e) {
     console.error('request email failed (request itself was saved):', e && e.message);
@@ -1867,11 +1920,13 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
     }
     to = fallback[0];
   }
-  const r = await mailer.send({
-    to, subject: 'Attendance email is working',
+  const testMail = {
+    to: [to], subject: 'Attendance email is working',
     html: mailer.layout('Attendance', 'Test message', ['<p>This is the test message from the dashboard. '
       + 'Daily summaries and leave requests will arrive here.</p>'])
-  });
+  };
+  const r = await mailer.send({ to, subject: testMail.subject, html: testMail.html });
+  await logMail(req.session.orgId, 'test', testMail, r);
   res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to }, r));
 });
 /* A message is looked at before it goes. The dashboard asks for a preview,
@@ -1898,6 +1953,7 @@ app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
     previews.delete(req.session.userId);
     const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject, html: held.html,
                                   attachments: held.attachments });
+    await logMail(req.session.orgId, 'attendance', held, r);
     return res.status(r.ok ? 200 : 502).json(Object.assign(
       { to: held.to.length, attached: (held.attachments || []).length > 0 }, r));
   }
@@ -1920,6 +1976,7 @@ app.post('/api/mail/holiday', requireRole('admin'), async (req, res) => {
     if (!held) return res.status(410).json({ error: 'that preview has expired - open it again' });
     previews.delete(req.session.userId);
     const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject, html: held.html });
+    await logMail(req.session.orgId, 'holiday', held, r);
     return res.status(r.ok ? 200 : 502).json(Object.assign({ to: held.to.length }, r));
   }
   const out = await sendHolidayEmail(req.session.orgId, { preview: !!body.preview });

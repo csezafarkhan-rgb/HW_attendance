@@ -763,6 +763,17 @@ body{
 .em-go:hover{ background:#F4F7FB; border-color:#C5D0DE; }
 .em-go span{ display:block; margin-top:3px; font-weight:500; font-size:11px; color:var(--ink-soft); }
 /* The preview window: the message itself, and the one button that sends it. */
+/* What has been sent, on the Backup page. */
+.ml-row{ display:flex; align-items:center; gap:12px; padding:9px 2px; border-bottom:1px solid var(--line); }
+.ml-row:last-child{ border-bottom:0; }
+.ml-row.bad .ml-what b{ color:#B3261E; }
+.ml-when{ flex:none; width:64px; font:700 12px/1.2 'Inter',sans-serif; }
+.ml-when span{ display:block; font-weight:500; font-size:10.5px; color:var(--ink-soft); margin-top:2px; }
+.ml-what{ flex:1 1 auto; min-width:0; font-size:12.5px; }
+.ml-what b{ display:block; font-weight:700; }
+.ml-what span{ display:block; font-size:11px; color:var(--ink-soft); margin-top:2px; }
+.ml-row .btn{ width:auto !important; flex:none !important; padding:5px 12px; font-size:12px; }
+.ml-note{ font-size:12px; color:var(--ink-soft); padding:10px 2px; }
 .em-prev{ position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center;
   padding:24px; background:rgba(16,24,40,.45); }
 .em-prev-card{ width:min(680px, 100%); max-height:92vh; display:flex; flex-direction:column;
@@ -3209,6 +3220,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button type="button" class="subtab active" data-bk="in">📥 Bring data in</button>
     <button type="button" class="subtab" data-bk="out">📤 Take data out</button>
     <button type="button" class="subtab" data-bk="history">🕓 Import history</button>
+    <button type="button" class="subtab" data-bk="mail">📧 Email history</button>
+    <button type="button" class="subtab" data-bk="mail">📧 Email history</button>
     <button type="button" class="subtab" data-bk="sign">✍️ Signature</button>
   </div>
 
@@ -3258,6 +3271,28 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     </div>
   </div>
   <div id="importHistory" class="ih"></div>
+  </div>
+
+  <div class="bk-panel" data-bk="mail">
+  <div style="padding:16px 18px 2px;">
+    <div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Email history</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin:4px 0 10px;line-height:1.5;">
+      Every message the site has sent — the day's attendance, leave waiting for a decision, a
+      holiday reminder, a request as it was raised — with what it said and who it went to. Kept
+      for ninety days.</div>
+    <div id="mailLogList"></div>
+  </div>
+  </div>
+
+  <div class="bk-panel" data-bk="mail">
+  <div style="padding:16px 18px 2px;">
+    <div style="font-size:12.5px;font-weight:800;letter-spacing:.02em;">Email history</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin:4px 0 10px;line-height:1.5;">
+      Every message the site has sent — the day's attendance, leave waiting for a decision, a
+      holiday reminder, a request as it was raised — with what it said and who it went to. Kept
+      for ninety days.</div>
+    <div id="mailLogList"></div>
+  </div>
   </div>
 
   <div class="bk-panel" data-bk="out">
@@ -4089,6 +4124,7 @@ function showUploadStatus(msg, isError){
     });
     document.querySelectorAll('#page-backup .bk-panel').forEach(function(p){
       p.classList.toggle('active', p.getAttribute('data-bk') === key);
+      if(key === 'mail' && p.getAttribute('data-bk') === 'mail') renderMailLog();
     });
     // The status line reports on the panel that was open; it says nothing about this one.
     var st = document.getElementById('bkStatus');
@@ -4842,6 +4878,68 @@ function renderSignSetting(){
       saveSigns();
     });
   })();
+  /* What the site has sent. Read when the tab is opened, and any one of them
+     can be opened to see exactly what arrived. */
+  var MAIL_KIND = { attendance:'Attendance', leave:'Leave', holiday:'Holiday reminder',
+                    request:'A request was raised', test:'Test message' };
+  function renderMailLog(){
+    var box = document.getElementById('mailLogList');
+    if(!box) return;
+    box.innerHTML = '<div class="ml-note">Reading\u2026</div>';
+    fetch('/api/mail/log', {credentials:'same-origin', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        var rows = (j && j.sent) || [];
+        if(!rows.length){
+          box.innerHTML = '<div class="ml-note">Nothing has been sent yet. '
+            + 'Messages appear here as they go out.</div>';
+          return;
+        }
+        box.innerHTML = rows.map(function(r){
+          var when = new Date(r.at);
+          return '<div class="ml-row' + (r.ok ? '' : ' bad') + '">'
+            + '<div class="ml-when">' + escapeHtml(when.toLocaleDateString(undefined, {day:'numeric', month:'short'}))
+            +   '<span>' + escapeHtml(when.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'})) + '</span></div>'
+            + '<div class="ml-what"><b>' + escapeHtml(r.subject || '(no subject)') + '</b>'
+            +   '<span>' + escapeHtml(MAIL_KIND[r.kind] || r.kind) + ' \u00b7 to ' + escapeHtml(r.recipients || '\u2014')
+            +   (r.cc ? (' \u00b7 cc ' + escapeHtml(r.cc)) : '')
+            +   (r.attached ? ' \u00b7 with the record attached' : '')
+            +   (r.ok ? '' : (' \u00b7 did not go: ' + escapeHtml(r.detail || 'no reason given')))
+            +   '</span></div>'
+            + '<button type="button" class="btn ghost" data-ml="' + r.id + '">Open</button>'
+            + '</div>';
+        }).join('');
+        Array.prototype.forEach.call(box.querySelectorAll('[data-ml]'), function(b){
+          b.onclick = function(){ openSentMail(b.getAttribute('data-ml')); };
+        });
+      })
+      .catch(function(){ box.innerHTML = '<div class="ml-note">Could not read what was sent.</div>'; });
+  }
+  /* One of them, as it arrived. */
+  function openSentMail(id){
+    fetch('/api/mail/log/' + encodeURIComponent(id), {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(m){
+        if(!m) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'em-prev';
+        wrap.innerHTML = '<div class="em-prev-card">'
+          + '<div class="em-prev-top"><b>' + escapeHtml(m.subject || '') + '</b>'
+          +   '<span>' + escapeHtml(new Date(m.at).toLocaleString()) + ' \u00b7 to '
+          +   escapeHtml(m.recipients || '\u2014') + (m.attached ? ' \u00b7 the record was attached' : '') + '</span></div>'
+          + '<iframe class="em-prev-body" sandbox=""></iframe>'
+          + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
+          +   '<button type="button" class="btn ghost" data-em-x>Close</button></div>'
+          + '</div>';
+        document.body.appendChild(wrap);
+        try{ wrap.querySelector('iframe').srcdoc = m.html || '<p>The message itself was not kept.</p>'; }catch(e){}
+        var close = function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+        wrap.addEventListener('click', function(e){ if(e.target === wrap) close(); });
+        wrap.querySelector('[data-em-x]').onclick = close;
+      })
+      .catch(function(){});
+  }
+
 function renderImportFolder(){
   var lapsed = !!IMPORT_DIR && IMPORT_DIR_PERM !== 'granted';   // 'denied' as well as 'prompt'
   var fnote = document.getElementById('updFolderNote');
