@@ -9190,6 +9190,11 @@ function buildExcelBackup(){
       return;
     }
     var s = MAIL_CFG.settings || {};
+    /* A box left empty uses the wording the message was built with, so that
+       wording is shown in the box rather than hidden behind a placeholder:
+       what is on screen is what goes out, and it can be edited from there. */
+    var W = MAIL_CFG.defaults || {daily:{}, leave:{}, holiday:{}};
+    var text = function(saved, fallback){ return (saved && String(saved).trim()) ? saved : (fallback || ''); };
     var shown = visibleEmployees().length, all = EMPLOYEES.length;
     dd.innerHTML = '<div class="em-pane">'
       + '<div class="em-note">Sent to ' + (((MAIL_CFG.to || []).length)
@@ -9225,14 +9230,14 @@ function buildExcelBackup(){
       +   mailEscape((s.cc || []).join(', ')) + '"></div>'
       /* And what it says. Empty means the wording the message came with. */
       + '<div class="em-lab">Subject <span>{date} {present} {missing} {late} {org}</span></div>'
-      + '<div class="em-row"><input type="text" id="emSubject" placeholder="Attendance {date} \u00b7 {missing} with no punch" value="'
-      +   mailEscape(s.subject || '') + '"></div>'
+      + '<div class="em-row"><input type="text" id="emSubject" value="'
+      +   mailEscape(text(s.subject, W.daily.subject)) + '"></div>'
       + '<div class="em-lab">Message at the top</div>'
-      + '<div class="em-row"><textarea id="emIntro" rows="3" placeholder="A line or two before the figures">'
-      +   mailEscape(s.intro || '') + '</textarea></div>'
+      + '<div class="em-row"><textarea id="emIntro" rows="3">'
+      +   mailEscape(text(s.intro, W.daily.intro)) + '</textarea></div>'
       + '<div class="em-lab">Note at the foot</div>'
-      + '<div class="em-row"><textarea id="emFooter" rows="2" placeholder="e.g. Raise anything wrong with your manager">'
-      +   mailEscape(s.footer || '') + '</textarea></div>'
+      + '<div class="em-row"><textarea id="emFooter" rows="2">'
+      +   mailEscape(text(s.footer, W.daily.footer)) + '</textarea></div>'
       + '<div class="em-lab">What the message shows</div>'
       + (function(){
           var sec = s.sections || {};
@@ -9258,14 +9263,14 @@ function buildExcelBackup(){
       + '<div class="em-row"><input type="text" id="emLvCc" placeholder="comma separated" value="'
       +   mailEscape(((s.leave || {}).cc || []).join(', ')) + '"></div>'
       + '<div class="em-lab">Subject <span>{n} {waiting} {unrequested} {org}</span></div>'
-      + '<div class="em-row"><input type="text" id="emLvSubject" placeholder="Leave \u00b7 {n} need a decision" value="'
-      +   mailEscape((s.leave || {}).subject || '') + '"></div>'
+      + '<div class="em-row"><input type="text" id="emLvSubject" value="'
+      +   mailEscape(text((s.leave || {}).subject, W.leave.subject)) + '"></div>'
       + '<div class="em-lab">Message at the top</div>'
-      + '<div class="em-row"><textarea id="emLvIntro" rows="3" placeholder="A line before the requests">'
-      +   mailEscape((s.leave || {}).intro || '') + '</textarea></div>'
+      + '<div class="em-row"><textarea id="emLvIntro" rows="3">'
+      +   mailEscape(text((s.leave || {}).intro, W.leave.intro)) + '</textarea></div>'
       + '<div class="em-lab">Note at the foot</div>'
-      + '<div class="em-row"><textarea id="emLvFooter" rows="2" placeholder="e.g. Decide from the buttons above">'
-      +   mailEscape((s.leave || {}).footer || '') + '</textarea></div>'
+      + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
+      +   mailEscape(text((s.leave || {}).footer, W.leave.footer)) + '</textarea></div>'
       + '<div class="em-lab">When it goes on its own</div>'
       + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
       +   '<span>A note as each request is raised</span></label>'
@@ -9288,14 +9293,14 @@ function buildExcelBackup(){
             + '<div class="em-row"><input type="text" id="emHolCc" placeholder="comma separated" value="'
             +   mailEscape((h.cc || []).join(', ')) + '"></div>'
             + '<div class="em-lab">Subject <span>{name} {date} {days} {org}</span></div>'
-            + '<div class="em-row"><input type="text" id="emHolSubject" placeholder="Holiday \u00b7 {name} \u00b7 {date}" value="'
-            +   mailEscape(h.subject || '') + '"></div>'
+            + '<div class="em-row"><input type="text" id="emHolSubject" value="'
+            +   mailEscape(text(h.subject, W.holiday.subject)) + '"></div>'
             + '<div class="em-lab">Message at the top</div>'
-            + '<div class="em-row"><textarea id="emHolIntro" rows="3" placeholder="e.g. The office will be closed \u2014 please plan your work">'
-            +   mailEscape(h.intro || '') + '</textarea></div>'
+            + '<div class="em-row"><textarea id="emHolIntro" rows="3">'
+            +   mailEscape(text(h.intro, W.holiday.intro)) + '</textarea></div>'
             + '<div class="em-lab">Note at the foot</div>'
-            + '<div class="em-row"><textarea id="emHolFooter" rows="2" placeholder="e.g. Best regards">'
-            +   mailEscape(h.footer || '') + '</textarea></div>'
+            + '<div class="em-row"><textarea id="emHolFooter" rows="2">'
+            +   mailEscape(text(h.footer, W.holiday.footer)) + '</textarea></div>'
             + '</div>';
         })()
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'

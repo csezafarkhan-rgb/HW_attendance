@@ -36,7 +36,7 @@ const SECRET = 'test-secret-for-signing-links';
     ],
     hidden: 4, attached: true, siteUrl: 'https://x'
   });
-  check('the subject counts who has no punch', /1 with no punch/.test(mail.subject), mail.subject);
+  check('the subject is the wording the message starts with', mail.subject === 'Attendance · Tue, 22 Sep', mail.subject);
   const cards = mailer.dailyEmail({
     orgName: 'Test Co', dateLabel: 'Tue, 22 Sep',
     rows: [
@@ -89,7 +89,7 @@ const SECRET = 'test-secret-for-signing-links';
                     links: { approve: 'https://x/e/ccc', reject: 'https://x/e/ddd' } }],
     siteUrl: 'https://x'
   });
-  check('the leave message counts what needs a decision', /2 need a decision/.test(leave.subject), leave.subject);
+  check('the leave message counts what needs a decision', /2 waiting for a decision/.test(leave.subject), leave.subject);
   check('every button is in it', ['aaa', 'bbb', 'ccc', 'ddd'].every(t => leave.html.indexOf('https://x/e/' + t) > -1));
   check('nothing waiting means no leave message',
     mailer.leaveEmail({ orgName: 'Test Co', pending: [], unrequested: [] }) === null);
@@ -407,7 +407,7 @@ process.env.SESSION_SECRET = SECRET;
   kvSet(1, 'leaveRequests', JSON.stringify(waiting));
   const leaveOut = await asAdmin('POST', '/api/mail/leave', {});
   check('the leave message is separate, and carries its buttons',
-    leaveOut.status === 200 && /need/.test(sent[sent.length - 1].subject), leaveOut.body);
+    leaveOut.status === 200 && /waiting for a decision/.test(sent[sent.length - 1].subject), leaveOut.body);
   global.fetch = realFetch;
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 

@@ -158,6 +158,33 @@ function clock(t) {
   return h + ':' + m[2] + ' ' + ap;
 }
 
+/* What each message says before anybody changes it. The same braces work in
+   the subject, the greeting and the sign-off, so a name or a date can be
+   written into any of them. */
+const DEFAULT_TEXT = {
+  daily: {
+    subject: 'Attendance \u00b7 {date}',
+    intro: 'Hello,\n\nPlease find today\u2019s attendance record below.',
+    footer: 'Best regards,\n{org}'
+  },
+  leave: {
+    subject: 'Leave \u00b7 {n} waiting for a decision',
+    intro: 'Hello,\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
+    footer: 'Best regards,\n{org}'
+  },
+  holiday: {
+    subject: 'Holiday \u00b7 {name} \u00b7 {date}',
+    intro: 'Hello,\n\nA holiday is coming up. Please plan your work around it.',
+    footer: 'Best regards,\n{org}'
+  }
+};
+/* {name} {date} {days} {org} and the rest, wherever they are written. */
+function fillText(text, values) {
+  return String(text || '').replace(/\{(\w+)\}/g, function (m, k) {
+    return (k in values) ? String(values[k]) : m;
+  });
+}
+
 const KIND_NAME = {
   CL: 'Casual leave', Sick: 'Sick leave', Other: 'Leave', WFH: 'Work from home',
   VISIT: 'Client visit', HALF: 'Half day', SHORT: 'Short leave', THREEQ: 'Three-quarter day',
@@ -201,14 +228,19 @@ function noticeList(title, items, colour) {
    shows, the picture of the record, and the line at the foot. */
 function dailyEmail(o) {
   const rows = o.rows || [];
+  const words = DEFAULT_TEXT.daily;
   const on = Object.assign({ tally: true, late: true, shifts: true, wfh: true, visits: true,
                             table: true, shot: true }, o.sections || {});
   const count = function (st) { return rows.filter(function (r) { return r.state === st; }).length; };
   const body = [];
 
-  if (o.intro) {
+  const say = { date: o.dateLabel, org: o.orgName || 'Attendance',
+                present: count('present'), remote: count('remote'),
+                leave: count('leave'), missing: count('missing'), late: (o.late || []).length };
+  const intro = fillText(o.intro || words.intro, say);
+  if (intro) {
     body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(o.intro) + '</div>');
+      + esc(intro) + '</div>');
   }
 
   if (on.tally) {
@@ -298,41 +330,36 @@ function dailyEmail(o) {
       + 'The record is attached as a picture, exactly as the portal shows it.</div>');
   }
 
-  if (o.footer) {
+  const footer = fillText(o.footer || words.footer, say);
+  if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
   }
   if (o.siteUrl) {
     body.push('<div style="margin-top:18px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   }
 
-  /* The subject can be written in the portal, with the day's figures in it. */
-  const fill = {
-    date: o.dateLabel, present: count('present'), remote: count('remote'),
-    leave: count('leave'), missing: count('missing'),
-    late: (o.late || []).length, org: o.orgName || 'Attendance'
-  };
-  const subject = (o.subject && o.subject.trim())
-    ? o.subject.replace(/\{(\w+)\}/g, function (m, k) { return (k in fill) ? String(fill[k]) : m; })
-    : ('Attendance · ' + o.dateLabel + (count('missing') ? (' · ' + count('missing') + ' with no punch') : ''));
+  const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
 
   /* Gmail threads messages that share a subject and hides whatever repeats the
      one before - the greeting and the figures came through as "..." when a
      second message went out the same day. The time it was sent is on the
      header, so no two are ever quite the same. */
-  const stamp = o.dateLabel + (o.sentAt ? (' · as at ' + o.sentAt) : '');
+  const stamp = o.dateLabel + (o.sentAt ? (' \u00b7 as at ' + o.sentAt) : '');
   return { subject: subject, html: layout(o.orgName || 'Attendance', stamp, body) };
 }
 
-/* The leave message: what is waiting for a decision, and leave taken with no
-   request behind it. Both carry their two buttons. */
 function leaveEmail(o) {
   const pending = o.pending || [], unreq = o.unrequested || [];
   if (!pending.length && !unreq.length) return null;   // nothing to say: no message
+  const words = DEFAULT_TEXT.leave;
+  const say = { n: pending.length + unreq.length, waiting: pending.length,
+                unrequested: unreq.length, org: o.orgName || 'Attendance' };
   const body = [];
-  if (o.intro) {
+  const intro = fillText(o.intro || words.intro, say);
+  if (intro) {
     body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(o.intro) + '</div>');
+      + esc(intro) + '</div>');
   }
   if (pending.length) {
     body.push('<h3 style="font-size:14px;margin:0 0 10px;">Waiting for a decision</h3>');
@@ -344,20 +371,15 @@ function leaveEmail(o) {
       + 'Marked on the record but never approved. Rejecting removes the day.</div>');
     unreq.forEach(function (p) { body.push(requestCard(p.req, p.links, p.heading)); });
   }
-  if (o.footer) {
+  const footer = fillText(o.footer || words.footer, say);
+  if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
   }
   if (o.siteUrl) body.push('<div style="margin-top:18px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
-  const n = pending.length + unreq.length;
-  /* The subject can be written on the portal: {n} everything waiting, {waiting}
-     the requests, {unrequested} the days taken without one. */
-  const subject = (o.subject && o.subject.trim())
-    ? o.subject.replace(/\{(\w+)\}/g, function (m, k) {
-        return k === 'n' ? String(n) : k === 'waiting' ? String(pending.length)
-             : k === 'unrequested' ? String(unreq.length) : k === 'org' ? (o.orgName || '') : m;
-      })
-    : ('Leave · ' + n + ' need' + (n === 1 ? 's' : '') + ' a decision');
+  /* {n} everything waiting, {waiting} the requests, {unrequested} the days
+     taken without one. */
+  const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
   return {
     subject: subject,
     html: layout(o.orgName || 'Attendance', o.dateLabel || 'Leave waiting for a decision', body)
@@ -368,10 +390,15 @@ function leaveEmail(o) {
 function holidayEmail(o) {
   const list = o.holidays || [];
   if (!list.length) return null;
+  const words = DEFAULT_TEXT.holiday;
+  const first = list[0];
+  const say = { name: first.name || 'Holiday', date: first.when,
+                days: String(first.away == null ? '' : first.away), org: o.orgName || 'Attendance' };
   const body = [];
-  if (o.intro) {
+  const intro = fillText(o.intro || words.intro, say);
+  if (intro) {
     body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(o.intro) + '</div>');
+      + esc(intro) + '</div>');
   }
   list.forEach(function (h) {
     body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid #B45309;border-radius:10px;'
@@ -383,17 +410,13 @@ function holidayEmail(o) {
       + (h.note ? ('<div style="font-size:12.5px;margin-top:6px;">' + esc(h.note) + '</div>') : '')
       + '</div>');
   });
-  if (o.footer) {
+  const footer = fillText(o.footer || words.footer, say);
+  if (footer) {
     body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
   }
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
-  const first = list[0];
-  const fill = { name: first.name || 'Holiday', date: first.when, days: String(first.away == null ? '' : first.away),
-                 org: o.orgName || '' };
-  const subject = (o.subject && o.subject.trim())
-    ? o.subject.replace(/\{(\w+)\}/g, function (m, k) { return (k in fill) ? fill[k] : m; })
-    : ('Holiday \u00b7 ' + (first.name || 'Office closed') + ' \u00b7 ' + first.when);
+  const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
   return { subject: subject, html: layout(o.orgName || 'Attendance', 'A holiday is coming up', body) };
 }
 
@@ -445,5 +468,6 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange,
-  dailyEmail, leaveEmail, holidayEmail, requestEmail, requestCard, confirmPage, resultPage, clock
+  dailyEmail, leaveEmail, holidayEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
+  DEFAULT_TEXT, fillText
 };
