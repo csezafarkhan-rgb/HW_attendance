@@ -9272,7 +9272,8 @@ function buildExcelBackup(){
                : ('Database not answering' + (db.error ? (' — ' + escapeHtml(String(db.error).slice(0, 80))) : ''))) + '</div>';
     if(db.ok){
       html += meter(u.bytes || 0, plan.bytes || 0, 'Sent this month',
-        (u.requests ? (u.requests.toLocaleString() + ' requests') : '') + ' · the free plan is suspended past this');
+        (u.requests ? (u.requests.toLocaleString() + ' request' + (u.requests === 1 ? '' : 's') + ' · ') : '')
+        + 'counted here since the site began keeping score; past 5GB the free plan is suspended');
       html += meter(db.size || 0, plan.dbBytes || 0, 'Database', 'attendance, settings and history together');
       html += '<div class="st-facts">'
         + '<div><b>' + ((c.records || 0).toLocaleString()) + '</b><span>attendance rows</span></div>'
