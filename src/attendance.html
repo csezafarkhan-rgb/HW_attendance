@@ -9336,6 +9336,7 @@ function buildExcelBackup(){
       var told = function(j){
         msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
             + (j.attached ? ', screenshot attached.' : ' — without the screenshot.'));
+        keepACopy();                       // the record has gone out: keep the day's backup too
       };
       /* Sending it is one press away, but not this press: the server builds the
          message and hands it back to be looked at first. */
