@@ -1830,29 +1830,19 @@ app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
               current_database() AS name`);
     /* The write-ahead log sits on the same disk and Render counts it, but
        reading the log directory needs rights a hosted account does not get.
-       Postgres will keep at least min_wal_size of it, so that floor is used
-       when the directory cannot be read - it is a floor, not a guess, and the
-       panel says which figure is which. */
-    let wal = 0, walFloor = 0;
+       min_wal_size was tried as a stand-in and overshot by half - it is what
+       Postgres keeps room for, not what is there. So the figure is what can
+       actually be measured, the databases, and the panel says plainly that
+       Render's own percentage runs higher because of the log. */
+    let wal = 0;
     try {
       const w = await pool.query('SELECT COALESCE(sum(size), 0)::bigint AS wal FROM pg_ls_waldir()');
       wal = Number(w.rows[0].wal) || 0;
-    } catch (e) {
-      try {
-        const m = await pool.query("SELECT setting, unit FROM pg_settings WHERE name = 'min_wal_size'");
-        const row = m.rows[0];
-        if (row) {
-          const unit = String(row.unit || 'MB').toUpperCase();
-          const mult = unit === 'KB' ? 1024 : unit === 'MB' ? 1024 * 1024 : unit === 'GB' ? 1024 * 1024 * 1024 : 1;
-          walFloor = Number(row.setting) * mult;
-        }
-      } catch (e2) { /* then the disk figure is the databases alone */ }
-    }
+    } catch (e) { /* not readable on a hosted account */ }
     const own = Number(r.rows[0].size);
     const dbs = Number(r.rows[0].all_dbs || own);
-    const everything = dbs + wal + walFloor;
-    out.db = { ok: true, ms: Date.now() - t0, size: everything, own: own, databases: dbs,
-               wal: wal, walFloor: walFloor,
+    out.db = { ok: true, ms: Date.now() - t0, size: dbs + wal, own: own, databases: dbs,
+               wal: wal, walKnown: wal > 0,
                version: r.rows[0].version, name: r.rows[0].name };
     try {
       const seen = await dbFirstSeen();

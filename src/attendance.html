@@ -9335,9 +9335,8 @@ function buildExcelBackup(){
         (db.own != null
           ? (fmtBytes(db.own) + ' of it is the attendance data'
              + (db.databases && db.databases > db.own ? ('; ' + fmtBytes(db.databases - db.own) + ' is Postgres’s own') : '')
-             + ((db.wal || db.walFloor) ? ('; ' + fmtBytes(db.wal || db.walFloor) + ' of write-ahead log'
-                 + (db.wal ? '' : ' (the least Postgres keeps — Render counts what is really there, so it may read a little higher)')) : '')
-             + '.')
+             + (db.walKnown ? ('; ' + fmtBytes(db.wal) + ' of write-ahead log.')
+                            : '. Render counts the write-ahead log on the same disk as well, which this account cannot read, so its percentage runs a few points higher.'))
           : 'attendance, settings and history together'));
       /* A free database is deleted on its thirtieth day. That is the one thing
          here nobody can undo, so it is said plainly and gets louder as the day
