@@ -51,6 +51,7 @@ const SECRET = 'test-secret-for-signing-links';
       && !/From home \/ visiting/.test(cards.html)
       && /Ravi Test/.test(cards.html) && /Priya Test/.test(cards.html), cards.html.slice(0, 60));
   check('a kind nobody is on is left out', !/On leave/.test(cards.html));
+  check('the names on a card are numbered', /1_Asha Test/.test(cards.html) && /1_Ravi Test/.test(cards.html));
   check('the cards sit on one line',
     (((cards.html.match(/<table[^>]*table-layout:fixed[^>]*>[\s\S]*?<\/table>/) || [''])[0]).match(/<tr>/g) || []).length === 1);
   const lists = mailer.dailyEmail({

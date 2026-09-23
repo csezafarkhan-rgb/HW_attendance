@@ -233,7 +233,9 @@ function dailyEmail(o) {
           + '<div style="font-size:18px;font-weight:700;color:' + k[2] + ';line-height:1.1;">' + k[1].length + '</div>'
           + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
           + '<div style="font-size:11px;line-height:1.45;color:' + INK + ';">'
-          +   k[1].map(function (r) { return esc(r.name); }).join('<br>')
+          /* Numbered, so a card can be counted down at a glance and read back
+             over the phone without losing the place. */
+          +   k[1].map(function (r, i) { return (i + 1) + '_' + esc(r.name); }).join('<br>')
           + '</div></div></td>';
       }).join('');
       body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
