@@ -9213,7 +9213,8 @@ function buildExcelBackup(){
       + (function(){
           var sec = s.sections || {};
           var boxes = [['tally','The day\u2019s figures'], ['late','Late today'], ['shifts','Shift changed today'],
-                       ['wfh','Working from home'], ['table','Everyone\u2019s in and out'], ['shot','The record as a picture']];
+                       ['wfh','Working from home'], ['visits','Visiting today'],
+                       ['table','Everyone\u2019s in and out'], ['shot','The record as a picture']];
           return boxes.map(function(b){
             return '<label class="em-row"><input type="checkbox" data-em-sec="' + b[0] + '"'
               + (sec[b[0]] !== false ? ' checked' : '') + '><span>' + b[1] + '</span></label>';
