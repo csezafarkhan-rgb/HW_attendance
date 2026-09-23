@@ -378,11 +378,23 @@ foreach ($r in $processed) {
 }
 
 # ------------------------------------------------------------- the rows ------
-$fromEssl = 0; $fromPunches = 0; $stale = 0; $open = 0
+$fromEssl = 0; $fromPunches = 0; $stale = 0; $open = 0; $unnamed = 0
+$unnamedWho = @{}
 $rows = foreach ($key in ($rawByKey.Keys + $essl.Keys | Select-Object -Unique)) {
     $parts = $key.Split('|')
     $emp   = $empById[$parts[0]]
     if (-not $emp) { continue }
+    <#  A card enrolled with no name against it carries its own number as the
+        name, and the dashboard then made a person out of it - "500" appeared in
+        the grid, the daily email and the payroll list. Such a row is left out
+        and counted, so an unmapped card is visible in the log rather than
+        silently becoming staff. Give the card an employee in eTimeTrackLite and
+        its punches arrive under the real name. #>
+    if (('' + $emp.EmployeeName).Trim() -match '^\d+$') {
+        $unnamed++
+        $unnamedWho[('' + $emp.EmployeeName).Trim()] = $true
+        continue
+    }
     $day   = [datetime]::ParseExact($parts[1], 'yyyy-MM-dd', $null)
 
     $list  = if ($rawByKey.ContainsKey($key)) { @($rawByKey[$key] | Sort-Object At) } else { @() }
@@ -479,6 +491,9 @@ Write-Output ('  built from punches: {0}   (days eSSL has not processed)' -f $fr
 Write-Output ('  eSSL row was stale: {0}   (written before the day finished)' -f $stale)
 Write-Output ('  still open        : {0}   (in-punch, no out-punch yet)' -f $open)
 Write-Output ('  straight off the readers: {0} punch(es) the database did not have' -f $fromDevice)
+if ($unnamed -gt 0) {
+    Write-Output ('  cards with no employee: {0} day(s) left out  ({1})' -f $unnamed, (($unnamedWho.Keys | Sort-Object) -join ', '))
+}
 
 if ($WhatIfOnly) { Write-Output 'WhatIfOnly - nothing written'; return }
 
@@ -496,11 +511,11 @@ Write-Output ('written             : {0}' -f $OutFile)
 $log = Join-Path $DataDir 'build-log.txt'
 $newest = ($rawByKey.Values | ForEach-Object { $_ } | ForEach-Object { $_.At } |
            Sort-Object | Select-Object -Last 1)
-$line = '{0}  rows={1} fromEssl={2} rebuilt={3} stale={4} open={5} newFromReaders={8} lastPunch={6} lastDevicePull={7}' -f `
+$line = '{0}  rows={1} fromEssl={2} rebuilt={3} stale={4} open={5} newFromReaders={8} unnamedCards={9} lastPunch={6} lastDevicePull={7}' -f `
         (Get-Date).ToString('yyyy-MM-dd HH:mm'), $rows.Count, $fromEssl, $fromPunches, $stale, $open,
         $(if ($newest)  { $newest.ToString('MM-dd HH:mm') }  else { 'none' }),
         $(if ($lastPull){ $lastPull.ToString('MM-dd HH:mm') } else { 'never' }),
-        $fromDevice
+        $fromDevice, $unnamed
 Add-Content -LiteralPath $log -Value $line
 $keep = Get-Content -LiteralPath $log -Tail 400
 Set-Content -LiteralPath $log -Value $keep
