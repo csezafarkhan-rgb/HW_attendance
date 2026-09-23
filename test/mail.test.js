@@ -400,6 +400,17 @@ process.env.SESSION_SECRET = SECRET;
   db.users[0].email = 'boss@x.com';
   db.users.pop();
 
+  /* An archived request is off the Requests page, so it is not waiting for
+     anybody and must not be counted as though it were. */
+  const withArchived = JSON.parse(kvFind(1, 'leaveRequests').value);
+  withArchived.push({ id: 'req_old', empName: 'Asha Test', dateFrom: '2026-08-14', dateTo: '2026-08-14',
+                      leaveType: 'CL', status: 'pending', archived: '2026-08-20T05:00:00Z',
+                      createdAt: '2026-08-12T05:00:00Z', updatedAt: '2026-08-12T05:00:00Z' });
+  kvSet(1, 'leaveRequests', JSON.stringify(withArchived));
+  const quiet = await asAdmin('POST', '/api/mail/leave', {});
+  check('an archived request is not counted as waiting',
+    quiet.body && quiet.body.nothing === true, quiet.body);
+
   // Everything raised above has been decided by now, so give it one to carry.
   const waiting = JSON.parse(kvFind(1, 'leaveRequests').value);
   waiting.push({ id: 'req_3', empName: 'Ravi Test', dateFrom: '2026-10-01', dateTo: '2026-10-01',

@@ -1485,7 +1485,10 @@ async function buildLeaveEmail(orgId) {
   const settings = await mailSettings(orgId);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'companyInfo']);
   const requests = parseJson(kv.leaveRequests) || [];
-  const pending = requests.filter(r => r && (r.status === 'pending' || r.status === 'query'))
+  /* An archived request is out of the way by definition - the dashboard keeps
+     it off the Requests page, and the message said seven were waiting when the
+     portal said none. */
+  const pending = requests.filter(r => r && !r.archived && (r.status === 'pending' || r.status === 'query'))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
     .map(r => ({ req: r, heading: r.status === 'query' ? 'A query was raised' : 'Waiting since ' + String(r.createdAt || '').slice(0, 10),
