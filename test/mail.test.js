@@ -97,6 +97,13 @@ function query(sql, p) {
   if (s.startsWith('INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, NULL)')) {
     kvSet(p[0], p[1], p[2]); return rows([]);
   }
+  if (s.startsWith('CREATE TABLE IF NOT EXISTS mail_shots')) return rows([]);
+  if (s.startsWith('INSERT INTO mail_shots')) { db.shots = (db.shots || []).concat([{ id: p[0], mime: p[1], data: p[2] }]); return rows([]); }
+  if (s.startsWith('DELETE FROM mail_shots')) return rows([]);
+  if (s.startsWith('SELECT mime, data FROM mail_shots')) {
+    const hit = (db.shots || []).find(x => x.id === p[0]);
+    return rows(hit ? [{ mime: hit.mime, data: hit.data }] : []);
+  }
   if (s.startsWith('INSERT INTO change_log')) { db.changes.push(p); return rows([]); }
   if (s.startsWith('INSERT INTO history')) { db.history.push({ area: p[3], item: p[4] }); return rows([]); }
   if (s.startsWith('SELECT id FROM orgs')) return rows([{ id: 1 }]);
@@ -281,6 +288,38 @@ process.env.SESSION_SECRET = SECRET;
       && sent[sent.length - 1].attachments[0].content === onePng, confirmed.body);
   const twice = await asAdmin('POST', '/api/mail/daily', { send: 'preview' });
   check('the same preview cannot be sent twice', twice.status === 410, twice.body);
+
+  /* The office writes its own message: who is copied, the subject, the words
+     at the top and foot, and which parts of the message appear at all. */
+  kvSet(1, 'mailSettings', JSON.stringify({
+    to: ['boss@x.com'], cc: ['second@x.com'],
+    subject: 'Register {date} · {missing} missing', intro: 'Today at a glance.',
+    footer: 'Anything wrong, tell your manager.',
+    sections: { tally: true, late: true, shifts: true, wfh: true, table: true, shot: true }
+  }));
+  const dressed = await asAdmin('POST', '/api/mail/daily',
+    { inline: 'data:image/jpeg;base64,' + onePng, png: 'data:image/png;base64,' + onePng });
+  const msg2 = sent[sent.length - 1];
+  check('the subject is the one written on the portal, with the day filled in',
+    /^Register /.test(msg2.subject) && /missing$/.test(msg2.subject), msg2.subject);
+  check('the words at the top and foot are in the message',
+    /Today at a glance/.test(msg2.html) && /tell your manager/.test(msg2.html));
+  check('anyone copied is copied', (msg2.cc || []).indexOf('second@x.com') > -1, msg2.cc);
+  const shot = /<img src="([^"]*\/shot\/[a-f0-9]{32}\.(png|jpg))"/.exec(msg2.html);
+  check('the record is shown inside the message, not only attached', !!shot, msg2.html.slice(0, 80));
+  if (shot) {
+    const r = await realFetch(base + shot[1].replace(/^https?:\/\/[^/]+/, ''));
+    check('and that picture is served to the mail client',
+      r.status === 200 && (r.headers.get('content-type') || '').indexOf('image/') === 0, r.status);
+  }
+  const bare = JSON.parse(kvFind(1, 'mailSettings').value);
+  bare.sections = { tally: false, late: false, shifts: false, wfh: false, table: true, shot: false };
+  kvSet(1, 'mailSettings', JSON.stringify(bare));
+  await asAdmin('POST', '/api/mail/daily', {});
+  const trimmed = sent[sent.length - 1];
+  check('a section switched off is left out',
+    !/Late today/.test(trimmed.html) && !/<img src=/.test(trimmed.html) && /Asha Test/.test(trimmed.html));
+  kvSet(1, 'mailSettings', JSON.stringify({ to: [], cc: [] }));
 
   const pickOut = await asAdmin('POST', '/api/mail/daily', { names: ['Ravi Test'] });
   const picked = sent[sent.length - 1];

@@ -9192,15 +9192,41 @@ function buildExcelBackup(){
          behind a line of text rather than filling the menu. */
       + '<button type="button" class="em-more" id="emMore">Settings</button>'
       + '<div class="em-set" id="emSet" style="display:none;">'
-      + '<label class="em-row"><input type="checkbox" id="emDaily"' + (s.daily !== false ? ' checked' : '') + '>'
-      +   '<span>Send the attendance message every day at</span></label>'
-      + '<div class="em-row em-indent"><input type="text" id="emAt" value="' + mailEscape(s.dailyAt || '19:30') + '" size="5"><span>India time</span></div>'
-      + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
-      +   '<span>Send a note as each request is raised</span></label>'
-      + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
-      +   '<span>Include leave taken without a request</span></label>'
+      /* Who it goes to. Every Super Admin is written to whatever is here. */
+      + '<div class="em-lab">To</div>'
       + '<div class="em-row"><input type="text" id="emTo" placeholder="more addresses, comma separated" value="'
       +   mailEscape((s.to || []).join(', ')) + '"></div>'
+      + '<div class="em-lab">Cc</div>'
+      + '<div class="em-row"><input type="text" id="emCc" placeholder="comma separated" value="'
+      +   mailEscape((s.cc || []).join(', ')) + '"></div>'
+      /* And what it says. Empty means the wording the message came with. */
+      + '<div class="em-lab">Subject <span>{date} {present} {missing} {late} {org}</span></div>'
+      + '<div class="em-row"><input type="text" id="emSubject" placeholder="Attendance {date} \u00b7 {missing} with no punch" value="'
+      +   mailEscape(s.subject || '') + '"></div>'
+      + '<div class="em-lab">Message at the top</div>'
+      + '<div class="em-row"><textarea id="emIntro" rows="3" placeholder="A line or two before the figures">'
+      +   mailEscape(s.intro || '') + '</textarea></div>'
+      + '<div class="em-lab">Note at the foot</div>'
+      + '<div class="em-row"><textarea id="emFooter" rows="2" placeholder="e.g. Raise anything wrong with your manager">'
+      +   mailEscape(s.footer || '') + '</textarea></div>'
+      + '<div class="em-lab">What the message shows</div>'
+      + (function(){
+          var sec = s.sections || {};
+          var boxes = [['tally','The day\u2019s figures'], ['late','Late today'], ['shifts','Shift changed today'],
+                       ['wfh','Working from home'], ['table','Everyone\u2019s in and out'], ['shot','The record as a picture']];
+          return boxes.map(function(b){
+            return '<label class="em-row"><input type="checkbox" data-em-sec="' + b[0] + '"'
+              + (sec[b[0]] !== false ? ' checked' : '') + '><span>' + b[1] + '</span></label>';
+          }).join('');
+        })()
+      + '<div class="em-lab">When it goes on its own</div>'
+      + '<label class="em-row"><input type="checkbox" id="emDaily"' + (s.daily !== false ? ' checked' : '') + '>'
+      +   '<span>Every day at</span></label>'
+      + '<div class="em-row em-indent"><input type="text" id="emAt" value="' + mailEscape(s.dailyAt || '19:30') + '" size="5"><span>India time</span></div>'
+      + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
+      +   '<span>A note as each request is raised</span></label>'
+      + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
+      +   '<span>Leave taken without a request</span></label>'
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
       +   '<button type="button" class="btn ghost" id="emTest">'
       +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button></div>'
@@ -9324,7 +9350,15 @@ function buildExcelBackup(){
       renderShotCanvas(1.5).then(function(canvas){
         var png = imageUnder(canvas, 6 * 1024 * 1024);    // 6MB of picture is plenty
         if(!png) msg('The record is too big to attach — the figures will go on their own.');
-        return post('/api/mail/daily', {png:png, names:names, preview:true}, dayBtn,
+        /* The copy shown inside the message is drawn to fit a phone screen and
+           kept small: opening the mail should not pull megabytes, and the full
+           one is attached anyway. */
+        var inline = '';
+        try{
+          var wide = canvas.width > 1100 ? shrinkCanvas(canvas, 1100 / canvas.width) : canvas;
+          inline = imageUnder(wide, 400 * 1024);
+        }catch(e){ inline = ''; }
+        return post('/api/mail/daily', {png:png, inline:inline, names:names, preview:true}, dayBtn,
                     'Building the message…', confirmAndSend)
           .then(function(out){
             // Still too big for the server: the figures matter more than the picture.
@@ -9355,12 +9389,23 @@ function buildExcelBackup(){
     var saveBtn = document.getElementById('emSave');
     if(saveBtn) saveBtn.onclick = function(){
       saveBtn.disabled = true;
+      var list = function(id){
+        return document.getElementById(id).value.split(',').map(function(x){ return x.trim(); }).filter(Boolean);
+      };
+      var sections = {};
+      Array.prototype.forEach.call(document.querySelectorAll('[data-em-sec]'), function(b){
+        sections[b.getAttribute('data-em-sec')] = b.checked;
+      });
       var value = {
         daily: document.getElementById('emDaily').checked,
         dailyAt: document.getElementById('emAt').value.trim() || '19:30',
         requests: document.getElementById('emReq').checked,
         unrequested: document.getElementById('emUnreq').checked,
-        to: document.getElementById('emTo').value.split(',').map(function(x){ return x.trim(); }).filter(Boolean)
+        to: list('emTo'), cc: list('emCc'),
+        subject: document.getElementById('emSubject').value.trim(),
+        intro: document.getElementById('emIntro').value,
+        footer: document.getElementById('emFooter').value,
+        sections: sections
       };
       storage.set('mailSettings', JSON.stringify(value), true).then(function(){
         saveBtn.disabled = false;

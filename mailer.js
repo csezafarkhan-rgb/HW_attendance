@@ -51,6 +51,8 @@ async function send(msg) {
     text: msg.text || stripHtml(msg.html || '')
   };
   if (c.replyTo) body.reply_to = c.replyTo;
+  const cc = (Array.isArray(msg.cc) ? msg.cc : (msg.cc ? [msg.cc] : [])).filter(Boolean);
+  if (cc.length) body.cc = cc;
   /* Resend takes an attachment as base64 in `content`. The daily message
      carries the same picture the HD Screenshot button makes. */
   if (Array.isArray(msg.attachments) && msg.attachments.length) {
@@ -177,57 +179,117 @@ function requestCard(req, links, heading) {
     + '</div>';
 }
 
-/* The daily attendance message: the day's figures and the people shown on the
-   portal, nothing else. Leave is a message of its own. rows are worked out by
-   the caller, so this file stays free of attendance rules. */
+/* One of the day's lists - late, shift changed, from home - drawn the way the
+   banner above the record draws them. */
+function noticeList(title, items, colour) {
+  if (!items || !items.length) return '';
+  return '<div style="margin:16px 0 0;">'
+    + '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + SOFT + ';'
+    +   'padding-bottom:6px;border-bottom:1px solid ' + LINE + ';">' + esc(title) + '</div>'
+    + items.map(function (it) {
+        return '<div style="display:block;padding:6px 0;border-bottom:1px solid #F1F4F9;font-size:13px;">'
+          + '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + colour + ';margin-right:8px;"></span>'
+          + '<b>' + esc(it.name) + '</b>'
+          + (it.detail ? ('<span style="color:' + SOFT + ';"> — ' + esc(it.detail) + '</span>') : '')
+          + '</div>';
+      }).join('')
+    + '</div>';
+}
+
+/* The daily attendance message. Everything above the table can be turned off
+   or reworded from the portal: the note at the top, the three lists the banner
+   shows, the picture of the record, and the line at the foot. */
 function dailyEmail(o) {
   const rows = o.rows || [];
+  const on = Object.assign({ tally: true, late: true, shifts: true, wfh: true, table: true, shot: true },
+                           o.sections || {});
   const count = function (st) { return rows.filter(function (r) { return r.state === st; }).length; };
-  const tally = [
-    ['Present', count('present'), '#137A3B'],
-    ['From home / visiting', count('remote'), '#2F6FE4'],
-    ['On leave', count('leave'), '#B45309'],
-    ['No punch yet', count('missing'), '#B3261E']
-  ].map(function (t) {
-    return '<td style="padding:8px 10px;border:1px solid ' + LINE + ';border-radius:10px;">'
-      + '<div style="font-size:19px;font-weight:700;color:' + t[2] + ';">' + t[1] + '</div>'
-      + '<div style="font-size:11.5px;color:' + SOFT + ';">' + esc(t[0]) + '</div></td>';
-  }).join('<td style="width:8px;"></td>');
-
   const body = [];
-  body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;text-align:center;margin-bottom:16px;"><tr>' + tally + '</tr></table>');
 
-  body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:13px;">'
-    + '<tr><th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">Name</th>'
-    + '<th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">In</th>'
-    + '<th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">Out</th>'
-    + '<th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">Day</th></tr>'
-    + rows.map(function (r) {
-      const colour = r.state === 'present' ? '#137A3B' : r.state === 'remote' ? '#2F6FE4'
-                   : r.state === 'leave' ? '#B45309' : '#B3261E';
-      return '<tr><td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + esc(r.name) + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';white-space:nowrap;">' + esc(clock(r['in']) || '—') + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';white-space:nowrap;">' + esc(clock(r.out) || '—') + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + pill(r.label || '', colour) + '</td></tr>';
-    }).join('')
-    + '</table>');
-
-  if (o.hidden) {
-    body.push('<div style="margin-top:10px;font-size:12px;color:' + SOFT + ';">'
-      + esc(o.hidden + ' more on the roster ' + (o.hidden === 1 ? 'is' : 'are') + ' hidden on the portal and left out of this list.')
-      + '</div>');
+  if (o.intro) {
+    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+      + esc(o.intro) + '</div>');
   }
-  if (o.attached) {
+
+  if (on.tally) {
+    const tally = [
+      ['Present', count('present'), '#137A3B'],
+      ['From home / visiting', count('remote'), '#2F6FE4'],
+      ['On leave', count('leave'), '#B45309'],
+      ['No punch yet', count('missing'), '#B3261E']
+    ].map(function (t) {
+      return '<td style="padding:8px 10px;border:1px solid ' + LINE + ';border-radius:10px;">'
+        + '<div style="font-size:19px;font-weight:700;color:' + t[2] + ';">' + t[1] + '</div>'
+        + '<div style="font-size:11.5px;color:' + SOFT + ';">' + esc(t[0]) + '</div></td>';
+    }).join('<td style="width:8px;"></td>');
+    body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;text-align:center;margin-bottom:8px;"><tr>' + tally + '</tr></table>');
+  }
+
+  /* The day's exceptions, as the banner over the record states them. */
+  if (on.late) body.push(noticeList('Late today', o.late, '#E8B931'));
+  if (on.shifts) body.push(noticeList('Shift changed today', o.shifts, '#D97706'));
+  if (on.wfh) body.push(noticeList('Working from home', o.wfh, '#93A4BC'));
+
+  if (on.table) {
+    body.push('<div style="height:16px;"></div>');
+    body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:13px;">'
+      + '<tr><th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">Name</th>'
+      + '<th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">In</th>'
+      + '<th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">Out</th>'
+      + '<th align="left" style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';color:' + SOFT + ';font-weight:600;">Day</th></tr>'
+      + rows.map(function (r) {
+        const colour = r.state === 'present' ? '#137A3B' : r.state === 'remote' ? '#2F6FE4'
+                     : r.state === 'leave' ? '#B45309' : '#B3261E';
+        return '<tr><td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + esc(r.name) + '</td>'
+          + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';white-space:nowrap;">' + esc(clock(r['in']) || '—') + '</td>'
+          + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';white-space:nowrap;">' + esc(clock(r.out) || '—') + '</td>'
+          + '<td style="padding:6px 8px;border-bottom:1px solid ' + LINE + ';">' + pill(r.label || '', colour) + '</td></tr>';
+      }).join('')
+      + '</table>');
+
+    if (o.hidden) {
+      body.push('<div style="margin-top:10px;font-size:12px;color:' + SOFT + ';">'
+        + esc(o.hidden + ' more on the roster ' + (o.hidden === 1 ? 'is' : 'are') + ' hidden on the portal and left out of this list.')
+        + '</div>');
+    }
+  }
+
+  /* The record itself, in the message rather than only clipped to it. Mail
+     clients will not render a picture built into the HTML, so it is served
+     from the site and fetched when the message is opened; the full-size copy
+     is attached as well. */
+  if (on.shot && o.shotUrl) {
+    body.push('<div style="margin:20px 0 0;">'
+      + '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + SOFT + ';margin-bottom:8px;">The record</div>'
+      + '<a href="' + esc(o.shotUrl) + '" style="display:block;">'
+      + '<img src="' + esc(o.shotUrl) + '" alt="The attendance record" '
+      +   'style="width:100%;max-width:100%;border:1px solid ' + LINE + ';border-radius:10px;display:block;"></a>'
+      + '<div style="margin-top:6px;font-size:11.5px;color:' + SOFT + ';">'
+      + (o.attached ? 'Attached in full size as well.' : 'Tap it to open the full size.') + '</div></div>');
+  } else if (o.attached) {
     body.push('<div style="margin-top:12px;font-size:12.5px;color:' + SOFT + ';">'
-      + 'The month’s record is attached as a picture, exactly as the portal shows it.</div>');
+      + 'The record is attached as a picture, exactly as the portal shows it.</div>');
+  }
+
+  if (o.footer) {
+    body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>');
   }
   if (o.siteUrl) {
-    body.push('<div style="margin-top:20px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+    body.push('<div style="margin-top:18px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   }
-  return {
-    subject: 'Attendance · ' + o.dateLabel + (count('missing') ? (' · ' + count('missing') + ' with no punch') : ''),
-    html: layout(o.orgName || 'Attendance', o.dateLabel, body)
+
+  /* The subject can be written in the portal, with the day's figures in it. */
+  const fill = {
+    date: o.dateLabel, present: count('present'), remote: count('remote'),
+    leave: count('leave'), missing: count('missing'),
+    late: (o.late || []).length, org: o.orgName || 'Attendance'
   };
+  const subject = (o.subject && o.subject.trim())
+    ? o.subject.replace(/\{(\w+)\}/g, function (m, k) { return (k in fill) ? String(fill[k]) : m; })
+    : ('Attendance · ' + o.dateLabel + (count('missing') ? (' · ' + count('missing') + ' with no punch') : ''));
+
+  return { subject: subject, html: layout(o.orgName || 'Attendance', o.dateLabel, body) };
 }
 
 /* The leave message: what is waiting for a decision, and leave taken with no

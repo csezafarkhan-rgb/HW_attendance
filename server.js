@@ -1229,7 +1229,15 @@ app.get('/healthz', async (req, res) => {
    where is in the shared key `mailSettings`; recipients default to every
    active admin account.
    ------------------------------------------------------------------ */
-const MAIL_DEFAULTS = { daily: true, dailyAt: '19:30', requests: true, unrequested: true, to: [] };
+const MAIL_DEFAULTS = {
+  daily: true, dailyAt: '19:30', requests: true, unrequested: true,
+  to: [], cc: [],
+  /* The words are the office's own. Left empty, the message reads as it always
+     did; {date} {present} {remote} {leave} {missing} {late} {org} stand in for
+     the day's figures in the subject. */
+  subject: '', intro: '', footer: '',
+  sections: { tally: true, late: true, shifts: true, wfh: true, table: true, shot: true }
+};
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -1238,6 +1246,11 @@ async function mailSettings(orgId) {
   const v = r.rows[0] ? parseJson(r.rows[0].value) : null;
   const s = Object.assign({}, MAIL_DEFAULTS, isPlainObject(v) ? v : {});
   s.to = (Array.isArray(s.to) ? s.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20);
+  s.cc = (Array.isArray(s.cc) ? s.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20);
+  s.subject = String(s.subject || '').slice(0, 200);
+  s.intro = String(s.intro || '').slice(0, 2000);
+  s.footer = String(s.footer || '').slice(0, 2000);
+  s.sections = Object.assign({}, MAIL_DEFAULTS.sections, isPlainObject(s.sections) ? s.sections : {});
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
 }
@@ -1326,6 +1339,21 @@ function unrequestedFrom(overrides, halfDays, requests, sinceDay) {
   return out.sort((a, b) => b.dateFrom.localeCompare(a.dateFrom));
 }
 
+/* "9:30-6:30" as minutes past midnight. The first half is the arrival: an hour
+   under 8 is read as the afternoon only for the end of the shift, never the
+   start, which is how the dashboard reads it too. */
+function shiftStartMin(text) {
+  const m = /^\s*(\d{1,2}):(\d{2})/.exec(String(text || ''));
+  if (!m) return null;
+  let h = +m[1];
+  if (h > 12) h = h;                       // 13:00 is already the afternoon
+  return h * 60 + (+m[2]);
+}
+function hhmmToMinutes(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '').trim());
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+
 /* The day's summary, as the email will read. Returns null when there is
    nothing to say (no employees on file). */
 async function buildDailyEmail(orgId, day, opts) {
@@ -1344,7 +1372,8 @@ async function buildDailyEmail(orgId, day, opts) {
   const hidden = emps.rows.length - names.length;
   const recs = await pool.query(
     'SELECT employee, data FROM records WHERE org_id = $1 AND day = $2', [orgId, day]);
-  const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'empNames', 'leaveRequests', 'companyInfo']);
+  const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'empNames', 'leaveRequests', 'companyInfo',
+                                      'dayShifts', 'shiftAssignments', 'lateThresholdMin', 'lateExcuses']);
   const byEmp = {};
   recs.rows.forEach(r => { byEmp[r.employee] = r.data || {}; });
   const overrides = parseJson(kv.overrides) || {};
@@ -1368,10 +1397,47 @@ async function buildDailyEmail(orgId, day, opts) {
     return { name, 'in': rec['in'] || away, out: rec.out || away, state, label };
   });
 
+  /* The three lists the banner over the record shows: who was late, whose
+     shift was changed for the day, and who is working from home. Worked out
+     here so the message says the same as the screen. */
+  const dayShifts = parseJson(kv.dayShifts) || {};
+  const assigned = parseJson(kv.shiftAssignments) || {};
+  const excuses = parseJson(kv.lateExcuses) || {};
+  const threshold = Number(parseJson(kv.lateThresholdMin)) || Number(kv.lateThresholdMin) || 10;
+  const late = [], shifts = [], wfh = [];
+  names.forEach(empName => {
+    const shown = shownNames[empName] || empName;
+    const key = empName + '|' + day;
+    const rec = byEmp[empName] || {};
+    const ov = overrides[key];
+    const todayShift = dayShifts[key] || null;
+    const usual = assigned[empName] || null;
+    if (todayShift && usual && todayShift !== usual) {
+      shifts.push({ name: shown, detail: todayShift + ' today \u00b7 usual ' + usual });
+    }
+    if (ov && (ov.cat === 'WFH' || ov.cat === 'VISIT')) {
+      wfh.push({ name: shown, detail: rec['in'] ? ('started ' + mailer.clock(rec['in']))
+                                                : 'no start recorded yet' });
+      return;
+    }
+    const start = shiftStartMin(todayShift || usual || '9:30-6:30');
+    const came = hhmmToMinutes(rec['in']);
+    if (came != null && start != null && came - start > threshold) {
+      late.push({ name: shown,
+                  detail: 'in ' + mailer.clock(rec['in']) + ' (' + (came - start) + ' min late)'
+                        + (excuses[key] ? ' \u2014 excused' : '') });
+    }
+  });
+
+  const settings = opts.settings || await mailSettings(orgId);
   return mailer.dailyEmail({
     orgName: orgNameOf(kv.companyInfo),
     dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
-    rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl()
+    rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl(),
+    late, shifts, wfh,
+    sections: settings.sections, subject: settings.subject,
+    intro: settings.intro, footer: settings.footer,
+    shotUrl: opts.shotUrl || ''
   });
 }
 
@@ -1400,6 +1466,41 @@ async function buildLeaveEmail(orgId) {
   });
 }
 
+/* A mail client will not draw a picture built into the HTML, so the one shown
+   in the message is kept here and fetched from the site when the message is
+   opened. The name is thirty-two random characters; rows older than sixty days
+   go when a new one is written. */
+async function keepShot(dataUrl) {
+  const head = /^data:image\/(png|jpeg);base64,/.exec(String(dataUrl || ''));
+  if (!head) return '';
+  const body = String(dataUrl).replace(/^data:image\/[a-z]+;base64,/, '').replace(/\s+/g, '');
+  if (!body || !/^[A-Za-z0-9+/=]+$/.test(body) || body.length > 3 * 1024 * 1024) return '';
+  const id = crypto.randomBytes(16).toString('hex');
+  await pool.query(`CREATE TABLE IF NOT EXISTS mail_shots (
+    id TEXT PRIMARY KEY, mime TEXT NOT NULL, data TEXT NOT NULL,
+    at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+  await pool.query('INSERT INTO mail_shots (id, mime, data) VALUES ($1,$2,$3)',
+    [id, 'image/' + head[1], body]);
+  await pool.query("DELETE FROM mail_shots WHERE at < now() - interval '60 days'");
+  return mailer.baseUrl() + '/shot/' + id + (head[1] === 'jpeg' ? '.jpg' : '.png');
+}
+/* Opened straight from a mail client, so no session: the name is the secret,
+   and nothing but that day's picture is behind it. */
+app.get('/shot/:id', async (req, res) => {
+  const id = String(req.params.id || '').replace(/\.(png|jpg|jpeg)$/i, '');
+  if (!/^[a-f0-9]{32}$/.test(id)) return res.status(404).end();
+  let row = null;
+  try {
+    const r = await pool.query('SELECT mime, data FROM mail_shots WHERE id = $1', [id]);
+    row = r.rows[0] || null;
+  } catch (e) { return res.status(404).end(); }
+  if (!row) return res.status(404).end();
+  const buf = Buffer.from(row.data, 'base64');
+  res.set('Content-Type', row.mime);
+  res.set('Cache-Control', 'public, max-age=2592000, immutable');
+  res.send(buf);
+});
+
 async function sendDailyEmail(orgId, day, opts) {
   opts = opts || {};
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
@@ -1416,15 +1517,22 @@ async function sendDailyEmail(orgId, day, opts) {
     const ext = (head && head[1] === 'jpeg') ? 'jpg' : 'png';
     attachments = [{ filename: 'attendance-' + (day || istParts().day) + '.' + ext, content: picture }];
   }
+  /* The picture inside the message is a smaller copy, so opening the mail does
+     not pull megabytes; the attachment stays full size. */
+  let shotUrl = '';
+  if (settings.sections && settings.sections.shot !== false) {
+    try { shotUrl = await keepShot(opts.inline || opts.png); }
+    catch (e) { console.error('the picture could not be kept:', e && e.message); }
+  }
   const mail = await buildDailyEmail(orgId, day || istParts().day,
-    { names: opts.names, attached: attachments.length > 0 });
+    { names: opts.names, attached: attachments.length > 0, shotUrl, settings });
   if (!mail) return { ok: false, error: 'no employees on file' };
   // Asked for a preview: hand the finished message back instead of sending it.
   if (opts.preview) {
-    return { ok: true, mail: { to, subject: mail.subject, html: mail.html, attachments } };
+    return { ok: true, mail: { to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments } };
   }
-  const r = await mailer.send({ to, subject: mail.subject, html: mail.html, attachments });
-  return Object.assign({ to: to.length, attached: attachments.length > 0 }, r);
+  const r = await mailer.send({ to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments });
+  return Object.assign({ to: to.length, cc: (settings.cc || []).length, attached: attachments.length > 0 }, r);
 }
 async function sendLeaveEmail(orgId) {
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
@@ -1433,8 +1541,8 @@ async function sendLeaveEmail(orgId) {
   if (!to.length) return { ok: false, error: NO_ADDRESS };
   const mail = await buildLeaveEmail(orgId);
   if (!mail) return { ok: true, nothing: true };          // nothing waiting: no message
-  const r = await mailer.send({ to, subject: mail.subject, html: mail.html });
-  return Object.assign({ to: to.length }, r);
+  const r = await mailer.send({ to, cc: settings.cc, subject: mail.subject, html: mail.html });
+  return Object.assign({ to: to.length, cc: (settings.cc || []).length }, r);
 }
 
 /* One new request, emailed as it is raised. Never throws: a request must be
@@ -1692,13 +1800,14 @@ app.post('/api/mail/daily', requireRole('admin'), bigJson, async (req, res) => {
     const held = previews.get(req.session.userId);
     if (!held) return res.status(410).json({ error: 'that preview has expired - open it again' });
     previews.delete(req.session.userId);
-    const r = await mailer.send({ to: held.to, subject: held.subject, html: held.html,
+    const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject, html: held.html,
                                   attachments: held.attachments });
     return res.status(r.ok ? 200 : 502).json(Object.assign(
       { to: held.to.length, attached: (held.attachments || []).length > 0 }, r));
   }
 
-  const opts = { png: body.png, names: Array.isArray(body.names) ? body.names.slice(0, 200) : null,
+  const opts = { png: body.png, inline: body.inline,
+                 names: Array.isArray(body.names) ? body.names.slice(0, 200) : null,
                  preview: !!body.preview };
   const r = await sendDailyEmail(req.session.orgId, istParts().day, opts);
   if (body.preview && r.ok && r.mail) {

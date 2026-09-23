@@ -190,9 +190,27 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
 Every active Super Admin is written to, plus any address added in the panel.
 
 The controls are on the Attendance Record, under **📧 Email** beside HD
-Screenshot: send today's attendance (with the screenshot), send the leave
-message, turn each message on or off, set the daily time, add recipients, and
-send a test message to yourself.
+Screenshot. The menu is two things to do — email today's attendance, or send
+the leave message — and pressing the first one shows the message exactly as it
+will arrive, to be looked at before it goes.
+
+**Settings** (folded under the two buttons) is where the message is written:
+
+- **To** and **Cc**, kept with the rest of the settings. Every active Super
+  Admin is written to whatever is listed here.
+- **Subject**, where `{date}` `{present}` `{remote}` `{leave}` `{missing}`
+  `{late}` `{org}` stand in for the day's figures.
+- **A message at the top** and **a note at the foot**, in your own words.
+- **What the message shows**: the day's figures, Late today, Shift changed
+  today, Working from home, everyone's in and out, and the record as a picture
+  — each can be left out.
+- When each message goes on its own: the daily time, a note as each request is
+  raised, and whether leave taken without a request is included.
+
+The picture of the record is shown **inside** the message as well as attached.
+A mail client will not draw an image built into the HTML, so a phone-sized copy
+is kept on the server (`mail_shots`, cleared after sixty days) and fetched when
+the message is opened; the full-size one travels as the attachment.
 
 **Approve and Reject in an email** are signed links (HMAC over `SESSION_SECRET`),
 good for 14 days. Opening one shows a page that asks once and acts on that
