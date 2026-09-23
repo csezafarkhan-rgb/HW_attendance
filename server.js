@@ -1385,16 +1385,16 @@ async function buildDailyEmail(orgId, day, opts) {
     const name = shownNames[e.name] || e.name;
     const ov = overrides[e.name + '|' + day];
     const rec = byEmp[e.name] || {};
-    let state = 'missing', label = 'No punch', away = '';
-    if (ov && ov.cat === 'LEAVE') { state = 'leave'; label = 'Leave' + (ov.detail ? (' · ' + ov.detail) : ''); }
-    else if (ov && ov.cat === 'WFH') { state = 'remote'; label = 'From home'; away = 'WFH'; }
-    else if (ov && ov.cat === 'VISIT') { state = 'remote'; label = 'Visit' + (ov.detail ? (' · ' + ov.detail) : ''); away = 'Visit'; }
-    else if (rec['in']) { state = 'present'; label = rec.out ? 'Present' : 'In, not out yet'; }
+    let state = 'missing', label = 'No punch', away = '', kind = 'missing';
+    if (ov && ov.cat === 'LEAVE') { state = 'leave'; kind = 'leave'; label = 'Leave' + (ov.detail ? (' · ' + ov.detail) : ''); }
+    else if (ov && ov.cat === 'WFH') { state = 'remote'; kind = 'wfh'; label = 'From home'; away = 'WFH'; }
+    else if (ov && ov.cat === 'VISIT') { state = 'remote'; kind = 'visit'; label = 'Visit' + (ov.detail ? (' · ' + ov.detail) : ''); away = 'Visit'; }
+    else if (rec['in']) { state = 'present'; kind = 'present'; label = rec.out ? 'Present' : 'In, not out yet'; }
     const hd = halfDays[e.name + '|' + day];
     if (hd && state !== 'leave') label += ' · part day';
     /* A day worked from home or at a customer has no punches, and two dashes
        said nothing about it: the times read WFH or Visit instead. */
-    return { name, 'in': rec['in'] || away, out: rec.out || away, state, label };
+    return { name, 'in': rec['in'] || away, out: rec.out || away, state, kind, label };
   });
 
   /* The three lists the banner over the record shows: who was late, whose

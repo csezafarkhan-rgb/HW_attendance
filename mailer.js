@@ -212,17 +212,34 @@ function dailyEmail(o) {
   }
 
   if (on.tally) {
-    const tally = [
-      ['Present', count('present'), '#137A3B'],
-      ['From home / visiting', count('remote'), '#2F6FE4'],
-      ['On leave', count('leave'), '#B45309'],
-      ['No punch yet', count('missing'), '#B3261E']
-    ].map(function (t) {
-      return '<td style="padding:8px 10px;border:1px solid ' + LINE + ';border-radius:10px;">'
-        + '<div style="font-size:19px;font-weight:700;color:' + t[2] + ';">' + t[1] + '</div>'
-        + '<div style="font-size:11.5px;color:' + SOFT + ';">' + esc(t[0]) + '</div></td>';
-    }).join('<td style="width:8px;"></td>');
-    body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;text-align:center;margin-bottom:8px;"><tr>' + tally + '</tr></table>');
+    /* One card a kind, with the names under the number: "3 from home" says
+       less than knowing which three. Work from home and a customer visit are
+       different days, so they are counted apart. */
+    const kindOf = function (r) { return r.kind || (r.state === 'remote' ? 'wfh' : r.state); };
+    const who = function (k) { return rows.filter(function (r) { return kindOf(r) === k; }); };
+    const card = function (label, list, colour) {
+      if (!list.length) return '';
+      return '<td width="50%" valign="top" style="padding:3px;">'
+        + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:9px 11px;">'
+        + '<div style="font-size:19px;font-weight:700;color:' + colour + ';line-height:1.1;">' + list.length + '</div>'
+        + '<div style="font-size:11.5px;font-weight:600;color:' + SOFT + ';margin-bottom:4px;">' + esc(label) + '</div>'
+        + '<div style="font-size:12px;line-height:1.5;">'
+        +   list.map(function (r) { return esc(r.name); }).join('<br>')
+        + '</div></div></td>';
+    };
+    const cards = [
+      card('Present', who('present'), '#137A3B'),
+      card('From home', who('wfh'), '#2F6FE4'),
+      card('Visiting', who('visit'), '#7C3AED'),
+      card('On leave', who('leave'), '#B45309'),
+      card('No punch yet', who('missing'), '#B3261E')
+    ].filter(Boolean);
+    const rowsOut = [];
+    for (let i = 0; i < cards.length; i += 2) {
+      rowsOut.push('<tr>' + cards[i] + (cards[i + 1] || '<td width="50%"></td>') + '</tr>');
+    }
+    body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:6px;">'
+      + rowsOut.join('') + '</table>');
   }
 
   /* The day's exceptions, as the banner over the record states them. */

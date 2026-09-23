@@ -37,6 +37,21 @@ const SECRET = 'test-secret-for-signing-links';
     hidden: 4, attached: true, siteUrl: 'https://x'
   });
   check('the subject counts who has no punch', /1 with no punch/.test(mail.subject), mail.subject);
+  const cards = mailer.dailyEmail({
+    orgName: 'Test Co', dateLabel: 'Tue, 22 Sep',
+    rows: [
+      { name: 'Asha Test', state: 'present', kind: 'present', label: 'Present' },
+      { name: 'Ravi Test', state: 'remote', kind: 'wfh', label: 'From home' },
+      { name: 'Priya Test', state: 'remote', kind: 'visit', label: 'Visit' }
+    ],
+    sections: { table: false }
+  });
+  check('work from home and a customer visit are counted apart, each with its names',
+    /From home/.test(cards.html) && /Visiting/.test(cards.html)
+      && !/From home \/ visiting/.test(cards.html)
+      && /Ravi Test/.test(cards.html) && /Priya Test/.test(cards.html), cards.html.slice(0, 60));
+  check('a kind nobody is on is left out', !/On leave/.test(cards.html));
+
   check('the daily message writes its times as am and pm',
     /9:28 AM/.test(mail.html) && /6:31 PM/.test(mail.html), mail.html.slice(0, 40));
   check('it says how many are hidden on the portal', /4 more on the roster are hidden/.test(mail.html));
