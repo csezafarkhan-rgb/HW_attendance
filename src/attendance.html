@@ -772,7 +772,23 @@ body{
 /* The database / plan indicator and its panel. It sits at the right-hand end
    of the toolbar row, away from the controls that change what is on screen. */
 .st-picker{ margin-left:auto; }
-.st-btn{ display:inline-flex; align-items:center; gap:7px; }
+.st-btn{ display:inline-flex; align-items:center; gap:7px; font-variant-numeric:tabular-nums; }
+/* A database drawn as a cylinder that fills from the bottom, the way a battery
+   does, so how full the plan is can be read without opening anything. */
+.db-ico{ display:block; width:15px; height:18px; flex:none; color:#16A34A; }
+.db-svg{ width:15px; height:18px; display:block; overflow:visible; }
+.db-empty{ fill:#EEF2F7; }
+.db-level{ fill:currentColor; transition:y .45s cubic-bezier(.4,0,.2,1); }
+.db-line{ fill:none; stroke:#7A8699; stroke-width:1.3; stroke-linejoin:round; }
+.db-rib{ stroke-width:.9; opacity:.45; }
+.st-btn.ok .db-ico{ color:#16A34A; }
+.st-btn.warn .db-ico{ color:#D97706; }
+.st-btn.bad .db-ico{ color:#DC2626; }
+.st-btn.wait .db-ico{ color:#B6C0CE; }
+.st-btn.bad .db-line{ stroke:#DC2626; }
+.st-btn.warn .db-line{ stroke:#B4741A; }
+/* Nothing to report is not worth a colour; the number carries it. */
+.st-btn.off .db-ico{ color:#C4CCD8; }
 .st-expiry{ margin:8px 2px 2px; padding:8px 10px; border-radius:9px; font-size:11.5px; font-weight:700;
   border:1px solid #DDE5F0; background:#F7FAFF; color:#33415C; }
 .st-expiry.warn{ border-color:#F0DFB8; background:#FFFBF0; color:#8A5A00; }
@@ -3033,7 +3049,16 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   </div>
   <div class="month-picker st-picker">
     <button class="month-btn st-btn" id="statusBtn" title="Is the database answering, and how much of the plan is left">
-      <span class="st-dot wait" id="statusDot"></span><span id="statusLabel">Checking…</span></button>
+      <span class="db-ico" aria-hidden="true"><svg viewBox="0 0 22 26" class="db-svg">
+        <clipPath id="dbBody"><path d="M2,5 a9,4 0 0 1 18,0 v16 a9,4 0 0 1 -18,0 z"/></clipPath>
+        <g clip-path="url(#dbBody)">
+          <rect x="0" y="0" width="22" height="26" class="db-empty"/>
+          <rect x="0" y="26" width="22" height="26" id="dbLevel" class="db-level"/>
+        </g>
+        <path d="M2,5 a9,4 0 0 1 18,0 v16 a9,4 0 0 1 -18,0 z" class="db-line"/>
+        <ellipse cx="11" cy="5" rx="9" ry="4" class="db-line"/>
+        <path d="M2,12 a9,4 0 0 0 18,0" class="db-line db-rib"/>
+      </svg></span><span id="statusLabel">Checking…</span></button>
     <div class="month-dropdown st-dropdown" id="statusDropdown"></div>
   </div>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
@@ -9258,21 +9283,38 @@ function buildExcelBackup(){
       + '<div class="st-bar"><i class="' + tone + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
       + (note ? ('<div class="st-note">' + escapeHtml(note) + '</div>') : '') + '</div>';
   }
+  /* The icon fills from the bottom with whichever is further along: the
+     month's responses against the plan's 5GB, or the database against its
+     own gigabyte. Whichever it is, that is the one that will stop the site,
+     and the panel behind the icon says which. */
+  function setDbLevel(pct, tone){
+    var btn = document.getElementById('statusBtn'), rect = document.getElementById('dbLevel');
+    if(btn) btn.className = 'month-btn st-btn ' + tone;
+    if(rect){
+      var top = 26 - Math.max(0, Math.min(100, pct)) / 100 * 21;   // 21 units of cylinder
+      rect.setAttribute('y', top.toFixed(2));
+    }
+  }
   function renderStatusChip(){
-    var dot = document.getElementById('statusDot'), lab = document.getElementById('statusLabel');
-    if(!dot || !lab) return;
-    if(!STATUS){ dot.className = 'st-dot wait'; lab.textContent = 'Checking…'; return; }
-    if(!STATUS.db || !STATUS.db.ok){ dot.className = 'st-dot bad'; lab.textContent = 'No database'; return; }
-    var u = STATUS.usage || {bytes:0}, plan = STATUS.plan || {};
-    var pct = plan.bytes ? (u.bytes / plan.bytes * 100) : 0;
-    var tone = pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok';
+    var lab = document.getElementById('statusLabel');
+    if(!lab) return;
+    if(!STATUS){ setDbLevel(0, 'wait'); lab.textContent = 'Checking…'; return; }
+    if(!STATUS.db || !STATUS.db.ok){ setDbLevel(100, 'bad'); lab.textContent = 'No database'; return; }
+    var u = STATUS.usage || {bytes:0}, plan = STATUS.plan || {}, db = STATUS.db;
+    var sent = plan.bytes ? (u.bytes / plan.bytes * 100) : 0;
+    var held = plan.dbBytes ? ((db.size || 0) / plan.dbBytes * 100) : 0;
+    var pct = Math.max(sent, held);
+    var tone = pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : pct < 1 ? 'off' : 'ok';
+    var days = db.expiresAt ? Math.ceil((new Date(db.expiresAt) - Date.now()) / 86400000) : null;
     // A database about to be deleted outranks a quiet month.
-    var days = (STATUS.db && STATUS.db.expiresAt) ? Math.ceil((new Date(STATUS.db.expiresAt) - Date.now()) / 86400000) : null;
-    if(days != null && days <= 10) tone = days <= 3 ? 'bad' : 'warn';
-    dot.className = 'st-dot ' + tone;
-    lab.textContent = (days != null && days <= 10)
-      ? ('Database · ' + (days > 0 ? (days + 'd left') : 'expired'))
-      : ('Database · ' + Math.round(pct) + '%');
+    if(days != null && days <= 10){
+      tone = days <= 3 ? 'bad' : 'warn';
+      setDbLevel(100, tone);
+      lab.textContent = days > 0 ? (days + 'd left') : 'expired';
+      return;
+    }
+    setDbLevel(pct, tone);
+    lab.textContent = (pct < 1 ? '<1' : Math.round(pct)) + '%';
   }
   function renderStatusPanel(){
     var dd = document.getElementById('statusDropdown');
