@@ -1477,7 +1477,7 @@ async function keepShot(dataUrl) {
   const head = /^data:image\/(png|jpeg);base64,/.exec(String(dataUrl || ''));
   if (!head) return '';
   const body = String(dataUrl).replace(/^data:image\/[a-z]+;base64,/, '').replace(/\s+/g, '');
-  if (!body || !/^[A-Za-z0-9+/=]+$/.test(body) || body.length > 3 * 1024 * 1024) return '';
+  if (!body || !/^[A-Za-z0-9+/=]+$/.test(body) || body.length > 4 * 1024 * 1024) return '';
   const id = crypto.randomBytes(16).toString('hex');
   await pool.query(`CREATE TABLE IF NOT EXISTS mail_shots (
     id TEXT PRIMARY KEY, mime TEXT NOT NULL, data TEXT NOT NULL,

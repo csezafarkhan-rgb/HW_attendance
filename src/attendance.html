@@ -9351,13 +9351,15 @@ function buildExcelBackup(){
       renderShotCanvas(1.5).then(function(canvas){
         var png = imageUnder(canvas, 6 * 1024 * 1024);    // 6MB of picture is plenty
         if(!png) msg('The record is too big to attach — the figures will go on their own.');
-        /* The copy shown inside the message is drawn to fit a phone screen and
-           kept small: opening the mail should not pull megabytes, and the full
-           one is attached anyway. */
+        /* The copy shown inside the message. A message is about 600px across and
+           the record is ten times that, so a picture drawn to fit the message
+           cannot be read: it is kept at 2400px instead, which shows as the same
+           size but stays sharp when it is zoomed or opened. The full-size one
+           is attached as well. */
         var inline = '';
         try{
-          var wide = canvas.width > 1100 ? shrinkCanvas(canvas, 1100 / canvas.width) : canvas;
-          inline = imageUnder(wide, 400 * 1024);
+          var wide = canvas.width > 2400 ? shrinkCanvas(canvas, 2400 / canvas.width) : canvas;
+          inline = imageUnder(wide, 1200 * 1024);
         }catch(e){ inline = ''; }
         return post('/api/mail/daily', {png:png, inline:inline, names:names, preview:true}, dayBtn,
                     'Building the message…', confirmAndSend)

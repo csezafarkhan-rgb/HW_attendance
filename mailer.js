@@ -282,7 +282,8 @@ function dailyEmail(o) {
       + '<img src="' + esc(o.shotUrl) + '" alt="The attendance record" '
       +   'style="width:100%;max-width:100%;border:1px solid ' + LINE + ';border-radius:10px;display:block;"></a>'
       + '<div style="margin-top:6px;font-size:11.5px;color:' + SOFT + ';">'
-      + (o.attached ? 'Attached in full size as well.' : 'Tap it to open the full size.') + '</div></div>');
+      + 'Tap the picture to open it large enough to read'
+      + (o.attached ? ', or use the attachment.' : '.') + '</div></div>');
   } else if (o.attached) {
     body.push('<div style="margin-top:12px;font-size:12.5px;color:' + SOFT + ';">'
       + 'The record is attached as a picture, exactly as the portal shows it.</div>');
