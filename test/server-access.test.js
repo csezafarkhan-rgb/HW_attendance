@@ -49,6 +49,13 @@ function query(sql, p) {
   if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths' AND user_id IS NULL")) {
     const r = kvFind(p[0], 'lockedMonths', null); return rows(r ? [{ value: r.value }] : []);
   }
+  if (s.startsWith('SELECT pg_database_size')) return rows([{ size: '41943040', now: new Date() }]);
+  if (s.startsWith('CREATE TABLE IF NOT EXISTS usage_bytes')) return rows([]);
+  if (s.startsWith('INSERT INTO usage_bytes')) { db.usage = (db.usage || 0) + Number(p[1]); return rows([]); }
+  if (s.startsWith('SELECT bytes, requests FROM usage_bytes')) return rows([{ bytes: String(db.usage || 0), requests: '12' }]);
+  if (s.startsWith('SELECT (SELECT count(*) FROM records')) {
+    return rows([{ records: db.records.length, employees: db.employees.length, history: db.history.length }]);
+  }
   if (s.startsWith('INSERT INTO history')) {
     db.history.push({ id: db.history.length + 1, org_id: p[0], user_id: p[1], user_name: p[2], area: p[3], item: p[4], before_value: p[5], after_value: p[6], at: new Date() });
     return rows([]);
@@ -438,6 +445,18 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('last upload recorded for the dashboard', status.rows === 2 && status.newestPunch === '2026-09-14' && !!status.at, status);
   // Ravi: Asha was signed out everywhere by the disable check above.
   check('employees cannot see the office-PC status', !('deviceStatus' in (await ravi('GET', '/api/kv-all')).body.values));
+
+  /* The indicator in the toolbar: is the database answering, and how much of
+     the plan's 5GB of responses has gone. Admins only - it is about the
+     service, not about anybody's attendance. */
+  const health = await boss('GET', '/api/status');
+  check('an admin can see the database and plan figures',
+    health.status === 200 && health.body.db.ok === true && health.body.db.size === 41943040
+      && health.body.plan.bytes === 5 * 1024 * 1024 * 1024
+      && typeof health.body.usage.bytes === 'number' && health.body.usage.requests > 0, health.body);
+  check('it counts what is on file',
+    health.body.counts && typeof health.body.counts.records === 'number', health.body.counts);
+  check('employees cannot', (await ravi('GET', '/api/status')).status === 403);
 
   /* Bandwidth: the dashboard page and the two big reads must revalidate, not
      be fetched whole every time. Serving index.html `no-store` used up the

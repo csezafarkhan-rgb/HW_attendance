@@ -221,6 +221,23 @@ service. Two things used to spend it:
 `/api/dataset` and `/api/kv-all` also revalidate, so a hydrate after someone
 else's edit costs a 304 unless something really changed.
 
+## The indicator in the toolbar
+
+Beside the Email button, admins see a dot and a figure: whether the database is
+answering, and how much of the month's responses have gone. Opening it shows
+
+- **Sent this month** against the plan's 5GB, with the request count. The dot
+  turns amber past 70% and red past 90%, which is the warning nobody had in
+  September.
+- **Database** size against the free plan's 1GB.
+- Attendance rows, employees and changes kept; when the office PC last sent
+  anything; and how long the service has been running (a free instance is
+  restarted whenever it wakes).
+
+Every response is weighed by the server and the month's total kept in
+`usage_bytes`, written once a minute rather than once a request. The table is
+created on first use, so no migration is needed.
+
 ## Security notes
 
 - **Keep the repo private.** Employee names and attendance times are personal data.

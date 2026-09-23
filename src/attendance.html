@@ -769,6 +769,25 @@ body{
   border:1px solid #CFD8E5; border-radius:7px; }
 .em-row.em-btns{ gap:6px; padding-top:8px; }
 .em-row.em-btns .btn{ width:auto !important; flex:none !important; padding:5px 12px; font-size:12px; }
+/* The database / plan indicator and its panel. */
+.st-btn{ display:inline-flex; align-items:center; gap:7px; }
+.st-dot{ width:8px; height:8px; border-radius:50%; background:#9AA6B6; flex:none; box-shadow:0 0 0 2px rgba(255,255,255,.6); }
+.st-dot.ok{ background:#16A34A; } .st-dot.warn{ background:#D97706; } .st-dot.bad{ background:#DC2626; }
+.st-dot.wait{ background:#9AA6B6; }
+.st-dropdown{ min-width:320px; }
+.st-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
+.st-head{ display:flex; align-items:center; gap:8px; font-weight:700; padding:2px 4px 10px; }
+.st-row{ padding:6px 4px 10px; }
+.st-row-top{ display:flex; justify-content:space-between; align-items:baseline; font-size:12px; margin-bottom:5px; }
+.st-row-top b{ font-weight:700; } .st-row-top b span{ font-weight:500; color:var(--ink-soft); }
+.st-bar{ height:7px; border-radius:20px; background:#EDF1F7; overflow:hidden; }
+.st-bar i{ display:block; height:100%; border-radius:20px; background:#16A34A; transition:width .3s ease; }
+.st-bar i.warn{ background:#D97706; } .st-bar i.bad{ background:#DC2626; }
+.st-note{ font-size:11px; color:var(--ink-soft); margin-top:5px; line-height:1.45; }
+.st-facts{ display:flex; gap:8px; margin:8px 2px 4px; }
+.st-facts > div{ flex:1 1 0; text-align:center; padding:7px 4px; border:1px solid #E6EBF4; border-radius:9px; background:#FBFCFE; }
+.st-facts b{ display:block; font-size:14px; font-weight:800; }
+.st-facts span{ font-size:10.5px; color:var(--ink-soft); }
 .page{display:none;}
 /* Every page runs the full width of the content column. Requests, Official
    Leaves and Backup used to be capped at 1600px and centred, which on a wide
@@ -3004,6 +3023,11 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   <div class="month-picker">
     <button class="month-btn" id="emailBtn" title="Send the record by email">📧 Email</button>
     <div class="month-dropdown em-dropdown" id="emailDropdown"></div>
+  </div>
+  <div class="month-picker">
+    <button class="month-btn st-btn" id="statusBtn" title="Is the database answering, and how much of the plan is left">
+      <span class="st-dot wait" id="statusDot"></span><span id="statusLabel">Checking…</span></button>
+    <div class="month-dropdown st-dropdown" id="statusDropdown"></div>
   </div>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
 </div>
@@ -9205,6 +9229,94 @@ function buildExcelBackup(){
       }).catch(function(e){ saveBtn.disabled = false; msg(e.message || 'Not saved.', true); });
     };
   }
+
+  /* ---- Database and plan usage, in the toolbar ----
+     The site was suspended in September for passing the free plan's 5GB of
+     responses, and the only place that figure lived was Render's billing page.
+     The dot says whether the database is answering; the panel says how much of
+     the month's allowance and of the database is gone. */
+  var STATUS = null, STATUS_AT = 0;
+  function fmtBytes(n){
+    n = +n || 0;
+    if(n < 1024) return n + ' B';
+    if(n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+    if(n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+  function meter(used, total, label, note){
+    var pct = total > 0 ? Math.min(100, used / total * 100) : 0;
+    var tone = pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok';
+    return '<div class="st-row"><div class="st-row-top"><span>' + escapeHtml(label) + '</span>'
+      + '<b>' + escapeHtml(fmtBytes(used)) + ' <span>of ' + escapeHtml(fmtBytes(total)) + '</span></b></div>'
+      + '<div class="st-bar"><i class="' + tone + '" style="width:' + pct.toFixed(1) + '%"></i></div>'
+      + (note ? ('<div class="st-note">' + escapeHtml(note) + '</div>') : '') + '</div>';
+  }
+  function renderStatusChip(){
+    var dot = document.getElementById('statusDot'), lab = document.getElementById('statusLabel');
+    if(!dot || !lab) return;
+    if(!STATUS){ dot.className = 'st-dot wait'; lab.textContent = 'Checking…'; return; }
+    if(!STATUS.db || !STATUS.db.ok){ dot.className = 'st-dot bad'; lab.textContent = 'No database'; return; }
+    var u = STATUS.usage || {bytes:0}, plan = STATUS.plan || {};
+    var pct = plan.bytes ? (u.bytes / plan.bytes * 100) : 0;
+    dot.className = 'st-dot ' + (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok');
+    lab.textContent = 'Database · ' + Math.round(pct) + '%';
+  }
+  function renderStatusPanel(){
+    var dd = document.getElementById('statusDropdown');
+    if(!dd) return;
+    if(!STATUS){ dd.innerHTML = '<div class="st-pane"><div class="st-note">Asking the server…</div></div>'; return; }
+    var db = STATUS.db || {}, plan = STATUS.plan || {}, u = STATUS.usage || {}, c = STATUS.counts || {};
+    var html = '<div class="st-pane">';
+    html += '<div class="st-head"><span class="st-dot ' + (db.ok ? 'ok' : 'bad') + '"></span>'
+      + (db.ok ? ('Database connected · answered in ' + (db.ms || 0) + ' ms')
+               : ('Database not answering' + (db.error ? (' — ' + escapeHtml(String(db.error).slice(0, 80))) : ''))) + '</div>';
+    if(db.ok){
+      html += meter(u.bytes || 0, plan.bytes || 0, 'Sent this month',
+        (u.requests ? (u.requests.toLocaleString() + ' requests') : '') + ' · the free plan is suspended past this');
+      html += meter(db.size || 0, plan.dbBytes || 0, 'Database', 'attendance, settings and history together');
+      html += '<div class="st-facts">'
+        + '<div><b>' + ((c.records || 0).toLocaleString()) + '</b><span>attendance rows</span></div>'
+        + '<div><b>' + (c.employees || 0) + '</b><span>employees</span></div>'
+        + '<div><b>' + ((c.history || 0).toLocaleString()) + '</b><span>changes kept</span></div>'
+        + '</div>';
+      var office = STATUS.office;
+      html += '<div class="st-note">Office PC: '
+        + (office && office.at ? ('last sent ' + new Date(office.at).toLocaleString()) : 'has never sent anything to the site')
+        + '</div>';
+      html += '<div class="st-note">Service running since ' + new Date(STATUS.startedAt).toLocaleString() + '</div>';
+    }
+    dd.innerHTML = html + '</div>';
+  }
+  function loadStatus(force){
+    if(!force && Date.now() - STATUS_AT < 30000) return Promise.resolve(STATUS);
+    STATUS_AT = Date.now();
+    return fetch('/api/status', {credentials:'same-origin', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        STATUS = j || { db:{ ok:false, error:'the server did not answer' }, plan:{} };
+        renderStatusChip(); renderStatusPanel();
+        return STATUS;
+      })
+      .catch(function(){
+        STATUS = { db:{ ok:false, error:'the server could not be reached' }, plan:{} };
+        renderStatusChip(); renderStatusPanel();
+      });
+  }
+  (function(){
+    var btn = document.getElementById('statusBtn'), dd = document.getElementById('statusDropdown');
+    if(!btn || !dd) return;
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var opening = !dd.classList.contains('open');
+      dd.classList.toggle('open');
+      if(opening){ renderStatusPanel(); positionDropdown(btn, dd); loadStatus(true); }
+    });
+    dd.addEventListener('click', function(e){ e.stopPropagation(); });
+    document.addEventListener('click', function(){ dd.classList.remove('open'); });
+    setTimeout(function(){ loadStatus(true); }, 2500);
+    setInterval(function(){ if(!document.hidden) loadStatus(false); }, 120000);
+  })();
+
   (function(){
     var btn = document.getElementById('emailBtn'), dd = document.getElementById('emailDropdown');
     if(!btn || !dd) return;
@@ -11394,7 +11506,7 @@ function buildExcelBackup(){
      them, but that is not discoverable, and on a wide panel the outside is a
      long way from where you are working. */
   (function(){
-    var PANELS = ['empDropdown','orderDropdown','shiftDropdown','monthDropdown','usersDropdown','leaveAsOfDropdown','leaveMonthsDropdown','payMonthDropdown','payRulesDropdown','emailDropdown'];
+    var PANELS = ['empDropdown','orderDropdown','shiftDropdown','monthDropdown','usersDropdown','leaveAsOfDropdown','leaveMonthsDropdown','payMonthDropdown','payRulesDropdown','emailDropdown','statusDropdown'];
     function addClose(el){
       if(!el || el.querySelector('.pnl-x')) return;
       var b = document.createElement('button');

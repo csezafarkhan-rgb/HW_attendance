@@ -1718,6 +1718,105 @@ async function dailyEmailTick() {
    the lot again - the free plan's 5GB of bandwidth went in three weeks and the
    service was suspended. `no-cache` still revalidates on every load, so a new
    build is picked up at once, but an unchanged one answers 304 with no body. */
+/* ------------------------------------------------------------------
+   Is the database there, and how much of the plan is left?
+
+   The service was suspended in September for going past the free plan's 5GB
+   of responses, and nobody saw it coming: the figure lived in Render's billing
+   page and nowhere else. Every response is weighed here and the month's total
+   kept in the database, so the dashboard can show it beside the database's own
+   size and say something before the site goes dark.
+
+   Counting is in memory and written once a minute, so a busy minute costs one
+   UPDATE rather than one per request, and a restart loses at most that minute.
+   ------------------------------------------------------------------ */
+const STARTED_AT = new Date();
+const FREE_BYTES = 5 * 1024 * 1024 * 1024;      // the plan's monthly responses
+const FREE_DB_BYTES = 1024 * 1024 * 1024;       // and its database
+let usage = { month: '', bytes: 0, requests: 0 };
+let usageDirty = false;
+
+function monthNow() { return new Date().toISOString().slice(0, 7); }
+
+app.use(function (req, res, next) {
+  const m = monthNow();
+  if (usage.month !== m) usage = { month: m, bytes: 0, requests: 0 };
+  res.on('finish', function () {
+    /* What actually went down the wire: the body Express reports, plus a
+       rough allowance for the headers, which are far from free on a page
+       that answers 304 all day. */
+    const len = Number(res.getHeader('content-length') || 0);
+    usage.bytes += (isFinite(len) ? len : 0) + 350;
+    usage.requests += 1;
+    usageDirty = true;
+  });
+  next();
+});
+
+let usageTableReady = false;
+async function flushUsage() {
+  if (!usageDirty || !usage.month) return;
+  const snapshot = { month: usage.month, bytes: usage.bytes, requests: usage.requests };
+  usageDirty = false;
+  try {
+    if (!usageTableReady) {
+      await pool.query(`CREATE TABLE IF NOT EXISTS usage_bytes (
+        month TEXT PRIMARY KEY, bytes BIGINT NOT NULL DEFAULT 0,
+        requests BIGINT NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+      usageTableReady = true;
+    }
+    /* The row holds the month's total across restarts, so this process adds
+       only what it has counted since the last write. */
+    await pool.query(
+      `INSERT INTO usage_bytes (month, bytes, requests) VALUES ($1,$2,$3)
+       ON CONFLICT (month) DO UPDATE SET bytes = usage_bytes.bytes + EXCLUDED.bytes,
+         requests = usage_bytes.requests + EXCLUDED.requests, updated_at = now()`,
+      [snapshot.month, snapshot.bytes, snapshot.requests]);
+    usage.bytes -= snapshot.bytes;
+    usage.requests -= snapshot.requests;
+  } catch (e) {
+    usageDirty = true;                       // try again next minute
+    console.error('usage not written:', e && e.message);
+  }
+}
+
+/* What the dashboard's indicator shows. Cheap enough to ask for every minute:
+   one size query, one count, one row. */
+app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const out = { at: new Date().toISOString(), startedAt: STARTED_AT.toISOString(),
+                db: { ok: false }, plan: { bytes: FREE_BYTES, dbBytes: FREE_DB_BYTES } };
+  const t0 = Date.now();
+  try {
+    const r = await pool.query('SELECT pg_database_size(current_database())::bigint AS size, now() AS now');
+    out.db = { ok: true, ms: Date.now() - t0, size: Number(r.rows[0].size) };
+  } catch (e) {
+    out.db = { ok: false, ms: Date.now() - t0, error: (e && e.message) || 'no answer' };
+    return res.json(out);
+  }
+  try {
+    const c = await pool.query(
+      `SELECT (SELECT count(*) FROM records WHERE org_id = $1)::int AS records,
+              (SELECT count(*) FROM employees WHERE org_id = $1 AND is_active)::int AS employees,
+              (SELECT count(*) FROM history WHERE org_id = $1)::int AS history`, [req.session.orgId]);
+    out.counts = c.rows[0];
+  } catch (e) { out.counts = null; }
+  try {
+    await flushUsage();
+    const u = await pool.query('SELECT bytes, requests FROM usage_bytes WHERE month = $1', [monthNow()]);
+    const row = u.rows[0] || { bytes: 0, requests: 0 };
+    out.usage = { month: monthNow(), bytes: Number(row.bytes) + usage.bytes,
+                  requests: Number(row.requests) + usage.requests };
+  } catch (e) { out.usage = { month: monthNow(), bytes: usage.bytes, requests: usage.requests }; }
+  try {
+    const d = await pool.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'deviceStatus' AND user_id IS NULL", [req.session.orgId]);
+    const v = d.rows[0] ? parseJson(d.rows[0].value) : null;
+    out.office = (v && v.at) ? { at: v.at, rows: v.rows || null } : null;
+  } catch (e) { out.office = null; }
+  res.json(out);
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html'],
   etag: true,
@@ -1789,6 +1888,7 @@ if (require.main === module) {
     .catch(e => console.error('could not create the tables:', e && e.message))
     // Listen either way: a service that answers is one whose log can be read.
     .finally(() => app.listen(PORT, () => console.log('listening on ' + PORT)));
+  setInterval(function () { flushUsage().catch(function () {}); }, 60000).unref();
   if (mailer.ready()) {
     setTimeout(dailyEmailTick, 60000).unref();
     setInterval(dailyEmailTick, DAILY_CHECK_MS).unref();
