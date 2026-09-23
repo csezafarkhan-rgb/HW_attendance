@@ -1394,7 +1394,10 @@ async function buildDailyEmail(orgId, day, opts) {
     if (hd && state !== 'leave') label += ' · part day';
     /* A day worked from home or at a customer has no punches, and two dashes
        said nothing about it: the times read WFH or Visit instead. */
-    return { name, 'in': rec['in'] || away, out: rec.out || away, state, kind, label };
+    return { name, 'in': rec['in'] || away, out: rec.out || away, state, kind, label,
+             /* When they arrived, as a number, so the message can list a card
+                in the order people came in rather than alphabetically. */
+             inMin: hhmmToMinutes(rec['in']) };
   });
 
   /* The three lists the banner over the record shows: who was late, whose

@@ -217,7 +217,14 @@ function dailyEmail(o) {
        customer visit are different days, so they are counted apart, and a kind
        nobody is on is left out rather than standing there as a nought. */
     const kindOf = function (r) { return r.kind || (r.state === 'remote' ? 'wfh' : r.state); };
-    const who = function (k) { return rows.filter(function (r) { return kindOf(r) === k; }); };
+    /* In the order they arrived: first in, first on the card. Anyone with no
+       time yet follows, by name, so the list is still steady between sends. */
+    const who = function (k) {
+      return rows.filter(function (r) { return kindOf(r) === k; }).sort(function (a, b) {
+        const x = (a.inMin == null) ? Infinity : a.inMin, y = (b.inMin == null) ? Infinity : b.inMin;
+        return x === y ? String(a.name).localeCompare(String(b.name)) : x - y;
+      });
+    };
     const kinds = [
       ['Present', who('present'), '#137A3B'],
       ['From home', who('wfh'), '#2F6FE4'],
