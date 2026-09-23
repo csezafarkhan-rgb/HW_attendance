@@ -3058,9 +3058,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
     </div>
   </div>
-  <button class="month-btn" id="screenshotBtn">📸 HD Screenshot</button>
   <div class="month-picker">
-    <button class="month-btn" id="emailBtn" title="Send the record by email">📧 Email</button>
+    <button class="month-btn" id="emailBtn" title="Send or save the record">↗ Share</button>
     <div class="month-dropdown em-dropdown" id="emailDropdown"></div>
   </div>
   <div class="month-picker st-picker">
@@ -9147,10 +9146,13 @@ function buildExcelBackup(){
   // DOM into an SVG <foreignObject>, rasterize that to a canvas) so it works
   // fully offline and isn't at the mercy of a CDN being reachable, which is
   // exactly the kind of thing that can silently fail for a downloaded file.
-  document.getElementById('screenshotBtn').addEventListener('click', function(){
-    autoExcelBackup(); // hand over an Excel backup of all data (to your folder, or Downloads)
-    captureScreenshot(); // render the image + copy to clipboard / show popup
-  });
+  /* Sharing the record - as a picture or by email - is also the moment a copy
+     of everything is worth keeping, so both paths write the day's backup to
+     the chosen folder. Once a day, and never in the way. */
+  function keepACopy(){
+    try{ autoExcelBackup(); }catch(e){ console.error('excel backup', e); }
+    try{ downloadDailySnapshot(false); }catch(e){ console.error('daily snapshot', e); }
+  }
 
   /* ---- Email: send the record, and say what goes out on its own ----
      The daily message carries the same picture the HD Screenshot button makes
@@ -9159,7 +9161,7 @@ function buildExcelBackup(){
   var MAIL_CFG = null;
   function mailEscape(s){ return escapeHtml(String(s == null ? '' : s)); }
   function renderEmailDropdown(){
-    var dd = document.getElementById('emailDropdown');
+    var dd = document.getElementById('emailDropdown'), d0 = dd;
     if(!dd) return;
     if(!MAIL_CFG){
       dd.innerHTML = '<div class="em-pane"><div class="em-note">Loading…</div></div>';
@@ -9182,6 +9184,8 @@ function buildExcelBackup(){
       + '<div class="em-note">Sent to ' + (((MAIL_CFG.to || []).length)
             ? mailEscape(MAIL_CFG.to.join(', '))
             : 'nobody yet — no admin account has an address on it') + '</div>'
+      + '<button type="button" class="em-go" id="emShot">📸 HD screenshot'
+      +   '<span>Copies the record as a picture, and saves a backup</span></button>'
       + '<button type="button" class="em-go" id="emSendDay">📨 Email today’s attendance'
       +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
       + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
@@ -9318,6 +9322,11 @@ function buildExcelBackup(){
           close();
         });
       };
+    };
+    var shotBtn = document.getElementById('emShot');
+    if(shotBtn) shotBtn.onclick = function(){
+      d0.classList.remove('open');
+      captureScreenshot();
     };
     var dayBtn = document.getElementById('emSendDay');
     if(dayBtn) dayBtn.onclick = function(){
@@ -10035,8 +10044,8 @@ function buildExcelBackup(){
   function captureScreenshot(){
     // A screenshot is a daily habit here, so it is a good moment to make sure a
     // same-day restorable copy exists. Once per day, and never blocking.
-    try{ downloadDailySnapshot(false); }catch(e){ console.error(e); }
-    var btn = document.getElementById('screenshotBtn');
+    keepACopy();
+    var btn = document.getElementById('emailBtn');
     var originalLabel = btn.textContent;
     btn.textContent = 'Rendering…';
     btn.disabled = true;
