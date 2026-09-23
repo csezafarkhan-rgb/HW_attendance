@@ -25,12 +25,20 @@ const isProd = process.env.NODE_ENV === 'production';
 
 if (isProd && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production.');
+  console.error('       A service created by hand starts with no environment at all. It needs:');
+  console.error('         SESSION_SECRET  a long random string (Render can generate one)');
+  console.error('         DATABASE_URL    the Postgres Internal Database URL');
+  console.error('         NODE_ENV        production');
+  console.error('       and, for the first admin account, ADMIN_EMAIL and ADMIN_PASSWORD.');
+  console.error('       Start Command must be `npm start`, which creates the tables first.');
   process.exit(1);
 }
 
 if (isProd && !process.env.DATABASE_URL) {
   console.error('FATAL: DATABASE_URL must be set in production.');
   console.error('       Add the Render PostgreSQL connection string as the DATABASE_URL environment variable.');
+  console.error('       Internal Database URL when the database is in the same Render account as this');
+  console.error('       service; External Database URL when it is somewhere else.');
   process.exit(1);
 }
 

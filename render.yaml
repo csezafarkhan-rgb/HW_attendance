@@ -26,6 +26,16 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      # Email (Resend) and the office PC's upload token. Left blank, the site
+      # runs without email and without accepting attendance from the office PC.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: RESEND_REPLY_TO
+        sync: false
+      - key: SYNC_TOKEN
+        sync: false
 
 databases:
   - name: hw-attendance-db

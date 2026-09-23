@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "prestart": "node migrate.js",
     "start": "node server.js",
     "migrate": "node migrate.js",
     "create-user": "node scripts/create-user.js",

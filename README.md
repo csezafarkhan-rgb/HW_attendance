@@ -34,6 +34,33 @@ If the service was created directly from **Web Service > GitHub** instead of fro
 
 The application now fails fast with a clear message if `DATABASE_URL` is missing in production instead of silently trying `127.0.0.1:5432`.
 
+### Starting again on a fresh Render account
+
+A service created by hand (**New → Web Service**) starts with no environment at
+all, so the first deploy ends with `FATAL: SESSION_SECRET must be set in
+production`. Either point Render at `render.yaml` (**New → Blueprint**), which
+sets everything up and asks for the values it cannot invent, or set it by hand:
+
+| Setting | Value |
+|---|---|
+| Build Command | `npm ci` |
+| Start Command | `npm start` — it creates the tables first (`prestart`) |
+| `NODE_ENV` | `production` |
+| `SESSION_SECRET` | a long random string (**Generate** in Render's editor) |
+| `DATABASE_URL` | the database's **Internal Database URL** |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | the first admin, created when the users table is empty |
+| `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_REPLY_TO` | email (optional) |
+| `SYNC_TOKEN` | lets the office PC upload attendance (optional) |
+
+Create the PostgreSQL database first, or the service has nothing to connect to.
+
+**The data does not come with the account.** A new database is empty. Either
+point `DATABASE_URL` at the old database (its **External Database URL**, if that
+account still has it), or sign in as the new admin and use **Backup & Restore →
+Restore from a backup file** with the most recent `Attendance_Backup_*.json`
+from the office PC's backup folder. The dashboard writes one every day it is
+opened, so the newest is at most a day behind.
+
 ## Environment variables
 
 Required on Render:
