@@ -9331,7 +9331,10 @@ function buildExcelBackup(){
         + 'counted here since the site began keeping score; past 5GB the free plan is suspended');
       html += meter(db.size || 0, plan.dbBytes || 0,
         'Database' + (db.version ? (' \u00b7 PostgreSQL ' + String(db.version).split('.')[0]) : ''),
-        'attendance, settings and history together');
+        /* The disk holds more than our own tables, and Render counts the disk. */
+        (db.own != null ? (fmtBytes(db.own) + ' of it is the attendance data; the rest is Postgres’s own'
+                           + (db.wal ? (' and ' + fmtBytes(db.wal) + ' of write-ahead log') : '')
+                           + '.') : 'attendance, settings and history together'));
       /* A free database is deleted on its thirtieth day. That is the one thing
          here nobody can undo, so it is said plainly and gets louder as the day
          approaches. */

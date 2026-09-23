@@ -1818,11 +1818,24 @@ app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
                 db: { ok: false }, plan: { bytes: FREE_BYTES, dbBytes: FREE_DB_BYTES } };
   const t0 = Date.now();
   try {
+    /* Render's storage figure is the whole disk, not this one database: every
+       database on the instance, plus Postgres's own catalogues and its
+       write-ahead log. Reporting only our own made the dashboard read 1% where
+       Render read 7%. Both are shown - the meter follows Render, and the note
+       says how much of it is the attendance data. */
     const r = await pool.query(
       `SELECT pg_database_size(current_database())::bigint AS size,
+              (SELECT sum(pg_database_size(datname))::bigint FROM pg_database) AS all_dbs,
               current_setting('server_version') AS version,
               current_database() AS name`);
-    out.db = { ok: true, ms: Date.now() - t0, size: Number(r.rows[0].size),
+    let wal = 0;
+    try {
+      const w = await pool.query('SELECT COALESCE(sum(size), 0)::bigint AS wal FROM pg_ls_waldir()');
+      wal = Number(w.rows[0].wal) || 0;
+    } catch (e) { /* not every account may read the log directory */ }
+    const own = Number(r.rows[0].size);
+    const everything = Number(r.rows[0].all_dbs || own) + wal;
+    out.db = { ok: true, ms: Date.now() - t0, size: everything, own: own, wal: wal,
                version: r.rows[0].version, name: r.rows[0].name };
     try {
       const seen = await dbFirstSeen();
