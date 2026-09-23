@@ -84,7 +84,11 @@ app.use(helmet({
    they are skipped here rather than parsed twice: express.json marks the request
    once it has read it, so a second parser would be a no-op and the small limit
    would reject the import before it ever reached the route. */
-const IMPORT_PATHS = ['/api/dataset', '/api/records', '/api/employees', '/api/device/records'];
+/* /api/mail/daily carries the picture of the record, a megabyte or two of it:
+   parsed by the small limit first, every emailed screenshot came back 413 and
+   the message went out without it. */
+const IMPORT_PATHS = ['/api/dataset', '/api/records', '/api/employees', '/api/device/records',
+                      '/api/mail/daily'];
 const smallJson = express.json({ limit: '200kb' });
 const bigJson = express.json({ limit: '25mb' });
 app.use(function (req, res, next) {

@@ -259,6 +259,14 @@ process.env.SESSION_SECRET = SECRET;
   check('a day from home reads WFH in the times, not dashes',
     /WFH/.test(withJpeg.html) && /From home/.test(withJpeg.html));
 
+  /* The picture of a month's record runs to a megabyte or more. Parsed by the
+     200kb limit the whole send came back 413 and the message went out bare. */
+  const bigPng = 'iVBORw0KGgo' + 'A'.repeat(400 * 1024);
+  const bigOut = await asAdmin('POST', '/api/mail/daily', { png: 'data:image/png;base64,' + bigPng });
+  check('a megabyte of picture is accepted, not refused as too large',
+    bigOut.status === 200 && sent[sent.length - 1].attachments
+      && sent[sent.length - 1].attachments[0].content.length > 400 * 1024, bigOut.body);
+
   const pickOut = await asAdmin('POST', '/api/mail/daily', { names: ['Ravi Test'] });
   const picked = sent[sent.length - 1];
   check('a message can name the employees itself',
