@@ -1758,8 +1758,20 @@ process.on('unhandledRejection', function (err) {
    request, whatever command started the process. */
 async function ensureSchema() {
   const r = await pool.query("SELECT to_regclass('public.users') AS t");
-  if (r.rows[0] && r.rows[0].t) return;
-  console.log('no tables yet - creating them');
+  if (r.rows[0] && r.rows[0].t) {
+    /* Tables but nobody in them: the first admin is created by the migration,
+       and it only fires when the users table is empty. Without this a database
+       created before ADMIN_EMAIL was set could never be signed into at all. */
+    const n = await pool.query('SELECT count(*)::int AS n FROM users');
+    if (n.rows[0].n > 0) return;
+    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
+      console.log('no accounts yet - set ADMIN_EMAIL and ADMIN_PASSWORD, then restart');
+      return;
+    }
+    console.log('no accounts yet - creating the first admin');
+  } else {
+    console.log('no tables yet - creating them');
+  }
   await new Promise((resolve, reject) => {
     const child = require('child_process').spawn(process.execPath, [path.join(__dirname, 'migrate.js')],
       { stdio: 'inherit', env: process.env });
