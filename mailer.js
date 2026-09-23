@@ -307,7 +307,12 @@ function dailyEmail(o) {
     ? o.subject.replace(/\{(\w+)\}/g, function (m, k) { return (k in fill) ? String(fill[k]) : m; })
     : ('Attendance · ' + o.dateLabel + (count('missing') ? (' · ' + count('missing') + ' with no punch') : ''));
 
-  return { subject: subject, html: layout(o.orgName || 'Attendance', o.dateLabel, body) };
+  /* Gmail threads messages that share a subject and hides whatever repeats the
+     one before - the greeting and the figures came through as "..." when a
+     second message went out the same day. The time it was sent is on the
+     header, so no two are ever quite the same. */
+  const stamp = o.dateLabel + (o.sentAt ? (' · as at ' + o.sentAt) : '');
+  return { subject: subject, html: layout(o.orgName || 'Attendance', stamp, body) };
 }
 
 /* The leave message: what is waiting for a decision, and leave taken with no

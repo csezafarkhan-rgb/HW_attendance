@@ -1437,6 +1437,7 @@ async function buildDailyEmail(orgId, day, opts) {
     orgName: orgNameOf(kv.companyInfo),
     dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
     rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl(),
+    sentAt: mailer.clock(Math.floor(istParts().min / 60) + ':' + String(istParts().min % 60).padStart(2, '0')),
     late, shifts, wfh, visits,
     sections: settings.sections, subject: settings.subject,
     intro: settings.intro, footer: settings.footer,
