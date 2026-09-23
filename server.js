@@ -1752,10 +1752,29 @@ process.on('unhandledRejection', function (err) {
   console.error('unhandled rejection (kept alive):', err && err.message);
 });
 
+/* A service whose start command is `node server.js` never runs the migration,
+   so the site came up on an empty database and every call answered 500. The
+   tables are checked here instead: missing, they are created before the first
+   request, whatever command started the process. */
+async function ensureSchema() {
+  const r = await pool.query("SELECT to_regclass('public.users') AS t");
+  if (r.rows[0] && r.rows[0].t) return;
+  console.log('no tables yet - creating them');
+  await new Promise((resolve, reject) => {
+    const child = require('child_process').spawn(process.execPath, [path.join(__dirname, 'migrate.js')],
+      { stdio: 'inherit', env: process.env });
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error('migrate exited with ' + code)));
+  });
+}
+
 if (require.main === module) {
-  app.listen(PORT, () => console.log('listening on ' + PORT));
+  ensureSchema()
+    .catch(e => console.error('could not create the tables:', e && e.message))
+    // Listen either way: a service that answers is one whose log can be read.
+    .finally(() => app.listen(PORT, () => console.log('listening on ' + PORT)));
   if (mailer.ready()) {
-    setTimeout(dailyEmailTick, 30000).unref();
+    setTimeout(dailyEmailTick, 60000).unref();
     setInterval(dailyEmailTick, DAILY_CHECK_MS).unref();
   } else {
     console.log('email is off: set RESEND_API_KEY and RESEND_FROM to turn it on');

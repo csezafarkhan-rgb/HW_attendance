@@ -22,7 +22,7 @@ function req(method, pathName, headers) {
 }
 const results = [];
 const check = (name, ok, got) => { results.push(ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(got))); };
-const DASH = 'https://hw-attendance.onrender.com';
+const DASH = 'https://hw-attendance-6qwd.onrender.com';
 const H = { host: '127.0.0.1:' + PORT };
 
 (async () => {

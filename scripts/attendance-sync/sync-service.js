@@ -35,7 +35,7 @@ const SCRIPT = path.join(HERE, 'Build-AttendanceCsv.ps1');
 
 // Only the dashboard, and a local copy of it for testing.
 const ALLOWED = [
-  'https://hw-attendance.onrender.com',
+  'https://hw-attendance-6qwd.onrender.com',
   'http://localhost:3000',
   'http://127.0.0.1:3000'
 ];

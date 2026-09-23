@@ -13,7 +13,7 @@ const path = require('path');
 const zlib = require('zlib');
 
 const DATA_DIR = process.env.HW_DATA_DIR || 'E:\\Drive H- Desktop\\ZAFAR LISTING\\AI Projects\\Attendance backup';
-const SITE = process.env.HW_SITE || 'https://hw-attendance.onrender.com';
+const SITE = process.env.HW_SITE || 'https://hw-attendance-6qwd.onrender.com';
 const TOKEN_FILE = process.env.HW_TOKEN_FILE || path.join(DATA_DIR, 'sync-token.txt');
 const DIR = path.join(DATA_DIR, 'db-backups');
 const KEEP = 30;
