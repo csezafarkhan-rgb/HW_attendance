@@ -1737,10 +1737,16 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
     const PART = ['HALF', 'SHORT', 'THREEQ'];
     /* Only marks that have just appeared, and only leave: a WFH or visit day is
        not something anybody has to decide. */
-    const fresh = [];
+    const fresh = [], cleared = [];
     changes.slice(0, 60).forEach(c => {
       const after = parseJson(c.after);
-      if (!after) return;                                  // removed, not added
+      if (!after) {
+        /* The mark has gone - undone on the grid, or removed by a rejection.
+           Its claim goes with it, so if the day is marked again it is sent
+           again rather than silently swallowed. */
+        if (DAY_RE.test(String(c.item).split('|')[1] || '')) cleared.push(String(c.item));
+        return;
+      }
       const emp = String(c.item).split('|')[0], day = String(c.item).split('|')[1] || '';
       if (!DAY_RE.test(day)) return;
       if (key === 'overrides') {
@@ -1755,6 +1761,9 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
                      half: after.half || '', message: after.note || '' });
       }
     });
+    for (const item of cleared) {
+      await pool.query('DELETE FROM maintenance_done WHERE job = $1', ['unreq-email:' + orgId + ':' + item]);
+    }
     if (!fresh.length) return;
 
     const kv = await sharedKeys(orgId, ['leaveRequests', 'companyInfo']);
@@ -1914,6 +1923,9 @@ async function applyEmailDecision(p) {
       if (p.act === 'approve') fresh.approvedBy = 'email';
       reqs.push(fresh);
       summary = dispReq(fresh);
+      /* Decided: the day starts afresh. Marked again later, it is sent again. */
+      await client.query('DELETE FROM maintenance_done WHERE job = $1',
+        ['unreq-email:' + p.org + ':' + p.e + '|' + p.d]);
       if (p.act === 'reject') {
         if (locked[p.d.slice(0, 7)]) skipped++;
         else {

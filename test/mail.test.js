@@ -480,11 +480,21 @@ process.env.SESSION_SECRET = SECRET;
     shared: true });
   await new Promise(r => setTimeout(r, 400));
   check('editing the same day does not send it again', sent.length === marksBefore + 1, sent.length - marksBefore);
+  /* Undo the mark and make it again: that is news a second time. */
+  await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
+  await new Promise(r => setTimeout(r, 400));
+  await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify(markOne), shared: true });
+  await new Promise(r => setTimeout(r, 500));
+  check('a day marked again after the mark was removed is sent again',
+    sent.length === marksBefore + 2, sent.length - marksBefore);
+  await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
+  await new Promise(r => setTimeout(r, 300));
+
   const wfhOnly = { 'Ravi Test|2026-09-30': { cat: 'WFH' } };
   await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify(wfhOnly), shared: true });
   await new Promise(r => setTimeout(r, 400));
   check('a day from home is not something to decide, so nothing is sent',
-    sent.length === marksBefore + 1, sent.length - marksBefore);
+    sent.length === marksBefore + 2, sent.length - marksBefore);
 
   global.fetch = realFetch;
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
