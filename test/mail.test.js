@@ -135,12 +135,25 @@ function query(sql, p) {
     return rows(db.kv.filter(x => x.org_id === p[0] && x.user_id === null && p[1].indexOf(x.key) > -1)
                   .map(x => ({ key: x.key, value: x.value })));
   }
+  if (s.startsWith('SELECT value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL')) {
+    const r = kvFind(p[0], p[1]); return rows(r ? [{ value: r.value, version: r.version }] : []);
+  }
+  if (s.startsWith('INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, $4)')) {
+    kvSet(p[0], p[1], p[2]);
+    return rows([{ version: kvFind(p[0], p[1]).version }]);
+  }
   if (s.startsWith('SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL')) {
     const r = kvFind(p[0], p[1]); return rows(r ? [{ value: r.value }] : []);
   }
   if (s.startsWith('INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, NULL)')) {
     kvSet(p[0], p[1], p[2]); return rows([]);
   }
+  if (s.startsWith('INSERT INTO maintenance_done')) {
+    db.jobs = db.jobs || {};
+    if (db.jobs[p[0]]) return rows([]);
+    db.jobs[p[0]] = true; return rows([{ job: p[0] }]);
+  }
+  if (s.startsWith('DELETE FROM maintenance_done')) { if (db.jobs) delete db.jobs[p[0]]; return rows([]); }
   if (s.startsWith('CREATE TABLE IF NOT EXISTS mail_log')) return rows([]);
   if (s.startsWith('CREATE INDEX IF NOT EXISTS mail_log_recent_idx')) return rows([]);
   if (s.startsWith('INSERT INTO mail_log')) {
@@ -442,6 +455,32 @@ process.env.SESSION_SECRET = SECRET;
   const leaveOut = await asAdmin('POST', '/api/mail/leave', {});
   check('the leave message is separate, and carries its buttons',
     leaveOut.status === 200 && /waiting for a decision/.test(sent[sent.length - 1].subject), leaveOut.body);
+  /* A day marked as leave straight on the grid is the same news as a request,
+     and goes out the same way - once. */
+  kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true }));
+  kvSet(1, 'leaveRequests', JSON.stringify([]));
+  kvSet(1, 'lockedMonths', JSON.stringify({}));   // the locked month above is done with
+  const marksBefore = sent.length;
+  const markOne = { 'Asha Test|2026-09-30': { cat: 'LEAVE', detail: 'CL', reason: 'family' } };
+  await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify(markOne), shared: true });
+  await new Promise(r => setTimeout(r, 600));
+  const marked = sent[sent.length - 1];
+  check('a leave mark with no request behind it is emailed as it is made',
+    sent.length === marksBefore + 1 && /Taken without a request/.test(marked.html)
+      && /Asha Test/.test(marked.html), sent.length - marksBefore);
+  check('and it carries its Approve and Reject buttons',
+    /\/e\/[A-Za-z0-9_-]+\./.test(marked.html));
+  await asAdmin('PUT', '/api/kv/overrides', {
+    value: JSON.stringify(Object.assign({}, markOne, { 'Asha Test|2026-09-30': { cat: 'LEAVE', detail: 'CL', reason: 'family, updated' } })),
+    shared: true });
+  await new Promise(r => setTimeout(r, 400));
+  check('editing the same day does not send it again', sent.length === marksBefore + 1, sent.length - marksBefore);
+  const wfhOnly = { 'Ravi Test|2026-09-30': { cat: 'WFH' } };
+  await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify(wfhOnly), shared: true });
+  await new Promise(r => setTimeout(r, 400));
+  check('a day from home is not something to decide, so nothing is sent',
+    sent.length === marksBefore + 1, sent.length - marksBefore);
+
   global.fetch = realFetch;
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 

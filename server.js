@@ -863,6 +863,11 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
     const fresh = newPendingRequests(requestsBefore, value);
     if (fresh.length) notifyNewRequests(req.session.orgId, fresh);
   }
+  /* And a day marked as leave straight on the grid, which is the same news
+     arriving by another door. */
+  if (shared && (key === 'overrides' || key === 'halfDays') && changes && changes.length) {
+    notifyUnrequestedMarks(req.session.orgId, key, changes);
+  }
   // Answer with what this account may see - the merged array holds everyone's requests.
   if (shared && req.session.role === 'employee') {
     value = valueForEmployee(key, value, (req.user && req.user.name) || '', null);
@@ -1716,6 +1721,77 @@ async function notifyNewRequests(orgId, added) {
     console.error('request email failed (request itself was saved):', e && e.message);
   }
 }
+/* A day marked as leave on the grid with no request behind it is the same
+   thing as a request, arriving by a different door: somebody is away and it has
+   not been agreed. So it is sent the same way, with its Approve and Reject
+   buttons, as the mark is made.
+
+   Each day is claimed in maintenance_done first, so editing the same day twice
+   - or two admins saving at once - does not send it twice. */
+async function notifyUnrequestedMarks(orgId, key, changes) {
+  try {
+    if (!mailer.ready() || !changes || !changes.length) return;
+    const settings = await mailSettings(orgId);
+    if (!settings.unrequested) return;
+    const PART = ['HALF', 'SHORT', 'THREEQ'];
+    /* Only marks that have just appeared, and only leave: a WFH or visit day is
+       not something anybody has to decide. */
+    const fresh = [];
+    changes.slice(0, 60).forEach(c => {
+      const after = parseJson(c.after);
+      if (!after) return;                                  // removed, not added
+      const emp = String(c.item).split('|')[0], day = String(c.item).split('|')[1] || '';
+      if (!DAY_RE.test(day)) return;
+      if (key === 'overrides') {
+        if (after.cat !== 'LEAVE' || after.reqId) return;   // a request wrote it: already known
+        fresh.push({ empName: emp, dateFrom: day, dateTo: day,
+                     leaveType: after.detail === 'Sick' ? 'Sick' : 'CL', message: after.reason || '' });
+      } else if (key === 'halfDays') {
+        if (after.reqId) return;
+        const kind = after.kind || 'HALF';
+        if (PART.indexOf(kind) === -1) return;
+        fresh.push({ empName: emp, dateFrom: day, dateTo: day, leaveType: kind,
+                     half: after.half || '', message: after.note || '' });
+      }
+    });
+    if (!fresh.length) return;
+
+    const kv = await sharedKeys(orgId, ['leaveRequests', 'companyInfo']);
+    const requests = parseJson(kv.leaveRequests) || [];
+    const covered = (m) => requests.some(r => r && r.status !== 'rejected' && r.leaveType !== 'PUNCH'
+      && r.empName === m.empName && r.dateFrom <= m.dateFrom && r.dateTo >= m.dateFrom
+      && ((PART.indexOf(r.leaveType) > -1) === (PART.indexOf(m.leaveType) > -1)));
+    const worth = [];
+    for (const m of fresh) {
+      if (covered(m)) continue;
+      const job = 'unreq-email:' + orgId + ':' + m.empName + '|' + m.dateFrom;
+      const claimed = await pool.query(
+        'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+      if (claimed.rows.length) worth.push(m);
+    }
+    if (!worth.length) return;
+
+    const mail = mailer.leaveEmail({
+      orgName: orgNameOf(kv.companyInfo), pending: [],
+      unrequested: worth.slice(0, 15).map(m => ({
+        req: m, heading: 'Marked on the record, no request',
+        links: linksFor({ k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
+                          t: m.leaveType, h: m.half || '' })
+      })),
+      subject: settings.leave.subject, intro: settings.leave.intro,
+      footer: settings.leave.footer, siteUrl: mailer.baseUrl()
+    });
+    if (!mail) return;
+    const to = await mailRecipients(orgId, settings, 'leave');
+    if (!to.length) return;
+    const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+    await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
+  } catch (e) {
+    console.error('leave-without-a-request email failed (the mark itself was saved):', e && e.message);
+  }
+}
+
 /* Which requests are new and still waiting, comparing what was stored with
    what was just saved. */
 function newPendingRequests(beforeText, afterText) {
