@@ -273,6 +273,31 @@ Every response is weighed by the server and the month's total kept in
 `usage_bytes`, written once a minute rather than once a request. The table is
 created on first use, so no migration is needed.
 
+### If the messages land in spam
+
+The sending domain needs three things in DNS. For `homeweavers.net` two of
+them are already there:
+
+- **DKIM** — `resend._domainkey` holds Resend's public key ✓
+- **SPF for the return path** — `send.homeweavers.net` lists Resend's addresses ✓
+- **DMARC** — **missing**. Gmail and Yahoo have required it of anyone sending
+  reports like these since 2024, and without it a new sending domain has
+  nothing to vouch for it. Add one TXT record:
+
+      _dmarc.homeweavers.net   TXT   "v=DMARC1; p=none; rua=mailto:dmarc@homeweavers.net"
+
+  `p=none` changes nothing about delivery; it only asks for reports, and its
+  presence is what the filters look for. Tighten to `p=quarantine` later.
+
+The root domain's SPF (`include:_spf.google.com`) does not list Resend, which
+is correct and does not need changing: the envelope sender is
+`send.homeweavers.net`, which does, and DKIM signs as the root domain, so both
+checks align with the From address.
+
+Beyond DNS, on the first few messages: mark **Not spam**, add the sender to
+Contacts, and reply once. For an internal recipient that settles it within a
+day or two.
+
 ## Security notes
 
 - **Keep the repo private.** Employee names and attendance times are personal data.

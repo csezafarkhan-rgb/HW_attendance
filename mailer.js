@@ -55,6 +55,19 @@ async function send(msg) {
   if (cc.length) body.cc = cc;
   /* Resend takes an attachment as base64 in `content`. The daily message
      carries the same picture the HD Screenshot button makes. */
+  /* A daily report to the same people, every day, reads to a spam filter as
+     bulk mail unless it says how to stop it. These two headers are what Gmail
+     and Yahoo ask for, and they cost nothing: the address they point at is the
+     one that already receives replies. */
+  const unsub = c.replyTo || c.from.replace(/^.*<|>.*$/g, '');
+  if (unsub) {
+    body.headers = Object.assign({
+      'List-Unsubscribe': '<mailto:' + unsub + '?subject=unsubscribe>',
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+    }, msg.headers || {});
+  } else if (msg.headers) {
+    body.headers = msg.headers;
+  }
   if (Array.isArray(msg.attachments) && msg.attachments.length) {
     body.attachments = msg.attachments.slice(0, 3).map(function (a) {
       return { filename: String(a.filename || 'attachment'), content: String(a.content || '') };
