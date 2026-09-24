@@ -274,7 +274,14 @@ function dailyEmail(o) {
           + '<div style="font-size:11px;line-height:1.45;color:' + INK + ';">'
           /* Numbered, so a card can be counted down at a glance and read back
              over the phone without losing the place. */
-          +   k[1].map(function (r, i) { return (i + 1) + '_' + esc(r.name); }).join('<br>')
+          /* With the time they came in beside the name, the card answers "who
+             is in and when did they get here" on its own. Somebody with no
+             punch yet is simply named. */
+          +   k[1].map(function (r, i) {
+                const at = (r.inMin != null) ? clock(r['in']) : '';
+                return (i + 1) + '_' + esc(r.name)
+                     + (at ? ('<span style="color:' + SOFT + ';"> (' + esc(at) + ')</span>') : '');
+              }).join('<br>')
           + '</div></div></td>';
       }).join('');
       body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'

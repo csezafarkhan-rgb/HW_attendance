@@ -52,6 +52,13 @@ const SECRET = 'test-secret-for-signing-links';
       && /Ravi Test/.test(cards.html) && /Priya Test/.test(cards.html), cards.html.slice(0, 60));
   check('a kind nobody is on is left out', !/On leave/.test(cards.html));
   check('the names on a card are numbered', /1_Asha Test/.test(cards.html) && /1_Ravi Test/.test(cards.html));
+  const timed = mailer.dailyEmail({
+    orgName: 'Test Co', dateLabel: 'Tue, 22 Sep', sections: { table: false },
+    rows: [{ name: 'Early Test', kind: 'present', 'in': '9:10', inMin: 550 },
+           { name: 'Nopunch Test', kind: 'missing', 'in': '', inMin: null }]
+  });
+  check('a card shows when each of them came in',
+    /1_Early Test<span[^>]*> \(9:10 AM\)/.test(timed.html) && /1_Nopunch Test</.test(timed.html), timed.html.slice(0, 60));
   const arrived = mailer.dailyEmail({
     orgName: 'Test Co', dateLabel: 'Tue, 22 Sep', sections: { table: false },
     rows: [
