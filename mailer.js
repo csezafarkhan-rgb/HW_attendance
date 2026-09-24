@@ -298,17 +298,18 @@ function dailyEmail(o) {
           + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:8px 6px;text-align:center;">'
           + '<div style="font-size:18px;font-weight:700;color:' + k[2] + ';line-height:1.1;">' + k[1].length + '</div>'
           + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
-          + '<div style="font-size:11px;line-height:1.45;color:' + INK + ';">'
+          + '<div style="font-size:10.5px;line-height:1.5;color:' + INK + ';">'
           /* Numbered, so a card can be counted down at a glance and read back
-             over the phone without losing the place. */
-          /* With the time they came in beside the name, the card answers "who
-             is in and when did they get here" on its own. Somebody with no
-             punch yet is simply named. */
+             over the phone without losing the place, with the time they came
+             in beside the name. One person is one line: a card is a quarter of
+             the message wide, and "1_Aman Chandra (9:29 AM)" broke over two
+             lines and read as two people. */
           +   k[1].map(function (r, i) {
                 const at = (r.inMin != null) ? clock(r['in']) : '';
-                return (i + 1) + '_' + esc(r.name)
-                     + (at ? ('<span style="color:' + SOFT + ';"> (' + esc(at) + ')</span>') : '');
-              }).join('<br>')
+                return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
+                     + (at ? ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>') : '')
+                     + '</div>';
+              }).join('')
           + '</div></div></td>';
       }).join('');
       body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
