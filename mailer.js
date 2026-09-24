@@ -146,6 +146,7 @@ function layout(title, subtitle, blocks) {
     + '<tr><td style="padding:18px 22px;color:' + INK + ';font-size:14px;line-height:1.5;">' + blocks.join('') + '</td></tr>'
     + '<tr><td style="padding:14px 22px;border-top:1px solid ' + LINE + ';color:' + SOFT + ';font-size:11.5px;">'
     +   'Sent by the attendance dashboard. Buttons in this email ask once before they do anything.'
+    +   '<br>If this landed in spam, please mark it <b>Not spam</b> so the next one reaches you.'
     + '</td></tr>'
     + '</table></td></tr></table></body></html>';
 }
