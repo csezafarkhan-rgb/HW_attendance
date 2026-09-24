@@ -146,7 +146,20 @@ function pill(text, colour) {
   return '<span style="display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;'
     + 'background:' + colour + '22;color:' + colour + ';">' + esc(text) + '</span>';
 }
-function dateRange(from, to) { return from === to ? from : (from + ' → ' + to); }
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const WEEKDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+/* Dates as the office writes them: 24 Sep' 2026, with the weekday in front
+   where a message is about one particular day. */
+function fmtDay(iso, withWeekday) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return String(iso || '');
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  const day = (+m[3]) + ' ' + MONTHS[+m[2] - 1] + '’ ' + m[1];
+  return withWeekday ? (WEEKDAYS[d.getUTCDay()] + ', ' + day) : day;
+}
+function dateRange(from, to) {
+  return from === to ? fmtDay(from) : (fmtDay(from) + ' → ' + fmtDay(to));
+}
 /* Times are read at a glance on a phone, so they carry am/pm as the grid does:
    9:33 reads as 9:33 AM, 16:17 as 4:17 PM. */
 function clock(t) {
@@ -436,7 +449,7 @@ function requestEmail(o) {
     html: layout(o.orgName || 'Attendance', 'A request is waiting for a decision', [
       o.intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
                  + esc(o.intro) + '</div>') : '',
-      requestCard(r, o.links, 'Raised ' + (r.createdAt ? String(r.createdAt).slice(0, 10) : 'just now')),
+      requestCard(r, o.links, 'Raised ' + (r.createdAt ? fmtDay(String(r.createdAt).slice(0, 10)) : 'just now')),
       o.footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
                   + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>') : '',
       o.siteUrl ? ('<div style="margin-top:8px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>') : ''
@@ -474,7 +487,7 @@ function resultPage(title, detail, ok) {
 module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
-  esc, stripHtml, layout, button, kindName, dateRange,
+  esc, stripHtml, layout, button, kindName, dateRange, fmtDay,
   dailyEmail, leaveEmail, holidayEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
   DEFAULT_TEXT, fillText
 };

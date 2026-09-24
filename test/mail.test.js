@@ -52,6 +52,11 @@ const SECRET = 'test-secret-for-signing-links';
       && /Ravi Test/.test(cards.html) && /Priya Test/.test(cards.html), cards.html.slice(0, 60));
   check('a kind nobody is on is left out', !/On leave/.test(cards.html));
   check('the names on a card are numbered', /1_Asha Test/.test(cards.html) && /1_Ravi Test/.test(cards.html));
+  check('dates read as the office writes them',
+    mailer.fmtDay('2026-09-24') === '24 Sep’ 2026'
+      && mailer.fmtDay('2026-09-24', true) === 'Thu, 24 Sep’ 2026'
+      && mailer.dateRange('2026-09-24', '2026-09-26') === '24 Sep’ 2026 → 26 Sep’ 2026',
+    mailer.fmtDay('2026-09-24', true));
   const timed = mailer.dailyEmail({
     orgName: 'Test Co', dateLabel: 'Tue, 22 Sep', sections: { table: false },
     rows: [{ name: 'Early Test', kind: 'present', 'in': '9:10', inMin: 550 },

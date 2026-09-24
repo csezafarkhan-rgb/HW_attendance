@@ -1474,7 +1474,7 @@ async function buildDailyEmail(orgId, day, opts) {
   const settings = opts.settings || await mailSettings(orgId);
   return mailer.dailyEmail({
     orgName: orgNameOf(kv.companyInfo),
-    dateLabel: new Date(day + 'T00:00:00Z').toUTCString().slice(0, 16),
+    dateLabel: mailer.fmtDay(day, true),
     rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl(),
     sentAt: mailer.clock(Math.floor(istParts().min / 60) + ':' + String(istParts().min % 60).padStart(2, '0')),
     late, shifts, wfh, visits,
@@ -1496,7 +1496,8 @@ async function buildLeaveEmail(orgId) {
   const pending = requests.filter(r => r && !r.archived && (r.status === 'pending' || r.status === 'query'))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
-    .map(r => ({ req: r, heading: r.status === 'query' ? 'A query was raised' : 'Waiting since ' + String(r.createdAt || '').slice(0, 10),
+    .map(r => ({ req: r, heading: r.status === 'query' ? 'A query was raised'
+                          : 'Waiting since ' + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)),
                  links: linksFor({ k: 'req', org: orgId, id: r.id }) }));
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
   const unreq = settings.unrequested
@@ -1668,7 +1669,7 @@ async function sendHolidayEmail(orgId, opts) {
     orgName: orgNameOf(kv.companyInfo),
     holidays: holidays.map(h => ({
       name: h.name, note: h.note, away: daysApart(today, h.day),
-      when: new Date(h.day + 'T00:00:00Z').toUTCString().slice(0, 16)
+      when: mailer.fmtDay(h.day, true)
     })),
     subject: settings.holiday.subject, intro: settings.holiday.intro,
     footer: settings.holiday.footer, siteUrl: mailer.baseUrl()
