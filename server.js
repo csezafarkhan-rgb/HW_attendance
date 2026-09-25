@@ -862,6 +862,9 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   if (shared && key === 'leaveRequests' && requestsBefore !== null) {
     const fresh = newPendingRequests(requestsBefore, value);
     if (fresh.length) notifyNewRequests(req.session.orgId, fresh);
+    /* And whoever has just been told yes or no hears it from the site. */
+    newlyDecided(requestsBefore, value).slice(0, 10)
+      .forEach(r => { notifyDecision(req.session.orgId, r); });
   }
   /* And a day marked as leave straight on the grid, which is the same news
      arriving by another door. */
@@ -1245,7 +1248,7 @@ const MAIL_DEFAULTS = {
   /* The leave message goes to different people and says a different thing, so
      it keeps its own address list and wording. Anything left blank here falls
      back to the attendance settings above. */
-  leave: { to: [], cc: [], subject: '', intro: '', footer: '' },
+  leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true },
   /* A word before a holiday, so nobody turns up to a closed building. `days`
      is how far ahead it goes out; `at` is the hour of that day, India time. */
   holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' }
@@ -1280,7 +1283,8 @@ async function mailSettings(orgId) {
     cc: (Array.isArray(lv.cc) ? lv.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
     subject: String(lv.subject || '').slice(0, 200),
     intro: String(lv.intro || '').slice(0, 2000),
-    footer: String(lv.footer || '').slice(0, 2000)
+    footer: String(lv.footer || '').slice(0, 2000),
+    confirm: lv.confirm !== false
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
@@ -1722,6 +1726,56 @@ async function notifyNewRequests(orgId, added) {
     console.error('request email failed (request itself was saved):', e && e.message);
   }
 }
+/* The person the leave belongs to, by their own account. Accounts are made
+   with the employee's name against them, so that is what ties a request to an
+   address; without an account there is nobody to write to. */
+async function employeeAddress(orgId, empName) {
+  const r = await pool.query(
+    `SELECT email FROM users WHERE org_id = $1 AND is_active
+       AND lower(COALESCE(name, '')) = lower($2) ORDER BY id LIMIT 1`, [orgId, String(empName || '')]);
+  const email = r.rows[0] ? String(r.rows[0].email || '') : '';
+  return EMAIL_RE.test(email) ? email : '';
+}
+
+/* Once a request is settled - from the buttons in an email or on the portal -
+   the person who asked is told, with the office copied. Claimed against the
+   request and the answer, so one decision is one message however many saves
+   carry it. */
+async function notifyDecision(orgId, req) {
+  try {
+    if (!mailer.ready() || !req || !req.id) return;
+    if (req.status !== 'approved' && req.status !== 'rejected') return;
+    const settings = await mailSettings(orgId);
+    if (!settings.leave.confirm) return;
+    const to = await employeeAddress(orgId, req.empName);
+    if (!to) return;                                   // no account, nobody to write to
+    const job = 'decision-email:' + orgId + ':' + req.id + ':' + req.status;
+    const claimed = await pool.query(
+      'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+    if (!claimed.rows.length) return;
+    const kv = await sharedKeys(orgId, ['companyInfo']);
+    const mail = mailer.decisionEmail({
+      orgName: orgNameOf(kv.companyInfo), req, decision: req.status, siteUrl: mailer.baseUrl()
+    });
+    const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+    await logMail(orgId, 'decision', { to: [to], cc, subject: mail.subject, html: mail.html }, r);
+  } catch (e) {
+    console.error('the decision stands but its message failed:', e && e.message);
+  }
+}
+
+/* Which requests have just been settled, comparing what was stored with what
+   was saved: a decision made on the portal, rather than from an email. */
+function newlyDecided(beforeText, afterText) {
+  const before = parseJson(beforeText), after = parseJson(afterText);
+  if (!Array.isArray(after)) return [];
+  const was = {};
+  (Array.isArray(before) ? before : []).forEach(r => { if (r && r.id) was[String(r.id)] = r.status; });
+  return after.filter(r => r && r.id && (r.status === 'approved' || r.status === 'rejected')
+                        && was[String(r.id)] !== r.status);
+}
+
 /* A day marked as leave on the grid with no request behind it is the same
    thing as a request, arriving by a different door: somebody is away and it has
    not been agreed. So it is sent the same way, with its Approve and Reject
@@ -1861,7 +1915,7 @@ async function applyEmailDecision(p) {
     const now = new Date().toISOString();
     const reqsText = await read('leaveRequests');
     const reqs = parseJson(reqsText) || [];
-    let skipped = 0, kept = 0, summary = '';
+    let skipped = 0, kept = 0, summary = '', decided = null;
 
     if (p.k === 'req') {
       const req = reqs.filter(r => r && r.id === p.id)[0];
@@ -1876,6 +1930,7 @@ async function applyEmailDecision(p) {
       if (p.act === 'approve') req.approvedBy = 'email';
       else delete req.approvedBy;
       summary = dispReq(req);
+      decided = req;
 
       if (p.act === 'approve') {
         if (req.leaveType === 'PUNCH') {
@@ -1923,6 +1978,7 @@ async function applyEmailDecision(p) {
       if (p.act === 'approve') fresh.approvedBy = 'email';
       reqs.push(fresh);
       summary = dispReq(fresh);
+      decided = fresh;
       /* Decided: the day starts afresh. Marked again later, it is sent again. */
       await client.query('DELETE FROM maintenance_done WHERE job = $1',
         ['unreq-email:' + p.org + ':' + p.e + '|' + p.d]);
@@ -1946,6 +2002,9 @@ async function applyEmailDecision(p) {
       return { ok: false, title: 'That link is not valid', detail: 'Open the dashboard and decide there.' };
     }
     await client.query('COMMIT');
+    /* Decided from the email: tell the person it belongs to, as the portal
+       does. After the commit, and never in the way of the answer. */
+    if (decided) notifyDecision(p.org, decided);
     const notes = [];
     if (kept) notes.push(kept + ' day(s) already carried another mark and were left alone.');
     if (skipped) notes.push(skipped + ' day(s) are in a locked month and were not changed.');

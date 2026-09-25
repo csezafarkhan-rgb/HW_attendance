@@ -200,6 +200,11 @@ function query(sql, p) {
     const r = db.kv.find(x => x.key === 'visibleEmployees' && x.user_id === 1);
     return rows(r ? [{ value: r.value }] : []);
   }
+  if (s.startsWith('SELECT email FROM users WHERE org_id = $1 AND is_active AND lower(COALESCE(name')) {
+    const hit = db.users.find(u => u.org_id === p[0] && u.is_active
+      && String(u.name || '').toLowerCase() === String(p[1]).toLowerCase());
+    return rows(hit ? [{ email: hit.email }] : []);
+  }
   if (s.startsWith('SELECT email FROM users')) {
     return rows(db.users.filter(u => u.org_id === p[0] && u.is_active && u.role === 'admin').map(u => ({ email: u.email })));
   }
@@ -460,6 +465,42 @@ process.env.SESSION_SECRET = SECRET;
   const leaveOut = await asAdmin('POST', '/api/mail/leave', {});
   check('the leave message is separate, and carries its buttons',
     leaveOut.status === 200 && /waiting for a decision/.test(sent[sent.length - 1].subject), leaveOut.body);
+  /* Once it is settled, the person who asked hears so, with the office copied. */
+  db.users.push({ id: 7, org_id: 1, email: 'keshav@homeweavers.net', name: 'Keshav Garg',
+                  role: 'employee', is_active: true });
+  kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], leave: { cc: ['support@x.com'], confirm: true } }));
+  kvSet(1, 'leaveRequests', JSON.stringify([
+    { id: 'req_k', empName: 'Keshav Garg', dateFrom: '2026-09-24', dateTo: '2026-09-24',
+      leaveType: 'Sick', status: 'pending', createdAt: '2026-09-24T04:00:00Z', updatedAt: '2026-09-24T04:00:00Z' }
+  ]));
+  const decideTok = mailer.actionToken({ k: 'req', org: 1, id: 'req_k', act: 'approve' }, SECRET);
+  const decidedBefore = sent.length;
+  await realFetch(base + '/e/' + decideTok, { method: 'POST' });
+  await new Promise(r => setTimeout(r, 600));
+  const told = sent[sent.length - 1];
+  check('the employee is told when their leave is decided',
+    sent.length === decidedBefore + 1 && (told.to || []).indexOf('keshav@homeweavers.net') > -1
+      && /approved/i.test(told.subject), told && { to: told.to, subject: told.subject });
+  check('and the addresses saved on the Leave tab are copied',
+    (told.cc || []).indexOf('support@x.com') > -1, told && told.cc);
+  check('the message names the days it was about', /24 Sep’ 2026/.test(told.html));
+
+  /* A decision made on the portal says the same thing. */
+  const portalBefore = sent.length;
+  const withRefusal = JSON.parse(kvFind(1, 'leaveRequests').value);
+  withRefusal.push({ id: 'req_k2', empName: 'Keshav Garg', dateFrom: '2026-09-26', dateTo: '2026-09-26',
+               leaveType: 'CL', status: 'rejected', adminNote: 'Too short notice',
+               createdAt: '2026-09-25T04:00:00Z', updatedAt: '2026-09-25T05:00:00Z' });
+  await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(withRefusal), shared: true });
+  await new Promise(r => setTimeout(r, 600));
+  const refused = sent[sent.length - 1];
+  check('a decision made on the portal is told the same way',
+    sent.length === portalBefore + 1 && (refused.to || [])[0] === 'keshav@homeweavers.net'
+      && /not approved/i.test(refused.subject), refused && refused.subject);
+  await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(withRefusal), shared: true });
+  await new Promise(r => setTimeout(r, 400));
+  check('saving the same decision again tells nobody twice', sent.length === portalBefore + 1);
+
   /* A day marked as leave straight on the grid is the same news as a request,
      and goes out the same way - once. */
   kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true }));

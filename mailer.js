@@ -199,6 +199,12 @@ const DEFAULT_TEXT = {
     intro: 'Hello,\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
     footer: 'Best regards,\n{org}'
   },
+  decision: {
+    subject: 'Your {kind} \u00b7 {dates} \u00b7 {decision}',
+    introYes: 'Hello {name},\n\nYour leave has been approved. The days below are on the record.',
+    introNo: 'Hello {name},\n\nYour leave was not approved. Please speak to your manager if that is not what you expected.',
+    footer: 'Best regards,\n{org}'
+  },
   holiday: {
     subject: 'Holiday \u00b7 {name} \u00b7 {date}',
     intro: 'Hello,\n\nA holiday is coming up. Please plan your work around it.',
@@ -421,6 +427,40 @@ function leaveEmail(o) {
   };
 }
 
+/* What the person who asked is told once it is settled. Approved or not, the
+   answer is short and carries the dates it was about. */
+function decisionEmail(o) {
+  const r = o.req || {};
+  const yes = o.decision === 'approved';
+  const words = DEFAULT_TEXT.decision;
+  const say = { name: r.empName || '', kind: kindName(r.leaveType), dates: dateRange(r.dateFrom, r.dateTo),
+                decision: yes ? 'approved' : 'not approved', org: o.orgName || 'Attendance' };
+  const body = [];
+  const intro = fillText(o.intro || (yes ? words.introYes : words.introNo), say);
+  if (intro) {
+    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+      + esc(intro) + '</div>');
+  }
+  body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + (yes ? '#137A3B' : '#B3261E')
+    + ';border-radius:10px;padding:12px 14px;margin:0 0 10px;">'
+    + '<div style="font-size:11.5px;color:' + SOFT + ';margin-bottom:4px;">'
+    +   (yes ? 'Approved' : 'Not approved') + (r.approvedBy ? (' by ' + esc(r.approvedBy)) : '') + '</div>'
+    + '<div style="font-weight:700;">' + esc(kindName(r.leaveType)) + (r.half ? (' \u00b7 ' + esc(r.half)) : '') + '</div>'
+    + '<div style="color:' + SOFT + ';font-size:13px;margin-top:2px;">' + esc(dateRange(r.dateFrom, r.dateTo)) + '</div>'
+    + (r.message ? ('<div style="font-size:12.5px;margin-top:6px;">\u201c' + esc(String(r.message).slice(0, 300)) + '\u201d</div>') : '')
+    + (r.adminNote ? ('<div style="font-size:12.5px;margin-top:6px;color:' + SOFT + ';">' + esc(r.adminNote) + '</div>') : '')
+    + '</div>');
+  const footer = fillText(o.footer || words.footer, say);
+  if (footer) {
+    body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+  }
+  if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
+  return { subject: subject, html: layout(o.orgName || 'Attendance',
+    yes ? 'Your leave is approved' : 'Your leave was not approved', body) };
+}
+
 /* The holiday reminder: what is closed, when, and how far off it is. */
 function holidayEmail(o) {
   const list = o.holidays || [];
@@ -503,6 +543,6 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay,
-  dailyEmail, leaveEmail, holidayEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
+  dailyEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
   DEFAULT_TEXT, fillText
 };

@@ -9382,6 +9382,9 @@ function buildExcelBackup(){
       +   '<span>A note as each request is raised</span></label>'
       + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
       +   '<span>Leave taken without a request</span></label>'
+      + '<label class="em-row"><input type="checkbox" id="emConfirm"'
+      +   (((s.leave || {}).confirm !== false) ? ' checked' : '') + '>'
+      +   '<span>Tell the employee once their leave is decided</span></label>'
       + '</div>'
       /* ---- the holiday reminder ---- */
       + (function(){
@@ -9633,7 +9636,8 @@ function buildExcelBackup(){
           to: list('emLvTo'), cc: list('emLvCc'),
           subject: document.getElementById('emLvSubject').value.trim(),
           intro: document.getElementById('emLvIntro').value,
-          footer: document.getElementById('emLvFooter').value
+          footer: document.getElementById('emLvFooter').value,
+          confirm: document.getElementById('emConfirm').checked
         },
         holiday: {
           on: document.getElementById('emHolOn').checked,

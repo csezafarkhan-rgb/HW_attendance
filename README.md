@@ -188,6 +188,11 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
   and again on its own as each request is raised.
 - **A holiday reminder**, a set number of days before a date on the Official
   Leaves calendar (two by default), naming the holiday and what is closed.
+- **The answer, to the person who asked.** Once leave is approved or rejected
+  — from the buttons in an email or on the portal — the employee is told,
+  with the Leave tab's Cc addresses copied. Their address is their own account
+  (accounts carry the employee's name), so somebody with no account is not
+  written to. Switch it off under **Settings → Leave**.
 
 Every active Super Admin is written to, plus any address added in the panel.
 
