@@ -283,9 +283,16 @@ process.env.SESSION_SECRET = SECRET;
 
   // --- the same link a second time ---
   const again = await hit('POST', '/e/' + approveTok);
-  check('the same link cannot decide twice', again.status === 409 && /Already decided/.test(again.body), again.status);
+  check('the same link cannot decide twice',
+    again.status === 409 && /already settled/i.test(again.body), again.status);
 
   // --- a decision on something already settled ---
+  const reopen = await hit('GET', '/e/' + tok({ k: 'req', org: 1, id: 'req_2', act: 'reject' }));
+  check('a settled request does not even offer the button',
+    reopen.status === 409 && /already settled/i.test(reopen.body) && !/<form method="POST"/.test(reopen.body),
+    reopen.status);
+  check('and it points at the panel for a change of mind',
+    /attendance panel/i.test(reopen.body), reopen.body.slice(0, 400));
   const settled = await hit('POST', '/e/' + tok({ k: 'req', org: 1, id: 'req_2', act: 'reject' }));
   check('a request decided in the dashboard is refused', settled.status === 409, settled.status);
 
@@ -298,6 +305,15 @@ process.env.SESSION_SECRET = SECRET;
     rejected.status === 200 && !ovs2['Ravi Test|2026-09-18'], ovs2);
   check('and it is written down as rejected',
     reqs2.some(r => r.empName === 'Ravi Test' && r.dateFrom === '2026-09-18' && r.status === 'rejected'), reqs2);
+
+  /* Answered once, answered for good: the other button on the same message
+     cannot turn a refusal into an approval. */
+  const flip = await hit('POST', '/e/' + tok({ k: 'unreq', org: 1, e: 'Ravi Test', d: '2026-09-18', t: 'CL', h: '', act: 'approve' }));
+  check('a day already answered cannot be answered the other way',
+    flip.status === 409 && /already settled/i.test(flip.body), flip.status);
+  check('and no second request is written for it',
+    JSON.parse(kvFind(1, 'leaveRequests').value)
+      .filter(r => r.empName === 'Ravi Test' && r.dateFrom === '2026-09-18').length === 1);
 
   // --- a locked month is not touched ---
   kvSet(1, 'overrides', JSON.stringify({ 'Ravi Test|2026-08-10': { cat: 'LEAVE', detail: 'CL' } }));
@@ -484,6 +500,27 @@ process.env.SESSION_SECRET = SECRET;
   check('and the addresses saved on the Leave tab are copied',
     (told.cc || []).indexOf('support@x.com') > -1, told && told.cc);
   check('the message names the days it was about', /24 Sep’ 2026/.test(told.html));
+
+  /* A refusal can carry a word of explanation, typed on the page the button
+     opens - and the person who asked reads it. */
+  kvSet(1, 'leaveRequests', JSON.stringify([
+    { id: 'req_n', empName: 'Keshav Garg', dateFrom: '2026-10-05', dateTo: '2026-10-05',
+      leaveType: 'CL', status: 'pending', createdAt: '2026-10-01T04:00:00Z', updatedAt: '2026-10-01T04:00:00Z' }
+  ]));
+  const noteTok = mailer.actionToken({ k: 'req', org: 1, id: 'req_n', act: 'reject' }, SECRET);
+  const asks = await realFetch(base + '/e/' + noteTok).then(r => r.text());
+  check('the refusal page offers a box for a reason', /<textarea name="note"/.test(asks));
+  const noteBefore = sent.length;
+  await realFetch(base + '/e/' + noteTok, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'note=' + encodeURIComponent('We are short-handed that week')
+  });
+  await new Promise(r => setTimeout(r, 600));
+  const stored = JSON.parse(kvFind(1, 'leaveRequests').value).filter(r => r.id === 'req_n')[0];
+  check('what was typed is kept on the request', stored.adminNote === 'We are short-handed that week', stored);
+  const withNote = sent[sent.length - 1];
+  check('and the employee is told in those words',
+    sent.length === noteBefore + 1 && /short-handed that week/.test(withNote.html), withNote && withNote.subject);
 
   /* A decision made on the portal says the same thing. */
   const portalBefore = sent.length;

@@ -1892,7 +1892,7 @@ function daysBetween(from, to) {
    the dashboard writes: the request's new status, and the marks an approval puts
    on the record. A day already carrying somebody else's mark is left alone, and
    a locked month is not touched at all. */
-async function applyEmailDecision(p) {
+async function applyEmailDecision(p, note) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1922,11 +1922,11 @@ async function applyEmailDecision(p) {
       if (!req) { await client.query('ROLLBACK'); return { ok: false, title: 'That request is gone', detail: 'It is no longer on file.' }; }
       if (req.status !== 'pending' && req.status !== 'query') {
         await client.query('ROLLBACK');
-        return { ok: false, title: 'Already decided',
-                 detail: dispReq(req) + ' was already ' + req.status + '. Open the dashboard to change it.' };
+        return settledSay(dispReq(req), req.status);
       }
       req.status = p.act === 'approve' ? 'approved' : 'rejected';
       req.updatedAt = now;
+      if (note) req.adminNote = note;                  // the reason, in their own words
       if (p.act === 'approve') req.approvedBy = 'email';
       else delete req.approvedBy;
       summary = dispReq(req);
@@ -1961,18 +1961,17 @@ async function applyEmailDecision(p) {
       }
       await write('leaveRequests', reqsText, JSON.stringify(reqs));
     } else if (p.k === 'unreq') {
-      const covered = reqs.some(r => r && r.empName === p.e && r.status !== 'rejected'
-                                  && r.dateFrom <= p.d && r.dateTo >= p.d
-                                  && (PART_KINDS.indexOf(r.leaveType) > -1) === (PART_KINDS.indexOf(p.t) > -1));
+      const covered = reqs.filter(r => coversDay(r, p))[0];
       if (covered) {
         await client.query('ROLLBACK');
-        return { ok: false, title: 'Already settled', detail: p.e + '’s ' + p.d + ' now has a request against it.' };
+        return settledSay(dispReq(covered), covered.status);
       }
       const fresh = {
         id: 'req_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex'),
         empName: p.e, dateFrom: p.d, dateTo: p.d, leaveType: p.t, half: p.h || '',
         message: 'Taken without a request', status: p.act === 'approve' ? 'approved' : 'rejected',
-        adminNote: p.act === 'approve' ? 'Approved by email' : 'Not authorised — the day was removed from the record.',
+        adminNote: note || (p.act === 'approve' ? 'Approved by email'
+                                                 : 'Not authorised — the day was removed from the record.'),
         employeeReply: '', createdAt: now, updatedAt: now
       };
       if (p.act === 'approve') fresh.approvedBy = 'email';
@@ -2019,29 +2018,63 @@ async function applyEmailDecision(p) {
 function dispReq(r) {
   return r.empName + ' · ' + mailer.kindName(r.leaveType) + ' · ' + mailer.dateRange(r.dateFrom, r.dateTo);
 }
+/* Whichever way a request was answered, that answer stands: the buttons in an
+   email decide once. Changing one's mind is a job for the panel, where the
+   whole record is in view. */
+function settledSay(summary, status) {
+  return { ok: false, title: 'This request is already settled',
+           detail: summary + ' was already ' + (status === 'approved' ? 'approved' : 'rejected')
+             + '. If you need to revise it, please make the change from the attendance panel.' };
+}
+/* Whether a stored request already speaks for the day a "taken without a
+   request" link is about - answered either way. */
+function coversDay(r, p) {
+  return !!r && r.empName === p.e && r.dateFrom <= p.d && r.dateTo >= p.d
+      && (PART_KINDS.indexOf(r.leaveType) > -1) === (PART_KINDS.indexOf(p.t) > -1);
+}
+/* What the link is about, if it has already been settled - so the page says so
+   before anything is pressed, rather than after. */
+async function alreadySettled(p) {
+  try {
+    const r = await pool.query(
+      'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL', [p.org, 'leaveRequests']);
+    const reqs = parseJson(r.rows[0] ? r.rows[0].value : null) || [];
+    const hit = p.k === 'unreq'
+      ? reqs.filter(x => coversDay(x, p))[0]
+      : reqs.filter(x => x && x.id === p.id)[0];
+    if (!hit) return null;
+    if (p.k !== 'unreq' && (hit.status === 'pending' || hit.status === 'query')) return null;
+    return settledSay(dispReq(hit), hit.status);
+  } catch (e) { return null; }      // if it cannot be read, the POST still guards
+}
 
 /* The page a button in an email opens. GET asks; POST acts - so a mail scanner
    following every link cannot decide anything. */
 const mailActionLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
-app.get('/e/:token', mailActionLimiter, (req, res) => {
+app.get('/e/:token', mailActionLimiter, async (req, res) => {
   const p = mailer.verifyAction(req.params.token, process.env.SESSION_SECRET || 'dev-secret');
   res.set('Cache-Control', 'no-store').type('html');
   if (!p) return res.status(400).send(mailer.resultPage('That link has expired',
     'Links in an email are good for ' + mailer.ACTION_DAYS + ' days. Open the dashboard and decide there.', false));
+  const done = await alreadySettled(p);
+  if (done) return res.status(409).send(mailer.resultPage(done.title, done.detail, false));
   const what = p.k === 'unreq'
-    ? (p.e + ' · ' + mailer.kindName(p.t) + ' · ' + p.d)
+    ? (p.e + ' · ' + mailer.kindName(p.t) + ' · ' + mailer.fmtDay(p.d))
     : 'the request in the email';
   res.send(mailer.confirmPage({
     action: p.act, unrequested: p.k === 'unreq', summary: what,
+    who: p.k === 'unreq' ? p.e : '',
     postTo: '/e/' + req.params.token
   }));
 });
-app.post('/e/:token', mailActionLimiter, async (req, res) => {
+const formBody = express.urlencoded({ extended: false, limit: '20kb' });
+app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
   const p = mailer.verifyAction(req.params.token, process.env.SESSION_SECRET || 'dev-secret');
   res.set('Cache-Control', 'no-store').type('html');
   if (!p) return res.status(400).send(mailer.resultPage('That link has expired',
     'Open the dashboard and decide there.', false));
-  const out = await applyEmailDecision(p);
+  // Whatever was typed in the box on that page travels with the decision.
+  const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim());
   res.status(out.ok ? 200 : 409).send(mailer.resultPage(out.title, out.detail, out.ok));
 });
 

@@ -525,6 +525,15 @@ function confirmPage(o) {
     + '<p style="color:' + SOFT + ';font-size:14px;line-height:1.5;margin:0 0 14px;">' + esc(o.summary) + '</p>'
     + warn
     + '<form method="POST" action="' + esc(o.postTo) + '">'
+    /* A refusal usually has a reason, and the person who asked should hear it.
+       Optional: an empty box sends the refusal on its own, as before. */
+    + (o.action === 'reject'
+        ? ('<label style="display:block;font-size:12.5px;color:' + SOFT + ';margin:0 0 6px;">'
+           + 'A word for ' + esc(o.who || 'them') + ', if you want to give one (optional)</label>'
+           + '<textarea name="note" rows="3" maxlength="500" placeholder="e.g. We are short-handed that week"'
+           + ' style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid ' + LINE + ';'
+           + 'border-radius:9px;font:inherit;font-size:13px;resize:vertical;margin-bottom:12px;"></textarea>')
+        : '')
     + '<button type="submit" style="border:0;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;color:#fff;'
     + 'background:' + (o.action === 'approve' ? '#137A3B' : '#B3261E') + ';cursor:pointer;">Yes, ' + esc(act.toLowerCase()) + '</button>'
     + '</form></div></body>';
