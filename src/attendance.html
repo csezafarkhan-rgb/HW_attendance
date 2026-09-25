@@ -9391,7 +9391,7 @@ function buildExcelBackup(){
           var h = s.holiday || {};
           return '<div data-em-pane="hol" style="display:none;">'
             + '<label class="em-row"><input type="checkbox" id="emHolOn"' + (h.on !== false ? ' checked' : '') + '>'
-            +   '<span>Remind everyone before a holiday</span></label>'
+            +   '<span>Remind below saved emails before a holiday</span></label>'
             + '<div class="em-row em-indent"><input type="text" id="emHolDays" value="'
             +   mailEscape(String(h.days == null ? 2 : h.days)) + '" size="3"><span>days before, at</span>'
             +   '<input type="text" id="emHolAt" value="' + mailEscape(h.at || '10:00') + '" size="5"><span>India time</span></div>'
