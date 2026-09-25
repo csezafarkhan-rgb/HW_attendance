@@ -4547,10 +4547,30 @@ function offerImportFile(file, stamp){
     if(btn){ btn.disabled = true; }
     var restore = function(){ if(btn){ btn.disabled = false; btn.textContent = was; } };
 
+    /* Ask for the folder here, while the press still counts as one. Chrome only
+       grants file access from a gesture, and reading the readers takes about a
+       minute - by the time the old code came to look at the folder the gesture
+       was long gone, so the request was refused without a prompt and the sync
+       reported "nothing new to import" however many times it was pressed. */
+    var allowed = Promise.resolve(ensureDirPerm(IMPORT_DIR, true, 'read')).catch(function(){ return false; });
+
     say(live ? 'Reading the readers\u2026' : 'Looking\u2026');
     var bar = live ? syncProgress('Reading the punch readers\u2026') : null;
     var step = live ? askHelperToFetch(true) : Promise.resolve({ok:false, reason:'skipped'});
-    step.then(function(pull){
+    Promise.all([step, allowed]).then(function(both){
+      var pull = both[0];
+      if(!both[1]){
+        /* Without the folder there is nothing to import, whatever the readers
+           did, and saying "nothing new" would be a lie. */
+        if(bar) bar.done(false);
+        restore();
+        IMPORT_DIR_PERM = 'prompt';
+        renderImportFolder();
+        showUploadStatus('Chrome has stopped letting this page read \u201c' + IMPORT_DIR.name + '\u201d, so the '
+          + 'punch file could not be read. Press Reconnect on the Backup tab (or choose the folder again) '
+          + 'and press Sync once more.', true);
+        return;
+      }
       say('Looking\u2026');
       if(bar) bar.stage('Looking for new punches\u2026');
       return Promise.resolve(checkImportFolder(false)).then(function(found){
