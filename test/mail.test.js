@@ -375,7 +375,8 @@ process.env.SESSION_SECRET = SECRET;
   check('a JPEG is attached as a JPEG',
     jpegOut.status === 200 && withJpeg.attachments[0].filename.slice(-4) === '.jpg', withJpeg.attachments);
   check('a day from home reads WFH in the times, not dashes',
-    /WFH/.test(withJpeg.html) && /From home/.test(withJpeg.html));
+    /WFH/.test(withJpeg.html) && /Work from home/.test(withJpeg.html));
+
 
   /* The picture of a month's record runs to a megabyte or more. Parsed by the
      200kb limit the whole send came back 413 and the message went out bare. */
