@@ -292,7 +292,7 @@ function dailyEmail(o) {
     };
     const kinds = [
       ['Present', who('present'), '#137A3B'],
-      ['From home', who('wfh'), '#2F6FE4'],
+      ['Work from home', who('wfh'), '#2F6FE4'],
       ['Visiting', who('visit'), '#7C3AED'],
       ['On leave', who('leave'), '#B45309'],
       ['No punch', who('missing'), '#B3261E']
@@ -312,8 +312,15 @@ function dailyEmail(o) {
              lines and read as two people. */
           +   k[1].map(function (r, i) {
                 const at = (r.inMin != null) ? clock(r['in']) : '';
+                /* Anyone past their shift's start has that hour picked out in
+                   yellow, so a late arrival is seen without reading the list
+                   below. */
+                const time = r.late
+                  ? ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
+                     + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>')
+                  : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
                 return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
-                     + (at ? ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>') : '')
+                     + (at ? time : '')
                      + '</div>';
               }).join('')
           + '</div></div></td>';

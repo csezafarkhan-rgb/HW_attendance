@@ -47,10 +47,22 @@ const SECRET = 'test-secret-for-signing-links';
     sections: { table: false }
   });
   check('work from home and a customer visit are counted apart, each with its names',
-    /From home/.test(cards.html) && /Visiting/.test(cards.html)
+    /Work from home/.test(cards.html) && /Visiting/.test(cards.html)
       && !/From home \/ visiting/.test(cards.html)
       && /Ravi Test/.test(cards.html) && /Priya Test/.test(cards.html), cards.html.slice(0, 60));
   check('a kind nobody is on is left out', !/On leave/.test(cards.html));
+  /* A late arrival is picked out on the card, so it is seen without reading
+     the list below; an excused one is left plain. */
+  const marked = mailer.dailyEmail({
+    orgName: 'Test Co', dateLabel: 'Wed, 23 Sep 2026',
+    rows: [{ name: 'Early One', state: 'present', kind: 'present', 'in': '9:16', inMin: 556 },
+           { name: 'Late One', state: 'present', kind: 'present', 'in': '10:13', inMin: 613, late: 43 }],
+    sections: { table: false }
+  });
+  check('a late arrival has its hour picked out',
+    /Late One<span style="background:#FFF3C4[^>]*> \(10:13 AM\)/.test(marked.html));
+  check('and an on-time arrival is left plain',
+    /Early One<span style="color:#5B6675[^>]*> \(9:16 AM\)/.test(marked.html));
   check('the names on a card are numbered', /1_Asha Test/.test(cards.html) && /1_Ravi Test/.test(cards.html));
   check('dates read as the office writes them',
     mailer.fmtDay('2026-09-24') === '24 Sep’ 2026'

@@ -1448,7 +1448,7 @@ async function buildDailyEmail(orgId, day, opts) {
   const excuses = parseJson(kv.lateExcuses) || {};
   const threshold = Number(parseJson(kv.lateThresholdMin)) || Number(kv.lateThresholdMin) || 10;
   const late = [], shifts = [], wfh = [], visits = [];
-  names.forEach(empName => {
+  names.forEach((empName, i) => {
     const shown = shownNames[empName] || empName;
     const key = empName + '|' + day;
     const rec = byEmp[empName] || {};
@@ -1472,6 +1472,9 @@ async function buildDailyEmail(orgId, day, opts) {
       late.push({ name: shown,
                   detail: 'in ' + mailer.clock(rec['in']) + ' (' + (came - start) + ' min late)'
                         + (excuses[key] ? ' \u2014 excused' : '') });
+      /* So the card can mark the hour they came in. An excused lateness has
+         been answered for already and is left alone. */
+      if (rows[i] && !excuses[key]) { rows[i].late = came - start; }
     }
   });
 
