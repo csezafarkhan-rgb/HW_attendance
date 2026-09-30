@@ -545,13 +545,65 @@ function confirmPage(o) {
     + 'background:' + (o.action === 'approve' ? '#137A3B' : '#B3261E') + ';cursor:pointer;">Yes, ' + esc(act.toLowerCase()) + '</button>'
     + '</form></div></body>';
 }
-function resultPage(title, detail, ok) {
+/* The message that carries a password link. An invitation and a forgotten
+   password are the same errand with different words: the link is the point,
+   and it says how long it is good for. */
+function passwordEmail(o) {
+  const invite = o.kind === 'invite';
+  const who = o.name && o.name !== 'Admin' ? o.name : '';
+  const body = [];
+  body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+    + (who ? ('Hello ' + esc(who) + ',<br><br>') : '')
+    + (invite
+        ? ('An account has been made for you on the ' + esc(o.orgName || 'Attendance') + ' dashboard, '
+           + 'signed in with <b>' + esc(o.email) + '</b>. Choose a password and it is yours.')
+        : ('Somebody asked to reset the password for <b>' + esc(o.email) + '</b>. '
+           + 'Choose a new one below. If it was not you, nothing has changed - ignore this message.'))
+    + '</div>');
+  body.push('<div style="margin:0 0 14px;">' + button(o.link, invite ? 'Set your password' : 'Choose a new password') + '</div>');
+  body.push('<div style="font-size:12px;color:' + SOFT + ';line-height:1.5;">'
+    + 'The link is good for ' + esc(o.goodFor) + ', and works once. '
+    + 'If it has run out, ask an admin for another - or use "Forgot password?" on the sign-in card.'
+    + '</div>');
+  return { subject: invite ? ('Set your password · ' + (o.orgName || 'Attendance'))
+                           : ('Reset your password · ' + (o.orgName || 'Attendance')),
+           html: layout(o.orgName || 'Attendance', invite ? 'Welcome' : 'Password reset', body) };
+}
+
+/* The page that link opens: two boxes and nothing else. Posted back to the
+   same address, which is the only thing that can set the password. */
+function passwordPage(o) {
+  const field = function (id, label) {
+    return '<label for="' + id + '" style="display:block;font-size:12.5px;color:' + SOFT + ';margin:0 0 5px;">'
+      + esc(label) + '</label>'
+      + '<input id="' + id + '" name="' + id + '" type="password" required minlength="8" autocomplete="new-password"'
+      + ' style="width:100%;box-sizing:border-box;padding:10px;border:1px solid ' + LINE + ';border-radius:9px;'
+      + 'font:inherit;font-size:14px;margin-bottom:12px;">';
+  };
+  return '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>Set your password</title>'
+    + '<body style="margin:0;background:#F3F6FB;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">'
+    + '<div style="max-width:420px;margin:40px auto;background:#fff;border:1px solid ' + LINE + ';border-radius:14px;padding:22px;">'
+    + '<h2 style="margin:0 0 6px;font-size:17px;">' + (o.invite ? 'Set your password' : 'Choose a new password') + '</h2>'
+    + '<p style="color:' + SOFT + ';font-size:13.5px;line-height:1.5;margin:0 0 16px;">'
+    +   'For <b>' + esc(o.email) + '</b>. At least 8 characters.</p>'
+    + (o.error ? ('<p style="color:#B3261E;font-size:13px;margin:0 0 12px;">' + esc(o.error) + '</p>') : '')
+    + '<form method="POST" action="' + esc(o.postTo) + '">'
+    +   field('pw1', 'New password')
+    +   field('pw2', 'Repeat it')
+    +   '<button type="submit" style="border:0;border-radius:8px;padding:11px 20px;font-size:14px;font-weight:600;'
+    +   'color:#fff;background:' + BLUE + ';cursor:pointer;width:100%;">Save the password</button>'
+    + '</form></div></body>';
+}
+
+function resultPage(title, detail, ok, link) {
   return '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<title>' + esc(title) + '</title>'
     + '<body style="margin:0;background:#F3F6FB;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">'
     + '<div style="max-width:460px;margin:40px auto;background:#fff;border:1px solid ' + LINE + ';border-radius:14px;padding:22px;">'
     + '<h2 style="margin:0 0 10px;font-size:17px;color:' + (ok ? '#137A3B' : '#B3261E') + ';">' + esc(title) + '</h2>'
     + '<p style="color:' + SOFT + ';font-size:14px;line-height:1.5;margin:0;">' + esc(detail) + '</p>'
+    + (link ? ('<div style="margin-top:16px;">' + button(link, 'Go to the sign-in page') + '</div>') : '')
     + '</div></body>';
 }
 
@@ -560,5 +612,6 @@ module.exports = {
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay,
   dailyEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
+  passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

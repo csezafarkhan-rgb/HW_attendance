@@ -200,6 +200,30 @@ function query(sql, p) {
   if (s.startsWith('SELECT id, org_id, email, password_hash, name, role, is_active FROM users')) {
     return rows(db.users.filter(u => u.email === p[0]));
   }
+  if (s.startsWith('SELECT id, org_id, email, name, password_hash, is_active FROM users WHERE id = $1 AND org_id = $2')) {
+    return rows(db.users.filter(u => u.id === p[0] && u.org_id === p[1]));
+  }
+  if (s.startsWith('SELECT id, org_id, email, name, password_hash, is_active FROM users WHERE id = $1')) {
+    return rows(db.users.filter(u => u.id === p[0]));
+  }
+  if (s.startsWith('SELECT id, org_id, email, name, password_hash FROM users')) {
+    const want = String(p[0]).toLowerCase();
+    return rows(db.users.filter(u => u.is_active && (String(u.email).toLowerCase() === want
+      || String(u.email).split('@')[0].toLowerCase() === want
+      || String(u.name || '').toLowerCase() === want)).slice(0, 1));
+  }
+  if (s.startsWith('INSERT INTO users (org_id, email, password_hash, name, role)')) {
+    const made = { id: db.users.length + 20, org_id: p[0], email: p[1], password_hash: p[2],
+                   name: p[3], role: p[4], is_active: true, last_login_at: null, created_at: new Date() };
+    db.users.push(made);
+    return rows([Object.assign({}, made)]);
+  }
+  if (s.startsWith('UPDATE users SET password_hash')) {
+    const hit = db.users.find(u => u.id === p[1]);
+    if (hit) hit.password_hash = p[0];
+    return rows([]);
+  }
+  if (s.startsWith('DELETE FROM session')) return rows([]);
   if (s.startsWith('UPDATE users SET last_login_at')) return rows([]);
   if (s.startsWith('SELECT totp_enabled, totp_secret')) return rows([{ totp_enabled: false }]);
   if (s.startsWith('SELECT role, is_active, org_id, name, email FROM users WHERE id = $1')) {
@@ -513,6 +537,61 @@ process.env.SESSION_SECRET = SECRET;
   check('and the addresses saved on the Leave tab are copied',
     (told.cc || []).indexOf('support@x.com') > -1, told && told.cc);
   check('the message names the days it was about', /24 Sep’ 2026/.test(told.html));
+
+  /* ---- a password set from a link in an email ---- */
+  const pwBefore = sent.length;
+  const forgotten = await realFetch(base + '/api/forgot', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'keshav@homeweavers.net' })
+  });
+  await new Promise(r => setTimeout(r, 400));
+  const linkMail = sent[sent.length - 1];
+  check('forgetting a password sends a link to that account',
+    forgotten.status === 200 && sent.length === pwBefore + 1
+      && (linkMail.to || [])[0] === 'keshav@homeweavers.net'
+      && /Reset your password/.test(linkMail.subject), linkMail && linkMail.subject);
+  const noSuch = await realFetch(base + '/api/forgot', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'nobody@nowhere.test' })
+  });
+  await new Promise(r => setTimeout(r, 300));
+  check('an address with no account is answered the same way, and written to nobody',
+    noSuch.status === 200 && sent.length === pwBefore + 1, sent.length - pwBefore);
+
+  const linkHref = (/href="([^"]*set-password[^"]*)"/.exec(linkMail.html) || [])[1] || '';
+  const pwPath = linkHref.slice(linkHref.indexOf('/set-password/'));
+  const pwAsks = await realFetch(base + pwPath).then(r => r.text());
+  check('the link opens a page asking for the new password twice',
+    /name="pw1"/.test(pwAsks) && /name="pw2"/.test(pwAsks) && /keshav@homeweavers.net/.test(pwAsks));
+  const post = (path, body) => realFetch(base + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, redirect: 'manual'
+  });
+  const short = await post(pwPath, 'pw1=abc&pw2=abc');
+  check('a short password is refused, with the page shown again',
+    short.status === 400 && /at least 8/.test(await short.text()), short.status);
+  const mismatch = await post(pwPath, 'pw1=longenough1&pw2=longenough2');
+  check('two that do not match are refused', mismatch.status === 400
+    && /did not match/.test(await mismatch.text()), mismatch.status);
+  const set = await post(pwPath, 'pw1=a-fine-password&pw2=a-fine-password');
+  check('a good one is saved', set.status === 200 && /Password saved/.test(await set.text()), set.status);
+  const keshav = db.users.find(u => u.email === 'keshav@homeweavers.net');
+  check('and it is the password on the account now',
+    bcrypt.compareSync('a-fine-password', keshav.password_hash));
+  const spent = await post(pwPath, 'pw1=another-password&pw2=another-password');
+  check('the same link cannot set a second password',
+    spent.status === 400 && /run out/.test(await spent.text()), spent.status);
+
+  /* An account made with no password: they are written to, and the account
+     cannot be signed into until they have chosen one. */
+  const madeBefore = sent.length;
+  const made = await asAdmin('POST', '/api/users',
+    { email: 'newbie@homeweavers.net', password: '', name: 'New Bie', role: 'employee' });
+  check('a user made with no password is emailed a link',
+    made.status === 200 && made.body.invited === true && made.body.mailed === true
+      && sent.length === madeBefore + 1 && /Set your password/.test(sent[sent.length - 1].subject),
+    made.body);
+  check('and the link says who it is for',
+    /newbie@homeweavers.net/.test(sent[sent.length - 1].html));
 
   /* A refusal can carry a word of explanation, typed on the page the button
      opens - and the person who asked reads it. */

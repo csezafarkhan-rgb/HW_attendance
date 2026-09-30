@@ -97,10 +97,40 @@
       uEl.setAttribute('autocapitalize', 'none');
       uEl.setAttribute('spellcheck', 'false');
     }
-    /* The gate carries a plain note now - self-service reset does not exist, and
-       changing a password is done from inside the app, not from the sign-in card. */
+    /* Forgotten passwords answer themselves: the name or address typed above
+       is sent to the server, which writes to whoever it belongs to. The answer
+       is the same whether or not there is such an account, so the card cannot
+       be used to find out who has one. */
     var fp = document.getElementById('lgFpNote');
-    if (fp) fp.textContent = 'Forgot password? Contact Admin';
+    if (fp) {
+      fp.textContent = '';
+      var fpLink = document.createElement('a');
+      fpLink.href = '#';
+      fpLink.textContent = 'Forgot password?';
+      var fpSaid = document.createElement('span');
+      fpSaid.style.cssText = 'display:none;color:#5B6472;';
+      fp.appendChild(fpLink);
+      fp.appendChild(fpSaid);
+      fpLink.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var who = (uEl && uEl.value ? uEl.value : '').trim();
+        if (!who) {
+          fpSaid.style.display = '';
+          fpSaid.textContent = ' — type your username or email above first.';
+          try { uEl.focus(); } catch (e) {}
+          return;
+        }
+        fpLink.style.display = 'none';
+        fpSaid.style.display = '';
+        fpSaid.textContent = 'Sending…';
+        apiJson('/api/forgot', { method: 'POST', body: JSON.stringify({ email: who }) })
+          .catch(function () {})
+          .then(function () {
+            fpSaid.textContent = 'If ' + who + ' has an account, a link to choose a new password is on its '
+              + 'way to it. The link is good for 3 hours.';
+          });
+      });
+    }
 
     /* Two-step sign-in: after a right password on an account that has it on,
        the same card asks for the code from the authenticator app. */

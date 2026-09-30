@@ -154,6 +154,27 @@ Employees are limited by the server, not only by what the page shows:
 - **Save conflicts**: shared values carry a version; a save made from an older copy
   than the server's is refused (409) and the page asks the person to reload.
 
+## Passwords
+
+A password is never invented for somebody and read down the phone. Both ways in
+are a signed link sent to the account's own address, and both need
+`RESEND_API_KEY` and `RESEND_FROM` (see **Email**).
+
+- **A new account.** Leave the password box blank in **Users → + Add user** and
+  the person is emailed a link to choose their own; the account is made with a
+  password nobody knows in the meantime. Type a password there instead and they
+  are still written to, so they know the account exists and can change it.
+- **A forgotten password.** The sign-in card's **Forgot password?** takes the
+  username or email typed above it and writes to whoever it belongs to. The
+  answer on screen is the same whether or not there is such an account, so the
+  card cannot be used to find out who has one.
+- **Sending again.** **Email a link** on any row in the Users list issues a new
+  one - the first ran out, or never arrived.
+- An invitation is good for 7 days, a reset for 3 hours. A link carries a stamp
+  taken from the password it was issued against, so it stops working the moment
+  a password is set, whether from that link or by an admin. Nothing is stored
+  for it, and setting a password signs that account out everywhere else.
+
 ## Two-step sign-in
 
 Admins can turn on two-step sign-in for their own account: **Users → Your sign-in

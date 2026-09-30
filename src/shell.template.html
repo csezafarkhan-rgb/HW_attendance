@@ -238,11 +238,11 @@
     <div class="um-card">
       <div class="um-top"><h2>👥 Users &amp; Access</h2><button id="umClose" class="um-btn">✕ Close</button></div>
       <div id="umTwoStep" class="um-addbox" style="display:none"></div>
-      <div class="um-note">Accounts are stored securely in PostgreSQL. Create either an Admin account (full access) or an Employee account (their own attendance only). Passwords are never stored in plain text.</div>
+      <div class="um-note">Accounts are stored securely in PostgreSQL. Create either an Admin account (full access) or an Employee account (their own attendance only). Passwords are never stored in plain text. Leave the password blank and the new user is emailed a link to choose their own.</div>
       <div class="um-addbox">
         <div class="um-addrow">
           <input id="umNewUser" type="email" placeholder="work email" spellcheck="false" autocapitalize="none" autocorrect="off">
-          <input id="umNewPass" type="password" placeholder="password (8+ chars)">
+          <input id="umNewPass" type="password" placeholder="password (blank: they set their own)">
           <select id="umNewRole"><option value="employee">Employee</option><option value="admin_view">View Admin — read only</option><option value="admin">Super Admin — full access</option></select>
           <button id="umAdd" class="um-btn um-add">+ Add user</button>
         </div>
@@ -2737,7 +2737,16 @@ function _initLoginGateReal(startWorkspace){
         if(u.role==='employee'){
           var hint=document.createElement('div'); hint.className='um-note'; hint.textContent='Employee view: '+(u.name||'No employee assigned'); row.appendChild(hint);
         } else { var hint2=document.createElement('div'); hint2.className='um-alltabs'; hint2.textContent='Admin — full attendance access + user management'; row.appendChild(hint2); }
-        var pwr=document.createElement('div'); pwr.className='um-pw'; pwr.appendChild(pw); pwr.appendChild(pwBtn); row.appendChild(pwr);
+        /* When the first link ran out, or never arrived: send another rather
+           than inventing a password and reading it down the phone. */
+        var inv=document.createElement('button'); inv.className='um-btn'; inv.textContent='Email a link';
+        inv.title='Email '+u.email+' a link to set their own password';
+        inv.onclick=function(){ inv.disabled=true; inv.textContent='Sending…';
+          userApi('/api/users/'+u.id+'/invite',{method:'POST',body:'{}'}).then(function(){
+            inv.disabled=false; inv.textContent='Email a link';
+            serverFlash('A link to set a password is on its way to '+u.email+'.',true);
+          }).catch(function(e){ inv.disabled=false; inv.textContent='Email a link'; serverFlash(serverErrorMessage(e),false); }); };
+        var pwr=document.createElement('div'); pwr.className='um-pw'; pwr.appendChild(pw); pwr.appendChild(pwBtn); pwr.appendChild(inv); row.appendChild(pwr);
         list.appendChild(row);
       });
     }).catch(function(e){ list.innerHTML=''; serverFlash(serverErrorMessage(e),false); });
@@ -2750,12 +2759,18 @@ function _initLoginGateReal(startWorkspace){
     var name=(document.getElementById('umNewAttEmp').value||'').trim();
     if(!email) return serverFlash('Enter a work email.',false);
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return serverFlash('Enter a valid work email.',false);
-    if(pass.length<8) return serverFlash('Password must be at least 8 characters.',false);
+    /* Blank is allowed on purpose: the new user is emailed a link and picks
+       their own, so nobody has to invent one for them and say it out loud. */
+    if(pass && pass.length<8) return serverFlash('Password must be at least 8 characters, or leave it blank to email them a link.',false);
     if(role==='employee' && !name) return serverFlash('Enter the employee name for this account.',false);
     serverFlash('Creating…',true);
-    userApi('/api/users',{method:'POST',body:JSON.stringify({email:email,password:pass,name:name||'Admin',role:role})}).then(function(){
+    userApi('/api/users',{method:'POST',body:JSON.stringify({email:email,password:pass,name:name||'Admin',role:role})}).then(function(out){
       document.getElementById('umNewUser').value=''; document.getElementById('umNewPass').value=''; document.getElementById('umNewAttEmp').value='';
-      serverRenderUsers(); serverFlash('✓ '+email+' created.',true);
+      serverRenderUsers();
+      var why=(out&&out.mailError)||'no mail';
+      if(out && out.mailed){ serverFlash('✓ '+email+' created · a link to set their password is on its way to them.',true); }
+      else if(out && out.invited){ serverFlash(email+' created, but the email could not be sent ('+why+'). They have no password yet — press "Email a link" on their row, or set one here.',false); }
+      else { serverFlash('✓ '+email+' created. The email telling them could not be sent ('+why+'), so pass the password on yourself.',true); }
     }).catch(function(e){serverFlash(serverErrorMessage(e),false);});
   }
   function serverOpenUsers(){

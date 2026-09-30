@@ -640,6 +640,117 @@ app.post('/api/change-password', requireAuth, accountLimiter, async (req, res) =
 
 /* ---------------- user admin ---------------- */
 
+/* ---- a password set from a link in an email -------------------------------
+   Two errands, one road: an account just made needs its first password, and
+   somebody who has forgotten theirs needs another. Both are a signed link to
+   the same page.
+
+   The link carries a stamp taken from the password it was issued against, so
+   the moment a password is set the link stops working - used once, and dead
+   the day an admin sets one by hand. Nothing is stored for it. */
+const PW_LINK_HOURS = { invite: 7 * 24, reset: 3 };
+function pwStamp(hash) {
+  return crypto.createHash('sha256').update(String(hash || '')).digest('hex').slice(0, 12);
+}
+function pwSecret() { return process.env.SESSION_SECRET || 'dev-secret'; }
+function pwToken(u, kind) {
+  return mailer.signAction({ t: 'pw', k: kind, u: u.id, o: u.org_id, v: pwStamp(u.password_hash),
+                             exp: Date.now() + PW_LINK_HOURS[kind] * 3600000 }, pwSecret());
+}
+function pwGoodFor(kind) { return kind === 'invite' ? '7 days' : '3 hours'; }
+async function pwFromToken(token) {
+  const p = mailer.verifyAction(token, pwSecret());
+  if (!p || p.t !== 'pw') return null;
+  const r = await pool.query(
+    'SELECT id, org_id, email, name, password_hash, is_active FROM users WHERE id = $1', [p.u]);
+  const u = r.rows[0];
+  if (!u || !u.is_active || u.org_id !== p.o) return null;
+  if (pwStamp(u.password_hash) !== p.v) return null;      // spent, or set another way since
+  return { p, u };
+}
+/* Writes to whoever the account belongs to. Never in the way of the thing that
+   asked for it: a send that fails is reported, not thrown. */
+async function sendPasswordLink(u, kind) {
+  if (!mailer.ready()) return { ok: false, error: 'not_configured' };
+  if (!EMAIL_RE.test(String(u.email || ''))) return { ok: false, error: 'no_address' };
+  const kv = await sharedKeys(u.org_id, ['companyInfo']);
+  const mail = mailer.passwordEmail({
+    kind, email: u.email, name: u.name, orgName: orgNameOf(kv.companyInfo),
+    goodFor: pwGoodFor(kind),
+    link: mailer.baseUrl().replace(/\/+$/, '') + '/set-password/' + pwToken(u, kind)
+  });
+  const r = await mailer.send({ to: u.email, subject: mail.subject, html: mail.html });
+  await logMail(u.org_id, kind === 'invite' ? 'invite' : 'reset',
+    { to: [u.email], subject: mail.subject, html: mail.html }, r);
+  return r;
+}
+
+const pwLinkLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+app.get('/set-password/:token', pwLinkLimiter, async (req, res) => {
+  res.set('Cache-Control', 'no-store').type('html');
+  const hit = await pwFromToken(req.params.token);
+  if (!hit) return res.status(400).send(mailer.resultPage('That link has run out',
+    'A password link works once, and not for long. Use "Forgot password?" on the sign-in card for another.',
+    false, mailer.baseUrl()));
+  res.send(mailer.passwordPage({ email: hit.u.email, invite: hit.p.k === 'invite',
+                                 postTo: '/set-password/' + req.params.token }));
+});
+app.post('/set-password/:token', pwLinkLimiter, express.urlencoded({ extended: false, limit: '20kb' }),
+  async (req, res) => {
+    res.set('Cache-Control', 'no-store').type('html');
+    const hit = await pwFromToken(req.params.token);
+    if (!hit) return res.status(400).send(mailer.resultPage('That link has run out',
+      'It may already have been used. Use "Forgot password?" on the sign-in card for another.',
+      false, mailer.baseUrl()));
+    const a = String((req.body && req.body.pw1) || ''), b = String((req.body && req.body.pw2) || '');
+    const say = msg => res.status(400).send(mailer.passwordPage({
+      email: hit.u.email, invite: hit.p.k === 'invite', error: msg,
+      postTo: '/set-password/' + req.params.token }));
+    if (a.length < 8) return say('Use at least 8 characters.');
+    if (a.length > 200) return say('That is longer than 200 characters.');
+    if (a !== b) return say('The two did not match. Type it again.');
+    const hash = await bcrypt.hash(a, 12);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, hit.u.id]);
+    /* Whoever was signed in as them signs in again - if the password was
+       forgotten because somebody else had it, this is where they lose it. */
+    await endSessions(hit.u.id, '');
+    res.send(mailer.resultPage('Password saved',
+      'Sign in as ' + hit.u.email + ' with the password you just chose.', true, mailer.baseUrl()));
+  });
+
+/* "Forgot password?" on the sign-in card. Answers the same either way, so the
+   card cannot be used to find out who has an account. */
+app.post('/api/forgot', loginLimiter, async (req, res) => {
+  const who = String((req.body && req.body.email) || '').trim().toLowerCase();
+  res.json({ ok: true });                                  // said before anything is looked up
+  if (!who) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, org_id, email, name, password_hash FROM users
+        WHERE is_active AND (lower(email) = $1 OR lower(split_part(email, '@', 1)) = $1
+              OR (lower(COALESCE(name, '')) = $1 AND (
+                    SELECT count(*) FROM users u2
+                     WHERE lower(COALESCE(u2.name, '')) = $1 AND u2.is_active) = 1))
+        ORDER BY CASE WHEN lower(email) = $1 THEN 0 ELSE 1 END, id LIMIT 1`, [who]);
+    if (rows[0]) await sendPasswordLink(rows[0], 'reset');
+  } catch (e) {
+    console.error('the reset link could not be sent:', e && e.message);
+  }
+});
+
+/* An admin sending the link again - the first one ran out, or never arrived. */
+app.post('/api/users/:id/invite', requireRole('admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const r = await pool.query(
+    'SELECT id, org_id, email, name, password_hash, is_active FROM users WHERE id = $1 AND org_id = $2',
+    [id, req.session.orgId]);
+  if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
+  const out = await sendPasswordLink(r.rows[0], 'invite');
+  if (!out.ok) return res.status(502).json({ error: out.error || 'send_failed' });
+  res.json({ ok: true, sentTo: r.rows[0].email });
+});
+
 app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, email, name, role, is_active, last_login_at, created_at, totp_enabled AS two_step
@@ -655,17 +766,25 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
   const r = ROLES.indexOf(role) > -1 ? role : 'employee';
   const n = String(name || '').trim();
   if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return res.status(400).json({ error: 'invalid_email' });
-  if (!password || String(password).length < 8) return res.status(400).json({ error: 'password_too_short' });
+  /* A password left blank means the person chooses their own: the account is
+     made with one nobody knows, and the link in their email is the way in. */
+  const invited = !String(password || '');
+  if (!invited && String(password).length < 8) return res.status(400).json({ error: 'password_too_short' });
   if (r === 'employee' && !n) return res.status(400).json({ error: 'employee_name_required' });
-  const hash = await bcrypt.hash(String(password), 12);
+  const hash = await bcrypt.hash(invited ? crypto.randomBytes(32).toString('hex') : String(password), 12);
   try {
     const { rows } = await pool.query(
       `INSERT INTO users (org_id, email, password_hash, name, role)
        VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, email, name, role, is_active, last_login_at, created_at`,
+       RETURNING id, org_id, email, password_hash, name, role, is_active, last_login_at, created_at`,
       [req.session.orgId, e, hash, n || 'Admin', r]
     );
-    res.json({ user: rows[0] });
+    /* Everybody new is written to: the invited to set a password, the rest to
+       know the account is there and change what was typed for them. */
+    const invite = await sendPasswordLink(rows[0], 'invite').catch(() => ({ ok: false, error: 'send_failed' }));
+    delete rows[0].password_hash;
+    delete rows[0].org_id;
+    res.json({ user: rows[0], invited, mailed: !!invite.ok, mailError: invite.ok ? '' : (invite.error || 'send_failed') });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'email_exists' });
     throw err;
