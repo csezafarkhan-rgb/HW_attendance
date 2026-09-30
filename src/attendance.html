@@ -2187,8 +2187,13 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
     overflow:visible; height:auto !important; }
   #dofOverlay .dof-bar{ display:none !important; }
   /* The sheet is already exactly one A4 page, so printing only removes the
-     screen chrome. Nothing is rescaled. */
-  .dof-sheet{ margin:0; box-shadow:none;
+     screen chrome. Nothing is rescaled - and it says so in full, because a
+     sheet of A4 is 794px wide to a media query, which is inside the
+     small-screen breakpoint below. The printer was being handed the phone's
+     sheet: the form at 62% in the corner of the page, its full-size layout
+     box pushing a blank second sheet out behind it. */
+  .dof-sheet{ margin:0; box-shadow:none; transform:none;
+    width:594.96pt; height:840.96pt; padding:0; font-size:12pt;
     page-break-inside:avoid; page-break-after:avoid; break-inside:avoid;
     -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
@@ -2330,9 +2335,6 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .unreq-row{ flex-wrap:wrap; }
   .unreq-row .btn{ width:100%; }
 
-  /* The sheet is a fixed A4 page now, so it is scaled down rather than reflowed:
-     rewrapping it would stop it matching the document it reproduces. */
-  .dof-sheet{ transform:scale(.62); transform-origin:top left; margin:8px; }
   #dofOverlay{ overflow:auto; }
   #dofOverlay .dof-bar{ flex-wrap:wrap; }
   #dofOverlay .dof-bar span{ flex-basis:100%; margin-bottom:4px; }
@@ -2348,7 +2350,16 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .els-cards{ grid-template-columns:1fr; }
   .req-tab{ padding:5px 9px; font-size:11.5px; }
   .rk{ font-size:10px; padding:1px 7px; }
-  .dof-sheet{ margin:8px; padding:12px 12px; font-size:12.5px; }
+}
+/* The sheet is a fixed A4 page, so on a narrow screen it is scaled down rather
+   than reflowed: rewrapping it would stop it matching the document it
+   reproduces. Screens only - paper is never short of room, and these rules
+   sit after the print block, so on paper they would have won. */
+@media screen and (max-width: 820px){
+  .dof-sheet{ transform:scale(.62); transform-origin:top left; margin:8px; }
+}
+@media screen and (max-width: 520px){
+  .dof-sheet{ margin:8px; }
 }
 /* A stray ".emp-cal-grid.compact" used to sit in front of the 820px block above,
    which made the browser throw that whole block away, and left this rule
@@ -11202,7 +11213,12 @@ function buildExcelBackup(){
        them from the approver's signature settings where they are filled in. */
     var sg = (req.status === 'approved') ? signFor(req.approvedBy) : null;
     var byParts = ((sg && sg.by) || '').split(',');
-    var signName = (byParts[0] || '').trim() || (req.approvedBy || '');
+    /* "email" is how a decision taken from the buttons in a message is stored.
+       It is not a name, and the form read "Request Approved By: email" and
+       signed off "Sincerely, email". */
+    var byEmail = req.approvedBy === 'email';
+    var approver = byEmail ? 'Approved by email' : (req.approvedBy || '');
+    var signName = (byParts[0] || '').trim() || (byEmail ? '' : (req.approvedBy || ''));
     var signTitle = (byParts.slice(1).join(',') || '').trim();
 
     var sheet =
@@ -11250,7 +11266,7 @@ function buildExcelBackup(){
           + 'ten (10) days prior to start date.')
 
       + row(633.5, 'b', 'Approval:')
-      + row(661.1, 'b', field('Request Approved By:', req.approvedBy || '', 205))
+      + row(661.1, 'b', field('Request Approved By:', approver, 205))
       /* The signature image, where the approver has one on file. */
       + ((sg && sg.data)
           ? '<img class="dof-sign" src="' + sg.data + '" style="left:300pt;top:' + (661.1 - 32) + 'pt">'
