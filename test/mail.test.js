@@ -538,6 +538,51 @@ process.env.SESSION_SECRET = SECRET;
     (told.cc || []).indexOf('support@x.com') > -1, told && told.cc);
   check('the message names the days it was about', /24 Sep’ 2026/.test(told.html));
 
+  /* ---- who a message is addressed to ----
+     The admins used to be written to whatever was typed on a tab, so naming
+     one address on the Leave tab still sent it to every admin as well. */
+  kvSet(1, 'mailSettings', JSON.stringify({
+    to: ['office@x.com'], cc: [],
+    leave: { to: ['support@homeweavers.net'], cc: ['support@homeweavers.net'] }
+  }));
+  const pending = JSON.parse(kvFind(1, 'leaveRequests').value);
+  pending.push({ id: 'req_to', empName: 'Ravi Test', dateFrom: '2026-11-04', dateTo: '2026-11-04',
+                 leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T06:00:00Z',
+                 updatedAt: '2026-11-01T06:00:00Z' });
+  kvSet(1, 'leaveRequests', JSON.stringify(pending));
+  const addressed = await asAdmin('POST', '/api/mail/leave', {});
+  const onlyThem = sent[sent.length - 1];
+  check('a tab that names its own address writes to that address alone',
+    addressed.status === 200 && JSON.stringify(onlyThem.to) === JSON.stringify(['support@homeweavers.net']),
+    onlyThem && onlyThem.to);
+  check('and not to the admins as well',
+    (onlyThem.to || []).indexOf('boss@x.com') === -1 && (onlyThem.to || []).indexOf('office@x.com') === -1,
+    onlyThem && onlyThem.to);
+  check('an address in both boxes is written to once, on the TO line',
+    !(onlyThem.cc || []).length, onlyThem && onlyThem.cc);
+
+  /* A tab left blank still means "the same as the attendance message". */
+  kvSet(1, 'mailSettings', JSON.stringify({ to: ['office@x.com'], cc: [], leave: { to: [], cc: [] } }));
+  const fellBack = JSON.parse(kvFind(1, 'leaveRequests').value);
+  fellBack.push({ id: 'req_to2', empName: 'Ravi Test', dateFrom: '2026-11-05', dateTo: '2026-11-05',
+                  leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T06:00:00Z',
+                  updatedAt: '2026-11-01T06:00:00Z' });
+  kvSet(1, 'leaveRequests', JSON.stringify(fellBack));
+  await asAdmin('POST', '/api/mail/leave', {});
+  check('a tab with an empty TO box goes where the attendance message goes',
+    JSON.stringify(sent[sent.length - 1].to) === JSON.stringify(['office@x.com']), sent[sent.length - 1].to);
+
+  /* With nothing named anywhere it still has to reach somebody. */
+  kvSet(1, 'mailSettings', JSON.stringify({ to: [], cc: [], leave: { to: [], cc: [] } }));
+  const noneNamed = JSON.parse(kvFind(1, 'leaveRequests').value);
+  noneNamed.push({ id: 'req_to3', empName: 'Ravi Test', dateFrom: '2026-11-06', dateTo: '2026-11-06',
+                   leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T06:00:00Z',
+                   updatedAt: '2026-11-01T06:00:00Z' });
+  kvSet(1, 'leaveRequests', JSON.stringify(noneNamed));
+  await asAdmin('POST', '/api/mail/leave', {});
+  check('with no box filled in anywhere it falls back to the admins',
+    (sent[sent.length - 1].to || []).indexOf('boss@x.com') > -1, sent[sent.length - 1].to);
+
   /* ---- a password set from a link in an email ---- */
   const pwBefore = sent.length;
   const forgotten = await realFetch(base + '/api/forgot', {

@@ -41,7 +41,9 @@ function baseUrl() {
 async function send(msg) {
   const c = conf();
   if (!c.key || !c.from) return { ok: false, error: 'RESEND_API_KEY or RESEND_FROM is not set' };
-  const to = (Array.isArray(msg.to) ? msg.to : [msg.to]).filter(Boolean);
+  const seen = {};
+  const to = (Array.isArray(msg.to) ? msg.to : [msg.to]).filter(Boolean)
+    .filter(function (e) { const k = String(e).toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
   if (!to.length) return { ok: false, error: 'no recipients' };
   const body = {
     from: c.from,
@@ -51,7 +53,10 @@ async function send(msg) {
     text: msg.text || stripHtml(msg.html || '')
   };
   if (c.replyTo) body.reply_to = c.replyTo;
-  const cc = (Array.isArray(msg.cc) ? msg.cc : (msg.cc ? [msg.cc] : [])).filter(Boolean);
+  /* An address written in both boxes is one person, and Resend would send
+     them the message twice over. The TO line wins. */
+  const cc = (Array.isArray(msg.cc) ? msg.cc : (msg.cc ? [msg.cc] : [])).filter(Boolean)
+    .filter(function (e) { const k = String(e).toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
   if (cc.length) body.cc = cc;
   /* Resend takes an attachment as base64 in `content`. The daily message
      carries the same picture the HD Screenshot button makes. */

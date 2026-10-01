@@ -1411,16 +1411,22 @@ async function mailSettings(orgId) {
 /* Every active super admin, plus anyone named in the settings. A view admin is
    left out: they cannot act on the buttons anyway. */
 async function mailRecipients(orgId, settings, which) {
-  const r = await pool.query(
-    "SELECT email FROM users WHERE org_id = $1 AND is_active AND role = 'admin' ORDER BY id", [orgId]);
-  const out = [];
-  r.rows.forEach(x => { if (EMAIL_RE.test(String(x.email || '')) && out.indexOf(x.email) === -1) out.push(x.email); });
-  /* The leave message can be addressed to its own people; with none named it
-     goes where the attendance message goes. */
+  /* Whoever is named on the tab is who it goes to - nobody else. A tab with
+     nothing in its TO box falls back to the attendance list, as the box says.
+
+     The admins used to be added to every list whatever was typed, so naming
+     one address on the Leave tab still sent the message to all of them. They
+     are the fallback now, not a standing audience: if no box names anybody,
+     the message goes to the admins rather than to nobody at all. */
   const own = (which === 'leave' && settings.leave && settings.leave.to.length) ? settings.leave.to
             : (which === 'holiday' && settings.holiday && settings.holiday.to.length) ? settings.holiday.to
             : (settings.to || []);
-  own.forEach(e => { if (out.indexOf(e) === -1) out.push(e); });
+  const out = [];
+  own.forEach(e => { if (EMAIL_RE.test(String(e || '')) && out.indexOf(e) === -1) out.push(e); });
+  if (out.length) return out;
+  const r = await pool.query(
+    "SELECT email FROM users WHERE org_id = $1 AND is_active AND role = 'admin' ORDER BY id", [orgId]);
+  r.rows.forEach(x => { if (EMAIL_RE.test(String(x.email || '')) && out.indexOf(x.email) === -1) out.push(x.email); });
   return out;
 }
 /* The office is in India and the server is on UTC, so the day an email is

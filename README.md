@@ -215,7 +215,9 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
   (accounts carry the employee's name), so somebody with no account is not
   written to. Switch it off under **Settings → Leave**.
 
-Every active Super Admin is written to, plus any address added in the panel.
+A message goes to the addresses named on its own tab and to nobody else. A tab
+with an empty **To** box falls back to the Attendance tab's; with that empty
+too, it goes to every active Super Admin, so a message is never sent to nobody.
 
 The controls are on the Attendance Record, under **📧 Email** beside HD
 Screenshot. The menu is two things to do — email today's attendance, or send
@@ -227,8 +229,9 @@ Leave and Holiday — each with its own addresses and wording; a field left
 blank on Leave or Holiday falls back to the Attendance one. The Attendance tab
 holds:
 
-- **To** and **Cc**, kept with the rest of the settings. Every active Super
-  Admin is written to whatever is listed here.
+- **To** and **Cc**, kept with the rest of the settings. Leave **To** empty and
+  the message goes to every active Super Admin instead. An address written in
+  both boxes is written to once, on the To line.
 - **Subject**, where `{date}` `{present}` `{remote}` `{leave}` `{missing}`
   `{late}` `{org}` stand in for the day's figures.
 - **A message at the top** and **a note at the foot**, in your own words.
