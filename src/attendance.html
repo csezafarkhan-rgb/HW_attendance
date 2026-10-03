@@ -9050,6 +9050,33 @@ function buildExcelBackup(){
   document.addEventListener('click', function(e){
     if(!monthDropdown.contains(e.target) && e.target!==monthBtn) monthDropdown.classList.remove('open');
   });
+
+  /* ---- one panel at a time ----
+     Every toolbar menu minded only itself: its button called stopPropagation,
+     so the click never reached the other menus' own "clicked outside"
+     handlers, and opening Months over Shifts left both sitting there on top of
+     each other. This listens in the capture phase - before any button can stop
+     the click - and shuts every panel except the one being used.
+
+     The panel's own button is left alone so its toggle still closes it, and a
+     click inside an open panel is a click on its contents, not a dismissal. */
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    if(!t || !t.closest) return;
+    var inside = t.closest('.month-dropdown');
+    var onBtn = t.closest('.month-btn, .status-btn, #emailBtn, #statusBtn');
+    document.querySelectorAll('.month-dropdown.open').forEach(function(dd){
+      if(dd === inside) return;
+      if(onBtn && onBtn.parentElement === dd.parentElement) return;   // its own button
+      dd.classList.remove('open');
+    });
+  }, true);
+  /* Escape shuts whatever is open, which is what every other panel on the page
+     already answers to. */
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape') return;
+    document.querySelectorAll('.month-dropdown.open').forEach(function(dd){ dd.classList.remove('open'); });
+  });
   document.getElementById('searchBox').addEventListener('input', function(e){
     state.search = e.target.value.trim().toLowerCase();
     /* Every page that lists people reads the same filter, but only the grid was
