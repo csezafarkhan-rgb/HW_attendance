@@ -172,6 +172,35 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
         && send.indexOf('inline:') === -1, send.indexOf('png:'));
   }
 
+  /* ---- the days nobody is due in on ----
+     The punch file carries only the days somebody attended, so a weekly off
+     arrives as no row at all. Said out loud rather than left blank - but only
+     where nothing was recorded: a Sunday somebody actually worked keeps what it
+     was given. */
+  {
+    const ctx = { console, Date, getSatPolicy: e => ({ mode: e === 'Habib' ? 'OFF' : 'FULL', hours: 4 }) };
+    vm.createContext(ctx);
+    vm.runInContext(grab('weeklyOffDay'), ctx);
+    const off = ctx.weeklyOffDay;
+
+    const SUN = '2026-09-13', SAT = '2026-09-12', MON = '2026-09-14';
+    check('a Sunday with nothing recorded is a weekly off',
+      off('Asha', SUN, null).st === 'WO', off('Asha', SUN, null));
+    check('every Sunday, not just the one the reader sent a row for',
+      ['2026-09-06', '2026-09-13', '2026-09-20', '2026-09-27']
+        .every(d => off('Asha', d, null).st === 'WO'));
+    const worked = { e: 'Asha', d: SUN, 'in': '10:05', out: '14:00', dur: '3:55', st: 'PR', c: 2 };
+    check('but a Sunday somebody worked keeps its punches',
+      off('Asha', SUN, worked) === worked, off('Asha', SUN, worked));
+    check('and a Sunday marked absent with no punch is still a weekly off',
+      off('Asha', SUN, { st: 'AB', 'in': '' }).st === 'WO');
+    check('a Saturday is a weekly off only for whoever has it set that way',
+      off('Habib', SAT, null).st === 'WO' && off('Asha', SAT, null) === null,
+      { habib: off('Habib', SAT, null), asha: off('Asha', SAT, null) });
+    check('and an ordinary weekday with no row stays as it was',
+      off('Asha', MON, null) === null);
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

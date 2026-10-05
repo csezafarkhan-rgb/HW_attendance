@@ -5800,6 +5800,20 @@ function ensureDirPerm(dir, byClick, mode){
     });
     rows.push(hdr);
 
+    /* The band that closes a week off, written once and used by both the
+       Sunday that ends a whole week and the stub of a week a month ends on. */
+    var weekRow = function(wk){
+      var wrow = [{ v:'Week status', s:'colHdr' }];
+      emps.forEach(function(emp, i){
+        var vd = gridWeekVerdict(weekInfo[emp.name], wk);
+        wrow.push({ v:vd.v, s:vd.s+'|'+edge(i) });
+        for(var k=1;k<COLS;k++) wrow.push({ v:'', s:vd.s+(k===COLS-1?'|R':'') });
+        wrow.push({ v:'', s:'gap' });
+        merges.push(C(at(i))+(rows.length+1)+':'+C(at(i)+COLS-1)+(rows.length+1));
+      });
+      rows.push(wrow);
+    };
+
     dates.forEach(function(dateStr, di){
       var dl = gridDateLabel(dateStr);
       var zeb = (di % 2) === 1;
@@ -5826,19 +5840,15 @@ function ensureDirPerm(dir, byClick, mode){
       });
       rows.push(row);
 
-      if(new Date(dateStr+'T00:00:00').getDay()===0 && state.showWeekStatus){
-        var wk = mondayOf(dateStr);
-        var wrow = [{ v:'Week status', s:'colHdr' }];
-        emps.forEach(function(emp, i){
-          var vd = gridWeekVerdict(weekInfo[emp.name], wk);
-          wrow.push({ v:vd.v, s:vd.s+'|'+edge(i) });
-          for(var k=1;k<COLS;k++) wrow.push({ v:'', s:vd.s+(k===COLS-1?'|R':'') });
-          wrow.push({ v:'', s:'gap' });
-          merges.push(C(at(i))+(rows.length+1)+':'+C(at(i)+COLS-1)+(rows.length+1));
-        });
-        rows.push(wrow);
-      }
+      if(new Date(dateStr+'T00:00:00').getDay()===0 && state.showWeekStatus) weekRow(mondayOf(dateStr));
     });
+    /* A month rarely ends on a Sunday, and the band was only written when one
+       came round - so the last few days of nearly every month were left with no
+       verdict at all. The week they belong to gets its line here. */
+    var lastDay = dates[dates.length - 1];
+    if(state.showWeekStatus && lastDay && new Date(lastDay+'T00:00:00').getDay() !== 0){
+      weekRow(mondayOf(lastDay));
+    }
 
     var widths = [17];
     emps.forEach(function(){ widths.push(9.5, 9.5, 8, 8, 8, 5.5, 1.2); });
@@ -9472,18 +9482,27 @@ function buildExcelBackup(){
         manual: true
       };
     }
-    return satOffDay(emp, d, recIndex[emp+'|'+d] || null);
+    return weeklyOffDay(emp, d, recIndex[emp+'|'+d] || null);
   }
   /* A Saturday is a weekly off for anyone whose Saturday is set to "Full day
      off" in Shifts - the same as a Sunday. The punch file carries only the days
      someone attended, so those Saturdays arrived with no row at all and showed
      as a blank "-". An "Absent" with no punch on such a Saturday is the same day
      misnamed. A Saturday they did come in keeps its punches. */
-  function satOffDay(emp, d, rec){
+  /* A day nobody is due in on, said out loud. The punch file carries only the
+     days somebody attended, so a weekly off arrives as no row at all - and the
+     cell then read as a blank rather than as a day off. Sunday is a weekly off
+     for everybody; a Saturday is one for whoever has it set that way.
+
+     This used to cover Saturdays alone, which is why one Sunday in September
+     said "Weekly Off" - the one the reader happened to send a row for - and the
+     other four said nothing. */
+  function weeklyOffDay(emp, d, rec){
     if(rec && !(rec.st === 'AB' && !rec['in'])) return rec;
-    if(new Date(d+'T00:00:00').getDay() !== 6) return rec;
-    if(getSatPolicy(emp).mode !== 'OFF') return rec;
-    return {e:emp, d:d, 'in':'', out:'', dur:'', late:'', early:'', st:'WO', c:0, satOff:true};
+    var dow = new Date(d+'T00:00:00').getDay();
+    if(dow !== 0 && dow !== 6) return rec;
+    if(dow === 6 && getSatPolicy(emp).mode !== 'OFF') return rec;
+    return {e:emp, d:d, 'in':'', out:'', dur:'', late:'', early:'', st:'WO', c:0, weeklyOff:true};
   }
   function getOverride(emp,d){ return overrides[emp+'|'+d] || null; }
 

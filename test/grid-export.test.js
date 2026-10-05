@@ -150,6 +150,22 @@ check('work from home is written across its block',
 const absRow = sheets[0].rows.find(r => r[0] && /Oct 01/.test(r[0].v));
 check('an absence is called an absence', /Absent/.test(absRow[15].v) && /alert/.test(absRow[15].s), absRow[15]);
 
+/* ---- the week bands ----
+   A month rarely ends on a Sunday, and the band used to be written only when
+   one came round, leaving the last days of nearly every month with no verdict.
+   The stand-in month runs Thursday 1 October to Monday 5 October. */
+{
+  const wide = sheets[0];
+  const bands = wide.rows.filter(r => r[0] && r[0].v === 'Week status');
+  check('a week band closes the Sunday that ends a whole week',
+    bands.length >= 1, bands.length);
+  check('and the days after the last Sunday get one too',
+    bands.length === 2 && wide.rows[wide.rows.length - 1][0].v === 'Week status',
+    wide.rows.map(r => (r[0] || {}).v));
+  check('the closing band is merged across each person, like the others',
+    wide.merges.some(m => m.indexOf('B' + wide.rows.length + ':') === 0), wide.merges.slice(-4));
+}
+
 /* ---- why a lateness was let pass ---- */
 {
   const wide = sheets[0];
