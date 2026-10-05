@@ -5609,11 +5609,11 @@ function ensureDirPerm(dir, byClick, mode){
 
 
   /* ---------- The grid as a workbook ----------
-     One file, three kinds of sheet: everyone side by side with each person
-     walled off, how people did over the month, and a sheet per person that prints on
-     a page. The wide sheet used to be the whole export - thirteen people times
-     six columns is seventy-nine columns of identical hairline border, with
-     nothing to say where one person stopped and the next began. */
+     Two sheets: everyone side by side with each person walled off, and how
+     they did over the month. The wide sheet used to be the whole export -
+     thirteen people times six columns is seventy-nine columns of identical
+     hairline border, with nothing to say where one person stopped and the next
+     began. */
   var GRID_COLS = ['IN','OUT','TOTAL','IN DUR','OUT DUR','PUN'];
 
   /* What one person's day says, as cells. Returns either a single cell to be
@@ -5750,50 +5750,9 @@ function ensureDirPerm(dir, byClick, mode){
              freeze:{ row:5, col:1 }, repeatRows:5, landscape:true };
   }
 
-  /* ---- a sheet of one person's month ---- */
-  function gridOneSheet(emp, dates, weekInfo, coName){
-    var COLS = GRID_COLS.length;
-    var rows = [], merges = [], C = _colLetter, last = C(COLS);
-    rows.push([{ v:emp.name+' · Shift '+getShift(emp.name), s:'empBand|LRT' }]);
-    merges.push('A1:'+last+'1');
-    rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', '), s:'empShift|LR' }]);
-    merges.push('A2:'+last+'2');
-    var hdr = [{ v:'Date', s:'colHdr|BL' }];
-    GRID_COLS.forEach(function(h, k){ hdr.push({ v:h, s:'colHdr|B'+(k===COLS-1?'R':'') }); });
-    rows.push(hdr);
-
-    dates.forEach(function(dateStr, di){
-      var dl = gridDateLabel(dateStr), zeb = (di % 2) === 1;
-      var day = gridDayCells(emp.name, dateStr);
-      var row = [{ v:dl.v, s:dl.s+'|L' }];
-      if(day.span){
-        row.push({ v:day.span.v, s:day.span.s });
-        for(var k=1;k<COLS;k++) row.push({ v:'', s:day.span.s+(k===COLS-1?'|R':'') });
-        merges.push('B'+(rows.length+1)+':'+last+(rows.length+1));
-      } else {
-        day.cells.forEach(function(c, k){
-          var fill = (c.s === 'none' && zeb) ? 'zebra' : c.s;
-          row.push({ v:c.v, s:fill+(k===COLS-1?'|R':'') });
-        });
-      }
-      rows.push(row);
-      if(new Date(dateStr+'T00:00:00').getDay()===0 && state.showWeekStatus){
-        var vd = gridWeekVerdict(weekInfo[emp.name], mondayOf(dateStr));
-        var wrow = [{ v:'Week status', s:'colHdr|L' }, { v:vd.v, s:vd.s }];
-        for(var k2=1;k2<COLS;k2++) wrow.push({ v:'', s:vd.s+(k2===COLS-1?'|R':'') });
-        merges.push('B'+(rows.length+1)+':'+last+(rows.length+1));
-        rows.push(wrow);
-      }
-    });
-    return { name:emp.name, rows:rows, merges:merges,
-             widths:[17, 10, 10, 8.5, 8.5, 8.5, 6.5],
-             freeze:{ row:3, col:1 }, repeatRows:3, landscape:false };
-  }
-
-  /* ---- the month in figures, one row a person ---- */
   /* How a person's weeks went, in one cell. The grid states each week on its
-     own line; a summary has room for the verdict over all of them, so it says
-     how many were completed and takes its colour from the worst one. */
+     own line; a row of figures has room for the verdict over all of them, so it
+     says how many were completed and takes its colour from the worst one. */
   function gridWeekSummary(info, dates){
     var seen = {}, weeks = [];
     dates.forEach(function(d){
@@ -5813,19 +5772,6 @@ function ensureDirPerm(dir, byClick, mode){
     if(bad)  return { v: bad + ' of ' + done + ' not completed' + tail, s:'bad' };
     if(warn) return { v: warn + ' of ' + done + ' within leverage' + tail, s:'warn' };
     return { v: done + ' week' + (done===1?'':'s') + ' completed' + tail, s:'ok' };
-  }
-
-  /* A built file as base64, for putting in a message. */
-  function blobBase64(blob){
-    return new Promise(function(resolve, reject){
-      var fr = new FileReader();
-      fr.onload = function(){
-        var out = String(fr.result || '');
-        resolve(out.slice(out.indexOf(',') + 1));          // drop the data: head
-      };
-      fr.onerror = function(){ reject(new Error('the workbook could not be read back')); };
-      try{ fr.readAsDataURL(blob); }catch(e){ reject(e); }
-    });
   }
 
   /* ---- how people did, ranked ----
@@ -5852,10 +5798,17 @@ function ensureDirPerm(dir, byClick, mode){
 
     var ranked = emps.map(function(emp){
       var st = computeEmployeeStats(emp.name, dates);
-      return { emp: emp, st: st, score: perfScore(st) };
+      return { emp: emp, st: st, score: perfScore(st),
+               /* Somebody whose every day in was a day at home has no punches
+                  behind any of this: the hours are what was arranged, not what
+                  a reader saw. Ranking them against people the machines
+                  measured compares two different things. */
+               fromHome: st.presentDays > 0 && (st.wfhDays || 0) >= st.presentDays };
     }).sort(function(a, b){ return b.score - a.score; });
+    var measured = ranked.filter(function(r){ return !r.fromHome; });
+    var athome   = ranked.filter(function(r){ return r.fromHome; });
 
-    ranked.forEach(function(r, ri){
+    var write = function(r, ri){
       var st = r.st, zeb = (ri % 2) === 1 ? 'zebra' : 'none';
       /* The same three bands the dashboard colours its scores with. */
       var band = r.score >= 85 ? 'ok' : (r.score >= 70 ? 'warn' : 'bad');
@@ -5890,16 +5843,45 @@ function ensureDirPerm(dir, byClick, mode){
              + fmtMin(Math.abs(st.netMin || 0)),
           s:(st.netMin < 0 ? 'bad' : (st.netMin > 0 ? 'ok' : zeb)) + '|R' }
       ]);
-    });
+    };
 
-    var firstRow = 3, lastRow = rows.length;
+    /* The measured, ranked. Then those working from home under a line of their
+       own, so a reader is never left thinking the two were weighed the same. */
+    var blocks = [];
+    var open = rows.length + 1;
+    measured.forEach(write);
+    if(rows.length >= open) blocks.push([open, rows.length]);
+    if(athome.length){
+      rows.push([{ v:'Working from home \u00b7 hours are as arranged, not read off the punch machines',
+                   s:'empShift|LRT' }]);
+      merges.push('A'+(rows.length)+':'+last+(rows.length));
+      open = rows.length + 1;
+      athome.forEach(write);
+      if(rows.length >= open) blocks.push([open, rows.length]);
+    }
+
+    var bars = [];
+    blocks.forEach(function(b){
+      bars.push({ ref: C(SCORE)+b[0]+':'+C(SCORE)+b[1], color:'FFA8D5B5' });
+      bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
+    });
     return { name:'Performance', rows:rows, merges:merges,
              widths:[20, 12, 8, 24, 11, 9, 10, 9, 10, 9, 8, 7, 10, 7, 10, 7, 7, 7, 13],
-             bars: lastRow >= firstRow
-               ? [{ ref: C(SCORE)+firstRow+':'+C(SCORE)+lastRow, color:'FFA8D5B5' },
-                  { ref: C(WORKED)+firstRow+':'+C(WORKED)+lastRow, color:'FF9CC4F5' }]
-               : [],
+             bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
+  }
+
+  /* A built file as base64, for putting in a message. */
+  function blobBase64(blob){
+    return new Promise(function(resolve, reject){
+      var fr = new FileReader();
+      fr.onload = function(){
+        var out = String(fr.result || '');
+        resolve(out.slice(out.indexOf(',') + 1));          // drop the data: head
+      };
+      fr.onerror = function(){ reject(new Error('the workbook could not be read back')); };
+      try{ fr.readAsDataURL(blob); }catch(e){ reject(e); }
+    });
   }
 
   /* Every sheet of the grid workbook, in the order they open. */
@@ -5919,7 +5901,6 @@ function ensureDirPerm(dir, byClick, mode){
        not cost the workbook its attendance, which is the point of the file. */
     try{ sheets.push(gridPerformanceSheet(emps, dates, weekInfo, coName)); }
     catch(e){ console.error('the performance sheet was left out', e); }
-    emps.forEach(function(e){ sheets.push(gridOneSheet(e, dates, weekInfo, coName)); });
     return sheets;
   }
   /* The Leave Record is already a table on screen; lift it straight out rather
@@ -5984,8 +5965,8 @@ function ensureDirPerm(dir, byClick, mode){
     a.download='Attendance_Grid_'+(state.selectedMonths[0]||'export')+'.xlsx';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ try{a.remove();}catch(_){ } URL.revokeObjectURL(a.href); }, 1500);
-    showUploadStatus('Excel exported — everyone side by side on the first sheet, how people did, '
-      + 'then a sheet each for the ' + (sheets.length - 2) + ' employees shown.', false);
+    showUploadStatus('Excel exported — everyone side by side on the first sheet, '
+      + 'how the ' + visibleEmployees().length + ' of them did on the second.', false);
   }
 
   /* A complete, restorable snapshot: the punch records plus every setting,

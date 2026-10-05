@@ -73,8 +73,8 @@ const ctx = {
     'Rahul Mishra': { attendancePct: 80, onTimePct: 60, workedMin: 1088, presentDays: 2, absentDays: 0,
                       lateDays: 2, totalLateMin: 44, earlyDays: 1, totalEarlyMin: 20, wfhDays: 0,
                       visitDays: 0, leaveDays: 1, netMin: -90 },
-    'karan Ahuja':  { attendancePct: 50, onTimePct: 40, workedMin: 0, presentDays: 0, absentDays: 1,
-                      lateDays: 0, totalLateMin: 0, earlyDays: 0, totalEarlyMin: 0, wfhDays: 1,
+    'karan Ahuja':  { attendancePct: 50, onTimePct: 40, workedMin: 480, presentDays: 2, absentDays: 1,
+                      lateDays: 0, totalLateMin: 0, earlyDays: 0, totalEarlyMin: 0, wfhDays: 2,
                       visitDays: 0, leaveDays: 0, netMin: 0 }
   }[name]),
   perfScore: st => Math.round(0.6 * st.attendancePct + 0.4 * st.onTimePct)
@@ -90,24 +90,21 @@ vm.runInContext('var XLKEYS = Object.keys(XLF);', ctx);
 vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
 ['_colLetter', '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
  '_crc32', '_zipStore', 'buildStyledXlsxMulti', 'gridDayCells', 'gridWeekVerdict', 'gridDateLabel',
- 'gridAllSheet', 'gridOneSheet', 'gridWeekSummary', 'gridPerformanceSheet',
- 'buildGridWorkbook'
+ 'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet', 'buildGridWorkbook'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
 vm.runInContext('var GRID_COLS = ' + JSON.stringify(['IN', 'OUT', 'TOTAL', 'IN DUR', 'OUT DUR', 'PUN']) + ';', ctx);
 
 const sheets = ctx.buildGridWorkbook();
 
 /* ---- the shape of the workbook ---- */
-check('a sheet for everyone, how people did, and one each',
-  sheets.length === 2 + EMPS.length && sheets[0].name === 'All employees'
-    && sheets[1].name === 'Performance' && sheets[2].name === 'Zafar Khan',
+check('two sheets: everyone side by side, and how they did',
+  sheets.length === 2 && sheets[0].name === 'All employees' && sheets[1].name === 'Performance',
   sheets.map(s => s.name));
-check('and no summary sheet of its own, now that its columns live in Performance',
-  sheets.every(s => s.name !== 'Summary'), sheets.map(s => s.name));
+check('and none of its own for any one person',
+  !sheets.some(s => EMPS.some(e => e.name === s.name)), sheets.map(s => s.name));
 check('the wide sheet freezes the date column and the headers',
   sheets[0].freeze.col === 1 && sheets[0].freeze.row === 5 && sheets[0].repeatRows === 5, sheets[0].freeze);
-check('a person\'s own sheet is seven columns wide',
-  sheets[2].widths.length === 7 && sheets[2].rows[2].length === 7, sheets[2].widths);
+
 
 
 /* ---- the walls ---- */
@@ -138,8 +135,12 @@ check('an absence is called an absence', /Absent/.test(absRow[15].v) && /alert/.
 const sum = sheets[1];
 const headCells = sum.rows[1].map(c => c.v);
 const col = name => headCells.indexOf(name);
+/* The title and the "working from home" line are single merged cells; the
+   header and one row a person are the full width. */
 check('it heads its columns and holds a row per person',
-  headCells[0] === 'Employee' && sum.rows.length === 2 + EMPS.length, headCells);
+  headCells[0] === 'Employee'
+    && sum.rows.filter(r => r.length > 1).length === 1 + EMPS.length,
+  sum.rows.map(r => r.length));
 check('and carries what the summary sheet used to',
   ['Shift', 'Weeks', 'Worked', 'Absent', 'Late', 'Early', 'Leave', 'WFH', 'Visits']
     .every(h => col(h) > -1), headCells);
@@ -152,41 +153,64 @@ check('how the weeks went is stated, and coloured by the worst of them',
 {
   const p = sum, ph = headCells, at = col;
   check('and ranks them, best first',
-    p.rows[2][0].v === 'Zafar Khan' && p.rows[4][0].v === 'karan Ahuja',
-    p.rows.slice(2).map(r => r[0].v + ':' + r[at('Score')].n));
+    p.rows[2][0].v === 'Zafar Khan' && p.rows[3][0].v === 'Rahul Mishra',
+    p.rows.slice(2).map(r => r[0].v + ':' + (r[at('Score')] || {}).n));
+
+  /* Somebody whose every day in was a day at home has no punches behind the
+     figures, so they are set out under a line of their own rather than ranked
+     against people the machines measured. */
+  const bandRow = p.rows.findIndex(r => r.length === 1 && /Working from home/.test(r[0].v || ''));
+  check('those working from home are set apart, under a line that says why',
+    bandRow > -1 && /not read off the punch machines/.test(p.rows[bandRow][0].v),
+    bandRow > -1 ? p.rows[bandRow][0].v : p.rows.map(r => r.length));
+  check('and they come after the people who were measured',
+    p.rows[bandRow + 1][0].v === 'karan Ahuja'
+      && p.rows.slice(2, bandRow).every(r => r[0].v !== 'karan Ahuja'),
+    p.rows.map(r => r[0].v));
+  check('a person the machines did measure stays above that line',
+    p.rows.slice(2, bandRow).some(r => r[0].v === 'Zafar Khan'), bandRow);
+  check('the line spans the sheet, so it reads as a heading',
+    p.merges.some(m => m.indexOf('A' + (bandRow + 1) + ':') === 0), p.merges);
+  check('and each block gets its own bars, so the band is not barred',
+    p.bars.length === 4
+      && p.bars.every(b => !/:[A-Z]+' + (bandRow + 1)/.test(b.ref)),
+    p.bars.map(b => b.ref));
+  /* Rows move as blocks are added, so look people up by name. */
+  const who = n => p.rows.find(r => r.length > 1 && r[0].v === n);
+  const zafar = who('Zafar Khan'), rahul = who('Rahul Mishra'), karan = who('karan Ahuja');
   check('the score is a figure, coloured by the band it falls in',
-    typeof p.rows[2][at('Score')].n === 'number' && p.rows[2][at('Score')].s === 'ok'
-      && p.rows[4][at('Score')].s === 'bad',
-    p.rows.slice(2).map(r => r[at('Score')].n + '=' + r[at('Score')].s));
+    typeof zafar[at('Score')].n === 'number' && zafar[at('Score')].s === 'ok'
+      && karan[at('Score')].s === 'bad',
+    [zafar, rahul, karan].map(r => r[at('Score')].n + '=' + r[at('Score')].s));
   check('percentages go in as percentages, not as the word',
-    Math.abs(p.rows[2][at('Attendance')].n - 0.96) < 1e-9
-      && /\|p$/.test(p.rows[2][at('Attendance')].s), p.rows[2][at('Attendance')]);
+    Math.abs(zafar[at('Attendance')].n - 0.96) < 1e-9
+      && /\|p$/.test(zafar[at('Attendance')].s), zafar[at('Attendance')]);
   check('spans of time go in as spans',
-    Math.abs(p.rows[2][at('Worked')].n - 1088 / 1440) < 1e-9
-      && /\|t$/.test(p.rows[2][at('Worked')].s), p.rows[2][at('Worked')]);
+    Math.abs(zafar[at('Worked')].n - 1088 / 1440) < 1e-9
+      && /\|t$/.test(zafar[at('Worked')].s), zafar[at('Worked')]);
   check('counts go in as counts, so they can be totalled',
-    typeof p.rows[2][at('Present')].n === 'number' && p.rows[4][at('Absent')].n === 1,
-    { present: p.rows[2][at('Present')], absent: p.rows[4][at('Absent')] });
+    typeof zafar[at('Present')].n === 'number' && karan[at('Absent')].n === 1,
+    { present: zafar[at('Present')], absent: karan[at('Absent')] });
   /* A Saturday worked, a weekly off come in on: time given over and above what
      the days asked for. */
   check('time worked on days that asked for none is shown, and shown in green',
-    p.rows[2][at('Extra days')].n === 1 && p.rows[2][at('Extra days')].s === 'ok'
-      && Math.abs(p.rows[2][at('Extra time')].n - 230 / 1440) < 1e-9
-      && /^ok\|\|t$/.test(p.rows[2][at('Extra time')].s),
-    { days: p.rows[2][at('Extra days')], time: p.rows[2][at('Extra time')] });
+    zafar[at('Extra days')].n === 1 && zafar[at('Extra days')].s === 'ok'
+      && Math.abs(zafar[at('Extra time')].n - 230 / 1440) < 1e-9
+      && /^ok\|\|t$/.test(zafar[at('Extra time')].s),
+    { days: zafar[at('Extra days')], time: zafar[at('Extra time')] });
   check('and left plain for somebody who worked none',
-    p.rows[4][at('Extra days')].n === 0 && p.rows[4][at('Extra days')].s !== 'ok',
-    p.rows[4][at('Extra days')]);
+    karan[at('Extra days')].n === 0 && karan[at('Extra days')].s !== 'ok',
+    karan[at('Extra days')]);
   check('hours over or under target keep their sign, which [h]:mm cannot show',
-    /^\+/.test(p.rows[2][at('Net vs target')].v)
-      && /^\u2212/.test(p.rows[3][at('Net vs target')].v),
-    [p.rows[2][at('Net vs target')].v, p.rows[3][at('Net vs target')].v]);
+    /^\+/.test(zafar[at('Net vs target')].v)
+      && /^\u2212/.test(rahul[at('Net vs target')].v),
+    [zafar[at('Net vs target')].v, rahul[at('Net vs target')].v]);
   check('an absence, a lateness and a day from home each keep their colour',
-    p.rows[4][at('Absent')].s === 'alert' && p.rows[3][at('Late')].s === 'late'
-      && p.rows[4][at('WFH')].s === 'wfh',
-    { absent: p.rows[4][at('Absent')].s, late: p.rows[3][at('Late')].s, wfh: p.rows[4][at('WFH')].s });
+    karan[at('Absent')].s === 'alert' && rahul[at('Late')].s === 'late'
+      && karan[at('WFH')].s === 'wfh',
+    { absent: karan[at('Absent')].s, late: rahul[at('Late')].s, wfh: karan[at('WFH')].s });
   check('with a bar along the score and another along the hours',
-    p.bars.length === 2 && p.bars[0].ref === 'C3:C5' && p.bars[1].ref === 'G3:G5', p.bars);
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'G3:G4', p.bars.map(b => b.ref));
 }
 /* ---- the file itself ---- */
 const parts = [];

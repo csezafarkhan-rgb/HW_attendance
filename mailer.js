@@ -513,8 +513,8 @@ function monthEmail(o) {
   if (o.fileName) {
     body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + BLUE + ';border-radius:10px;'
       + 'padding:11px 13px;margin:0 0 10px;font-size:12.5px;line-height:1.5;">'
-      + '<b>' + esc(o.fileName) + '</b> is attached \u2014 one sheet with everybody side by side, '
-      + 'how people did over the month, and a sheet for each person.'
+      + '<b>' + esc(o.fileName) + '</b> is attached \u2014 one sheet with everybody side by '
+      + 'side, and one saying how they did over the month.'
       + '</div>');
   }
   const footer = fillText(o.footer || words.footer, say);

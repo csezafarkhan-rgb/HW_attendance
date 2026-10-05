@@ -412,7 +412,7 @@ process.env.SESSION_SECRET = SECRET;
       && monthPv.body.file === true, monthPv.body && (monthPv.body.error || monthPv.body.preview));
   check('and it says what is in the file',
     /Attendance_Grid_2026-09\.xlsx/.test(monthPv.body.preview.html)
-      && /a sheet for each person/.test(monthPv.body.preview.html));
+      && /how they did over the month/.test(monthPv.body.preview.html));
   check('with the month and the head-count stated',
     /September 2026/.test(monthPv.body.preview.html) && />2 of 3</.test(monthPv.body.preview.html)
       && />30</.test(monthPv.body.preview.html), monthPv.body.preview.html.slice(0, 200));
