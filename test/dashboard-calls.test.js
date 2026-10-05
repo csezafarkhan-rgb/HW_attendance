@@ -97,8 +97,21 @@ const missingFns = WATCHED.filter(n => !body(n));
 check('every watched function is still in the file', missingFns.length === 0, missingFns);
 
 const bad = [];
+/* What a function says, with the insides of its strings and comments blanked
+   out. A spreadsheet formula built up as text - "ROUND((0.35*" + ... - is not a
+   call to anything in this file, and reading it as one had the guard reporting
+   that the Performance sheet calls ROUND(). */
+function code(text) {
+  return String(text)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/`(?:\\.|[^`\\])*`/g, '``');
+}
+
 for (const name of WATCHED) {
-  const text = body(name);
+  const text = code(body(name));
   if (!text) continue;
   /* Locals and parameters of this function are not expected to be declared at
      file level, so gather them first. */
@@ -118,6 +131,13 @@ for (const name of WATCHED) {
   }
 }
 check('and every helper they call is declared somewhere', bad.length === 0, bad);
+
+/* And the blanking itself: a formula built up as text must not read as a call,
+   or the guard cries wolf on every spreadsheet sum in the file. */
+check('a sum written as text is not mistaken for a call',
+  code("var f = 'ROUND((0.35*' + a + ')'; g(1);").indexOf('ROUND') === -1
+    && code("var f = 'ROUND(' + a; g(1);").indexOf('g(1)') > -1,
+  code("var f = 'ROUND((0.35*' + a + ')'; g(1);"));
 
 /* The particular one that bit: the month button must reach a real function. */
 const month = body('sendMonth') || '';

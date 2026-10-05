@@ -5499,6 +5499,12 @@ function ensureDirPerm(dir, byClick, mode){
         if(cell==null) cell='';
         var st= (typeof cell==='object' && cell.s) ? xlStyleIdx(cell.s) : 0;
         var ref = '<c r="'+_colLetter(ci)+(ri+1)+'"'+(st?(' s="'+st+'"'):'');
+        /* A sum goes in as the sum itself, not its answer: the spreadsheet
+           works it out on opening and anybody can see how it was reached. */
+        if(typeof cell==='object' && cell.f){
+          sd += ref + '><f>'+_xesc(cell.f)+'</f></c>';
+          continue;
+        }
         /* A figure goes in as a figure - it can then be totalled, sorted and
            have a bar drawn along it. Everything else is text. */
         if(typeof cell==='object' && typeof cell.n === 'number' && isFinite(cell.n)){
@@ -5597,7 +5603,10 @@ function ensureDirPerm(dir, byClick, mode){
     }).join('');
     var WB='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
       +'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+wbs+'</sheets>'
-      + (names ? ('<definedNames>'+names+'</definedNames>') : '') + '</workbook>';
+      + (names ? ('<definedNames>'+names+'</definedNames>') : '')
+      /* The sums are written without their answers, so the spreadsheet is told
+         to work them out the moment the file opens. */
+      + '<calcPr calcId="0" fullCalcOnLoad="1"/></workbook>';
     var WBR='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
       + wbr + '<Relationship Id="rId'+styleId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
       + '</Relationships>';
@@ -5882,8 +5891,12 @@ function ensureDirPerm(dir, byClick, mode){
     /* Spelled out: a column heading should not need the person reading it to
        remember what we meant by it. Absent is gone - a day missed is recorded
        as leave here, so it stood at nought against every name. */
+    /* The score is a weighted sum of five figures. All five are columns here,
+       so the score can be the sum itself rather than its answer - open any cell
+       in it and the reckoning is there to read. */
     var head = ['Employee','Shift','Score /100','Weeks completed','Weekly short',
-                'Attendance %','On-time %','Target hours','Hours worked',
+                'Attendance %','On-time %','Hours met %','Breaks kept %','At desk %',
+                'Target hours','Hours punched','Excused hours','Hours worked',
                 'Days worked on offs','Extra hours','Saturdays worked','Saturday extra',
                 'Days present','Late days','Total late by',
                 'Early-leave days','Total early by','Days from home','Days visiting','Leave days'];
@@ -5925,8 +5938,13 @@ function ensureDirPerm(dir, byClick, mode){
     var measured = ranked.filter(function(r){ return !r.fromHome; });
     var athome   = ranked.filter(function(r){ return r.fromHome; });
 
+    /* Where each figure the score is made of ends up, so the sum can name its
+       own columns rather than carry them written out by hand. */
+    var cell = function(name, rowNo){ return C(head.indexOf(name)) + rowNo; };
+
     var write = function(r, ri){
       var st = r.st, zeb = (ri % 2) === 1 ? 'zebra' : 'none';
+      var rowNo = rows.length + 1;
       /* The same three bands the dashboard colours its scores with. */
       var band = r.score >= 85 ? 'ok' : (r.score >= 70 ? 'warn' : 'bad');
       var wk = gridWeekSummary(weekInfo[r.emp.name], dates);
@@ -5943,7 +5961,16 @@ function ensureDirPerm(dir, byClick, mode){
       rows.push([
         { v:dispName(r.emp.name), s:'zebra|L' },
         { v:getShift(r.emp.name), s:zeb },
-        { n:r.score, s:band },
+        /* 35 parts attendance, 25 on time, 15 hours met, 15 breaks kept, 10 at
+           the desk. Written as the sum of the five columns beside it, so the
+           spreadsheet works it out and anybody can see what it is made of and
+           try it with a different weighting. */
+        { f:'ROUND((0.35*' + cell('Attendance %', rowNo)
+             + '+0.25*' + cell('On-time %', rowNo)
+             + '+0.15*' + cell('Hours met %', rowNo)
+             + '+0.15*' + cell('Breaks kept %', rowNo)
+             + '+0.10*' + cell('At desk %', rowNo) + ')*100,0)',
+          s:band },
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
         /* What the weeks ran short by, added up. The hours over are worked out
            beside it and left off the sheet: time given back is already said by
@@ -5952,14 +5979,26 @@ function ensureDirPerm(dir, byClick, mode){
         { n:(wk.shortMin || 0) / 1440, s:(wk.shortMin ? 'bad' : zeb) + '||t' },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
-        /* What the days asked for and what was actually put in, side by side.
-           The hours colour themselves against that target, so the comparison is
-           made for the reader rather than left to them. */
+        /* Hours met is itself a sum of two columns further along: what was put
+           in against nine hours a present day, and never over the hundred. */
+        { f:'IFERROR(MIN(1,' + cell('Hours worked', rowNo) + '/('
+             + cell('Days present', rowNo) + '*0.375)),0)', s: zeb + '||p' },
+        /* These two come off the punch times - how long people were away from
+           the desk - and have no columns of their own to be worked out from. */
+        { n:(st.breakOkPct == null ? 100 : st.breakOkPct) / 100, s: zeb + '||p' },
+        { n:(st.inOfficePct == null ? 100 : st.inOfficePct) / 100, s: zeb + '||p' },
+        /* What the days asked for, what the readers saw, what was forgiven,
+           and the two of those added up - as the sum itself, so the addition is
+           there to read. Excused time counts towards the hours: it was let pass
+           at the time, and holding it against the total afterwards would be
+           forgiving it twice over and taking it back once. */
         mins(st.owedMin),
-        { n:(st.workedMin || 0) / 1440,
+        mins(st.workedMin),
+        { n:(st.excusedMin || 0) / 1440, s:((st.excusedMin ? 'lateExc' : zeb)) + '||t' },
+        { f:cell('Hours punched', rowNo) + '+' + cell('Excused hours', rowNo),
           s:(st.owedMin > 0
-               ? (st.workedMin >= st.owedMin ? 'ok'
-                  : (st.workedMin >= st.owedMin * 0.95 ? 'warn' : 'bad'))
+               ? (((st.workedMin || 0) + (st.excusedMin || 0)) >= st.owedMin ? 'ok'
+                  : (((st.workedMin || 0) + (st.excusedMin || 0)) >= st.owedMin * 0.95 ? 'warn' : 'bad'))
                : zeb) + '||t' },
         /* Time put in on a day that asked for none - a weekly off, a Saturday
            off, a holiday worked. Worth seeing on its own rather than buried in
@@ -6006,7 +6045,7 @@ function ensureDirPerm(dir, byClick, mode){
       bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
     });
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 12, 9, 20, 12, 12, 10, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
+             widths:[20, 12, 9, 20, 12, 12, 10, 11, 11, 10, 12, 13, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
              bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }

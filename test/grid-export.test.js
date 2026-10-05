@@ -86,7 +86,8 @@ const ctx = {
   computeEmployeeStats: name => ({
     'Zafar Khan':   { owedMin: 1080, attendancePct: 96, onTimePct: 90, workedMin: 1088, presentDays: 2, absentDays: 0,
                       lateDays: 1, totalLateMin: 13, earlyDays: 0, totalEarlyMin: 0, wfhDays: 0,
-                      visitDays: 0, leaveDays: 0, netMin: 45, extraDays: 1, extraMin: 230 },
+                      visitDays: 0, leaveDays: 0, netMin: 45, extraDays: 1, extraMin: 230,
+                      excusedMin: 40 },
     'Rahul Mishra': { owedMin: 1080, attendancePct: 80, onTimePct: 60, workedMin: 1088, presentDays: 2, absentDays: 0,
                       lateDays: 2, totalLateMin: 44, earlyDays: 1, totalEarlyMin: 20, wfhDays: 0,
                       visitDays: 0, leaveDays: 1, netMin: -90 },
@@ -220,16 +221,44 @@ check('how the weeks went is stated, and coloured by the worst of them',
   /* Rows move as blocks are added, so look people up by name. */
   const who = n => p.rows.find(r => r.length > 1 && r[0].v === n);
   const zafar = who('Zafar Khan'), rahul = who('Rahul Mishra'), karan = who('karan Ahuja');
-  check('the score is a figure, coloured by the band it falls in',
-    typeof zafar[at('Score /100')].n === 'number' && zafar[at('Score /100')].s === 'ok'
-      && karan[at('Score /100')].s === 'bad',
-    [zafar, rahul, karan].map(r => r[at('Score /100')].n + '=' + r[at('Score /100')].s));
+  /* The score is the sum itself, not its answer: it names the five columns it
+     is made of, and the spreadsheet works it out on opening. */
+  check('the score is written as the sum it is, not as a number',
+    /^ROUND\(\(0\.35\*/.test(zafar[at('Score /100')].f)
+      && zafar[at('Score /100')].n === undefined, zafar[at('Score /100')]);
+  check('and it names the five columns it is made of, on its own row',
+    ['Attendance %', 'On-time %', 'Hours met %', 'Breaks kept %', 'At desk %']
+      .every(h => zafar[at('Score /100')].f.indexOf(String.fromCharCode(65 + at(h)) + '3') > -1),
+    zafar[at('Score /100')].f);
+  check('with the weighting still visible in it',
+    /0\.35\*/.test(zafar[at('Score /100')].f) && /0\.25\*/.test(zafar[at('Score /100')].f)
+      && /0\.15\*/.test(zafar[at('Score /100')].f) && /0\.10\*/.test(zafar[at('Score /100')].f),
+    zafar[at('Score /100')].f);
+  check('and still coloured by the band the score falls in',
+    zafar[at('Score /100')].s === 'ok' && karan[at('Score /100')].s === 'bad',
+    [zafar, rahul, karan].map(r => r[at('Score /100')].s));
+  check('hours met is worked out from the two columns beside it, not handed over',
+    /^IFERROR\(MIN\(1,/.test(zafar[at('Hours met %')].f)
+      && zafar[at('Hours met %')].f.indexOf(String.fromCharCode(65 + at('Hours worked')) + '3') > -1
+      && zafar[at('Hours met %')].f.indexOf(String.fromCharCode(65 + at('Days present')) + '3') > -1,
+    zafar[at('Hours met %')]);
   check('percentages go in as percentages, not as the word',
     Math.abs(zafar[at('Attendance %')].n - 0.96) < 1e-9
       && /\|p$/.test(zafar[at('Attendance %')].s), zafar[at('Attendance %')]);
   check('spans of time go in as spans',
-    Math.abs(zafar[at('Hours worked')].n - 1088 / 1440) < 1e-9
-      && /\|t$/.test(zafar[at('Hours worked')].s), zafar[at('Hours worked')]);
+    Math.abs(zafar[at('Hours punched')].n - 1088 / 1440) < 1e-9
+      && /\|t$/.test(zafar[at('Hours punched')].s), zafar[at('Hours punched')]);
+  /* Time that was let pass at the time counts towards the hours: holding it
+     against the total afterwards would forgive it twice and take it back once. */
+  check('time that was excused is shown on its own',
+    Math.abs(zafar[at('Excused hours')].n - 40 / 1440) < 1e-9
+      && String(zafar[at('Excused hours')].s).split('|')[0] === 'lateExc',
+    zafar[at('Excused hours')]);
+  check('and the hours worked are the two of them added up, as the sum itself',
+    zafar[at('Hours worked')].f
+      === String.fromCharCode(65 + at('Hours punched')) + '3+'
+       + String.fromCharCode(65 + at('Excused hours')) + '3',
+    zafar[at('Hours worked')]);
   check('counts go in as counts, so they can be totalled',
     typeof zafar[at('Days present')].n === 'number' && karan[at('Leave days')].n === 0,
     { present: zafar[at('Days present')], leave: karan[at('Leave days')] });
@@ -237,13 +266,14 @@ check('how the weeks went is stated, and coloured by the worst of them',
      column said nothing and has gone. */
   check('there is no column for absences', at('Absent') === -1 && at('Days absent') === -1, ph);
   check('what the days asked for stands beside what was put in',
-    at('Target hours') === at('Hours worked') - 1
+    at('Target hours') === at('Hours punched') - 1
+      && at('Hours worked') === at('Excused hours') + 1
       && Math.abs(zafar[at('Target hours')].n - 1080 / 1440) < 1e-9,
     { target: zafar[at('Target hours')], worked: zafar[at('Hours worked')] });
   /* The style is a fill and a number format; it is the fill that carries the
      verdict. */
   const fillOf = c => String(c.s).split('|')[0];
-  check('and the hours colour themselves against that target',
+  check('and the hours colour themselves against that target, excused time and all',
     fillOf(zafar[at('Hours worked')]) === 'ok' && fillOf(karan[at('Hours worked')]) === 'bad',
     { met: zafar[at('Hours worked')].s, short: karan[at('Hours worked')].s });
   /* A Saturday worked, a weekly off come in on: time given over and above what
@@ -281,7 +311,7 @@ check('how the weeks went is stated, and coloured by the worst of them',
     rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
     { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
   check('with a bar along the score and another along the hours worked',
-    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'I3:I4', p.bars.map(b => b.ref));
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'N3:N4', p.bars.map(b => b.ref));
   /* What the weeks ran short by. The hours they ran over are said by the
      extra-hours and Saturday columns, so the weeks only report the shortfall. */
   check('the weeks say what they ran short by',
