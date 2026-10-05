@@ -241,10 +241,10 @@ check('how the weeks went is stated, and coloured by the worst of them',
   /* The score is the sum itself, not its answer: it names the five columns it
      is made of, and the spreadsheet works it out on opening. */
   check('the score is written as the sum it is, not as a number',
-    /^ROUND\(\(0\.35\*/.test(zafar[at('Score /100')].f)
+    /^ROUND\(\(0\.30\*/.test(zafar[at('Score /100')].f)
       && zafar[at('Score /100')].n === undefined, zafar[at('Score /100')]);
-  check('and it names the five columns it is made of, on its own row',
-    ['Attendance %', 'On-time %', 'Hours met %', 'At desk %', 'Time given %']
+  check('and it names the columns it is made of, on its own row',
+    ['Attendance %', 'Punctuality %', 'Hours met %', 'At desk %']
       .every(h => zafar[at('Score /100')].f.indexOf(String.fromCharCode(65 + at(h)) + '3') > -1),
     zafar[at('Score /100')].f);
   /* Breaks used to carry fifteen points of their own. Minutes away from the
@@ -252,21 +252,28 @@ check('how the weeks went is stated, and coloured by the worst of them',
      people down twice for one lunch. */
   check('and breaks are not one of them any more',
     at('Breaks kept %') === -1, ph);
-  check('time given over is, and is worked out from the columns beside it',
-    /^IFERROR\(MIN\(1,/.test(zafar[at('Time given %')].f)
-      && zafar[at('Time given %')].f.indexOf(String.fromCharCode(65 + at('Weekly extra')) + '3') > -1
-      && zafar[at('Time given %')].f.indexOf(String.fromCharCode(65 + at('Target hours')) + '3') > -1,
-    zafar[at('Time given %')]);
+  /* Time given past what the weeks asked for is worth ten points, worked out
+     inside the sum rather than in a column of its own. */
+  check('time given over is counted inside the sum, with no column of its own',
+    at('Time given %') === -1
+      && /\+0\.05\*IFERROR\(MIN\(1,/.test(zafar[at('Score /100')].f)
+      && zafar[at('Score /100')].f.indexOf(String.fromCharCode(65 + at('Weekly extra')) + '3') > -1
+      && zafar[at('Score /100')].f.indexOf(String.fromCharCode(65 + at('Target hours')) + '3') > -1,
+    zafar[at('Score /100')].f);
   check('with the weighting still visible in it',
-    ['0.35*', '0.25*', '0.20*', '0.10*'].every(w => zafar[at('Score /100')].f.indexOf(w) > -1),
+    ['0.30*', '0.25*', '0.15*', '0.05*'].every(w => zafar[at('Score /100')].f.indexOf(w) > -1),
     zafar[at('Score /100')].f);
   check('and still coloured by the band the score falls in',
     zafar[at('Score /100')].s === 'ok' && karan[at('Score /100')].s === 'bad',
     [zafar, rahul, karan].map(r => r[at('Score /100')].s));
-  check('hours met is worked out from the two columns beside it, not handed over',
+  /* Against what the month asked for, not against the days they happened to
+     attend - measured that way, a day missed took its own hours out of the
+     reckoning with it. */
+  check('hours met is the hours worked against the target, as a sum',
     /^IFERROR\(MIN\(1,/.test(zafar[at('Hours met %')].f)
       && zafar[at('Hours met %')].f.indexOf(String.fromCharCode(65 + at('Hours worked')) + '3') > -1
-      && zafar[at('Hours met %')].f.indexOf(String.fromCharCode(65 + at('Days present')) + '3') > -1,
+      && zafar[at('Hours met %')].f.indexOf(String.fromCharCode(65 + at('Target hours')) + '3') > -1
+      && zafar[at('Hours met %')].f.indexOf('Days present') === -1,
     zafar[at('Hours met %')]);
   check('percentages go in as percentages, not as the word',
     Math.abs(zafar[at('Attendance %')].n - 0.96) < 1e-9
@@ -337,7 +344,7 @@ check('how the weeks went is stated, and coloured by the worst of them',
     rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
     { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
   check('with a bar along the score and another along the hours worked',
-    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'O3:O4', p.bars.map(b => b.ref));
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'N3:N4', p.bars.map(b => b.ref));
   /* What the weeks ran short by. The hours they ran over are said by the
      extra-hours and Saturday columns, so the weeks only report the shortfall. */
   check('the weeks say what they ran short by',

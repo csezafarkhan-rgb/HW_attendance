@@ -44,34 +44,39 @@ check('breaks within: 2 of 3 days', s.breakOkPct === 67, s.breakOkPct);
 // Per day, then averaged: 490/480 -> 100, 480/480 -> 100, 450/480 -> 93.75; a day with no break cannot hide one with a long one.
 check('in-office: each day\'s in duration against its total less the allowance, averaged', s.inOfficePct === Math.round((100 + 100 + 93.75) / 3), s.inOfficePct);
 
-/* 35 attendance, 25 on time, 20 hours met, 10 at the desk, 10 for time given.
-   Full marks on the last of those is a twentieth of the month's target given
-   over - here 2700 minutes owed, so 135 of surplus. */
-const perfect = { attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700,
-                  inOfficePct: 100, owedMin: 2700, weekExtraMin: 135 };
+/* 30 turning up, 25 keeping the day, 25 doing the hours, 15 at the desk, 5 for
+   time given over. Full marks on the last is a twentieth of the target given
+   back - here 2700 minutes owed, so 135 of surplus. */
+const perfect = { attendancePct: 100, punctualityPct: 100, onTimePct: 100, presentDays: 5,
+                  workedMin: 2700, inOfficePct: 100, owedMin: 2700, weekExtraMin: 135 };
+const with_ = o => ctx.perfScore(Object.assign({}, perfect, o));
 check('a month that met everything and gave time over scores 100',
   ctx.perfScore(perfect) === 100, ctx.perfScore(perfect));
-check('giving nothing over costs the ten points it is worth',
-  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 0 })) === 90,
-  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 0 })));
-check('half of it earns half of them',
-  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 67 })) === 95,
-  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 67 })));
-check('and giving more than the twentieth earns no more than the ten',
-  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 4000 })) === 100);
-check('in-office time counts for 10 points',
-  ctx.perfScore(Object.assign({}, perfect, { inOfficePct: 0 })) === 90);
-/* Minutes away from the desk are inside the in-office figure already; counting
-   them again marked people down twice for one lunch. */
-check('breaks no longer count on their own',
-  ctx.perfScore(Object.assign({}, perfect, { breakOkPct: 0 })) === 100,
-  ctx.perfScore(Object.assign({}, perfect, { breakOkPct: 0 })));
-check('hours met carries twenty points, excused time counted towards them',
-  ctx.perfScore(Object.assign({}, perfect, { workedMin: 0 })) === 80
-    && ctx.perfScore(Object.assign({}, perfect, { workedMin: 0, excusedMin: 2700 })) === 100,
-  [ctx.perfScore(Object.assign({}, perfect, { workedMin: 0 })),
-   ctx.perfScore(Object.assign({}, perfect, { workedMin: 0, excusedMin: 2700 }))]);
-check('older stats with no duration figures are not marked down for them',
+check('turning up carries thirty', with_({ attendancePct: 0 }) === 70, with_({ attendancePct: 0 }));
+check('keeping the day carries twenty-five', with_({ punctualityPct: 0 }) === 75,
+  with_({ punctualityPct: 0 }));
+/* Leaving early used to cost nothing at all: on-time counted the mornings and
+   the afternoons went unread. */
+check('and it reads both ends of the day, not just the morning',
+  with_({ punctualityPct: 60, onTimePct: 100 }) === 90, with_({ punctualityPct: 60, onTimePct: 100 }));
+check('doing the hours carries twenty-five', with_({ workedMin: 0 }) === 75, with_({ workedMin: 0 }));
+/* Measured against the days attended, a day missed took its own hours out of
+   the reckoning with it, and the figure never moved. */
+check('measured against what the month asked for, not the days attended',
+  with_({ workedMin: 1350, presentDays: 2 }) === 88, with_({ workedMin: 1350, presentDays: 2 }));
+check('excused time counts towards the hours',
+  with_({ workedMin: 0, excusedMin: 2700 }) === 100, with_({ workedMin: 0, excusedMin: 2700 }));
+check('the desk carries fifteen', with_({ inOfficePct: 0 }) === 85, with_({ inOfficePct: 0 }));
+check('time given over carries five', with_({ weekExtraMin: 0 }) === 95, with_({ weekExtraMin: 0 }));
+check('half of the twentieth earns half of those five',
+  with_({ weekExtraMin: 67 }) === 98, with_({ weekExtraMin: 67 }));
+check('and giving more than the twentieth earns no more',
+  with_({ weekExtraMin: 4000 }) === 100);
+/* Minutes away from the desk are inside the desk figure already; counting them
+   again marked people down twice for one lunch. */
+check('breaks no longer count on their own', with_({ breakOkPct: 0 }) === 100, with_({ breakOkPct: 0 }));
+check('a mispunch is not held against anybody', with_({ mispunches: 9 }) === 100);
+check('older stats with no punctuality figure fall back to on-time',
   ctx.perfScore({ attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700,
                   owedMin: 2700, weekExtraMin: 135 }) === 100);
 
