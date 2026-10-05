@@ -29,6 +29,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext('function getMispunch(e, d){ return mispunchFlags[e+"|"+d] || null; }', ctx);
+/* The share of the target that, given over, earns full marks on that part. */
+vm.runInContext(/ {2}var SCORE_GIVEN_FULL = [^;]*;/.exec(src)[0], ctx);
 ['computeDurations', 'computeEmployeeStats', 'perfScore'].forEach(n => vm.runInContext(lift(src, n), ctx));
 vm.runInContext('var LUNCH_BREAK_MIN = 45, TEA_BREAK_MIN = 15; var BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + TEA_BREAK_MIN;', ctx);
 
@@ -42,11 +44,36 @@ check('breaks within: 2 of 3 days', s.breakOkPct === 67, s.breakOkPct);
 // Per day, then averaged: 490/480 -> 100, 480/480 -> 100, 450/480 -> 93.75; a day with no break cannot hide one with a long one.
 check('in-office: each day\'s in duration against its total less the allowance, averaged', s.inOfficePct === Math.round((100 + 100 + 93.75) / 3), s.inOfficePct);
 
-const perfect = { attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700, breakOkPct: 100, inOfficePct: 100 };
-check('a perfect month scores 100', ctx.perfScore(perfect) === 100, ctx.perfScore(perfect));
-check('breaks count: every day over the allowance takes 15 points', ctx.perfScore(Object.assign({}, perfect, { breakOkPct: 0 })) === 85);
-check('in-office time counts for 10 points', ctx.perfScore(Object.assign({}, perfect, { inOfficePct: 0 })) === 90);
-check('older stats without duration figures are not marked down', ctx.perfScore({ attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700 }) === 100);
+/* 35 attendance, 25 on time, 20 hours met, 10 at the desk, 10 for time given.
+   Full marks on the last of those is a twentieth of the month's target given
+   over - here 2700 minutes owed, so 135 of surplus. */
+const perfect = { attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700,
+                  inOfficePct: 100, owedMin: 2700, weekExtraMin: 135 };
+check('a month that met everything and gave time over scores 100',
+  ctx.perfScore(perfect) === 100, ctx.perfScore(perfect));
+check('giving nothing over costs the ten points it is worth',
+  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 0 })) === 90,
+  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 0 })));
+check('half of it earns half of them',
+  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 67 })) === 95,
+  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 67 })));
+check('and giving more than the twentieth earns no more than the ten',
+  ctx.perfScore(Object.assign({}, perfect, { weekExtraMin: 4000 })) === 100);
+check('in-office time counts for 10 points',
+  ctx.perfScore(Object.assign({}, perfect, { inOfficePct: 0 })) === 90);
+/* Minutes away from the desk are inside the in-office figure already; counting
+   them again marked people down twice for one lunch. */
+check('breaks no longer count on their own',
+  ctx.perfScore(Object.assign({}, perfect, { breakOkPct: 0 })) === 100,
+  ctx.perfScore(Object.assign({}, perfect, { breakOkPct: 0 })));
+check('hours met carries twenty points, excused time counted towards them',
+  ctx.perfScore(Object.assign({}, perfect, { workedMin: 0 })) === 80
+    && ctx.perfScore(Object.assign({}, perfect, { workedMin: 0, excusedMin: 2700 })) === 100,
+  [ctx.perfScore(Object.assign({}, perfect, { workedMin: 0 })),
+   ctx.perfScore(Object.assign({}, perfect, { workedMin: 0, excusedMin: 2700 }))]);
+check('older stats with no duration figures are not marked down for them',
+  ctx.perfScore({ attendancePct: 100, onTimePct: 100, presentDays: 5, workedMin: 2700,
+                  owedMin: 2700, weekExtraMin: 135 }) === 100);
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

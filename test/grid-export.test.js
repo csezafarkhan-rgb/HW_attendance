@@ -112,6 +112,7 @@ vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
  'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet', 'buildGridWorkbook'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
 vm.runInContext('var GRID_COLS = ' + JSON.stringify(['IN', 'OUT', 'TOTAL', 'IN DUR', 'OUT DUR', 'PUN']) + ';', ctx);
+vm.runInContext(/ {2}var SCORE_GIVEN_FULL = [^;]*;/.exec(src)[0], ctx);
 
 const sheets = ctx.buildGridWorkbook();
 
@@ -243,12 +244,21 @@ check('how the weeks went is stated, and coloured by the worst of them',
     /^ROUND\(\(0\.35\*/.test(zafar[at('Score /100')].f)
       && zafar[at('Score /100')].n === undefined, zafar[at('Score /100')]);
   check('and it names the five columns it is made of, on its own row',
-    ['Attendance %', 'On-time %', 'Hours met %', 'Breaks kept %', 'At desk %']
+    ['Attendance %', 'On-time %', 'Hours met %', 'At desk %', 'Time given %']
       .every(h => zafar[at('Score /100')].f.indexOf(String.fromCharCode(65 + at(h)) + '3') > -1),
     zafar[at('Score /100')].f);
+  /* Breaks used to carry fifteen points of their own. Minutes away from the
+     desk are already inside the at-desk figure, so counting them again marked
+     people down twice for one lunch. */
+  check('and breaks are not one of them any more',
+    at('Breaks kept %') === -1, ph);
+  check('time given over is, and is worked out from the columns beside it',
+    /^IFERROR\(MIN\(1,/.test(zafar[at('Time given %')].f)
+      && zafar[at('Time given %')].f.indexOf(String.fromCharCode(65 + at('Weekly extra')) + '3') > -1
+      && zafar[at('Time given %')].f.indexOf(String.fromCharCode(65 + at('Target hours')) + '3') > -1,
+    zafar[at('Time given %')]);
   check('with the weighting still visible in it',
-    /0\.35\*/.test(zafar[at('Score /100')].f) && /0\.25\*/.test(zafar[at('Score /100')].f)
-      && /0\.15\*/.test(zafar[at('Score /100')].f) && /0\.10\*/.test(zafar[at('Score /100')].f),
+    ['0.35*', '0.25*', '0.20*', '0.10*'].every(w => zafar[at('Score /100')].f.indexOf(w) > -1),
     zafar[at('Score /100')].f);
   check('and still coloured by the band the score falls in',
     zafar[at('Score /100')].s === 'ok' && karan[at('Score /100')].s === 'bad',

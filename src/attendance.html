@@ -5905,7 +5905,7 @@ function ensureDirPerm(dir, byClick, mode){
        so the score can be the sum itself rather than its answer - open any cell
        in it and the reckoning is there to read. */
     var head = ['Employee','Shift','Score /100','Weeks completed','Weekly extra','Weekly short',
-                'Attendance %','On-time %','Hours met %','Breaks kept %','At desk %',
+                'Attendance %','On-time %','Hours met %','At desk %','Time given %',
                 'Target hours','Hours punched','Excused hours','Hours worked',
                 'Days worked on offs','Extra hours','Saturdays worked','Saturday extra',
                 'Days present','Late days','Total late by',
@@ -5971,15 +5971,15 @@ function ensureDirPerm(dir, byClick, mode){
       rows.push([
         { v:dispName(r.emp.name), s:'zebra|L' },
         { v:getShift(r.emp.name), s:zeb },
-        /* 35 parts attendance, 25 on time, 15 hours met, 15 breaks kept, 10 at
-           the desk. Written as the sum of the five columns beside it, so the
-           spreadsheet works it out and anybody can see what it is made of and
-           try it with a different weighting. */
+        /* 35 parts attendance, 25 on time, 20 hours met, 10 at the desk, 10 for
+           time given over. Written as the sum of the five columns beside it, so
+           the spreadsheet works it out and anybody can see what it is made of
+           and try it with a different weighting. */
         { f:'ROUND((0.35*' + cell('Attendance %', rowNo)
              + '+0.25*' + cell('On-time %', rowNo)
-             + '+0.15*' + cell('Hours met %', rowNo)
-             + '+0.15*' + cell('Breaks kept %', rowNo)
-             + '+0.10*' + cell('At desk %', rowNo) + ')*100,0)',
+             + '+0.20*' + cell('Hours met %', rowNo)
+             + '+0.10*' + cell('At desk %', rowNo)
+             + '+0.10*' + cell('Time given %', rowNo) + ')*100,0)',
           s:band },
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
         /* Over and under across the weeks, each on its own. A week forty
@@ -5997,10 +5997,13 @@ function ensureDirPerm(dir, byClick, mode){
            in against nine hours a present day, and never over the hundred. */
         { f:'IFERROR(MIN(1,' + cell('Hours worked', rowNo) + '/('
              + cell('Days present', rowNo) + '*0.375)),0)', s: zeb + '||p' },
-        /* These two come off the punch times - how long people were away from
-           the desk - and have no columns of their own to be worked out from. */
-        { n:(st.breakOkPct == null ? 100 : st.breakOkPct) / 100, s: zeb + '||p' },
+        /* Off the punch times - how much of the day was spent at the desk - so
+           it has no columns of its own to be worked out from. */
         { n:(st.inOfficePct == null ? 100 : st.inOfficePct) / 100, s: zeb + '||p' },
+        /* And what was given past what the weeks asked for, as a share of the
+           twentieth of the target that earns full marks. */
+        { f:'IFERROR(MIN(1,' + cell('Weekly extra', rowNo) + '/('
+             + cell('Target hours', rowNo) + '*' + SCORE_GIVEN_FULL + ')),0)', s: zeb + '||p' },
         /* What the days asked for, what the readers saw, what was forgiven,
            and the two of those added up - as the sum itself, so the addition is
            there to read. Excused time counts towards the hours: it was let pass
@@ -12889,7 +12892,15 @@ function buildExcelBackup(){
     var expected = presentDays + absentDays + leaveDays;
     leaveDays = Math.round(leaveDays * 100) / 100;
     var wk = computeWeeklyShortHours(empName, dates);
-    var net = 0; Object.keys(wk.weekTotals).forEach(function(k){ net += wk.weekTotals[k]; });
+    /* Over and under across the weeks, netted and kept apart. The surplus is
+       what somebody gave past what was asked of them, week by week - staying
+       late, coming in on a day off - and the score counts it. */
+    var net = 0, weekExtra = 0, weekShort = 0;
+    Object.keys(wk.weekTotals).forEach(function(k){
+      var v = wk.weekTotals[k];
+      net += v;
+      if(v > 0) weekExtra += v; else weekShort += -v;
+    });
     var onTime = presentDays - lateDays;
     return {
       presentDays:presentDays, absentDays:absentDays, halfDays:halfDays, wfhDays:wfhDays, visitDays:visitDays, leaveDays:leaveDays,
@@ -12900,6 +12911,7 @@ function buildExcelBackup(){
       excusedLateMin:excusedLateMin, excusedEarlyMin:excusedEarlyMin,
       excusedMin:(excusedLateMin + excusedEarlyMin),
       owedMin:owedMin, extraMin:extraMin, extraDays:extraDays,
+      weekExtraMin:weekExtra, weekShortMin:weekShort,
       holidayDays:holidayDays, offDays:offDays, mispunches:mispunches,
       hoursMetPct: owedMin > 0 ? Math.round(workedMin / owedMin * 100) : 100,
       attendancePct: expected>0 ? Math.round(presentDays/expected*100) : 100,
@@ -12925,16 +12937,29 @@ function buildExcelBackup(){
   /* Performance score, out of 100:
        35% attendance    - days attended of the days due in
        25% punctuality   - days on time
-       15% hours met     - total duration against a 9-hour day
-       15% breaks        - days with out duration within 45 + 15 min
-       10% in-office     - in duration against the total less the allowance
-     A person with no measurable punch days (all WFH, say) is not marked down
-     on the two break figures. */
+       20% hours met     - time put in against a nine-hour day, excused time
+                           counted, since it was let pass at the time
+       10% in-office     - in duration against the total less the break allowance
+       10% time given    - hours past what the weeks asked for, where giving a
+                           twentieth of the month's target earns the full ten
+
+     Breaks used to carry fifteen of these points and no longer count: minutes
+     away from the desk are already inside the in-office figure, and counting
+     them twice marked people down twice for one lunch. What is left of that
+     weight goes to the hours and to the time given over.
+
+     A person with no measurable punch days (all WFH, say) is not marked down on
+     the in-office figure. */
+  var SCORE_GIVEN_FULL = 0.05;     // a twentieth of the target, given over, scores the lot
   function perfScore(s){
-    var hoursMet = s.presentDays>0 ? Math.min(100, Math.round((s.workedMin/(s.presentDays*540))*100)) : 0;
-    var breakOk = s.breakOkPct == null ? 100 : s.breakOkPct;
+    var worked = (s.workedMin || 0) + (s.excusedMin || 0);
+    var hoursMet = s.presentDays>0 ? Math.min(100, Math.round((worked/(s.presentDays*540))*100)) : 0;
     var inOffice = s.inOfficePct == null ? 100 : s.inOfficePct;
-    return Math.round(0.35*s.attendancePct + 0.25*s.onTimePct + 0.15*hoursMet + 0.15*breakOk + 0.10*inOffice);
+    var given = s.owedMin > 0
+      ? Math.min(100, Math.round((s.weekExtraMin || 0) / (s.owedMin * SCORE_GIVEN_FULL) * 100))
+      : 0;
+    return Math.round(0.35*s.attendancePct + 0.25*s.onTimePct + 0.20*hoursMet
+                      + 0.10*inOffice + 0.10*given);
   }
   /* The arrow points the way the number moved; the colour says whether that
      direction is good for this metric - fewer absences is an improvement,
