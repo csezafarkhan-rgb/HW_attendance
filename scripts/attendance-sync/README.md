@@ -130,10 +130,18 @@ Rules the builder keeps, learned the hard way:
   on the 1st too.
 - **Files are swapped in, never written in place.** Both CSVs are written to
   `.partial` and then moved over, so the dashboard never imports half a file.
-- **The helper only answers the dashboard.** `/sync` needs the dashboard's
-  Origin, and every request must be addressed to `127.0.0.1` or `localhost`,
-  which blocks drive-by pages and DNS rebinding. A build running past five
-  minutes is killed with its whole process tree.
+- **The helper only answers the dashboard.** `/sync` and `/file` need the
+  dashboard's Origin, and every request must be addressed to `127.0.0.1` or
+  `localhost`, which blocks drive-by pages and DNS rebinding. A build running
+  past five minutes is killed with its whole process tree.
+- **The helper hands the punch file over itself.** `/file` serves what the
+  build last wrote and `/file?meta=1` names it with the moment it was written.
+  The dashboard used to reach that file only through a folder the browser had
+  been granted, and Chrome drops such a folder whenever it clears site data -
+  the attendance then stopped updating with "no folder is being watched", which
+  is how a Monday arrived with nothing imported since the Thursday. The folder
+  is still used where the browser has it; the helper is the way in when it does
+  not, for the Sync button and the five-minute check alike.
 
 If a day looks wrong (out-punches missing, say), press Live Sync with the days
 box set wide enough to cover it: the file is rebuilt over that window from the
