@@ -210,8 +210,8 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
 - **The full month**, sent by hand from the Share menu. It is the last entry
   because it asks which month: choose one from the shelf that opens and that
   month goes, whatever the grid happens to be showing. It carries the Excel
-  workbook and nothing else — everybody side by side on one sheet, a summary
-  of the month, how people did, and a sheet for each person. No picture: a month is too wide to
+  workbook and nothing else — everybody side by side on one sheet, how people
+  did over the month, and a sheet for each person. No picture: a month is too wide to
   read as an image in a message, and the workbook says it properly.
 - **A holiday reminder**, a set number of days before a date on the Official
   Leaves calendar (two by default), naming the holiday and what is closed.

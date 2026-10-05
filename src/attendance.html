@@ -5610,7 +5610,7 @@ function ensureDirPerm(dir, byClick, mode){
 
   /* ---------- The grid as a workbook ----------
      One file, three kinds of sheet: everyone side by side with each person
-     walled off, a summary of the month, and a sheet per person that prints on
+     walled off, how people did over the month, and a sheet per person that prints on
      a page. The wide sheet used to be the whole export - thirteen people times
      six columns is seventy-nine columns of identical hairline border, with
      nothing to say where one person stopped and the next began. */
@@ -5815,58 +5815,6 @@ function ensureDirPerm(dir, byClick, mode){
     return { v: done + ' week' + (done===1?'':'s') + ' completed' + tail, s:'ok' };
   }
 
-  function gridSummarySheet(emps, dates, weekInfo, coName){
-    var rows = [], merges = [], C = _colLetter;
-    var head = ['Employee','Shift','Worked','Weeks','Days','Late','Early','Leave','From home','Visit','Absent'];
-    var WORKED = 2;                                   // the column the bars run along
-    var last = C(head.length-1);
-    rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', '), s:'empBand|LRT' }]);
-    merges.push('A1:'+last+'1');
-    rows.push(head.map(function(h, i){
-      return { v:h, s:'colHdr|B'+(i===0?'L':(i===head.length-1?'R':'')) };
-    }));
-    emps.forEach(function(emp, ei){
-      var worked=0, days=0, late=0, early=0, leave=0, wfh=0, visit=0, absent=0;
-      dates.forEach(function(d){
-        if(getOfficialLeave(d)) return;
-        var ov = getOverride(emp.name, d);
-        if(ov && ov.cat==='LEAVE'){ leave++; return; }
-        if(ov && ov.cat==='WFH'){ wfh++; worked += workedMinutes(emp.name, d) || 0; return; }
-        if(ov && ov.cat==='VISIT'){ visit++; worked += workedMinutes(emp.name, d) || 0; return; }
-        var rec = getRecord(emp.name, d);
-        if(!rec || rec.st==='WO') return;
-        if(rec.st==='AB'){ absent++; return; }
-        days++;
-        worked += workedMinutes(emp.name, d) || 0;
-        if(isLate(emp.name, rec))  late++;
-        if(isEarly(emp.name, rec)) early++;
-      });
-      var zeb = (ei % 2) === 1 ? 'zebra' : 'none';
-      var wk = gridWeekSummary(weekInfo[emp.name], dates);
-      rows.push([
-        { v:emp.name, s:'zebra|L' }, { v:getShift(emp.name), s:zeb },
-        /* A span of time, not a word: written as a fraction of a day under a
-           [h]:mm format, so it still reads 18:08 and a bar can run along it. */
-        { n: worked / 1440, s: zeb + '||t' },
-        { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
-        { v:String(days), s:zeb },
-        { v:String(late),  s: late  ? 'late'  : zeb },
-        { v:String(early), s: early ? 'early' : zeb },
-        { v:String(leave), s: leave ? 'leave' : zeb },
-        { v:String(wfh),   s: wfh   ? 'wfh'   : zeb },
-        { v:String(visit), s: visit ? 'visit' : zeb },
-        { v:String(absent), s:(absent ? 'alert' : zeb) + '|R' }
-      ]);
-    });
-    var firstRow = 3, lastRow = rows.length;
-    return { name:'Summary', rows:rows, merges:merges,
-             widths:[20, 12, 10, 24, 7, 7, 7, 8, 11, 7, 8],
-             bars: lastRow >= firstRow
-               ? [{ ref: C(WORKED)+firstRow+':'+C(WORKED)+lastRow, color:'FF9CC4F5' }]
-               : [],
-             freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
-  }
-
   /* A built file as base64, for putting in a message. */
   function blobBase64(blob){
     return new Promise(function(resolve, reject){
@@ -5881,17 +5829,22 @@ function ensureDirPerm(dir, byClick, mode){
   }
 
   /* ---- how people did, ranked ----
-     The Dashboard page works all this out already; this is the same reckoning
-     written down, so the sheet and the screen cannot disagree. Best first,
-     because a ranking is what it is for. */
-  function gridPerformanceSheet(emps, dates, coName){
+     Everything the month has to say about a person in one row: the Dashboard
+     page's own reckoning, the counts that were once a summary of their own, and
+     how their weeks came out. Best first, because a ranking is what it is for.
+
+     The figures are computeEmployeeStats and perfScore - the Dashboard's, not a
+     second opinion written for the spreadsheet - so the sheet and the screen
+     cannot disagree. */
+  function gridPerformanceSheet(emps, dates, weekInfo, coName){
     var rows = [], merges = [], C = _colLetter;
-    var head = ['Employee','Score','Attendance','On-time','Worked','Present','Absent',
-                'Late','Late time','Early','Early time','WFH','Visits','Leave','Net vs target'];
-    var SCORE = 1, WORKED = 4;
+    var head = ['Employee','Shift','Score','Weeks','Attendance','On-time','Worked',
+                'Extra days','Extra time','Present','Absent','Late','Late time',
+                'Early','Early time','WFH','Visits','Leave','Net vs target'];
+    var SCORE = head.indexOf('Score'), WORKED = head.indexOf('Worked');
     var last = C(head.length-1);
-    rows.push([{ v:coName+' \u00b7 '+state.selectedMonths.map(monthLabel).join(', ')
-                 + ' \u00b7 how people did', s:'empBand|LRT' }]);
+    rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', ')
+                 + ' · how people did', s:'empBand|LRT' }]);
     merges.push('A1:'+last+'1');
     rows.push(head.map(function(h, i){
       return { v:h, s:'colHdr|B'+(i===0?'L':(i===head.length-1?'R':'')) };
@@ -5906,26 +5859,34 @@ function ensureDirPerm(dir, byClick, mode){
       var st = r.st, zeb = (ri % 2) === 1 ? 'zebra' : 'none';
       /* The same three bands the dashboard colours its scores with. */
       var band = r.score >= 85 ? 'ok' : (r.score >= 70 ? 'warn' : 'bad');
-      var num = function(v){ return { n: v, s: zeb }; };
+      var wk = gridWeekSummary(weekInfo[r.emp.name], dates);
+      var count = function(v, fill){ return { n: v || 0, s: (v && fill) ? fill : zeb }; };
       var mins = function(v){ return { n: (v || 0) / 1440, s: zeb + '||t' }; };
       rows.push([
         { v:dispName(r.emp.name), s:'zebra|L' },
+        { v:getShift(r.emp.name), s:zeb },
         { n:r.score, s:band },
+        { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
         mins(st.workedMin),
-        num(st.presentDays || 0),
-        { n:st.absentDays || 0, s: st.absentDays ? 'alert' : zeb },
-        { n:st.lateDays || 0, s: st.lateDays ? 'late' : zeb },
+        /* Time put in on a day that asked for none - a weekly off, a Saturday
+           off, a holiday worked. Worth seeing on its own rather than buried in
+           the total, and worth seeing in green. */
+        count(st.extraDays, 'ok'),
+        { n:(st.extraMin || 0) / 1440, s:(st.extraMin ? 'ok' : zeb) + '||t' },
+        count(st.presentDays),
+        count(st.absentDays, 'alert'),
+        count(st.lateDays, 'late'),
         mins(st.totalLateMin),
-        { n:st.earlyDays || 0, s: st.earlyDays ? 'early' : zeb },
+        count(st.earlyDays, 'early'),
         mins(st.totalEarlyMin),
-        { n:st.wfhDays || 0, s: st.wfhDays ? 'wfh' : zeb },
-        { n:st.visitDays || 0, s: st.visitDays ? 'visit' : zeb },
-        { n:st.leaveDays || 0, s: st.leaveDays ? 'leave' : zeb },
+        count(st.wfhDays, 'wfh'),
+        count(st.visitDays, 'visit'),
+        count(st.leaveDays, 'leave'),
         /* Hours over or under what the days asked for. A span that can be
            negative, which [h]:mm cannot show, so it stays in words. */
-        { v:(st.netMin > 0 ? '+' : (st.netMin < 0 ? '\u2212' : ''))
+        { v:(st.netMin > 0 ? '+' : (st.netMin < 0 ? '−' : ''))
              + fmtMin(Math.abs(st.netMin || 0)),
           s:(st.netMin < 0 ? 'bad' : (st.netMin > 0 ? 'ok' : zeb)) + '|R' }
       ]);
@@ -5933,7 +5894,7 @@ function ensureDirPerm(dir, byClick, mode){
 
     var firstRow = 3, lastRow = rows.length;
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 8, 11, 9, 10, 9, 8, 7, 10, 7, 10, 7, 7, 7, 13],
+             widths:[20, 12, 8, 24, 11, 9, 10, 9, 10, 9, 8, 7, 10, 7, 10, 7, 7, 7, 13],
              bars: lastRow >= firstRow
                ? [{ ref: C(SCORE)+firstRow+':'+C(SCORE)+lastRow, color:'FFA8D5B5' },
                   { ref: C(WORKED)+firstRow+':'+C(WORKED)+lastRow, color:'FF9CC4F5' }]
@@ -5953,12 +5914,10 @@ function ensureDirPerm(dir, byClick, mode){
       catch(err){ weekInfo[e.name] = {weekTotals:{}, weekDays:{}}; }
     });
     var coName = (coNameEl && coNameEl.textContent) ? coNameEl.textContent.trim() : 'Attendance Record';
-    var sheets = [ gridAllSheet(emps, dates, weekInfo, coName),
-                   gridSummarySheet(emps, dates, weekInfo, coName) ];
-    /* The performance reckoning is the Dashboard page's; if that page has not
-       been opened its helpers are still here, but a failure in it must not cost
-       the workbook its attendance. */
-    try{ sheets.push(gridPerformanceSheet(emps, dates, coName)); }
+    var sheets = [ gridAllSheet(emps, dates, weekInfo, coName) ];
+    /* The performance reckoning is the Dashboard page's; a failure in it must
+       not cost the workbook its attendance, which is the point of the file. */
+    try{ sheets.push(gridPerformanceSheet(emps, dates, weekInfo, coName)); }
     catch(e){ console.error('the performance sheet was left out', e); }
     emps.forEach(function(e){ sheets.push(gridOneSheet(e, dates, weekInfo, coName)); });
     return sheets;
@@ -6025,7 +5984,7 @@ function ensureDirPerm(dir, byClick, mode){
     a.download='Attendance_Grid_'+(state.selectedMonths[0]||'export')+'.xlsx';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ try{a.remove();}catch(_){ } URL.revokeObjectURL(a.href); }, 1500);
-    showUploadStatus('Excel exported — everyone side by side on the first sheet, a summary, '
+    showUploadStatus('Excel exported — everyone side by side on the first sheet, how people did, '
       + 'then a sheet each for the ' + (sheets.length - 2) + ' employees shown.', false);
   }
 

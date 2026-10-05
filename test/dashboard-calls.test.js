@@ -40,7 +40,7 @@ function body(name) {
        Told apart from division by what comes before it, ignoring spaces: after
        a name, a number or a closing bracket a slash divides; anywhere else it
        opens a pattern. "worked / 1440" is a division, and reading it as a
-       pattern swallowed the rest of gridSummarySheet. */
+       pattern swallowed the rest of the sheet builder it was reading. */
     if (c === '/' && (function () {
       let p = k - 1;
       while (p >= 0 && /\s/.test(src[p])) p--;
@@ -88,7 +88,7 @@ const BUILTIN = new Set([
    export path reaches. */
 const WATCHED = [
   'sendMonth', 'exportGridExcel', 'exportLeaveExcel', 'buildGridWorkbook',
-  'gridAllSheet', 'gridOneSheet', 'gridSummarySheet', 'gridWeekSummary', 'gridDayCells',
+  'gridAllSheet', 'gridOneSheet', 'gridWeekSummary', 'gridDayCells',
   'gridDateLabel', 'gridWeekVerdict', 'gridPerformanceSheet', 'buildStyledXlsxMulti', 'buildStyledXlsx',
   'blobBase64', 'runFolderSync', 'checkImportFolder', 'takeImportFile'
 ];
