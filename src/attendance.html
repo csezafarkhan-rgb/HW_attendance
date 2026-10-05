@@ -5882,7 +5882,7 @@ function ensureDirPerm(dir, byClick, mode){
     /* Spelled out: a column heading should not need the person reading it to
        remember what we meant by it. Absent is gone - a day missed is recorded
        as leave here, so it stood at nought against every name. */
-    var head = ['Employee','Shift','Score /100','Weeks completed','Weekly extra','Weekly short',
+    var head = ['Employee','Shift','Score /100','Weeks completed','Weekly short',
                 'Attendance %','On-time %','Target hours','Hours worked',
                 'Days worked on offs','Extra hours','Saturdays worked','Saturday extra',
                 'Days present','Late days','Total late by',
@@ -5945,9 +5945,10 @@ function ensureDirPerm(dir, byClick, mode){
         { v:getShift(r.emp.name), s:zeb },
         { n:r.score, s:band },
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
-        /* Over and under across the weeks, each on its own. "Hours vs target"
-           at the end is the two netted off; these are what made it. */
-        { n:(wk.extraMin || 0) / 1440, s:(wk.extraMin ? 'ok' : zeb) + '||t' },
+        /* What the weeks ran short by, added up. The hours over are worked out
+           beside it and left off the sheet: time given back is already said by
+           the extra-hours and Saturday columns, and what a reader wants from
+           the weeks is what is still owed. */
         { n:(wk.shortMin || 0) / 1440, s:(wk.shortMin ? 'bad' : zeb) + '||t' },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
@@ -6005,7 +6006,7 @@ function ensureDirPerm(dir, byClick, mode){
       bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
     });
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 12, 9, 20, 12, 12, 12, 10, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
+             widths:[20, 12, 9, 20, 12, 12, 10, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
              bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }

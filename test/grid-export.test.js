@@ -281,21 +281,17 @@ check('how the weeks went is stated, and coloured by the worst of them',
     rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
     { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
   check('with a bar along the score and another along the hours worked',
-    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'J3:J4', p.bars.map(b => b.ref));
-  /* Hours over and hours under across the weeks, each on its own. The last
-     column nets them off; these two say what made it. */
-  check('the weeks say how much was over and how much short, apart',
-    at('Weekly extra') > -1 && at('Weekly short') === at('Weekly extra') + 1
-      && typeof zafar[at('Weekly extra')].n === 'number'
-      && /\|t$/.test(zafar[at('Weekly extra')].s), ph);
-  check('and both are counted, not netted off against each other',
-    Math.abs(zafar[at('Weekly extra')].n - 90 / 1440) < 1e-9
-      && Math.abs(zafar[at('Weekly short')].n - 45 / 1440) < 1e-9,
-    { extra: zafar[at('Weekly extra')], short: zafar[at('Weekly short')] });
-  check('over reads green, short reads red',
-    String(zafar[at('Weekly extra')].s).split('|')[0] === 'ok'
-      && String(zafar[at('Weekly short')].s).split('|')[0] === 'bad',
-    { extra: zafar[at('Weekly extra')].s, short: zafar[at('Weekly short')].s });
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'I3:I4', p.bars.map(b => b.ref));
+  /* What the weeks ran short by. The hours they ran over are said by the
+     extra-hours and Saturday columns, so the weeks only report the shortfall. */
+  check('the weeks say what they ran short by',
+    at('Weekly short') > -1 && Math.abs(zafar[at('Weekly short')].n - 45 / 1440) < 1e-9
+      && /\|t$/.test(zafar[at('Weekly short')].s), ph);
+  check('and it reads red where there is any',
+    String(zafar[at('Weekly short')].s).split('|')[0] === 'bad',
+    zafar[at('Weekly short')].s);
+  check('with no column for the hours they ran over',
+    at('Weekly extra') === -1, ph);
 }
 /* ---- the file itself ---- */
 const parts = [];
