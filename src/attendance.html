@@ -5416,8 +5416,8 @@ function ensureDirPerm(dir, byClick, mode){
   /* And a number format, where the cell holds a figure rather than words: 't'
      is a span of hours and minutes, written as a fraction of a day so the
      spreadsheet can total it and draw a bar along it. */
-  var XL_FMTS = ['', 't'];
-  var XL_FMT_ID = { t: 164 };
+  var XL_FMTS = ['', 't', 'p'];
+  var XL_FMT_ID = { t: 164, p: 165 };
   function xlEdgeIdx(e){
     var want = String(e || '').split('').sort().join('');
     for(var i=0;i<XL_EDGES.length;i++){
@@ -5468,7 +5468,8 @@ function ensureDirPerm(dir, byClick, mode){
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
       /* [h]:mm, so twenty-six hours reads as 26:00 rather than rolling over. */
-      + '<numFmts count="1"><numFmt numFmtId="164" formatCode="[h]:mm"/></numFmts>'
+      + '<numFmts count="2"><numFmt numFmtId="164" formatCode="[h]:mm"/>'
+      +   '<numFmt numFmtId="165" formatCode="0%"/></numFmts>'
       + '<fonts count="2"><font><sz val="10"/><name val="Calibri"/></font>'
       + '<font><sz val="10"/><color rgb="FFFFFFFF"/><b/><name val="Calibri"/></font></fonts>'
       + '<fills count="'+(XLKEYS.length+2)+'">'+fills+'</fills>'
@@ -5879,6 +5880,67 @@ function ensureDirPerm(dir, byClick, mode){
     });
   }
 
+  /* ---- how people did, ranked ----
+     The Dashboard page works all this out already; this is the same reckoning
+     written down, so the sheet and the screen cannot disagree. Best first,
+     because a ranking is what it is for. */
+  function gridPerformanceSheet(emps, dates, coName){
+    var rows = [], merges = [], C = _colLetter;
+    var head = ['Employee','Score','Attendance','On-time','Worked','Present','Absent',
+                'Late','Late time','Early','Early time','WFH','Visits','Leave','Net vs target'];
+    var SCORE = 1, WORKED = 4;
+    var last = C(head.length-1);
+    rows.push([{ v:coName+' \u00b7 '+state.selectedMonths.map(monthLabel).join(', ')
+                 + ' \u00b7 how people did', s:'empBand|LRT' }]);
+    merges.push('A1:'+last+'1');
+    rows.push(head.map(function(h, i){
+      return { v:h, s:'colHdr|B'+(i===0?'L':(i===head.length-1?'R':'')) };
+    }));
+
+    var ranked = emps.map(function(emp){
+      var st = computeEmployeeStats(emp.name, dates);
+      return { emp: emp, st: st, score: perfScore(st) };
+    }).sort(function(a, b){ return b.score - a.score; });
+
+    ranked.forEach(function(r, ri){
+      var st = r.st, zeb = (ri % 2) === 1 ? 'zebra' : 'none';
+      /* The same three bands the dashboard colours its scores with. */
+      var band = r.score >= 85 ? 'ok' : (r.score >= 70 ? 'warn' : 'bad');
+      var num = function(v){ return { n: v, s: zeb }; };
+      var mins = function(v){ return { n: (v || 0) / 1440, s: zeb + '||t' }; };
+      rows.push([
+        { v:dispName(r.emp.name), s:'zebra|L' },
+        { n:r.score, s:band },
+        { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
+        { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
+        mins(st.workedMin),
+        num(st.presentDays || 0),
+        { n:st.absentDays || 0, s: st.absentDays ? 'alert' : zeb },
+        { n:st.lateDays || 0, s: st.lateDays ? 'late' : zeb },
+        mins(st.totalLateMin),
+        { n:st.earlyDays || 0, s: st.earlyDays ? 'early' : zeb },
+        mins(st.totalEarlyMin),
+        { n:st.wfhDays || 0, s: st.wfhDays ? 'wfh' : zeb },
+        { n:st.visitDays || 0, s: st.visitDays ? 'visit' : zeb },
+        { n:st.leaveDays || 0, s: st.leaveDays ? 'leave' : zeb },
+        /* Hours over or under what the days asked for. A span that can be
+           negative, which [h]:mm cannot show, so it stays in words. */
+        { v:(st.netMin > 0 ? '+' : (st.netMin < 0 ? '\u2212' : ''))
+             + fmtMin(Math.abs(st.netMin || 0)),
+          s:(st.netMin < 0 ? 'bad' : (st.netMin > 0 ? 'ok' : zeb)) + '|R' }
+      ]);
+    });
+
+    var firstRow = 3, lastRow = rows.length;
+    return { name:'Performance', rows:rows, merges:merges,
+             widths:[20, 8, 11, 9, 10, 9, 8, 7, 10, 7, 10, 7, 7, 7, 13],
+             bars: lastRow >= firstRow
+               ? [{ ref: C(SCORE)+firstRow+':'+C(SCORE)+lastRow, color:'FFA8D5B5' },
+                  { ref: C(WORKED)+firstRow+':'+C(WORKED)+lastRow, color:'FF9CC4F5' }]
+               : [],
+             freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
+  }
+
   /* Every sheet of the grid workbook, in the order they open. */
   function buildGridWorkbook(){
     var emps = visibleEmployees();
@@ -5893,6 +5955,11 @@ function ensureDirPerm(dir, byClick, mode){
     var coName = (coNameEl && coNameEl.textContent) ? coNameEl.textContent.trim() : 'Attendance Record';
     var sheets = [ gridAllSheet(emps, dates, weekInfo, coName),
                    gridSummarySheet(emps, dates, weekInfo, coName) ];
+    /* The performance reckoning is the Dashboard page's; if that page has not
+       been opened its helpers are still here, but a failure in it must not cost
+       the workbook its attendance. */
+    try{ sheets.push(gridPerformanceSheet(emps, dates, coName)); }
+    catch(e){ console.error('the performance sheet was left out', e); }
     emps.forEach(function(e){ sheets.push(gridOneSheet(e, dates, weekInfo, coName)); });
     return sheets;
   }

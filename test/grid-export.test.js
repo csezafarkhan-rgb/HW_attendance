@@ -62,7 +62,22 @@ const ctx = {
   weekdayName: d => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(d + 'T00:00:00').getDay()],
   pad2: n => String(n).padStart(2, '0'),
   mondayOf: d => '2026-09-28',
-  computeWeeklyShortHours: () => ({ weekTotals: { '2026-09-28': -45 }, weekDays: { '2026-09-28': 5 }, weekOpen: {} })
+  computeWeeklyShortHours: () => ({ weekTotals: { '2026-09-28': -45 }, weekDays: { '2026-09-28': 5 }, weekOpen: {} }),
+  dispName: n => n,
+  /* The Dashboard page's own reckoning, stood in for: the sheet is tested on
+     what it does with the figures, not on how they are arrived at. */
+  computeEmployeeStats: name => ({
+    'Zafar Khan':   { attendancePct: 96, onTimePct: 90, workedMin: 1088, presentDays: 2, absentDays: 0,
+                      lateDays: 1, totalLateMin: 13, earlyDays: 0, totalEarlyMin: 0, wfhDays: 0,
+                      visitDays: 0, leaveDays: 0, netMin: 45 },
+    'Rahul Mishra': { attendancePct: 80, onTimePct: 60, workedMin: 1088, presentDays: 2, absentDays: 0,
+                      lateDays: 2, totalLateMin: 44, earlyDays: 1, totalEarlyMin: 20, wfhDays: 0,
+                      visitDays: 0, leaveDays: 1, netMin: -90 },
+    'karan Ahuja':  { attendancePct: 50, onTimePct: 40, workedMin: 0, presentDays: 0, absentDays: 1,
+                      lateDays: 0, totalLateMin: 0, earlyDays: 0, totalEarlyMin: 0, wfhDays: 1,
+                      visitDays: 0, leaveDays: 0, netMin: 0 }
+  }[name]),
+  perfScore: st => Math.round(0.6 * st.attendancePct + 0.4 * st.onTimePct)
 };
 vm.createContext(ctx);
 
@@ -75,20 +90,54 @@ vm.runInContext('var XLKEYS = Object.keys(XLF);', ctx);
 vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
 ['_colLetter', '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
  '_crc32', '_zipStore', 'buildStyledXlsxMulti', 'gridDayCells', 'gridWeekVerdict', 'gridDateLabel',
- 'gridAllSheet', 'gridOneSheet', 'gridWeekSummary', 'gridSummarySheet', 'buildGridWorkbook'
+ 'gridAllSheet', 'gridOneSheet', 'gridWeekSummary', 'gridSummarySheet', 'gridPerformanceSheet',
+ 'buildGridWorkbook'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
 vm.runInContext('var GRID_COLS = ' + JSON.stringify(['IN', 'OUT', 'TOTAL', 'IN DUR', 'OUT DUR', 'PUN']) + ';', ctx);
 
 const sheets = ctx.buildGridWorkbook();
 
 /* ---- the shape of the workbook ---- */
-check('a sheet for everyone, a summary, and one per employee',
-  sheets.length === 2 + EMPS.length && sheets[0].name === 'All employees' && sheets[1].name === 'Summary'
-    && sheets[2].name === 'Zafar Khan', sheets.map(s => s.name));
+check('a sheet for everyone, a summary, how people did, and one each',
+  sheets.length === 3 + EMPS.length && sheets[0].name === 'All employees'
+    && sheets[1].name === 'Summary' && sheets[2].name === 'Performance'
+    && sheets[3].name === 'Zafar Khan', sheets.map(s => s.name));
 check('the wide sheet freezes the date column and the headers',
   sheets[0].freeze.col === 1 && sheets[0].freeze.row === 5 && sheets[0].repeatRows === 5, sheets[0].freeze);
 check('a person\'s own sheet is seven columns wide',
-  sheets[2].widths.length === 7 && sheets[2].rows[2].length === 7, sheets[2].widths);
+  sheets[3].widths.length === 7 && sheets[3].rows[2].length === 7, sheets[3].widths);
+
+/* ---- how people did ---- */
+{
+  const p = sheets[2];
+  const ph = p.rows[1].map(c => c.v);
+  const at = n => ph.indexOf(n);
+  check('the performance sheet heads its columns and holds a row per person',
+    ph[0] === 'Employee' && at('Score') > -1 && at('Net vs target') > -1
+      && p.rows.length === 2 + EMPS.length, ph);
+  check('and ranks them, best first',
+    p.rows[2][0].v === 'Zafar Khan' && p.rows[4][0].v === 'karan Ahuja',
+    p.rows.slice(2).map(r => r[0].v + ':' + r[1].n));
+  check('the score is a figure, coloured by the band it falls in',
+    typeof p.rows[2][1].n === 'number' && p.rows[2][1].s === 'ok' && p.rows[4][1].s === 'bad',
+    p.rows.slice(2).map(r => r[1].n + '=' + r[1].s));
+  check('percentages go in as percentages, not as the word',
+    Math.abs(p.rows[2][at('Attendance')].n - 0.96) < 1e-9
+      && /\|p$/.test(p.rows[2][at('Attendance')].s), p.rows[2][at('Attendance')]);
+  check('spans of time go in as spans',
+    Math.abs(p.rows[2][at('Worked')].n - 1088 / 1440) < 1e-9
+      && /\|t$/.test(p.rows[2][at('Worked')].s), p.rows[2][at('Worked')]);
+  check('hours over or under target keep their sign, which [h]:mm cannot show',
+    /^\+/.test(p.rows[2][at('Net vs target')].v)
+      && /^\u2212/.test(p.rows[3][at('Net vs target')].v),
+    [p.rows[2][at('Net vs target')].v, p.rows[3][at('Net vs target')].v]);
+  check('an absence, a lateness and a day from home each keep their colour',
+    p.rows[4][at('Absent')].s === 'alert' && p.rows[3][at('Late')].s === 'late'
+      && p.rows[4][at('WFH')].s === 'wfh',
+    { absent: p.rows[4][at('Absent')].s, late: p.rows[3][at('Late')].s, wfh: p.rows[4][at('WFH')].s });
+  check('with a bar along the score and another along the hours',
+    p.bars.length === 2 && p.bars[0].ref === 'B3:B5' && p.bars[1].ref === 'E3:E5', p.bars);
+}
 
 /* ---- the walls ---- */
 const headRow = sheets[0].rows[4];                       // the column headers
