@@ -311,7 +311,7 @@ check('how the weeks went is stated, and coloured by the worst of them',
     rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
     { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
   check('with a bar along the score and another along the hours worked',
-    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'N3:N4', p.bars.map(b => b.ref));
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'O3:O4', p.bars.map(b => b.ref));
   /* What the weeks ran short by. The hours they ran over are said by the
      extra-hours and Saturday columns, so the weeks only report the shortfall. */
   check('the weeks say what they ran short by',
@@ -320,8 +320,17 @@ check('how the weeks went is stated, and coloured by the worst of them',
   check('and it reads red where there is any',
     String(zafar[at('Weekly short')].s).split('|')[0] === 'bad',
     zafar[at('Weekly short')].s);
-  check('with no column for the hours they ran over',
-    at('Weekly extra') === -1, ph);
+  /* Over and under stand apart: a week over and a week under is not two steady
+     weeks, and a single netted figure cannot tell them apart. */
+  check('and what they ran over, beside it',
+    at('Weekly extra') === at('Weekly short') - 1
+      && Math.abs(zafar[at('Weekly extra')].n - 90 / 1440) < 1e-9
+      && String(zafar[at('Weekly extra')].s).split('|')[0] === 'ok',
+    zafar[at('Weekly extra')]);
+  check('with the two counted, not netted off against each other',
+    Math.abs(zafar[at('Weekly extra')].n - 90 / 1440) < 1e-9
+      && Math.abs(zafar[at('Weekly short')].n - 45 / 1440) < 1e-9,
+    { extra: zafar[at('Weekly extra')], short: zafar[at('Weekly short')] });
 }
 /* ---- the file itself ---- */
 const parts = [];

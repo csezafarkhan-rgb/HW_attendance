@@ -5894,7 +5894,7 @@ function ensureDirPerm(dir, byClick, mode){
     /* The score is a weighted sum of five figures. All five are columns here,
        so the score can be the sum itself rather than its answer - open any cell
        in it and the reckoning is there to read. */
-    var head = ['Employee','Shift','Score /100','Weeks completed','Weekly short',
+    var head = ['Employee','Shift','Score /100','Weeks completed','Weekly extra','Weekly short',
                 'Attendance %','On-time %','Hours met %','Breaks kept %','At desk %',
                 'Target hours','Hours punched','Excused hours','Hours worked',
                 'Days worked on offs','Extra hours','Saturdays worked','Saturday extra',
@@ -5972,10 +5972,10 @@ function ensureDirPerm(dir, byClick, mode){
              + '+0.10*' + cell('At desk %', rowNo) + ')*100,0)',
           s:band },
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
-        /* What the weeks ran short by, added up. The hours over are worked out
-           beside it and left off the sheet: time given back is already said by
-           the extra-hours and Saturday columns, and what a reader wants from
-           the weeks is what is still owed. */
+        /* Over and under across the weeks, each on its own. A week forty
+           minutes over and a week forty minutes under is not two steady weeks,
+           and one netted figure cannot tell the two apart. */
+        { n:(wk.extraMin || 0) / 1440, s:(wk.extraMin ? 'ok' : zeb) + '||t' },
         { n:(wk.shortMin || 0) / 1440, s:(wk.shortMin ? 'bad' : zeb) + '||t' },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
@@ -6045,7 +6045,7 @@ function ensureDirPerm(dir, byClick, mode){
       bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
     });
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 12, 9, 20, 12, 12, 10, 11, 11, 10, 12, 13, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
+             widths:[20, 12, 9, 20, 12, 12, 12, 10, 11, 11, 10, 12, 13, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
              bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }
