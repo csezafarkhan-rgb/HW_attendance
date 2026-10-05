@@ -5389,36 +5389,74 @@ function ensureDirPerm(dir, byClick, mode){
     earlyExc:'FFFBEBD2', weekend:'FFF7C9C6', sat:'FFE4E9F0', wfh:'FF8FC65E', holiday:'FF6E4BB8',
     leave:'FF4E535B', visit:'FF1B6E3C', alert:'FFF26B5E', head:'FFB7F0F5',
     ok:'FFCDE9CF', warn:'FFFFF0B3', bad:'FFF8C9C4', half:'FFC9A227', short:'FF8E5BB5',
-    lvHead:'FFF0C8CB', lvSub:'FFF3D9DB', lvLabel:'FFEFEDF1'
+    lvHead:'FFF0C8CB', lvSub:'FFF3D9DB', lvLabel:'FFEFEDF1',
+    /* The bands that carry a name rather than a figure, and the faint stripe
+       that walks the eye along a date. Added rather than folded into `head`,
+       so nothing already coloured changes. */
+    empBand:'FF20304A', empShift:'FF41536F', colHdr:'FFE8EDF5', zebra:'FFF7F9FC',
+    gap:'FFFFFFFF'                              // the lane between two people
   };
   var XLKEYS = Object.keys(XLF);
-  function xlStyleIdx(key){ var i = XLKEYS.indexOf(key); return i < 0 ? 1 : (i + 1); }
+  /* A cell is a fill and, where it walls somebody off, heavy edges: 'ok|LR' is
+     the ok fill with a thick left and right. Every fill exists in all sixteen
+     combinations, so a style is one lookup. */
+  var XL_EDGES = ['','L','R','LR','T','LT','RT','LRT','B','LB','RB','LRB','TB','LTB','RTB','LRTB'];
+  function xlEdgeIdx(e){
+    var want = String(e || '').split('').sort().join('');
+    for(var i=0;i<XL_EDGES.length;i++){
+      if(XL_EDGES[i].split('').sort().join('') === want) return i;
+    }
+    return 0;
+  }
+  function xlStyleIdx(key){
+    var p = String(key == null ? 'none' : key).split('|');
+    var f = XLKEYS.indexOf(p[0]);
+    if(f < 0) f = XLKEYS.indexOf('none');
+    return 1 + f * XL_EDGES.length + xlEdgeIdx(p[1]);
+  }
   function _stylesXml(){
     var fills = '<fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>';
     XLKEYS.forEach(function(k){
       fills += '<fill><patternFill patternType="solid"><fgColor rgb="'+XLF[k]+'"/><bgColor indexed="64"/></patternFill></fill>';
     });
+    /* A border per combination of heavy edges: hairline where a cell only meets
+       its neighbour, a dark medium rule where it meets the next person. */
+    var borders = '<border/>';
+    XL_EDGES.forEach(function(e){
+      var side = function(name){
+        var heavy = e.indexOf(name.charAt(0).toUpperCase()) > -1;
+        return '<' + name + ' style="' + (heavy ? 'medium' : 'thin') + '">'
+             + '<color rgb="' + (heavy ? 'FF334155' : 'FFC9CFD8') + '"/></' + name + '>';
+      };
+      borders += '<border>' + side('left') + side('right') + side('top') + side('bottom') + '</border>';
+    });
     var xfs = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>';
     XLKEYS.forEach(function(k, i){
-      var white = (k==='leave'||k==='visit'||k==='half'||k==='short'||k==='alert'||k==='holiday') ? 1 : 0;
-      xfs += '<xf numFmtId="0" fontId="'+white+'" fillId="'+(i+2)+'" borderId="1" xfId="0" '
-           + 'applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">'
-           + '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>';
+      var white = (k==='leave'||k==='visit'||k==='half'||k==='short'||k==='alert'||k==='holiday'
+                   ||k==='empBand'||k==='empShift') ? 1 : 0;
+      XL_EDGES.forEach(function(e, j){
+        /* The lane between two people carries no rule of its own - it is the
+           gap that does the separating. */
+        var b = (k === 'gap') ? 0 : (j + 1);
+        xfs += '<xf numFmtId="0" fontId="'+white+'" fillId="'+(i+2)+'" borderId="'+b+'" xfId="0" '
+             + 'applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">'
+             + '<alignment horizontal="center" vertical="center" wrapText="1"/></xf>';
+      });
     });
-    var thin='<left style="thin"><color rgb="FFC9CFD8"/></left><right style="thin"><color rgb="FFC9CFD8"/></right>'
-           + '<top style="thin"><color rgb="FFC9CFD8"/></top><bottom style="thin"><color rgb="FFC9CFD8"/></bottom>';
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
       + '<fonts count="2"><font><sz val="10"/><name val="Calibri"/></font>'
       + '<font><sz val="10"/><color rgb="FFFFFFFF"/><b/><name val="Calibri"/></font></fonts>'
       + '<fills count="'+(XLKEYS.length+2)+'">'+fills+'</fills>'
-      + '<borders count="2"><border/><border>'+thin+'</border></borders>'
+      + '<borders count="'+(XL_EDGES.length+1)+'">'+borders+'</borders>'
       + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-      + '<cellXfs count="'+(XLKEYS.length+1)+'">'+xfs+'</cellXfs>'
+      + '<cellXfs count="'+(XLKEYS.length*XL_EDGES.length+1)+'">'+xfs+'</cellXfs>'
       + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
   }
-  /* rows: [[{v,s} | string, ...], ...]   merges: ["A1:F1", ...] */
-  function _sheetXmlStyled(rows, merges, colWidths){
+  /* rows: [[{v,s} | string, ...], ...]   merges: ["A1:F1", ...]
+     opts: {freeze:{row,col}, landscape:true} - the headers stay put as you
+     scroll, and the sheet comes out of the printer fitted to the page. */
+  function _sheetXmlStyled(rows, merges, colWidths, opts){
     var sd='';
     for(var ri=0; ri<rows.length; ri++){
       var row=rows[ri]||[]; sd+='<row r="'+(ri+1)+'">';
@@ -5439,9 +5477,70 @@ function ensureDirPerm(dir, byClick, mode){
     var mg = (merges&&merges.length)
       ? '<mergeCells count="'+merges.length+'">'+merges.map(function(r){ return '<mergeCell ref="'+r+'"/>'; }).join('')+'</mergeCells>'
       : '';
+    var o = opts || {};
+    var views = '';
+    if(o.freeze && (o.freeze.row || o.freeze.col)){
+      var fr = o.freeze.row || 0, fc = o.freeze.col || 0;
+      views = '<sheetViews><sheetView workbookViewId="0"><pane'
+            + (fc ? (' xSplit="'+fc+'"') : '') + (fr ? (' ySplit="'+fr+'"') : '')
+            + ' topLeftCell="'+_colLetter(fc)+(fr+1)+'" activePane="bottomRight" state="frozen"/>'
+            + '</sheetView></sheetViews>';
+    }
+    /* Children have to come in this order or Excel calls the file corrupt. */
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-      + cols + '<sheetData>'+sd+'</sheetData>' + mg + '</worksheet>';
+      + '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
+      + views + cols + '<sheetData>'+sd+'</sheetData>' + mg
+      + '<pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>'
+      + '<pageSetup orientation="'+(o.landscape===false?'portrait':'landscape')+'" '
+      +   'fitToWidth="1" fitToHeight="0" paperSize="9"/>'
+      + '</worksheet>';
+  }
+  /* Several styled sheets in one workbook. The single-sheet builder below is
+     this with one sheet, kept because the Leave Record still uses it. */
+  function buildStyledXlsxMulti(sheets){
+    var files = [], ov = '', wbs = '', wbr = '', used = {};
+    /* Settled once: two people with the same name get different tabs, and the
+       print titles below must point at the name the tab actually carries. */
+    var tabNames = sheets.map(function(sh){ return _safeSheetName(sh.name, used); });
+    sheets.forEach(function(sh, i){
+      var idx = i + 1;
+      files.push({ name:'xl/worksheets/sheet'+idx+'.xml',
+                   data:_sheetXmlStyled(sh.rows, sh.merges, sh.widths, sh) });
+      ov  += '<Override PartName="/xl/worksheets/sheet'+idx+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+      wbs += '<sheet name="'+_xesc(tabNames[i])+'" sheetId="'+idx+'" r:id="rId'+idx+'"/>';
+      wbr += '<Relationship Id="rId'+idx+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+idx+'.xml"/>';
+    });
+    var styleId = sheets.length + 1;
+    var CT='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      +'<Default Extension="xml" ContentType="application/xml"/>'
+      +'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+      +'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+      + ov + '</Types>';
+    var RELS='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+    /* Print titles: the header rows are repeated at the top of every printed
+       page, so page four still says whose column is whose. */
+    var names = sheets.map(function(sh, i){
+      if(!sh.repeatRows) return '';
+      /* A quote inside a sheet name is doubled, the way a spreadsheet reads it. */
+      var ref = "'" + tabNames[i].replace(/'/g, "''") + "'!$1:$" + sh.repeatRows;
+      return '<definedName name="_xlnm.Print_Titles" localSheetId="'+i+'">' + _xesc(ref) + '</definedName>';
+    }).join('');
+    var WB='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+      +'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+wbs+'</sheets>'
+      + (names ? ('<definedNames>'+names+'</definedNames>') : '') + '</workbook>';
+    var WBR='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + wbr + '<Relationship Id="rId'+styleId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+      + '</Relationships>';
+    return _zipStore([
+      {name:'[Content_Types].xml', data:CT},
+      {name:'_rels/.rels', data:RELS},
+      {name:'xl/workbook.xml', data:WB},
+      {name:'xl/_rels/workbook.xml.rels', data:WBR},
+      {name:'xl/styles.xml', data:_stylesXml()}
+    ].concat(files));
   }
   function buildStyledXlsx(sheetName, rows, merges, colWidths){
     var CT='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -5469,133 +5568,247 @@ function ensureDirPerm(dir, byClick, mode){
   }
 
 
-  /* The on-screen grid, as a spreadsheet: dates down, six columns per employee,
-     week-status bands in place, cells filled the same colour they carry here. */
-  function buildGridXlsx(){
-    var emps = visibleEmployees();
-    // The week bands need the same figures the grid computes; that map is local
-    // to the renderer, so work them out here rather than reaching for it.
-    var weekInfo = {};
-    emps.forEach(function(e){
-      try{ weekInfo[e.name] = computeWeeklyShortHours(e.name, allSelectedDates()); }
-      catch(err){ weekInfo[e.name] = {weekTotals:{}, weekDays:{}}; }
-    });
-    if(!emps.length) return null;
-    var dates = allSelectedDates();
-    if(!dates.length) return null;
+  /* ---------- The grid as a workbook ----------
+     One file, three kinds of sheet: everyone side by side with each person
+     walled off, a summary of the month, and a sheet per person that prints on
+     a page. The wide sheet used to be the whole export - thirteen people times
+     six columns is seventy-nine columns of identical hairline border, with
+     nothing to say where one person stopped and the next began. */
+  var GRID_COLS = ['IN','OUT','TOTAL','IN DUR','OUT DUR','PUN'];
 
-    var COLS = 6;                        // IN, OUT, TOTAL, IN DUR, OUT DUR, PUNCHES
+  /* What one person's day says, as cells. Returns either a single cell to be
+     merged across the block, or the six figures. The reading is the grid's, so
+     a sheet never states something the screen does not. */
+  function gridDayCells(empName, dateStr){
+    var hol = getOfficialLeave(dateStr);
+    if(hol) return { span:{ v:(hol.name || hol || 'Holiday'), s:'holiday' } };
+    var ov  = getOverride(empName, dateStr);
+    if(ov){
+      var cat  = OV_CATS[ov.cat] || OV_CATS.OTHER;
+      var fill = ov.cat==='LEAVE' ? 'leave' : (ov.cat==='WFH' ? 'wfh' : (ov.cat==='VISIT' ? 'visit' : 'leave'));
+      var dur  = wfhCellDuration(empName, dateStr, ov);
+      return { span:{ v:cat.tag(ov.detail)+(dur?(' · '+dur):''), s:fill } };
+    }
+    var rec = getRecord(empName, dateStr);
+    if(!rec || rec.st==='WO') return { span:{ v: (rec&&rec.st==='WO') ? 'Weekly Off' : '—',
+                                              s: (rec&&rec.st==='WO') ? 'weekend' : 'none' } };
+    if(rec.st==='AB') return { span:{ v:'Absent', s:'alert' } };
+    var lx = getLateExcuse(empName, dateStr), ex = getEarlyExcuse(empName, dateStr);
+    var inFill  = isLate(empName, rec)  ? (lx?'lateExc':'late')   : 'none';
+    var outFill = isEarly(empName, rec) ? (ex?'earlyExc':'early') : 'none';
+    var hd = getHalfDay(empName, dateStr);
+    var durs = computeDurations(rec);
+    return { cells:[
+      { v:fmtTime(rec['in']), s:inFill },
+      { v:fmtTime(rec.out),   s:outFill },
+      { v:(durs.totalMin!==null?fmtMin(durs.totalMin):'')+(hd?(' '+hdMark(hd.kind)):''),
+        s: hd ? (hd.kind==='SHORT' ? 'short' : 'half') : 'none' },
+      { v:rec.dur||(durs.inMin?fmtMin(durs.inMin):''), s:'none' },
+      { v:durs.outMin!==null?fmtMin(durs.outMin):'', s:'none' },
+      { v:String(rec.c||0), s:'none' }
+    ] };
+  }
+
+  /* The week band, worded exactly as the grid words it. */
+  function gridWeekVerdict(info, wk){
+    var net  = (info && info.weekTotals[wk]) || 0;
+    var days = (info && info.weekDays[wk]) || 0;
+    var open = !!(info && info.weekOpen && info.weekOpen[wk]);
+    var lead = open ? 'So far · ' : 'Completed · ';
+    if(open && days===0) return { s:'warn', v:'Week in progress' };
+    if(days===0 || net===0) return { s:'ok', v:lead+'full hours' };
+    if(net>0) return { s:'ok', v:lead+net+'m extra' };
+    var shortMin=-net, lev=Math.round(weeklyLeverageMin/5*days);
+    if(shortMin<=lev) return { s:'warn', v:lead+'within leverage of '+lev+'m, total '+shortMin+'m short' };
+    if(open) return { s:'bad', v:lead+(shortMin-lev)+'m over leverage of '+lev+'m, total '+shortMin+'m short' };
+    return { s:'bad', v:'Not completed · '+(shortMin-lev)+'m over leverage of '+lev+'m, total '+shortMin+'m short' };
+  }
+
+  function gridDateLabel(dateStr){
+    var isHol = getOfficialLeave(dateStr);
+    var label = monthLabelShort(dateStr.slice(0,7)).split(' ')[0]+' '+pad2(parseInt(dateStr.slice(8),10))
+              + ', '+weekdayName(dateStr);
+    var dow = new Date(dateStr+'T00:00:00').getDay();
+    return { v: label + (isHol ? (' · ' + (isHol.name || isHol)) : ''),
+             s: isHol ? 'holiday' : (dow===0 ? 'weekend' : (dow===6 ? 'sat' : 'zebra')) };
+  }
+
+  /* ---- sheet one: everyone, each walled off from the next ---- */
+  function gridAllSheet(emps, dates, weekInfo, coName){
+    var COLS = GRID_COLS.length, STEP = COLS + 1;        // six columns and the lane beside them
     var rows = [], merges = [];
-    var C = function(i){ return _colLetter(i); };
+    var C = _colLetter;
+    var lastCol = C(emps.length * STEP);
+    var edge = function(i, extra){                        // the walls of block i
+      return (extra || '') + 'LR';
+    };
+    var at = function(i){ return 1 + i * STEP; };         // first column of block i
 
-    // title
-    var coName = (coNameEl && coNameEl.textContent) ? coNameEl.textContent.trim() : 'Attendance Record';
-    rows.push([{v:coName, s:'head'}]);
-    merges.push('A1:'+C(emps.length*COLS)+'1');
-    rows.push([{v:state.selectedMonths.map(monthLabel).join(', '), s:'head'}]);
-    merges.push('A2:'+C(emps.length*COLS)+'2');
+    rows.push([{ v:coName, s:'empBand' }]);
+    merges.push('A1:'+lastCol+'1');
+    rows.push([{ v:state.selectedMonths.map(monthLabel).join(', ')
+                 + ' · ' + emps.length + ' of ' + EMPLOYEES.length + ' employees shown', s:'empShift' }]);
+    merges.push('A2:'+lastCol+'2');
 
-    // employee band + shift band
-    var r1=['' ], r2=[''];
+    var band = [{ v:'', s:'empBand|T' }], shift = [{ v:'', s:'empShift' }];
     emps.forEach(function(e, i){
-      var start = 1 + i*COLS;
-      r1.push({v:e.name, s:'head'});
-      r2.push({v:'Shift '+getShift(e.name), s:'head'});
-      for(var k=1;k<COLS;k++){ r1.push({v:'', s:'head'}); r2.push({v:'', s:'head'}); }
-      merges.push(C(start)+'3:'+C(start+COLS-1)+'3');
-      merges.push(C(start)+'4:'+C(start+COLS-1)+'4');
+      band.push({ v:e.name, s:'empBand|'+edge(i,'T') });
+      shift.push({ v:'Shift '+getShift(e.name), s:'empShift|'+edge(i) });
+      for(var k=1;k<COLS;k++){ band.push({v:'', s:'empBand|T'}); shift.push({v:'', s:'empShift'}); }
+      band.push({ v:'', s:'gap' }); shift.push({ v:'', s:'gap' });
+      merges.push(C(at(i))+'3:'+C(at(i)+COLS-1)+'3');
+      merges.push(C(at(i))+'4:'+C(at(i)+COLS-1)+'4');
     });
-    rows.push(r1); rows.push(r2);
+    rows.push(band); rows.push(shift);
 
-    // column headers
-    var hdr=[{v:'Date', s:'head'}];
-    emps.forEach(function(){
-      ['IN','OUT','TOTAL DURATION','IN DURATION','OUT DURATION','PUNCHES'].forEach(function(h){ hdr.push({v:h, s:'head'}); });
+    var hdr = [{ v:'Date', s:'colHdr|B' }];
+    emps.forEach(function(e, i){
+      GRID_COLS.forEach(function(h, k){
+        hdr.push({ v:h, s:'colHdr|B' + (k===0 ? 'L' : (k===COLS-1 ? 'R' : '')) });
+      });
+      hdr.push({ v:'', s:'gap' });
     });
     rows.push(hdr);
 
-    dates.forEach(function(dateStr){
-      var dow = new Date(dateStr+'T00:00:00').getDay();
-      var dLabel = monthLabelShort(dateStr.slice(0,7)).split(' ')[0]+' '+pad2(parseInt(dateStr.slice(8),10))+', '+weekdayName(dateStr);
-      var isHol = !!getOfficialLeave(dateStr);
-      var row = [{v:dLabel+(isHol?(' \u00b7 '+getOfficialLeave(dateStr)):''),
-                  s: isHol ? 'holiday' : (dow===0?'weekend':(dow===6?'sat':'none'))}];
-      emps.forEach(function(emp){
-        var ov  = getOverride(emp.name, dateStr);
-        var rec = getRecord(emp.name, dateStr);
-        var hol = getOfficialLeave(dateStr);
-        if(hol){
-          row.push({v:hol, s:'none'});
-          for(var k=1;k<COLS;k++) row.push({v:'', s:'none'});
-          return;
+    dates.forEach(function(dateStr, di){
+      var dl = gridDateLabel(dateStr);
+      var zeb = (di % 2) === 1;
+      var row = [{ v:dl.v, s:dl.s }];
+      emps.forEach(function(emp, i){
+        var day = gridDayCells(emp.name, dateStr);
+        if(day.span){
+          row.push({ v:day.span.v, s:day.span.s+'|'+edge(i) });
+          for(var k=1;k<COLS;k++) row.push({ v:'', s:day.span.s+(k===COLS-1?'|R':'') });
+          merges.push(C(at(i))+(rows.length+1)+':'+C(at(i)+COLS-1)+(rows.length+1));
+        } else {
+          day.cells.forEach(function(c, k){
+            var fill = (c.s === 'none' && zeb) ? 'zebra' : c.s;      // the stripe only where nothing else speaks
+            row.push({ v:c.v, s:fill + '|' + (k===0 ? 'L' : (k===COLS-1 ? 'R' : '')) });
+          });
         }
-        if(ov){
-          var cat = OV_CATS[ov.cat] || OV_CATS.OTHER;
-          var fill = ov.cat==='LEAVE' ? 'leave' : (ov.cat==='WFH' ? 'wfh' : (ov.cat==='VISIT' ? 'visit' : 'leave'));
-          var ovDur = wfhCellDuration(emp.name, dateStr, ov);
-          row.push({v:cat.tag(ov.detail)+(ovDur?(' \u00b7 '+ovDur):''), s:fill});
-          for(var k2=1;k2<COLS;k2++) row.push({v:'', s:fill});
-          return;
-        }
-        if(!rec || rec.st==='WO'){
-          row.push({v: rec&&rec.st==='WO' ? 'Weekly Off' : '', s: rec&&rec.st==='WO' ? 'weekend' : 'none'});
-          for(var k3=1;k3<COLS;k3++) row.push({v:'', s: rec&&rec.st==='WO' ? 'weekend' : 'none'});
-          return;
-        }
-        if(rec.st==='AB'){
-          row.push({v:'Absent', s:'alert'});
-          for(var k4=1;k4<COLS;k4++) row.push({v:'', s:'alert'});
-          return;
-        }
-        var lx = getLateExcuse(emp.name, dateStr), ex = getEarlyExcuse(emp.name, dateStr);
-        var inFill  = isLate(emp.name, rec)  ? (lx?'lateExc':'late')   : 'none';
-        var outFill = isEarly(emp.name, rec) ? (ex?'earlyExc':'early') : 'none';
-        var hd = getHalfDay(emp.name, dateStr);
-        var durs = computeDurations(rec);
-        row.push({v:fmtTime(rec['in']), s:inFill});
-        row.push({v:fmtTime(rec.out),   s:outFill});
-        row.push({v:(durs.totalMin!==null?fmtMin(durs.totalMin):'')+(hd?(' '+hdMark(hd.kind)):''),
-                  s: hd ? (hd.kind==='SHORT' ? 'short' : 'half') : 'none'});   // excel fill: only two tints exist
-        row.push({v:rec.dur||(durs.inMin?fmtMin(durs.inMin):''), s:'none'});
-        row.push({v:durs.outMin!==null?fmtMin(durs.outMin):'', s:'none'});
-        row.push({v:String(rec.c||0), s:'none'});
+        row.push({ v:'', s:'gap' });
       });
       rows.push(row);
 
-      if(dow===0 && state.showWeekStatus){
+      if(new Date(dateStr+'T00:00:00').getDay()===0 && state.showWeekStatus){
         var wk = mondayOf(dateStr);
-        var wrow = [{v:'Week status', s:'head'}];
+        var wrow = [{ v:'Week status', s:'colHdr' }];
         emps.forEach(function(emp, i){
-          var info = weekInfo[emp.name];
-          var net  = (info && info.weekTotals[wk]) || 0;
-          var days = (info && info.weekDays[wk]) || 0;
-          var open = !!(info && info.weekOpen && info.weekOpen[wk]);
-          var fill, text;
-          /* Same reading as the grid, so an export never states a verdict the
-             screen has not reached. */
-          // Word for word what the grid says, so a sheet never reads differently.
-          var lead = open ? 'So far \u00b7 ' : 'Completed \u00b7 ';
-          if(open && days===0){ fill='warn'; text='Week in progress'; }
-          else if(days===0 || net===0){ fill='ok'; text=lead+'full hours'; }
-          else if(net>0){ fill='ok'; text=lead+net+'m extra'; }
-          else {
-            var shortMin=-net, lev=Math.round(weeklyLeverageMin/5*days);
-            if(shortMin<=lev){ fill='warn'; text=lead+'within leverage of '+lev+'m, total '+shortMin+'m short'; }
-            else if(open){ fill='bad'; text=lead+(shortMin-lev)+'m over leverage of '+lev+'m, total '+shortMin+'m short'; }
-            else { fill='bad'; text='Not completed \u00b7 '+(shortMin-lev)+'m over leverage of '+lev+'m, total '+shortMin+'m short'; }
-          }
-          wrow.push({v:text, s:fill});
-          for(var k5=1;k5<COLS;k5++) wrow.push({v:'', s:fill});
-          var st0 = 1 + i*COLS, rn = rows.length + 1;
-          merges.push(C(st0)+rn+':'+C(st0+COLS-1)+rn);
+          var vd = gridWeekVerdict(weekInfo[emp.name], wk);
+          wrow.push({ v:vd.v, s:vd.s+'|'+edge(i) });
+          for(var k=1;k<COLS;k++) wrow.push({ v:'', s:vd.s+(k===COLS-1?'|R':'') });
+          wrow.push({ v:'', s:'gap' });
+          merges.push(C(at(i))+(rows.length+1)+':'+C(at(i)+COLS-1)+(rows.length+1));
         });
         rows.push(wrow);
       }
     });
 
-    var widths = [18];
-    emps.forEach(function(){ widths.push(11,11,9,9,9,8); });
-    return {rows:rows, merges:merges, widths:widths};
+    var widths = [17];
+    emps.forEach(function(){ widths.push(9.5, 9.5, 8, 8, 8, 5.5, 1.2); });
+    return { name:'All employees', rows:rows, merges:merges, widths:widths,
+             freeze:{ row:5, col:1 }, repeatRows:5, landscape:true };
+  }
+
+  /* ---- a sheet of one person's month ---- */
+  function gridOneSheet(emp, dates, weekInfo, coName){
+    var COLS = GRID_COLS.length;
+    var rows = [], merges = [], C = _colLetter, last = C(COLS);
+    rows.push([{ v:emp.name+' · Shift '+getShift(emp.name), s:'empBand|LRT' }]);
+    merges.push('A1:'+last+'1');
+    rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', '), s:'empShift|LR' }]);
+    merges.push('A2:'+last+'2');
+    var hdr = [{ v:'Date', s:'colHdr|BL' }];
+    GRID_COLS.forEach(function(h, k){ hdr.push({ v:h, s:'colHdr|B'+(k===COLS-1?'R':'') }); });
+    rows.push(hdr);
+
+    dates.forEach(function(dateStr, di){
+      var dl = gridDateLabel(dateStr), zeb = (di % 2) === 1;
+      var day = gridDayCells(emp.name, dateStr);
+      var row = [{ v:dl.v, s:dl.s+'|L' }];
+      if(day.span){
+        row.push({ v:day.span.v, s:day.span.s });
+        for(var k=1;k<COLS;k++) row.push({ v:'', s:day.span.s+(k===COLS-1?'|R':'') });
+        merges.push('B'+(rows.length+1)+':'+last+(rows.length+1));
+      } else {
+        day.cells.forEach(function(c, k){
+          var fill = (c.s === 'none' && zeb) ? 'zebra' : c.s;
+          row.push({ v:c.v, s:fill+(k===COLS-1?'|R':'') });
+        });
+      }
+      rows.push(row);
+      if(new Date(dateStr+'T00:00:00').getDay()===0 && state.showWeekStatus){
+        var vd = gridWeekVerdict(weekInfo[emp.name], mondayOf(dateStr));
+        var wrow = [{ v:'Week status', s:'colHdr|L' }, { v:vd.v, s:vd.s }];
+        for(var k2=1;k2<COLS;k2++) wrow.push({ v:'', s:vd.s+(k2===COLS-1?'|R':'') });
+        merges.push('B'+(rows.length+1)+':'+last+(rows.length+1));
+        rows.push(wrow);
+      }
+    });
+    return { name:emp.name, rows:rows, merges:merges,
+             widths:[17, 10, 10, 8.5, 8.5, 8.5, 6.5],
+             freeze:{ row:3, col:1 }, repeatRows:3, landscape:false };
+  }
+
+  /* ---- the month in figures, one row a person ---- */
+  function gridSummarySheet(emps, dates, coName){
+    var rows = [], merges = [], C = _colLetter;
+    var head = ['Employee','Shift','Worked','Days','Late','Early','Leave','From home','Visit','Absent'];
+    var last = C(head.length-1);
+    rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', '), s:'empBand|LRT' }]);
+    merges.push('A1:'+last+'1');
+    rows.push(head.map(function(h, i){
+      return { v:h, s:'colHdr|B'+(i===0?'L':(i===head.length-1?'R':'')) };
+    }));
+    emps.forEach(function(emp, ei){
+      var worked=0, days=0, late=0, early=0, leave=0, wfh=0, visit=0, absent=0;
+      dates.forEach(function(d){
+        if(getOfficialLeave(d)) return;
+        var ov = getOverride(emp.name, d);
+        if(ov && ov.cat==='LEAVE'){ leave++; return; }
+        if(ov && ov.cat==='WFH'){ wfh++; worked += workedMinutes(emp.name, d) || 0; return; }
+        if(ov && ov.cat==='VISIT'){ visit++; worked += workedMinutes(emp.name, d) || 0; return; }
+        var rec = getRecord(emp.name, d);
+        if(!rec || rec.st==='WO') return;
+        if(rec.st==='AB'){ absent++; return; }
+        days++;
+        worked += workedMinutes(emp.name, d) || 0;
+        if(isLate(emp.name, rec))  late++;
+        if(isEarly(emp.name, rec)) early++;
+      });
+      var zeb = (ei % 2) === 1 ? 'zebra' : 'none';
+      rows.push([
+        { v:emp.name, s:'zebra|L' }, { v:getShift(emp.name), s:zeb },
+        { v:fmtMin(worked), s:zeb }, { v:String(days), s:zeb },
+        { v:String(late),  s: late  ? 'late'  : zeb },
+        { v:String(early), s: early ? 'early' : zeb },
+        { v:String(leave), s: leave ? 'leave' : zeb },
+        { v:String(wfh),   s: wfh   ? 'wfh'   : zeb },
+        { v:String(visit), s: visit ? 'visit' : zeb },
+        { v:String(absent), s:(absent ? 'alert' : zeb) + '|R' }
+      ]);
+    });
+    return { name:'Summary', rows:rows, merges:merges,
+             widths:[20, 12, 9, 7, 7, 7, 8, 11, 7, 8],
+             freeze:{ row:2, col:1 }, repeatRows:2, landscape:false };
+  }
+
+  /* Every sheet of the grid workbook, in the order they open. */
+  function buildGridWorkbook(){
+    var emps = visibleEmployees();
+    if(!emps.length) return null;
+    var dates = allSelectedDates();
+    if(!dates.length) return null;
+    var weekInfo = {};
+    emps.forEach(function(e){
+      try{ weekInfo[e.name] = computeWeeklyShortHours(e.name, dates); }
+      catch(err){ weekInfo[e.name] = {weekTotals:{}, weekDays:{}}; }
+    });
+    var coName = (coNameEl && coNameEl.textContent) ? coNameEl.textContent.trim() : 'Attendance Record';
+    var sheets = [ gridAllSheet(emps, dates, weekInfo, coName),
+                   gridSummarySheet(emps, dates, coName) ];
+    emps.forEach(function(e){ sheets.push(gridOneSheet(e, dates, weekInfo, coName)); });
+    return sheets;
   }
   /* The Leave Record is already a table on screen; lift it straight out rather
      than rebuilding its logic, so the two can never drift apart. */
@@ -5645,21 +5858,22 @@ function ensureDirPerm(dir, byClick, mode){
   }
   function exportGridExcel(){
     try{ downloadDailySnapshot(false); }catch(e){ console.error(e); }
-    var g;
-    try{ g = buildGridXlsx(); }
+    var sheets;
+    try{ sheets = buildGridWorkbook(); }
     catch(e){
       console.error(e);
       showUploadStatus('Could not build the export: '+((e&&e.message)||e), true);
       return;
     }
-    if(!g){ showUploadStatus('Nothing to export \u2014 no employees or dates in view.', true); return; }
-    var blob = buildStyledXlsx('Attendance', g.rows, g.merges, g.widths);
+    if(!sheets){ showUploadStatus('Nothing to export — no employees or dates in view.', true); return; }
+    var blob = buildStyledXlsxMulti(sheets);
     var a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
     a.download='Attendance_Grid_'+(state.selectedMonths[0]||'export')+'.xlsx';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ try{a.remove();}catch(_){ } URL.revokeObjectURL(a.href); }, 1500);
-    showUploadStatus('Excel exported with the grid layout and colours.', false);
+    showUploadStatus('Excel exported — everyone side by side on the first sheet, a summary, '
+      + 'then a sheet each for the ' + (sheets.length - 2) + ' employees shown.', false);
   }
 
   /* A complete, restorable snapshot: the punch records plus every setting,
