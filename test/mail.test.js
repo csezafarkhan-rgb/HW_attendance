@@ -402,6 +402,38 @@ process.env.SESSION_SECRET = SECRET;
     /WFH/.test(withJpeg.html) && /Work from home/.test(withJpeg.html));
 
 
+  /* ---- the whole month, as a picture and a workbook ---- */
+  const onePng2 = 'data:image/png;base64,' + onePng;
+  const fakeBook = 'UEsDBBQAAAAIAA' + 'A'.repeat(600);          // stands in for the .xlsx
+  const monthPv = await asAdmin('POST', '/api/mail/month', {
+    png: onePng2, inline: onePng2, xlsx: fakeBook, fileName: 'Attendance_Grid_2026-09.xlsx',
+    monthLabel: 'September 2026', slug: '2026-09', shown: 2, hidden: 1, days: 30, preview: true });
+  check('the month message is built for looking at first',
+    monthPv.status === 200 && /September 2026/.test(monthPv.body.preview.subject)
+      && monthPv.body.file === true, monthPv.body && (monthPv.body.error || monthPv.body.preview));
+  check('and it says what is in the file',
+    /Attendance_Grid_2026-09\.xlsx/.test(monthPv.body.preview.html)
+      && /a sheet for each person/.test(monthPv.body.preview.html));
+  check('with the month and the head-count stated',
+    /September 2026/.test(monthPv.body.preview.html) && />2 of 3</.test(monthPv.body.preview.html)
+      && />30</.test(monthPv.body.preview.html), monthPv.body.preview.html.slice(0, 200));
+  const monthBefore = sent.length;
+  const monthOut = await asAdmin('POST', '/api/mail/month', { send: 'preview' });
+  const monthMail = sent[sent.length - 1];
+  check('confirming sends it, with the picture and the workbook both attached',
+    monthOut.status === 200 && sent.length === monthBefore + 1
+      && (monthMail.attachments || []).length === 2
+      && monthMail.attachments.some(a => /\.png$/.test(a.filename))
+      && monthMail.attachments.some(a => a.filename === 'Attendance_Grid_2026-09.xlsx'),
+    monthMail && (monthMail.attachments || []).map(a => a.filename));
+  /* A workbook too large to send must not take the message with it. */
+  const big = await asAdmin('POST', '/api/mail/month', {
+    png: onePng2, xlsx: 'A'.repeat(19 * 1024 * 1024), fileName: 'huge.xlsx',
+    monthLabel: 'September 2026', shown: 2, days: 30, preview: true });
+  check('a workbook too big to send is left out, and the message still goes',
+    big.status === 200 && big.body.file === false && !/huge\.xlsx/.test(big.body.preview.html),
+    big.body && big.body.file);
+
   /* The picture of a month's record runs to a megabyte or more. Parsed by the
      200kb limit the whole send came back 413 and the message went out bare. */
   const bigPng = 'iVBORw0KGgo' + 'A'.repeat(400 * 1024);

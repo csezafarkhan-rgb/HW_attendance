@@ -88,7 +88,7 @@ app.use(helmet({
    parsed by the small limit first, every emailed screenshot came back 413 and
    the message went out without it. */
 const IMPORT_PATHS = ['/api/dataset', '/api/records', '/api/employees', '/api/device/records',
-                      '/api/mail/daily'];
+                      '/api/mail/daily', '/api/mail/month'];
 const smallJson = express.json({ limit: '200kb' });
 const bigJson = express.json({ limit: '25mb' });
 app.use(function (req, res, next) {
@@ -1764,6 +1764,60 @@ async function sendDailyEmail(orgId, day, opts) {
   await logMail(orgId, 'attendance', { to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments }, r);
   return Object.assign({ to: to.length, cc: (settings.cc || []).length, attached: attachments.length > 0 }, r);
 }
+/* The month, rather than the day. The dashboard has already drawn the grid and
+   built the workbook - it is the only thing that knows which months are in
+   view - so both arrive here ready, and this addresses the message and sends
+   it. Goes to the Attendance tab's people: it is the same record, over a
+   longer window. */
+const MONTH_XLSX_MAX = 18 * 1024 * 1024;        // base64, before Resend's own limit
+async function sendMonthEmail(orgId, opts) {
+  opts = opts || {};
+  if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
+  const settings = await mailSettings(orgId);
+  const to = await mailRecipients(orgId, settings);
+  if (!to.length) return { ok: false, error: NO_ADDRESS };
+
+  const attachments = [];
+  const b64 = v => String(v || '').replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+  const raw = typeof opts.png === 'string' ? opts.png : '';
+  const head = /^data:image\/(png|jpeg);base64,/.exec(raw);
+  const picture = b64(raw);
+  if (picture && /^[A-Za-z0-9+/=]+$/.test(picture) && picture.length < 11 * 1024 * 1024) {
+    attachments.push({ filename: 'attendance-' + clip(opts.slug || 'month', 40)
+                                 + ((head && head[1] === 'jpeg') ? '.jpg' : '.png'),
+                       content: picture });
+  }
+  /* The workbook. Too big to send is not a reason to lose the message - the
+     picture and the figures still go, and the answer says the file did not. */
+  const sheetName = clip(opts.fileName || '', 120).replace(/[^\w .\-]/g, '') || 'attendance.xlsx';
+  const book = b64(opts.xlsx);
+  let fileSent = '';
+  if (book && /^[A-Za-z0-9+/=]+$/.test(book) && book.length < MONTH_XLSX_MAX) {
+    attachments.push({ filename: sheetName, content: book });
+    fileSent = sheetName;
+  }
+
+  let shotUrl = '';
+  try { shotUrl = await keepShot(opts.inline || opts.png); }
+  catch (e) { console.error('the picture could not be kept:', e && e.message); }
+
+  const kv = await sharedKeys(orgId, ['companyInfo']);
+  const mail = mailer.monthEmail({
+    orgName: orgNameOf(kv.companyInfo),
+    monthLabel: clip(opts.monthLabel || '', 120),
+    shown: Number.isFinite(opts.shown) ? opts.shown : null,
+    hidden: Number.isFinite(opts.hidden) ? opts.hidden : 0,
+    days: Number.isFinite(opts.days) ? opts.days : null,
+    fileName: fileSent, shotUrl, siteUrl: mailer.baseUrl()
+  });
+  const msg = { to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments };
+  if (opts.preview) return { ok: true, mail: msg, attachedFile: !!fileSent };
+  const r = await mailer.send(msg);
+  await logMail(orgId, 'month', msg, r);
+  return Object.assign({ to: to.length, cc: (settings.cc || []).length,
+                         attached: attachments.length > 0, file: fileSent }, r);
+}
+
 /* The holidays on the calendar, as {day, name, note}, from the day given
    onwards. The dashboard stores them by date, either as a name or as a name
    with a note beside it. */
@@ -2293,6 +2347,32 @@ app.post('/api/mail/holiday', requireRole('admin'), async (req, res) => {
     keepPreview(req.session.userId, out.mail);
     return res.json({ ok: true, preview: { subject: out.mail.subject, html: out.mail.html },
                       to: out.mail.to, attached: false });
+  }
+  res.status(out.ok ? 200 : 502).json(out);
+});
+app.post('/api/mail/month', requireRole('admin'), bigJson, async (req, res) => {
+  const body = req.body || {};
+  if (body.send === 'preview') {
+    const held = previews.get(req.session.userId);
+    if (!held) return res.status(410).json({ error: 'that preview has expired - open it again' });
+    previews.delete(req.session.userId);
+    const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject,
+                                  html: held.html, attachments: held.attachments });
+    await logMail(req.session.orgId, 'month', held, r);
+    return res.status(r.ok ? 200 : 502).json(Object.assign(
+      { to: held.to.length, attached: (held.attachments || []).length > 0 }, r));
+  }
+  const out = await sendMonthEmail(req.session.orgId, {
+    png: body.png, inline: body.inline, xlsx: body.xlsx, fileName: body.fileName,
+    monthLabel: body.monthLabel, slug: body.slug,
+    shown: Number(body.shown), hidden: Number(body.hidden), days: Number(body.days),
+    preview: !!body.preview
+  });
+  if (body.preview && out.ok && out.mail) {
+    keepPreview(req.session.userId, out.mail);
+    return res.json({ ok: true, preview: { subject: out.mail.subject, html: out.mail.html },
+                      to: out.mail.to, attached: (out.mail.attachments || []).length > 0,
+                      file: out.attachedFile });
   }
   res.status(out.ok ? 200 : 502).json(out);
 });

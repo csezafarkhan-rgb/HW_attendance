@@ -207,6 +207,10 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
 - **Leave**: what is waiting for a decision and any leave taken without a
   request, each with **Approve** and **Reject**. Sent beside the daily message,
   and again on its own as each request is raised.
+- **The full month**, sent by hand from the Share menu: the whole grid for the
+  months in view as a picture, with the Excel workbook attached — everybody
+  side by side on one sheet, a summary of the month, and a sheet for each
+  person. Goes to the Attendance tab's addresses.
 - **A holiday reminder**, a set number of days before a date on the Official
   Leaves calendar (two by default), naming the holiday and what is closed.
 - **The answer, to the person who asked.** Once leave is approved or rejected

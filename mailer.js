@@ -210,6 +210,11 @@ const DEFAULT_TEXT = {
     introNo: 'Hello {name},\n\nYour leave was not approved. Please speak to your manager if that is not what you expected.',
     footer: 'Best regards,\n{org}'
   },
+  month: {
+    subject: 'Attendance \u00b7 {month}',
+    intro: 'Hello,\n\nPlease find the full attendance record for {month} below, and attached as a spreadsheet.',
+    footer: 'Best regards,\n{org}'
+  },
   holiday: {
     subject: 'Holiday \u00b7 {name} \u00b7 {date}',
     intro: 'Hello,\n\nA holiday is coming up. Please plan your work around it.',
@@ -473,6 +478,61 @@ function decisionEmail(o) {
     yes ? 'Your leave is approved' : 'Your leave was not approved', body) };
 }
 
+/* The whole month, rather than the day: the record as a picture and the same
+   thing as a workbook to open in Excel. The daily message answers "who is in
+   today"; this one is what gets sent on to somebody who wants the month. */
+function monthEmail(o) {
+  const words = DEFAULT_TEXT.month;
+  const say = { month: o.monthLabel || '', org: o.orgName || 'Attendance',
+                n: String(o.shown == null ? '' : o.shown), days: String(o.days == null ? '' : o.days) };
+  const body = [];
+  const intro = fillText(o.intro || words.intro, say);
+  if (intro) {
+    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+      + esc(intro) + '</div>');
+  }
+  /* What is in the file, stated before the picture, so it reads even where
+     images are turned off. */
+  const facts = [];
+  if (o.monthLabel) facts.push(['Month', o.monthLabel]);
+  if (o.shown != null) facts.push(['Employees', String(o.shown) + (o.hidden ? (' of ' + (o.shown + o.hidden)) : '')]);
+  if (o.days != null) facts.push(['Days', String(o.days)]);
+  if (facts.length) {
+    body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin:0 0 14px;">'
+      + '<tr>' + facts.map(function (f) {
+          return '<td valign="top" style="padding:0 3px;">'
+            + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:9px 6px;text-align:center;">'
+            + '<div style="font-size:15px;font-weight:700;color:' + INK + ';line-height:1.2;">' + esc(f[1]) + '</div>'
+            + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';">' + esc(f[0]) + '</div>'
+            + '</div></td>';
+        }).join('') + '</tr></table>');
+  }
+  if (o.shotUrl) {
+    body.push('<div style="margin:0 0 14px;">'
+      + '<a href="' + esc(o.shotUrl) + '" style="display:block;">'
+      + '<img src="' + esc(o.shotUrl) + '" alt="The month\u2019s attendance record" '
+      +   'style="width:100%;max-width:100%;border:1px solid ' + LINE + ';border-radius:10px;display:block;"></a>'
+      + '<div style="font-size:11px;color:' + SOFT + ';margin-top:5px;">The picture is scaled to fit; open it for the full size.</div>'
+      + '</div>');
+  }
+  if (o.fileName) {
+    body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + BLUE + ';border-radius:10px;'
+      + 'padding:11px 13px;margin:0 0 10px;font-size:12.5px;line-height:1.5;">'
+      + '<b>' + esc(o.fileName) + '</b> is attached \u2014 one sheet with everybody side by side, '
+      + 'a summary of the month, and a sheet for each person.'
+      + '</div>');
+  }
+  const footer = fillText(o.footer || words.footer, say);
+  if (footer) {
+    body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+  }
+  if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
+  return { subject: subject,
+           html: layout(o.orgName || 'Attendance', 'The month\u2019s attendance record', body) };
+}
+
 /* The holiday reminder: what is closed, when, and how far off it is. */
 function holidayEmail(o) {
   const list = o.holidays || [];
@@ -616,7 +676,7 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay,
-  dailyEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
+  dailyEmail, monthEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

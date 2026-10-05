@@ -4954,8 +4954,10 @@ function renderSignSetting(){
   })();
   /* What the site has sent. Read when the tab is opened, and any one of them
      can be opened to see exactly what arrived. */
-  var MAIL_KIND = { attendance:'Attendance', leave:'Leave', holiday:'Holiday reminder',
-                    request:'A request was raised', test:'Test message' };
+  var MAIL_KIND = { attendance:'Attendance', month:'The full month', leave:'Leave',
+                    holiday:'Holiday reminder', request:'A request was raised',
+                    decision:'A leave was decided', invite:'Set your password',
+                    reset:'Password reset', test:'Test message' };
   function renderMailLog(){
     var box = document.getElementById('mailLogList');
     if(!box) return;
@@ -5791,6 +5793,27 @@ function ensureDirPerm(dir, byClick, mode){
     return { name:'Summary', rows:rows, merges:merges,
              widths:[20, 12, 9, 7, 7, 7, 8, 11, 7, 8],
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:false };
+  }
+
+  /* The same workbook the Excel (grid) button saves, as base64 for a message.
+     Resolves to '' rather than failing: a month message without its spreadsheet
+     is worth less, but still worth sending. */
+  function xlsxForMail(){
+    return new Promise(function(resolve){
+      var sheets = null;
+      try{ sheets = buildGridWorkbook(); }catch(e){ console.error('the workbook could not be built', e); }
+      if(!sheets) return resolve('');
+      var blob;
+      try{ blob = buildStyledXlsxMulti(sheets); }
+      catch(e){ console.error('the workbook could not be written', e); return resolve(''); }
+      var fr = new FileReader();
+      fr.onload = function(){
+        var out = String(fr.result || '');
+        resolve(out.slice(out.indexOf(',') + 1));          // drop the data: head
+      };
+      fr.onerror = function(){ resolve(''); };
+      try{ fr.readAsDataURL(blob); }catch(e){ resolve(''); }
+    });
   }
 
   /* Every sheet of the grid workbook, in the order they open. */
@@ -9617,6 +9640,9 @@ function buildExcelBackup(){
       +   '<span>Copies the record as a picture, and saves a backup</span></button>'
       + '<button type="button" class="em-go" id="emSendDay">📨 Email today’s attendance'
       +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
+      + '<button type="button" class="em-go" id="emSendMonth">📗 Email the full month'
+      +   '<span>' + mailEscape(state.selectedMonths.map(monthLabel).join(', '))
+      +   ' as a picture, with the Excel workbook attached</span></button>'
       + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
       +   '<span>What is waiting for a decision, with Approve and Reject</span></button>'
       + '<button type="button" class="em-go" id="emSendHol">🏖 Send the holiday reminder'
@@ -9884,6 +9910,81 @@ function buildExcelBackup(){
         post('/api/mail/daily', {names:names, preview:true}, dayBtn, 'The picture could not be made — building without it…', function(j){
           confirmAndSend(j);
         });
+      });
+    };
+    /* The month, rather than the day: the same picture the HD Screenshot makes
+       and the same workbook the Excel (grid) button saves, sent together. Built
+       here because only the dashboard knows which months are in view. */
+    var monthBtn = document.getElementById('emSendMonth');
+    if(monthBtn) monthBtn.onclick = function(){
+      monthBtn.disabled = true;
+      msg('Building the workbook\u2026');
+      var emps = visibleEmployees(), dates = allSelectedDates();
+      if(!emps.length || !dates.length){
+        monthBtn.disabled = false;
+        msg('Nothing to send \u2014 no employees or dates in view.', true);
+        return;
+      }
+      var label = state.selectedMonths.map(monthLabel).join(', ');
+      var fileName = 'Attendance_Grid_' + (state.selectedMonths[0] || 'export') + '.xlsx';
+      var facts = { monthLabel: label, fileName: fileName,
+                    slug: (state.selectedMonths[0] || 'month'),
+                    shown: emps.length, hidden: Math.max(0, EMPLOYEES.length - emps.length),
+                    days: dates.length };
+
+      var told = function(j, withFile){
+        msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
+            + (withFile ? (', with ' + fileName + '.') : ' \u2014 without the workbook.'));
+        keepACopy();                       // the month has gone out: keep a backup of it too
+      };
+      var confirmAndSend = function(j){
+        msg('');
+        showPreview(j, function(done){
+          fetch('/api/mail/month', {method:'POST', credentials:'same-origin',
+                                    headers:{'Content-Type':'application/json'},
+                                    body: JSON.stringify({send:'preview'})})
+            .then(function(r){ return r.json().then(function(x){ return {ok:r.ok, j:x}; }); })
+            .then(function(out){
+              if(!out.ok || (out.j && out.j.ok === false)){
+                done((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+                return;
+              }
+              done();
+              told(out.j, !!j.file);
+            })
+            .catch(function(e){ done(e.message || 'It did not go out.', true); });
+        });
+      };
+
+      /* The workbook first - it is the point of this message - then the
+         picture, then both to the server to be looked at before it goes. */
+      xlsxForMail().then(function(book){
+        msg('Rendering the record\u2026');
+        return renderShotCanvas(1.5).then(function(canvas){
+          var png = imageUnder(canvas, 6 * 1024 * 1024);
+          var inline = '';
+          try{
+            var wide = canvas.width > 2400 ? shrinkCanvas(canvas, 2400 / canvas.width) : canvas;
+            inline = imageUnder(wide, 1200 * 1024);
+          }catch(e){ inline = ''; }
+          return { book: book, png: png, inline: inline };
+        }, function(){ return { book: book, png: '', inline: '' }; });
+      }).then(function(parts){
+        return post('/api/mail/month',
+          Object.assign({ png:parts.png, inline:parts.inline, xlsx:parts.book, preview:true }, facts),
+          monthBtn, 'Building the message\u2026', confirmAndSend)
+          .then(function(out){
+            /* Picture and workbook together can be more than the server takes.
+               The workbook is what this message is for, so the picture goes. */
+            if(out && out.j && out.j.error === 'payload_too_large'){
+              return post('/api/mail/month', Object.assign({ xlsx:parts.book, preview:true }, facts),
+                          monthBtn, 'Too big with the picture \u2014 sending the workbook alone\u2026',
+                          confirmAndSend);
+            }
+          });
+      }).catch(function(e){
+        monthBtn.disabled = false;
+        msg((e && e.message) || 'The month could not be built.', true);
       });
     };
     var holBtn = document.getElementById('emSendHol');
