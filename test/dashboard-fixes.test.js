@@ -144,18 +144,24 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       /id="emMonthPick"[^>]*style="display:none"/.test(menu));
   }
   {
-    /* Choosing a month sends that month, whatever the grid is showing: the view
-       is swapped for as long as the picture takes and put back afterwards. */
+    /* Choosing a month sends that month, whatever the grid is showing. The
+       workbook is read out of the data, not off the screen, so the month only
+       has to be the selected one while it is built - and the selection is put
+       back whatever happens, including when the build throws. */
     const send = grab('sendMonth');
-    check('a month other than the one on screen is put on screen to be drawn',
+    check('the month chosen is the one built, not the one in view',
       /var swap = !\(was\.length === 1 && was\[0\] === ym\)/.test(send)
-        && /state\.selectedMonths = \[ym\]/.test(send), send.slice(0, 400));
-    check('and the view is put back on every way out',
-      (send.match(/restore\(\);/g) || []).length >= 3
-        && /state\.selectedMonths = was/.test(send), (send.match(/restore\(\);/g) || []).length);
+        && /if\(swap\) state\.selectedMonths = \[ym\]/.test(send), send.slice(0, 400));
+    check('and the selection is put back even when the build throws',
+      /\}finally\{\s*\n\s*if\(swap\) state\.selectedMonths = was;/.test(send), send.slice(0, 1400));
+    check('nothing is redrawn for it',
+      send.indexOf('renderTable()') === -1 && send.indexOf('renderShotCanvas') === -1);
     check('the file and the figures are named for the month chosen, not the view',
-      /'Attendance_Grid_' \+ ym \+ '\.xlsx'/.test(send) && /monthLabel: label/.test(send)
+      /'Attendance_Grid_' \+ ym \+ '\.xlsx'/.test(send) && /monthLabel: monthLabel\(ym\)/.test(send)
         && /slug: ym/.test(send), send.indexOf('Attendance_Grid_'));
+    check('and the workbook is the only thing it sends',
+      /xlsx:b64, preview:true/.test(send) && send.indexOf('png:') === -1
+        && send.indexOf('inline:') === -1, send.indexOf('png:'));
   }
 
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

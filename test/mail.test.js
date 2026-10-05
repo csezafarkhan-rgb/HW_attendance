@@ -402,11 +402,10 @@ process.env.SESSION_SECRET = SECRET;
     /WFH/.test(withJpeg.html) && /Work from home/.test(withJpeg.html));
 
 
-  /* ---- the whole month, as a picture and a workbook ---- */
-  const onePng2 = 'data:image/png;base64,' + onePng;
+  /* ---- the whole month, as a workbook ---- */
   const fakeBook = 'UEsDBBQAAAAIAA' + 'A'.repeat(600);          // stands in for the .xlsx
   const monthPv = await asAdmin('POST', '/api/mail/month', {
-    png: onePng2, inline: onePng2, xlsx: fakeBook, fileName: 'Attendance_Grid_2026-09.xlsx',
+    xlsx: fakeBook, fileName: 'Attendance_Grid_2026-09.xlsx',
     monthLabel: 'September 2026', slug: '2026-09', shown: 2, hidden: 1, days: 30, preview: true });
   check('the month message is built for looking at first',
     monthPv.status === 200 && /September 2026/.test(monthPv.body.preview.subject)
@@ -420,11 +419,14 @@ process.env.SESSION_SECRET = SECRET;
   const monthBefore = sent.length;
   const monthOut = await asAdmin('POST', '/api/mail/month', { send: 'preview' });
   const monthMail = sent[sent.length - 1];
-  check('confirming sends it, with the picture and the workbook both attached',
+  check('confirming sends it, carrying the workbook and nothing else',
     monthOut.status === 200 && sent.length === monthBefore + 1
-      && (monthMail.attachments || []).length === 2
-      && monthMail.attachments.some(a => /\.png$/.test(a.filename))
-      && monthMail.attachments.some(a => a.filename === 'Attendance_Grid_2026-09.xlsx'),
+      && (monthMail.attachments || []).length === 1
+      && monthMail.attachments[0].filename === 'Attendance_Grid_2026-09.xlsx',
+    monthMail && (monthMail.attachments || []).map(a => a.filename));
+  /* A month is too wide to read as a picture; the workbook says it properly. */
+  check('and no picture of the grid, inside the message or attached',
+    !/<img/.test(monthMail.html) && !(monthMail.attachments || []).some(a => /\.(png|jpg)$/.test(a.filename)),
     monthMail && (monthMail.attachments || []).map(a => a.filename));
   /* The month has a tab of its own, as the other three do: its own people and
      its own words. */
@@ -434,7 +436,7 @@ process.env.SESSION_SECRET = SECRET;
              subject: 'The {month} record', intro: 'Hello accounts,', footer: 'Thanks.' }
   }));
   const own = await asAdmin('POST', '/api/mail/month', {
-    png: onePng2, xlsx: fakeBook, fileName: 'Attendance_Grid_2026-09.xlsx',
+    xlsx: fakeBook, fileName: 'Attendance_Grid_2026-09.xlsx',
     monthLabel: 'September 2026', shown: 2, days: 30, preview: true });
   check('the month tab addresses its own message',
     own.status === 200 && JSON.stringify(own.body.to) === JSON.stringify(['accounts@x.com']),
@@ -467,7 +469,7 @@ process.env.SESSION_SECRET = SECRET;
 
   /* A workbook too large to send must not take the message with it. */
   const big = await asAdmin('POST', '/api/mail/month', {
-    png: onePng2, xlsx: 'A'.repeat(19 * 1024 * 1024), fileName: 'huge.xlsx',
+    xlsx: 'A'.repeat(19 * 1024 * 1024), fileName: 'huge.xlsx',
     monthLabel: 'September 2026', shown: 2, days: 30, preview: true });
   check('a workbook too big to send is left out, and the message still goes',
     big.status === 200 && big.body.file === false && !/huge\.xlsx/.test(big.body.preview.html),

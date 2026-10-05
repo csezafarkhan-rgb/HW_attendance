@@ -1791,16 +1791,9 @@ async function sendMonthEmail(orgId, opts) {
 
   const attachments = [];
   const b64 = v => String(v || '').replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
-  const raw = typeof opts.png === 'string' ? opts.png : '';
-  const head = /^data:image\/(png|jpeg);base64,/.exec(raw);
-  const picture = b64(raw);
-  if (picture && /^[A-Za-z0-9+/=]+$/.test(picture) && picture.length < 11 * 1024 * 1024) {
-    attachments.push({ filename: 'attendance-' + clip(opts.slug || 'month', 40)
-                                 + ((head && head[1] === 'jpeg') ? '.jpg' : '.png'),
-                       content: picture });
-  }
-  /* The workbook. Too big to send is not a reason to lose the message - the
-     picture and the figures still go, and the answer says the file did not. */
+  /* The workbook, and nothing else: a month is too wide to read as a picture.
+     Too big to send is not a reason to lose the message - the figures still go,
+     and the answer says the file did not. */
   const sheetName = clip(opts.fileName || '', 120).replace(/[^\w .\-]/g, '') || 'attendance.xlsx';
   const book = b64(opts.xlsx);
   let fileSent = '';
@@ -1808,10 +1801,6 @@ async function sendMonthEmail(orgId, opts) {
     attachments.push({ filename: sheetName, content: book });
     fileSent = sheetName;
   }
-
-  let shotUrl = '';
-  try { shotUrl = await keepShot(opts.inline || opts.png); }
-  catch (e) { console.error('the picture could not be kept:', e && e.message); }
 
   const kv = await sharedKeys(orgId, ['companyInfo']);
   const mail = mailer.monthEmail({
@@ -1821,7 +1810,7 @@ async function sendMonthEmail(orgId, opts) {
     hidden: Number.isFinite(opts.hidden) ? opts.hidden : 0,
     days: Number.isFinite(opts.days) ? opts.days : null,
     subject: settings.month.subject, intro: settings.month.intro, footer: settings.month.footer,
-    fileName: fileSent, shotUrl, siteUrl: mailer.baseUrl()
+    fileName: fileSent, siteUrl: mailer.baseUrl()
   });
   const cc = (settings.month.cc.length ? settings.month.cc : settings.cc) || [];
   const msg = { to, cc, subject: mail.subject, html: mail.html, attachments };
@@ -2382,7 +2371,7 @@ app.post('/api/mail/month', requireRole('admin'), bigJson, async (req, res) => {
       { to: held.to.length, attached: (held.attachments || []).length > 0 }, r));
   }
   const out = await sendMonthEmail(req.session.orgId, {
-    png: body.png, inline: body.inline, xlsx: body.xlsx, fileName: body.fileName,
+    xlsx: body.xlsx, fileName: body.fileName,
     monthLabel: body.monthLabel, slug: body.slug,
     shown: Number(body.shown), hidden: Number(body.hidden), days: Number(body.days),
     preview: !!body.preview

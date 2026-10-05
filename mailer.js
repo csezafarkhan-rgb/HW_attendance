@@ -507,14 +507,9 @@ function monthEmail(o) {
             + '</div></td>';
         }).join('') + '</tr></table>');
   }
-  if (o.shotUrl) {
-    body.push('<div style="margin:0 0 14px;">'
-      + '<a href="' + esc(o.shotUrl) + '" style="display:block;">'
-      + '<img src="' + esc(o.shotUrl) + '" alt="The month\u2019s attendance record" '
-      +   'style="width:100%;max-width:100%;border:1px solid ' + LINE + ';border-radius:10px;display:block;"></a>'
-      + '<div style="font-size:11px;color:' + SOFT + ';margin-top:5px;">The picture is scaled to fit; open it for the full size.</div>'
-      + '</div>');
-  }
+  /* No picture of the grid here. A month is too wide to read as an image in a
+     message, and the workbook says the same thing properly - it is the point of
+     this message, not an extra. */
   if (o.fileName) {
     body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + BLUE + ';border-radius:10px;'
       + 'padding:11px 13px;margin:0 0 10px;font-size:12.5px;line-height:1.5;">'

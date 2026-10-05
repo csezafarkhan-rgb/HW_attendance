@@ -5805,24 +5805,16 @@ function ensureDirPerm(dir, byClick, mode){
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:false };
   }
 
-  /* The same workbook the Excel (grid) button saves, as base64 for a message.
-     Resolves to '' rather than failing: a month message without its spreadsheet
-     is worth less, but still worth sending. */
-  function xlsxForMail(){
-    return new Promise(function(resolve){
-      var sheets = null;
-      try{ sheets = buildGridWorkbook(); }catch(e){ console.error('the workbook could not be built', e); }
-      if(!sheets) return resolve('');
-      var blob;
-      try{ blob = buildStyledXlsxMulti(sheets); }
-      catch(e){ console.error('the workbook could not be written', e); return resolve(''); }
+  /* A built file as base64, for putting in a message. */
+  function blobBase64(blob){
+    return new Promise(function(resolve, reject){
       var fr = new FileReader();
       fr.onload = function(){
         var out = String(fr.result || '');
         resolve(out.slice(out.indexOf(',') + 1));          // drop the data: head
       };
-      fr.onerror = function(){ resolve(''); };
-      try{ fr.readAsDataURL(blob); }catch(e){ resolve(''); }
+      fr.onerror = function(){ reject(new Error('the file could not be read back')); };
+      try{ fr.readAsDataURL(blob); }catch(e){ reject(e); }
     });
   }
 
@@ -9969,40 +9961,49 @@ function buildExcelBackup(){
       };
     }
 
-    /* Build and send one month. The workbook and the picture are both made from
-       whatever the grid is showing, so a month other than the one on screen is
-       put on screen for as long as it takes and then put back. */
+    /* Build and send one month. The workbook is read out of the data rather
+       than off the screen, so the month chosen needs only to be the selected
+       one while it is built - no redraw, and the view is back before anything
+       is sent. */
     function sendMonth(ym){
       if(!monthBtn) return;
       var was = state.selectedMonths.slice();
       var swap = !(was.length === 1 && was[0] === ym);
-      var restore = function(){
-        if(!swap) return;
-        state.selectedMonths = was;
-        try{ renderMonthLabel(); renderTable(); }catch(e){ console.error(e); }
-      };
       monthBtn.disabled = true;
       msg('Building ' + monthLabel(ym) + '…');
-      if(swap){
-        state.selectedMonths = [ym];
-        try{ renderMonthLabel(); renderTable(); }catch(e){ console.error(e); }
-      }
 
-      var emps = visibleEmployees(), dates = allSelectedDates();
-      if(!emps.length || !dates.length){
-        restore(); monthBtn.disabled = false;
-        msg('Nothing to send for ' + monthLabel(ym) + ' — no employees or dates in it.', true);
+      var facts, book = '';
+      if(swap) state.selectedMonths = [ym];
+      try{
+        var emps = visibleEmployees(), dates = allSelectedDates();
+        if(!emps.length || !dates.length){
+          msg('Nothing to send for ' + monthLabel(ym) + ' — no employees or dates in it.', true);
+          monthBtn.disabled = false;
+          return;
+        }
+        facts = { monthLabel: monthLabel(ym),
+                  fileName: 'Attendance_Grid_' + ym + '.xlsx', slug: ym,
+                  shown: emps.length, hidden: Math.max(0, EMPLOYEES.length - emps.length),
+                  days: dates.length };
+        var sheets = buildGridWorkbook();
+        if(sheets) book = buildStyledXlsxMulti(sheets);
+      }catch(e){
+        console.error('the workbook could not be built', e);
+        msg('That month could not be built: ' + ((e && e.message) || e), true);
+        monthBtn.disabled = false;
+        return;
+      }finally{
+        if(swap) state.selectedMonths = was;        // the view never moved; nothing to redraw
+      }
+      if(!book){
+        msg('That month has no workbook to send.', true);
+        monthBtn.disabled = false;
         return;
       }
-      var label = monthLabel(ym);
-      var fileName = 'Attendance_Grid_' + ym + '.xlsx';
-      var facts = { monthLabel: label, fileName: fileName, slug: ym,
-                    shown: emps.length, hidden: Math.max(0, EMPLOYEES.length - emps.length),
-                    days: dates.length };
 
       var told = function(j, withFile){
         msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
-            + (withFile ? (', with ' + fileName + '.') : ' — without the workbook.'));
+            + (withFile ? (', with ' + facts.fileName + '.') : ' — without the workbook.'));
         keepACopy();                       // the month has gone out: keep a backup of it too
       };
       var confirmAndSend = function(j){
@@ -10024,38 +10025,12 @@ function buildExcelBackup(){
         });
       };
 
-      /* The workbook first - it is what this message is for - then the picture,
-         then both to the server to be looked at before it goes. The view goes
-         back as soon as nothing else needs to read it. */
-      xlsxForMail().then(function(book){
-        msg('Rendering ' + label + '…');
-        return renderShotCanvas(1.5).then(function(canvas){
-          var png = imageUnder(canvas, 6 * 1024 * 1024);
-          var inline = '';
-          try{
-            var wide = canvas.width > 2400 ? shrinkCanvas(canvas, 2400 / canvas.width) : canvas;
-            inline = imageUnder(wide, 1200 * 1024);
-          }catch(e){ inline = ''; }
-          return { book: book, png: png, inline: inline };
-        }, function(){ return { book: book, png: '', inline: '' }; });
-      }).then(function(parts){
-        restore();
-        return post('/api/mail/month',
-          Object.assign({ png:parts.png, inline:parts.inline, xlsx:parts.book, preview:true }, facts),
-          monthBtn, 'Building the message…', confirmAndSend)
-          .then(function(out){
-            /* Picture and workbook together can be more than the server takes.
-               The workbook is what this message is for, so the picture goes. */
-            if(out && out.j && out.j.error === 'payload_too_large'){
-              return post('/api/mail/month', Object.assign({ xlsx:parts.book, preview:true }, facts),
-                          monthBtn, 'Too big with the picture — sending the workbook alone…',
-                          confirmAndSend);
-            }
-          });
+      blobBase64(book).then(function(b64){
+        return post('/api/mail/month', Object.assign({ xlsx:b64, preview:true }, facts),
+                    monthBtn, 'Building the message…', confirmAndSend);
       }).catch(function(e){
-        restore();
         monthBtn.disabled = false;
-        msg((e && e.message) || 'That month could not be built.', true);
+        msg((e && e.message) || 'That month could not be sent.', true);
       });
     }
 
