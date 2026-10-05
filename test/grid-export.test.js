@@ -66,18 +66,16 @@ const ctx = {
 };
 vm.createContext(ctx);
 
-/* the palette and the edge table are plain declarations, not functions */
-['var XLF = ', 'var XL_EDGES = '].forEach(decl => {
-  const i = src.indexOf('  ' + decl);
-  const j = src.indexOf('];', i) > -1 && decl === 'var XL_EDGES = ' ? src.indexOf('];', i) + 2 : src.indexOf('};', i) + 2;
-  vm.runInContext(src.slice(i, j), ctx);
-});
+/* the palette, the edge table and the number formats are plain declarations */
+[/ {2}var XLF = \{[\s\S]*?\n {2}\};/, / {2}var XL_EDGES = \[[^\]]*\];/,
+ / {2}var XL_FMTS = \[[^\]]*\];/, / {2}var XL_FMT_ID = \{[^}]*\};/
+].forEach(re => vm.runInContext(re.exec(src)[0], ctx));
 vm.runInContext('var XLKEYS = Object.keys(XLF);', ctx);
 /* the CRC table the zip writer leans on */
 vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
 ['_colLetter', '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
  '_crc32', '_zipStore', 'buildStyledXlsxMulti', 'gridDayCells', 'gridWeekVerdict', 'gridDateLabel',
- 'gridAllSheet', 'gridOneSheet', 'gridSummarySheet', 'buildGridWorkbook'
+ 'gridAllSheet', 'gridOneSheet', 'gridWeekSummary', 'gridSummarySheet', 'buildGridWorkbook'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
 vm.runInContext('var GRID_COLS = ' + JSON.stringify(['IN', 'OUT', 'TOTAL', 'IN DUR', 'OUT DUR', 'PUN']) + ';', ctx);
 
@@ -118,11 +116,28 @@ check('an absence is called an absence', /Absent/.test(absRow[15].v) && /alert/.
 
 /* ---- the summary ---- */
 const sum = sheets[1];
+const headCells = sum.rows[1].map(c => c.v);
 check('the summary heads its columns and holds a row per person',
-  sum.rows[1][0].v === 'Employee' && sum.rows.length === 2 + EMPS.length
-    && sum.rows[2][0].v === 'Zafar Khan', sum.rows[1].map(c => c.v));
+  headCells[0] === 'Employee' && sum.rows.length === 2 + EMPS.length
+    && sum.rows[2][0].v === 'Zafar Khan', headCells);
+const col = name => headCells.indexOf(name);
 check('and counts what it found',
-  sum.rows[2][3].v === '2' && sum.rows[4][9].v === '1', { days: sum.rows[2][3].v, absent: sum.rows[4][9].v });
+  sum.rows[2][col('Days')].v === '2' && sum.rows[4][col('Absent')].v === '1',
+  { days: sum.rows[2][col('Days')].v, absent: sum.rows[4][col('Absent')].v });
+
+/* ---- the two things the summary says about effort ---- */
+check('hours worked go in as a figure, under an hours-and-minutes format',
+  typeof sum.rows[2][col('Worked')].n === 'number'
+    && Math.abs(sum.rows[2][col('Worked')].n - (544 * 2) / 1440) < 1e-9
+    && /\|t$/.test(sum.rows[2][col('Worked')].s), sum.rows[2][col('Worked')]);
+check('with a bar drawn along that column, and only that column',
+  sum.bars.length === 1 && sum.bars[0].ref === 'C3:C5', sum.bars);
+const weekCell = sum.rows[2][col('Weeks')];
+check('how the weeks went is stated, and coloured by the worst of them',
+  /of 1 not completed/.test(weekCell.v) && weekCell.s === 'bad', weekCell);
+check('a person with nothing to answer for is not marked red',
+  ['ok', 'warn', 'bad', 'none', 'zebra'].indexOf(String(sum.rows[4][col('Weeks')].s).split('|')[0]) > -1,
+  sum.rows[4][col('Weeks')]);
 
 /* ---- the file itself ---- */
 const parts = [];
@@ -170,7 +185,9 @@ const styleXml = zip['xl/styles.xml'].toString();
 const xfCount = parseInt((/<cellXfs count="(\d+)"/.exec(styleXml) || [])[1], 10);
 const xfActual = (styleXml.match(/<xf /g) || []).length - (styleXml.match(/<cellStyleXfs[^>]*>\s*<xf /g) || []).length;
 check('the style table declares as many entries as it holds',
-  xfCount === ctx.XLKEYS.length * ctx.XL_EDGES.length + 1, { declared: xfCount });
+  xfCount === ctx.XLKEYS.length * ctx.XL_EDGES.length * ctx.XL_FMTS.length + 1, { declared: xfCount });
+check('and an hours-and-minutes format for the figures that need one',
+  /<numFmt numFmtId="164" formatCode="\[h\]:mm"\/>/.test(styleXml));
 const borderCount = parseInt((/<borders count="(\d+)"/.exec(styleXml) || [])[1], 10);
 check('a border exists for every combination of heavy edges',
   borderCount === ctx.XL_EDGES.length + 1
