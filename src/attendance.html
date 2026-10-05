@@ -5866,6 +5866,19 @@ function ensureDirPerm(dir, byClick, mode){
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }
 
+  /* A built file as base64, for putting in a message. */
+  function blobBase64(blob){
+    return new Promise(function(resolve, reject){
+      var fr = new FileReader();
+      fr.onload = function(){
+        var out = String(fr.result || '');
+        resolve(out.slice(out.indexOf(',') + 1));          // drop the data: head
+      };
+      fr.onerror = function(){ reject(new Error('the workbook could not be read back')); };
+      try{ fr.readAsDataURL(blob); }catch(e){ reject(e); }
+    });
+  }
+
   /* Every sheet of the grid workbook, in the order they open. */
   function buildGridWorkbook(){
     var emps = visibleEmployees();
@@ -9697,7 +9710,7 @@ function buildExcelBackup(){
       +   '<span>The next holiday on the calendar, and what is closed</span></button>'
       /* Last, because it is the one that asks a question back: which month. */
       + '<button type="button" class="em-go" id="emSendMonth">📗 Email the full month'
-      +   '<span>A month of the record as a picture, with the Excel workbook attached</span></button>'
+      +   '<span>A month of the record, as an Excel workbook</span></button>'
       + '<div class="em-months" id="emMonthPick" style="display:none"></div>'
       + '<div class="em-note" id="emMsg"></div>'
       /* Everything else is set once and then left alone - a request raised
@@ -10073,13 +10086,24 @@ function buildExcelBackup(){
         });
       };
 
-      blobBase64(book).then(function(b64){
-        return post('/api/mail/month', Object.assign({ xlsx:b64, preview:true }, facts),
-                    monthBtn, 'Building the message…', confirmAndSend);
-      }).catch(function(e){
+      /* Whatever goes wrong from here - a helper that is not there, a file
+         that will not read back, a server that refuses it - the button comes
+         back and the reason is on screen. It once sat disabled under
+         "Building September 2026…" for good, because the throw happened before
+         there was a promise left to catch it. */
+      try{
+        blobBase64(book).then(function(b64){
+          return post('/api/mail/month', Object.assign({ xlsx:b64, preview:true }, facts),
+                      monthBtn, 'Building the message…', confirmAndSend);
+        }).catch(function(e){
+          monthBtn.disabled = false;
+          msg((e && e.message) || 'That month could not be sent.', true);
+        });
+      }catch(e){
+        console.error('the month could not be sent', e);
         monthBtn.disabled = false;
         msg((e && e.message) || 'That month could not be sent.', true);
-      });
+      }
     }
 
     var holBtn = document.getElementById('emSendHol');
