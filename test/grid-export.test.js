@@ -69,14 +69,16 @@ const ctx = {
   dispName: n => n,
   /* The Dashboard page's own reckoning, stood in for: the sheet is tested on
      what it does with the figures, not on how they are arrived at. */
+  /* owedMin is what the days asked for - the figure the hours are measured
+     against. 1080 minutes is two nine-hour days. */
   computeEmployeeStats: name => ({
-    'Zafar Khan':   { attendancePct: 96, onTimePct: 90, workedMin: 1088, presentDays: 2, absentDays: 0,
+    'Zafar Khan':   { owedMin: 1080, attendancePct: 96, onTimePct: 90, workedMin: 1088, presentDays: 2, absentDays: 0,
                       lateDays: 1, totalLateMin: 13, earlyDays: 0, totalEarlyMin: 0, wfhDays: 0,
                       visitDays: 0, leaveDays: 0, netMin: 45, extraDays: 1, extraMin: 230 },
-    'Rahul Mishra': { attendancePct: 80, onTimePct: 60, workedMin: 1088, presentDays: 2, absentDays: 0,
+    'Rahul Mishra': { owedMin: 1080, attendancePct: 80, onTimePct: 60, workedMin: 1088, presentDays: 2, absentDays: 0,
                       lateDays: 2, totalLateMin: 44, earlyDays: 1, totalEarlyMin: 20, wfhDays: 0,
                       visitDays: 0, leaveDays: 1, netMin: -90 },
-    'karan Ahuja':  { attendancePct: 50, onTimePct: 40, workedMin: 480, presentDays: 2, absentDays: 1,
+    'karan Ahuja':  { owedMin: 1080, attendancePct: 50, onTimePct: 40, workedMin: 480, presentDays: 2, absentDays: 1,
                       lateDays: 0, totalLateMin: 0, earlyDays: 0, totalEarlyMin: 0, wfhDays: 2,
                       visitDays: 0, leaveDays: 0, netMin: 0 }
   }[name]),
@@ -167,11 +169,14 @@ check('it heads its columns and holds a row per person',
     && sum.rows.filter(r => r.length > 1).length === 1 + EMPS.length,
   sum.rows.map(r => r.length));
 check('and carries what the summary sheet used to',
-  ['Shift', 'Weeks', 'Worked', 'Absent', 'Late', 'Early', 'Leave', 'WFH', 'Visits']
-    .every(h => col(h) > -1), headCells);
+  ['Shift', 'Weeks completed', 'Hours worked', 'Late days', 'Early-leave days',
+   'Leave days', 'Days from home', 'Days visiting'].every(h => col(h) > -1), headCells);
+check('every heading says what it holds, with no bare words left',
+  headCells.every(h => !['Score', 'Weeks', 'Worked', 'Present', 'Late', 'Early',
+                         'WFH', 'Visits', 'Leave'].includes(h)), headCells);
 check('the shift is stated beside the name',
   sum.rows[2][col('Shift')].v === '9:30-6:30', sum.rows[2][col('Shift')]);
-const weekCell = sum.rows[2][col('Weeks')];
+const weekCell = sum.rows[2][col('Weeks completed')];
 check('how the weeks went is stated, and coloured by the worst of them',
   /of 1 not completed/.test(weekCell.v) && weekCell.s === 'bad', weekCell);
 
@@ -179,7 +184,7 @@ check('how the weeks went is stated, and coloured by the worst of them',
   const p = sum, ph = headCells, at = col;
   check('and ranks them, best first',
     p.rows[2][0].v === 'Zafar Khan' && p.rows[3][0].v === 'Rahul Mishra',
-    p.rows.slice(2).map(r => r[0].v + ':' + (r[at('Score')] || {}).n));
+    p.rows.slice(2).map(r => r[0].v + ':' + (r[at('Score /100')] || {}).n));
 
   /* Somebody whose every day in was a day at home has no punches behind the
      figures, so they are set out under a line of their own rather than ranked
@@ -204,38 +209,50 @@ check('how the weeks went is stated, and coloured by the worst of them',
   const who = n => p.rows.find(r => r.length > 1 && r[0].v === n);
   const zafar = who('Zafar Khan'), rahul = who('Rahul Mishra'), karan = who('karan Ahuja');
   check('the score is a figure, coloured by the band it falls in',
-    typeof zafar[at('Score')].n === 'number' && zafar[at('Score')].s === 'ok'
-      && karan[at('Score')].s === 'bad',
-    [zafar, rahul, karan].map(r => r[at('Score')].n + '=' + r[at('Score')].s));
+    typeof zafar[at('Score /100')].n === 'number' && zafar[at('Score /100')].s === 'ok'
+      && karan[at('Score /100')].s === 'bad',
+    [zafar, rahul, karan].map(r => r[at('Score /100')].n + '=' + r[at('Score /100')].s));
   check('percentages go in as percentages, not as the word',
-    Math.abs(zafar[at('Attendance')].n - 0.96) < 1e-9
-      && /\|p$/.test(zafar[at('Attendance')].s), zafar[at('Attendance')]);
+    Math.abs(zafar[at('Attendance %')].n - 0.96) < 1e-9
+      && /\|p$/.test(zafar[at('Attendance %')].s), zafar[at('Attendance %')]);
   check('spans of time go in as spans',
-    Math.abs(zafar[at('Worked')].n - 1088 / 1440) < 1e-9
-      && /\|t$/.test(zafar[at('Worked')].s), zafar[at('Worked')]);
+    Math.abs(zafar[at('Hours worked')].n - 1088 / 1440) < 1e-9
+      && /\|t$/.test(zafar[at('Hours worked')].s), zafar[at('Hours worked')]);
   check('counts go in as counts, so they can be totalled',
-    typeof zafar[at('Present')].n === 'number' && karan[at('Absent')].n === 1,
-    { present: zafar[at('Present')], absent: karan[at('Absent')] });
+    typeof zafar[at('Days present')].n === 'number' && karan[at('Leave days')].n === 0,
+    { present: zafar[at('Days present')], leave: karan[at('Leave days')] });
+  /* Absent is never marked here - a day missed is recorded as leave - so the
+     column said nothing and has gone. */
+  check('there is no column for absences', at('Absent') === -1 && at('Days absent') === -1, ph);
+  check('what the days asked for stands beside what was put in',
+    at('Target hours') === at('Hours worked') - 1
+      && Math.abs(zafar[at('Target hours')].n - 1080 / 1440) < 1e-9,
+    { target: zafar[at('Target hours')], worked: zafar[at('Hours worked')] });
+  /* The style is a fill and a number format; it is the fill that carries the
+     verdict. */
+  const fillOf = c => String(c.s).split('|')[0];
+  check('and the hours colour themselves against that target',
+    fillOf(zafar[at('Hours worked')]) === 'ok' && fillOf(karan[at('Hours worked')]) === 'bad',
+    { met: zafar[at('Hours worked')].s, short: karan[at('Hours worked')].s });
   /* A Saturday worked, a weekly off come in on: time given over and above what
      the days asked for. */
   check('time worked on days that asked for none is shown, and shown in green',
-    zafar[at('Extra days')].n === 1 && zafar[at('Extra days')].s === 'ok'
-      && Math.abs(zafar[at('Extra time')].n - 230 / 1440) < 1e-9
-      && /^ok\|\|t$/.test(zafar[at('Extra time')].s),
-    { days: zafar[at('Extra days')], time: zafar[at('Extra time')] });
+    zafar[at('Days worked on offs')].n === 1 && zafar[at('Days worked on offs')].s === 'ok'
+      && Math.abs(zafar[at('Extra hours')].n - 230 / 1440) < 1e-9
+      && /^ok\|\|t$/.test(zafar[at('Extra hours')].s),
+    { days: zafar[at('Days worked on offs')], time: zafar[at('Extra hours')] });
   check('and left plain for somebody who worked none',
-    karan[at('Extra days')].n === 0 && karan[at('Extra days')].s !== 'ok',
-    karan[at('Extra days')]);
+    karan[at('Days worked on offs')].n === 0 && karan[at('Days worked on offs')].s !== 'ok',
+    karan[at('Days worked on offs')]);
   check('hours over or under target keep their sign, which [h]:mm cannot show',
-    /^\+/.test(zafar[at('Net vs target')].v)
-      && /^\u2212/.test(rahul[at('Net vs target')].v),
-    [zafar[at('Net vs target')].v, rahul[at('Net vs target')].v]);
-  check('an absence, a lateness and a day from home each keep their colour',
-    karan[at('Absent')].s === 'alert' && rahul[at('Late')].s === 'late'
-      && karan[at('WFH')].s === 'wfh',
-    { absent: karan[at('Absent')].s, late: rahul[at('Late')].s, wfh: karan[at('WFH')].s });
-  check('with a bar along the score and another along the hours',
-    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'G3:G4', p.bars.map(b => b.ref));
+    /^\+/.test(zafar[at('Hours vs target')].v)
+      && /^\u2212/.test(rahul[at('Hours vs target')].v),
+    [zafar[at('Hours vs target')].v, rahul[at('Hours vs target')].v]);
+  check('a lateness and a day from home each keep their colour',
+    rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
+    { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
+  check('with a bar along the score and another along the hours worked',
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'H3:H4', p.bars.map(b => b.ref));
 }
 /* ---- the file itself ---- */
 const parts = [];

@@ -5871,13 +5871,18 @@ function ensureDirPerm(dir, byClick, mode){
      cannot disagree. */
   function gridPerformanceSheet(emps, dates, weekInfo, coName){
     var rows = [], merges = [], C = _colLetter;
-    var head = ['Employee','Shift','Score','Weeks','Attendance','On-time','Worked',
-                'Extra days','Extra time','Present','Absent','Late','Late time',
-                'Early','Early time','WFH','Visits','Leave','Net vs target'];
-    var SCORE = head.indexOf('Score'), WORKED = head.indexOf('Worked');
+    /* Spelled out: a column heading should not need the person reading it to
+       remember what we meant by it. Absent is gone - a day missed is recorded
+       as leave here, so it stood at nought against every name. */
+    var head = ['Employee','Shift','Score /100','Weeks completed','Attendance %','On-time %',
+                'Target hours','Hours worked','Days worked on offs','Extra hours',
+                'Days present','Late days','Total late by','Early-leave days',
+                'Total early by','Days from home','Days visiting','Leave days',
+                'Hours vs target'];
+    var SCORE = head.indexOf('Score /100'), WORKED = head.indexOf('Hours worked');
     var last = C(head.length-1);
     rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', ')
-                 + ' · how people did', s:'empBand|LRT' }]);
+                 + ' · Performance, best first', s:'empBand|LRT' }]);
     merges.push('A1:'+last+'1');
     rows.push(head.map(function(h, i){
       return { v:h, s:'colHdr|B'+(i===0?'L':(i===head.length-1?'R':'')) };
@@ -5909,14 +5914,21 @@ function ensureDirPerm(dir, byClick, mode){
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
-        mins(st.workedMin),
+        /* What the days asked for and what was actually put in, side by side.
+           The hours colour themselves against that target, so the comparison is
+           made for the reader rather than left to them. */
+        mins(st.owedMin),
+        { n:(st.workedMin || 0) / 1440,
+          s:(st.owedMin > 0
+               ? (st.workedMin >= st.owedMin ? 'ok'
+                  : (st.workedMin >= st.owedMin * 0.95 ? 'warn' : 'bad'))
+               : zeb) + '||t' },
         /* Time put in on a day that asked for none - a weekly off, a Saturday
            off, a holiday worked. Worth seeing on its own rather than buried in
            the total, and worth seeing in green. */
         count(st.extraDays, 'ok'),
         { n:(st.extraMin || 0) / 1440, s:(st.extraMin ? 'ok' : zeb) + '||t' },
         count(st.presentDays),
-        count(st.absentDays, 'alert'),
         count(st.lateDays, 'late'),
         mins(st.totalLateMin),
         count(st.earlyDays, 'early'),
@@ -5953,7 +5965,7 @@ function ensureDirPerm(dir, byClick, mode){
       bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
     });
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 12, 8, 24, 11, 9, 10, 9, 10, 9, 8, 7, 10, 7, 10, 7, 7, 7, 13],
+             widths:[20, 12, 9, 20, 12, 10, 12, 12, 12, 11, 11, 10, 12, 12, 12, 12, 11, 10, 13],
              bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }
@@ -12764,9 +12776,14 @@ function buildExcelBackup(){
         }
       }
     });
-    // Leave is neither present nor absent - counting it as neither keeps
-    // attendance meaning "of the days you were due in, how many did you attend".
-    var expected = presentDays + absentDays;
+    /* Of the days you were due in, how many did you attend. Leave used to be
+       left out of that reckoning on the grounds that it is neither present nor
+       absent - but a day off is still a day the office did not have you, and
+       nobody here is ever marked absent (a day missed is recorded as leave), so
+       the figure read 100% against every single name and said nothing at all.
+       Leave counts against it now; an absence still does too, on the rare day
+       one is marked. */
+    var expected = presentDays + absentDays + leaveDays;
     leaveDays = Math.round(leaveDays * 100) / 100;
     var wk = computeWeeklyShortHours(empName, dates);
     var net = 0; Object.keys(wk.weekTotals).forEach(function(k){ net += wk.weekTotals[k]; });
