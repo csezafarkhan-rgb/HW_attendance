@@ -129,6 +129,35 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     const done = await r.ctx.restoreFullBackup({ attDashboard_overrides: '{}' });
     check('a refused write -> resolves false, no reload, says so', done === false && r.reloads.length === 0 && r.statuses.some(s => /^ERR .*not fully restored/.test(s)), r.statuses);
   }
+  /* ---- the Share menu ----
+     The full-month entry asks a question back - which month - so it sits last,
+     under the three that go straight out, with its shelf of months beneath it. */
+  {
+    const menu = grab('renderEmailDropdown');
+    const at = id => menu.indexOf("id=\"" + id + "\"");
+    const order = ['emShot', 'emSendDay', 'emSendLeave', 'emSendHol', 'emSendMonth', 'emMonthPick'];
+    const pos = order.map(at);
+    check('the Share menu reads screenshot, today, leave, holiday, then the month',
+      pos.every(p => p > -1) && pos.every((p, i) => i === 0 || p > pos[i - 1]),
+      order.map((id, i) => id + '@' + pos[i]));
+    check('and the month shelf sits with the month button, folded away',
+      /id="emMonthPick"[^>]*style="display:none"/.test(menu));
+  }
+  {
+    /* Choosing a month sends that month, whatever the grid is showing: the view
+       is swapped for as long as the picture takes and put back afterwards. */
+    const send = grab('sendMonth');
+    check('a month other than the one on screen is put on screen to be drawn',
+      /var swap = !\(was\.length === 1 && was\[0\] === ym\)/.test(send)
+        && /state\.selectedMonths = \[ym\]/.test(send), send.slice(0, 400));
+    check('and the view is put back on every way out',
+      (send.match(/restore\(\);/g) || []).length >= 3
+        && /state\.selectedMonths = was/.test(send), (send.match(/restore\(\);/g) || []).length);
+    check('the file and the figures are named for the month chosen, not the view',
+      /'Attendance_Grid_' \+ ym \+ '\.xlsx'/.test(send) && /monthLabel: label/.test(send)
+        && /slug: ym/.test(send), send.indexOf('Attendance_Grid_'));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

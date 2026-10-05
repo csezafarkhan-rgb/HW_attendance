@@ -207,10 +207,12 @@ With `RESEND_API_KEY` and `RESEND_FROM` set, two kinds of message go out.
 - **Leave**: what is waiting for a decision and any leave taken without a
   request, each with **Approve** and **Reject**. Sent beside the daily message,
   and again on its own as each request is raised.
-- **The full month**, sent by hand from the Share menu: the whole grid for the
-  months in view as a picture, with the Excel workbook attached — everybody
-  side by side on one sheet, a summary of the month, and a sheet for each
-  person. Goes to the Attendance tab's addresses.
+- **The full month**, sent by hand from the Share menu. It is the last entry
+  because it asks which month: choose one from the shelf that opens and that
+  month goes, whatever the grid happens to be showing. The whole grid as a
+  picture, with the Excel workbook attached — everybody side by side on one
+  sheet, a summary of the month, and a sheet for each person. Goes to the
+  Attendance tab's addresses.
 - **A holiday reminder**, a set number of days before a date on the Official
   Leaves calendar (two by default), naming the holiday and what is closed.
 - **The answer, to the person who asked.** Once leave is approved or rejected
@@ -229,8 +231,10 @@ the leave message — and pressing the first one shows the message exactly as it
 will arrive, to be looked at before it goes.
 
 **Settings** (folded under the buttons) has a tab a message — Attendance,
-Leave and Holiday — each with its own addresses and wording; a field left
-blank on Leave or Holiday falls back to the Attendance one. The Attendance tab
+Leave, Month and Holiday — each with its own addresses and wording; a field
+left blank on any of the three falls back to the Attendance one. A box left
+empty shows the wording the message is built with, so what is on screen is what
+goes out. The Attendance tab
 holds:
 
 - **To** and **Cc**, kept with the rest of the settings. Leave **To** empty and

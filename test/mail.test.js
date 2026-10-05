@@ -426,6 +426,45 @@ process.env.SESSION_SECRET = SECRET;
       && monthMail.attachments.some(a => /\.png$/.test(a.filename))
       && monthMail.attachments.some(a => a.filename === 'Attendance_Grid_2026-09.xlsx'),
     monthMail && (monthMail.attachments || []).map(a => a.filename));
+  /* The month has a tab of its own, as the other three do: its own people and
+     its own words. */
+  kvSet(1, 'mailSettings', JSON.stringify({
+    to: ['office@x.com'], cc: ['office-cc@x.com'],
+    month: { to: ['accounts@x.com'], cc: ['audit@x.com'],
+             subject: 'The {month} record', intro: 'Hello accounts,', footer: 'Thanks.' }
+  }));
+  const own = await asAdmin('POST', '/api/mail/month', {
+    png: onePng2, xlsx: fakeBook, fileName: 'Attendance_Grid_2026-09.xlsx',
+    monthLabel: 'September 2026', shown: 2, days: 30, preview: true });
+  check('the month tab addresses its own message',
+    own.status === 200 && JSON.stringify(own.body.to) === JSON.stringify(['accounts@x.com']),
+    own.body && own.body.to);
+  check('and words it in its own words',
+    own.body.preview.subject === 'The September 2026 record'
+      && /Hello accounts,/.test(own.body.preview.html) && /Thanks\./.test(own.body.preview.html),
+    own.body.preview.subject);
+  const ownBefore = sent.length;
+  await asAdmin('POST', '/api/mail/month', { send: 'preview' });
+  check('its Cc is its own too',
+    sent.length === ownBefore + 1 && JSON.stringify(sent[sent.length - 1].cc) === JSON.stringify(['audit@x.com']),
+    sent[sent.length - 1].cc);
+  /* Left blank, it falls back like the rest. */
+  kvSet(1, 'mailSettings', JSON.stringify({ to: ['office@x.com'], cc: [], month: { to: [], cc: [] } }));
+  const fell = await asAdmin('POST', '/api/mail/month', {
+    xlsx: fakeBook, fileName: 'x.xlsx', monthLabel: 'September 2026', shown: 2, days: 30, preview: true });
+  check('an empty month tab goes where the attendance message goes',
+    JSON.stringify(fell.body.to) === JSON.stringify(['office@x.com'])
+      && /Attendance \u00b7 September 2026/.test(fell.body.preview.subject), fell.body.to);
+
+  /* The panel shows the wording a message is built with, so it has to be told
+     what that wording is. */
+  const cfg = await asAdmin('GET', '/api/mail');
+  check('the settings panel is given the built-in wording for every message',
+    cfg.status === 200 && cfg.body.defaults && cfg.body.defaults.month
+      && cfg.body.defaults.daily && cfg.body.defaults.leave && cfg.body.defaults.holiday
+      && /\{month\}/.test(cfg.body.defaults.month.subject),
+    cfg.body && Object.keys(cfg.body.defaults || {}));
+
   /* A workbook too large to send must not take the message with it. */
   const big = await asAdmin('POST', '/api/mail/month', {
     png: onePng2, xlsx: 'A'.repeat(19 * 1024 * 1024), fileName: 'huge.xlsx',

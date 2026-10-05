@@ -1368,6 +1368,9 @@ const MAIL_DEFAULTS = {
      it keeps its own address list and wording. Anything left blank here falls
      back to the attendance settings above. */
   leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true },
+  /* The full month is sent by hand, so it has no hour of its own - only who it
+     goes to and what it says. */
+  month: { to: [], cc: [], subject: '', intro: '', footer: '' },
   /* A word before a holiday, so nobody turns up to a closed building. `days`
      is how far ahead it goes out; `at` is the hour of that day, India time. */
   holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' }
@@ -1396,6 +1399,14 @@ async function mailSettings(orgId) {
     intro: String(hd.intro || '').slice(0, 2000),
     footer: String(hd.footer || '').slice(0, 2000)
   };
+  const mo = isPlainObject(s.month) ? s.month : {};
+  s.month = {
+    to: (Array.isArray(mo.to) ? mo.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    cc: (Array.isArray(mo.cc) ? mo.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    subject: String(mo.subject || '').slice(0, 200),
+    intro: String(mo.intro || '').slice(0, 2000),
+    footer: String(mo.footer || '').slice(0, 2000)
+  };
   const lv = isPlainObject(s.leave) ? s.leave : {};
   s.leave = {
     to: (Array.isArray(lv.to) ? lv.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
@@ -1420,6 +1431,7 @@ async function mailRecipients(orgId, settings, which) {
      the message goes to the admins rather than to nobody at all. */
   const own = (which === 'leave' && settings.leave && settings.leave.to.length) ? settings.leave.to
             : (which === 'holiday' && settings.holiday && settings.holiday.to.length) ? settings.holiday.to
+            : (which === 'month' && settings.month && settings.month.to.length) ? settings.month.to
             : (settings.to || []);
   const out = [];
   own.forEach(e => { if (EMAIL_RE.test(String(e || '')) && out.indexOf(e) === -1) out.push(e); });
@@ -1774,7 +1786,7 @@ async function sendMonthEmail(orgId, opts) {
   opts = opts || {};
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
-  const to = await mailRecipients(orgId, settings);
+  const to = await mailRecipients(orgId, settings, 'month');
   if (!to.length) return { ok: false, error: NO_ADDRESS };
 
   const attachments = [];
@@ -1808,13 +1820,15 @@ async function sendMonthEmail(orgId, opts) {
     shown: Number.isFinite(opts.shown) ? opts.shown : null,
     hidden: Number.isFinite(opts.hidden) ? opts.hidden : 0,
     days: Number.isFinite(opts.days) ? opts.days : null,
+    subject: settings.month.subject, intro: settings.month.intro, footer: settings.month.footer,
     fileName: fileSent, shotUrl, siteUrl: mailer.baseUrl()
   });
-  const msg = { to, cc: settings.cc, subject: mail.subject, html: mail.html, attachments };
+  const cc = (settings.month.cc.length ? settings.month.cc : settings.cc) || [];
+  const msg = { to, cc, subject: mail.subject, html: mail.html, attachments };
   if (opts.preview) return { ok: true, mail: msg, attachedFile: !!fileSent };
   const r = await mailer.send(msg);
   await logMail(orgId, 'month', msg, r);
-  return Object.assign({ to: to.length, cc: (settings.cc || []).length,
+  return Object.assign({ to: to.length, cc: cc.length,
                          attached: attachments.length > 0, file: fileSent }, r);
 }
 
@@ -2265,8 +2279,13 @@ app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
   const s = await mailSettings(req.session.orgId);
   const to = await mailRecipients(req.session.orgId, s);
   const mine = String((req.user && req.user.email) || '');
+  /* The wording each message is built with. The panel shows it in the box when
+     nothing has been saved over it, so what is on screen is what goes out - it
+     was reading `defaults` all along and never being sent any, so every box
+     looked empty until somebody typed in it. */
   res.json({ configured: mailer.ready(), from: mailer.conf().from, siteUrl: mailer.baseUrl(),
-             settings: s, to, you: EMAIL_RE.test(mine) ? mine : '' });
+             settings: s, to, defaults: mailer.DEFAULT_TEXT,
+             you: EMAIL_RE.test(mine) ? mine : '' });
 });
 app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });

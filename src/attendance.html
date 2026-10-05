@@ -785,6 +785,16 @@ body{
 .em-prev-foot{ display:flex; align-items:center; gap:8px; padding:11px 14px; border-top:1px solid var(--line); }
 .em-prev-msg{ flex:1 1 auto; font-size:11.5px; color:#B3261E; }
 .em-prev-foot .btn{ width:auto !important; flex:none !important; padding:7px 16px; font-size:12.5px; }
+/* The months a full-month message can be sent for: one a line, newest first,
+   the one on screen marked. */
+.em-months{ margin:-2px 0 7px; padding:7px 8px; border:1px solid var(--line); border-radius:9px;
+  background:#F7F9FC; max-height:220px; overflow:auto; }
+.em-months .em-mo{ display:block; width:100%; text-align:left; padding:6px 9px; margin-bottom:3px;
+  border:1px solid transparent; border-radius:7px; background:none; cursor:pointer;
+  font:inherit; font-size:12.5px; font-weight:600; color:var(--ink); }
+.em-months .em-mo:hover{ background:#fff; border-color:var(--line-dk); }
+.em-months .em-mo i{ font-style:normal; font-weight:500; font-size:11px; color:var(--ink-soft); margin-left:6px; }
+.em-months .em-mo:last-child{ margin-bottom:0; }
 .em-more{ display:block; width:100%; margin-top:4px; padding:6px 4px; cursor:pointer;
   border:0; border-top:1px solid var(--line); background:none; color:var(--ink-soft);
   font:600 11.5px/1.2 'Inter',sans-serif; text-align:left; }
@@ -9629,7 +9639,8 @@ function buildExcelBackup(){
     /* A box left empty uses the wording the message was built with, so that
        wording is shown in the box rather than hidden behind a placeholder:
        what is on screen is what goes out, and it can be edited from there. */
-    var W = MAIL_CFG.defaults || {daily:{}, leave:{}, holiday:{}};
+    var W = MAIL_CFG.defaults || {daily:{}, month:{}, leave:{}, holiday:{}};
+    W.month = W.month || {};
     var text = function(saved, fallback){ return (saved && String(saved).trim()) ? saved : (fallback || ''); };
     var shown = visibleEmployees().length, all = EMPLOYEES.length;
     dd.innerHTML = '<div class="em-pane">'
@@ -9640,13 +9651,14 @@ function buildExcelBackup(){
       +   '<span>Copies the record as a picture, and saves a backup</span></button>'
       + '<button type="button" class="em-go" id="emSendDay">📨 Email today’s attendance'
       +   '<span>' + shown + ' of ' + all + ' shown, with the screenshot attached</span></button>'
-      + '<button type="button" class="em-go" id="emSendMonth">📗 Email the full month'
-      +   '<span>' + mailEscape(state.selectedMonths.map(monthLabel).join(', '))
-      +   ' as a picture, with the Excel workbook attached</span></button>'
       + '<button type="button" class="em-go" id="emSendLeave">🗓 Send the leave message'
       +   '<span>What is waiting for a decision, with Approve and Reject</span></button>'
       + '<button type="button" class="em-go" id="emSendHol">🏖 Send the holiday reminder'
       +   '<span>The next holiday on the calendar, and what is closed</span></button>'
+      /* Last, because it is the one that asks a question back: which month. */
+      + '<button type="button" class="em-go" id="emSendMonth">📗 Email the full month'
+      +   '<span>A month of the record as a picture, with the Excel workbook attached</span></button>'
+      + '<div class="em-months" id="emMonthPick" style="display:none"></div>'
       + '<div class="em-note" id="emMsg"></div>'
       /* Everything else is set once and then left alone - a request raised
          sends its own message without being asked - so it is folded away
@@ -9658,6 +9670,7 @@ function buildExcelBackup(){
          field is left empty. */
       + '<div class="em-tabs"><button type="button" class="em-tab on" data-em-tab="att">Attendance</button>'
       +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button>'
+      +   '<button type="button" class="em-tab" data-em-tab="mo">Month</button>'
       +   '<button type="button" class="em-tab" data-em-tab="hol">Holiday</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
@@ -9719,6 +9732,29 @@ function buildExcelBackup(){
       +   (((s.leave || {}).confirm !== false) ? ' checked' : '') + '>'
       +   '<span>Tell the employee once their leave is decided</span></label>'
       + '</div>'
+      /* ---- the full month ---- */
+      + (function(){
+          var m = s.month || {};
+          return '<div data-em-pane="mo" style="display:none;">'
+            + '<div class="em-note" style="padding-top:0;">Sent by hand from the menu above \u2014 '
+            +   'there is no hour for it, only who it goes to and what it says.</div>'
+            + '<div class="em-lab">To <span>blank: the same as the attendance message</span></div>'
+            + '<div class="em-row"><input type="text" id="emMoTo" placeholder="comma separated" value="'
+            +   mailEscape((m.to || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Cc</div>'
+            + '<div class="em-row"><input type="text" id="emMoCc" placeholder="comma separated" value="'
+            +   mailEscape((m.cc || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Subject <span>{month} {n} {days} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emMoSubject" value="'
+            +   mailEscape(text(m.subject, W.month.subject)) + '"></div>'
+            + '<div class="em-lab">Message at the top</div>'
+            + '<div class="em-row"><textarea id="emMoIntro" rows="3">'
+            +   mailEscape(text(m.intro, W.month.intro)) + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emMoFooter" rows="2">'
+            +   mailEscape(text(m.footer, W.month.footer)) + '</textarea></div>'
+            + '</div>';
+        })()
       /* ---- the holiday reminder ---- */
       + (function(){
           var h = s.holiday || {};
@@ -9912,29 +9948,61 @@ function buildExcelBackup(){
         });
       });
     };
-    /* The month, rather than the day: the same picture the HD Screenshot makes
-       and the same workbook the Excel (grid) button saves, sent together. Built
-       here because only the dashboard knows which months are in view. */
+    /* The month, rather than the day. Which month is a question, not an
+       assumption: the button opens a shelf of every month on file and the one
+       chosen is the one that goes - the grid as a picture and the workbook the
+       Excel (grid) button writes, whatever the screen happens to be showing. */
     var monthBtn = document.getElementById('emSendMonth');
-    if(monthBtn) monthBtn.onclick = function(){
+    var monthPick = document.getElementById('emMonthPick');
+    if(monthBtn && monthPick){
+      monthBtn.onclick = function(){
+        if(monthPick.style.display !== 'none'){ monthPick.style.display = 'none'; return; }
+        var inView = state.selectedMonths.slice();
+        monthPick.innerHTML = ALL_MONTHS.slice().reverse().map(function(ym){
+          return '<button type="button" class="em-mo" data-em-ym="' + ym + '">' + mailEscape(monthLabel(ym))
+               + (inView.indexOf(ym) > -1 ? '<i>on screen now</i>' : '') + '</button>';
+        }).join('') || '<div class="em-note">No months on file yet.</div>';
+        monthPick.style.display = '';
+        Array.prototype.forEach.call(monthPick.querySelectorAll('[data-em-ym]'), function(b){
+          b.onclick = function(){ monthPick.style.display = 'none'; sendMonth(b.getAttribute('data-em-ym')); };
+        });
+      };
+    }
+
+    /* Build and send one month. The workbook and the picture are both made from
+       whatever the grid is showing, so a month other than the one on screen is
+       put on screen for as long as it takes and then put back. */
+    function sendMonth(ym){
+      if(!monthBtn) return;
+      var was = state.selectedMonths.slice();
+      var swap = !(was.length === 1 && was[0] === ym);
+      var restore = function(){
+        if(!swap) return;
+        state.selectedMonths = was;
+        try{ renderMonthLabel(); renderTable(); }catch(e){ console.error(e); }
+      };
       monthBtn.disabled = true;
-      msg('Building the workbook\u2026');
+      msg('Building ' + monthLabel(ym) + '…');
+      if(swap){
+        state.selectedMonths = [ym];
+        try{ renderMonthLabel(); renderTable(); }catch(e){ console.error(e); }
+      }
+
       var emps = visibleEmployees(), dates = allSelectedDates();
       if(!emps.length || !dates.length){
-        monthBtn.disabled = false;
-        msg('Nothing to send \u2014 no employees or dates in view.', true);
+        restore(); monthBtn.disabled = false;
+        msg('Nothing to send for ' + monthLabel(ym) + ' — no employees or dates in it.', true);
         return;
       }
-      var label = state.selectedMonths.map(monthLabel).join(', ');
-      var fileName = 'Attendance_Grid_' + (state.selectedMonths[0] || 'export') + '.xlsx';
-      var facts = { monthLabel: label, fileName: fileName,
-                    slug: (state.selectedMonths[0] || 'month'),
+      var label = monthLabel(ym);
+      var fileName = 'Attendance_Grid_' + ym + '.xlsx';
+      var facts = { monthLabel: label, fileName: fileName, slug: ym,
                     shown: emps.length, hidden: Math.max(0, EMPLOYEES.length - emps.length),
                     days: dates.length };
 
       var told = function(j, withFile){
         msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
-            + (withFile ? (', with ' + fileName + '.') : ' \u2014 without the workbook.'));
+            + (withFile ? (', with ' + fileName + '.') : ' — without the workbook.'));
         keepACopy();                       // the month has gone out: keep a backup of it too
       };
       var confirmAndSend = function(j){
@@ -9956,10 +10024,11 @@ function buildExcelBackup(){
         });
       };
 
-      /* The workbook first - it is the point of this message - then the
-         picture, then both to the server to be looked at before it goes. */
+      /* The workbook first - it is what this message is for - then the picture,
+         then both to the server to be looked at before it goes. The view goes
+         back as soon as nothing else needs to read it. */
       xlsxForMail().then(function(book){
-        msg('Rendering the record\u2026');
+        msg('Rendering ' + label + '…');
         return renderShotCanvas(1.5).then(function(canvas){
           var png = imageUnder(canvas, 6 * 1024 * 1024);
           var inline = '';
@@ -9970,23 +10039,26 @@ function buildExcelBackup(){
           return { book: book, png: png, inline: inline };
         }, function(){ return { book: book, png: '', inline: '' }; });
       }).then(function(parts){
+        restore();
         return post('/api/mail/month',
           Object.assign({ png:parts.png, inline:parts.inline, xlsx:parts.book, preview:true }, facts),
-          monthBtn, 'Building the message\u2026', confirmAndSend)
+          monthBtn, 'Building the message…', confirmAndSend)
           .then(function(out){
             /* Picture and workbook together can be more than the server takes.
                The workbook is what this message is for, so the picture goes. */
             if(out && out.j && out.j.error === 'payload_too_large'){
               return post('/api/mail/month', Object.assign({ xlsx:parts.book, preview:true }, facts),
-                          monthBtn, 'Too big with the picture \u2014 sending the workbook alone\u2026',
+                          monthBtn, 'Too big with the picture — sending the workbook alone…',
                           confirmAndSend);
             }
           });
       }).catch(function(e){
+        restore();
         monthBtn.disabled = false;
-        msg((e && e.message) || 'The month could not be built.', true);
+        msg((e && e.message) || 'That month could not be built.', true);
       });
-    };
+    }
+
     var holBtn = document.getElementById('emSendHol');
     if(holBtn) holBtn.onclick = function(){
       post('/api/mail/holiday', {preview:true}, holBtn, 'Building the message\u2026', function(j){
@@ -10046,6 +10118,12 @@ function buildExcelBackup(){
           intro: document.getElementById('emLvIntro').value,
           footer: document.getElementById('emLvFooter').value,
           confirm: document.getElementById('emConfirm').checked
+        },
+        month: {
+          to: list('emMoTo'), cc: list('emMoCc'),
+          subject: document.getElementById('emMoSubject').value.trim(),
+          intro: document.getElementById('emMoIntro').value,
+          footer: document.getElementById('emMoFooter').value
         },
         holiday: {
           on: document.getElementById('emHolOn').checked,
