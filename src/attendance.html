@@ -4290,6 +4290,11 @@ function chooseImportFolder(){
   window.showDirectoryPicker({ mode:'read' }).then(function(dir){
     IMPORT_DIR = dir;
     IMPORT_DIR_PERM = 'granted';                 // just picked, so it is allowed
+    /* Ask for the storage to be kept. Without this Chrome may clear the site's
+       data, and the folder goes with it - which is how the dashboard arrived at
+       a Monday with no folder being watched at all. Best effort: the browser
+       decides, and the helper is the fallback either way. */
+    try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
     return idbImpDir('set', dir).then(function(){
       renderImportFolder();
       bkStatus('Watching "' + dir.name + '". Newest file will be offered on open.');
@@ -4381,25 +4386,29 @@ function checkImportFolder(quiet){
         if(!quiet) bkStatus('Already imported "' + found.file.name + '" \u2014 nothing newer in that folder.');
         return null;
       }
-      /* The punch file is the one this folder is watched for, and every import
-         keeps a restore point, so it is brought in as soon as it appears -
-         nobody has to press Import. Anything else in the folder still asks:
-         a stray workbook could be anything. */
-      if(autoSyncOn() && isPunchFileName(found.file.name)){
-        try{ localStorage.setItem(IMPDIR_KEY, stamp); }catch(e){}
-        var bar0 = document.getElementById('impFound');
-        if(bar0) bar0.style.display = 'none';
-        showUploadStatus('New punches found — bringing in "' + found.file.name + '"…', false);
-        handleUploadFile(found.file);
-        return found.file;
-      }
-      offerImportFile(found.file, stamp);
-      return found.file;
+      return takeImportFile(found.file, stamp);
     });
   }).catch(function(e){
     if(!quiet) bkStatus('Could not read that folder: ' + (e.message || e), true);
     return null;
   });
+}
+/* What to do with a punch file that has turned up, wherever it came from - the
+   watched folder, or the helper handing it over directly. The punch file is
+   what all this is for and every import keeps a restore point, so it is brought
+   in as soon as it appears; anything else still asks, because a stray workbook
+   could be anything. */
+function takeImportFile(file, stamp){
+  if(autoSyncOn() && isPunchFileName(file.name)){
+    try{ localStorage.setItem(IMPDIR_KEY, stamp); }catch(e){}
+    var bar0 = document.getElementById('impFound');
+    if(bar0) bar0.style.display = 'none';
+    showUploadStatus('New punches found — bringing in "' + file.name + '"…', false);
+    handleUploadFile(file);
+    return file;
+  }
+  offerImportFile(file, stamp);
+  return file;
 }
 /* Never import behind someone's back - a punch file overwrites the month. Say
    what was found and let them decide. */
@@ -4455,6 +4464,39 @@ function offerImportFile(file, stamp){
       setTimeout(function(){ give(onTimeout); }, ms);
       p.then(give, function(){ give(onTimeout); });
     });
+  }
+
+  /* The punch file straight from the helper, with no folder in between.
+
+     A folder granted to the browser is a permission Chrome can drop - and does,
+     whenever site data is cleared - and when it goes the dashboard has no way
+     to the punch file at all and says there is no folder being watched. The
+     helper is the thing that writes that file, so it can hand it over, and
+     attendance keeps updating whether or not the browser still has a folder.
+
+     Returns the file, 'same' when it is one already imported, or null when the
+     helper is not there or has nothing built. */
+  function fileFromHelper(){
+    return withTimeout(
+      fetch(SYNC_HELPER + '/file?meta=1', {cache:'no-store'}).then(function(r){ return r.json(); }),
+      6000, null
+    ).then(function(meta){
+      if(!meta || !meta.ok || !meta.name) return null;
+      var stamp = meta.name + '|' + Math.round(meta.mtime);
+      var seen = '';
+      try{ seen = localStorage.getItem(IMPDIR_KEY) || ''; }catch(e){}
+      if(stamp === seen) return 'same';
+      return withTimeout(
+        fetch(SYNC_HELPER + '/file', {cache:'no-store'}).then(function(r){
+          if(!r.ok) throw new Error('HTTP ' + r.status);
+          return r.blob();
+        }), 60000, null
+      ).then(function(blob){
+        if(!blob || !blob.size) return null;
+        var f = new File([blob], meta.name, { type:'text/csv', lastModified: Math.round(meta.mtime) });
+        return takeImportFile(f, stamp);
+      });
+    }).catch(function(){ return null; });
   }
 
   function askHelperToFetch(force){
@@ -4549,10 +4591,6 @@ function offerImportFile(file, stamp){
   function runFolderSync(btn, live){
     var dd = document.getElementById('updAttDropdown');
     if(dd) dd.classList.remove('open');
-    if(!IMPORT_DIR){
-      showUploadStatus('No folder is being watched yet \u2014 choose one on the Backup tab first.', true);
-      return;
-    }
     var was = btn ? btn.textContent : '';
     var say = function(t){ if(btn) btn.textContent = t; };
     if(btn){ btn.disabled = true; }
@@ -4563,37 +4601,50 @@ function offerImportFile(file, stamp){
        minute - by the time the old code came to look at the folder the gesture
        was long gone, so the request was refused without a prompt and the sync
        reported "nothing new to import" however many times it was pressed. */
-    var allowed = Promise.resolve(ensureDirPerm(IMPORT_DIR, true, 'read')).catch(function(){ return false; });
+    var allowed = IMPORT_DIR
+      ? Promise.resolve(ensureDirPerm(IMPORT_DIR, true, 'read')).catch(function(){ return false; })
+      : Promise.resolve(false);
 
     say(live ? 'Reading the readers\u2026' : 'Looking\u2026');
     var bar = live ? syncProgress('Reading the punch readers\u2026') : null;
     var step = live ? askHelperToFetch(true) : Promise.resolve({ok:false, reason:'skipped'});
     Promise.all([step, allowed]).then(function(both){
-      var pull = both[0];
-      if(!both[1]){
-        /* Without the folder there is nothing to import, whatever the readers
-           did, and saying "nothing new" would be a lie. */
-        if(bar) bar.done(false);
-        restore();
+      var pull = both[0], canRead = both[1];
+      if(IMPORT_DIR && !canRead){
         IMPORT_DIR_PERM = 'prompt';
         renderImportFolder();
-        showUploadStatus('Chrome has stopped letting this page read \u201c' + IMPORT_DIR.name + '\u201d, so the '
-          + 'punch file could not be read. Press Reconnect on the Backup tab (or choose the folder again) '
-          + 'and press Sync once more.', true);
-        return;
       }
       say('Looking\u2026');
       if(bar) bar.stage('Looking for new punches\u2026');
-      return Promise.resolve(checkImportFolder(false)).then(function(found){
+      /* The folder when the browser still has it; the helper when it does not.
+         Both end at the same place, so a dropped permission costs nothing but
+         the Backup tab's warning. */
+      var look = canRead ? checkImportFolder(false) : fileFromHelper();
+      return Promise.resolve(look).then(function(found){
         if(bar) bar.done(pull.ok);
         restore();
-        if(found) return;                    // checkImportFolder raises its own bar
+        if(found && found !== 'same') return;   // the import raises its own bar
+        if(!canRead && found !== 'same'){
+          /* Neither way in worked: no folder the browser may read, and no file
+             from the helper either. Say which is missing. */
+          showUploadStatus(IMPORT_DIR
+            ? ('Chrome has stopped letting this page read \u201c' + IMPORT_DIR.name + '\u201d, and the sync '
+               + 'helper on this PC did not hand the punch file over either. Press Reconnect on the Backup '
+               + 'tab, or start the helper, then press Sync again.')
+            : ('No punch file to read: no folder is being watched, and the sync helper on this PC is not '
+               + 'answering. Choose the folder on the Backup tab, or start the helper, then press Sync again.'),
+            true);
+          return;
+        }
         /* Nothing to import. Which is a different thing depending on whether
-           the readers were actually consulted, so say which. */
+           the readers were actually consulted, so say which. The punch file may
+           have come from the folder or straight from the helper, so it is named
+           by where it was looked for. */
+        var where = canRead ? ('"' + IMPORT_DIR.name + '"') : 'the punch file';
         if(pull.reason === 'skipped'){
           /* Plain text: showUploadStatus writes with textContent, so markup here
              would be shown rather than rendered. */
-          showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". This only reads the folder \u2014 '
+          showUploadStatus('Nothing newer in ' + where + '. This only reads what is already on disk \u2014 '
             + 'use Live Sync to fetch from the punch readers first.');
         } else if(pull.ok){
           showUploadStatus('Read the punch readers and rebuilt the last ' + (pull.days || syncDays()) + ' days \u2014 nothing new to import. '
@@ -4603,11 +4654,11 @@ function offerImportFile(file, stamp){
             + 'Choose Allow on its prompt (or the icon at the left of the address bar), then press Sync again. '
             + 'Until then this shows only what the last scheduled rebuild left.', true);
         } else if(pull.reason === 'unreachable'){
-          showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". The sync helper on the '
+          showUploadStatus('Nothing newer in ' + where + '. The sync helper on the '
             + 'office PC is not answering, so the readers were not checked \u2014 this is only '
             + 'as fresh as the last scheduled rebuild.', true);
         } else {
-          showUploadStatus('Nothing newer in "' + IMPORT_DIR.name + '". The sync helper could not '
+          showUploadStatus('Nothing newer in ' + where + '. The sync helper could not '
             + 'read the readers' + (pull.detail ? (': ' + pull.detail) : '.'), true);
         }
       });
@@ -4625,9 +4676,8 @@ function offerImportFile(file, stamp){
   var AUTO_SYNC_EVERY_MS = 5 * 60 * 1000;
   var autoSyncBusy = false, autoSyncLast = 0, autoSyncMisses = 0;
   function autoSyncTick(){
-    if(!autoSyncOn() || autoSyncBusy || !IMPORT_DIR) return;
+    if(!autoSyncOn() || autoSyncBusy) return;
     if(document.hidden) return;                                  // not while the tab is put away
-    if(IMPORT_DIR_PERM !== 'granted') return;                    // asking needs a click; Reconnect has it
     if(!viewRole || viewRole.role !== 'admin') return;           // the employee view imports nothing
     if(document.getElementById('modalOverlay') && document.getElementById('modalOverlay').classList.contains('open')) return;
     if(Date.now() - autoSyncLast < AUTO_SYNC_EVERY_MS - 5000) return;
@@ -4642,7 +4692,12 @@ function offerImportFile(file, stamp){
         return;
       }
       autoSyncMisses = 0;
-      return checkImportFolder(true);      // quiet: it imports a new punch file by itself
+      /* The folder while the browser still has it, the helper otherwise - the
+         same two ways in that Sync uses, so a dropped permission does not
+         quietly stop attendance updating by itself either. */
+      return (IMPORT_DIR && IMPORT_DIR_PERM === 'granted')
+        ? checkImportFolder(true)          // quiet: it imports a new punch file by itself
+        : fileFromHelper();
     }).catch(function(){}).then(function(){ autoSyncBusy = false; });
   }
   setInterval(autoSyncTick, 60 * 1000);

@@ -28,7 +28,10 @@ function makeCtx(opts) {
   };
   vm.createContext(ctx);
   vm.runInContext("var PUNCH_FILE_BASENAME = 'dailyattendancelogsdetails', IMPDIR_KEY = 'hw_impdir_seen', AUTOSYNC_KEY = 'hw_auto_sync';", ctx);
-  ['autoSyncOn', 'isPunchFileName', 'checkImportFolder'].forEach(n => vm.runInContext(lift(src, n), ctx));
+  /* takeImportFile is where the decision now lives - bring it in, or ask - and
+     both the watched folder and the helper hand their file to it. */
+  ['autoSyncOn', 'isPunchFileName', 'takeImportFile', 'checkImportFolder']
+    .forEach(n => vm.runInContext(lift(src, n), ctx));
   return ctx;
 }
 

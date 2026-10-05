@@ -8,8 +8,15 @@ const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'attendance-sy
   .replace('const PORT = 8765;', 'const PORT = ' + PORT + ';');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-sync-test-'));
 fs.writeFileSync(path.join(dir, 'sync-service.js'), src);
+/* The helper serves the punch file itself, and finds it the way it always
+   does: from the build script's own default. The stand-in therefore carries a
+   real path, and a file sits at it. */
+const CSV = path.join(dir, 'DailyAttendanceLogsDetails.csv');
+fs.writeFileSync(CSV, 'Employee,Date,In,Out\nAsha Test,2026-10-05,9:30,18:30\n');
 fs.writeFileSync(path.join(dir, 'Build-AttendanceCsv.ps1'),
-  "Write-Output 'rows                : 7  (2 people)'\nWrite-Output '  straight off the readers: 3 punch(es)'\nWrite-Output 'written             : x'\n");
+  "param(\n    [string] $OutFile = '" + CSV.replace(/\\/g, '\\\\') + "'\n)\n"
+  + "Write-Output 'rows                : 7  (2 people)'\nWrite-Output '  straight off the readers: 3 punch(es)'\n"
+  + "Write-Output ('written             : {0}' -f $OutFile)\n");
 
 function req(method, pathName, headers) {
   return new Promise(resolve => {
@@ -41,6 +48,24 @@ const H = { host: '127.0.0.1:' + PORT };
     check('preflight from dashboard allowed', r.status === 204 && r.headers['access-control-allow-private-network'] === 'true', r.status);
     r = await req('GET', '/ping', { host: 'rebind.evil.example:' + PORT, origin: DASH });
     check('DNS-rebinding Host refused', r.status === 403, r.status);
+
+    /* The punch file, handed over directly. This is what keeps attendance
+       updating when Chrome has dropped the folder the dashboard was granted. */
+    r = await req('GET', '/file?meta=1', Object.assign({ origin: DASH }, H));
+    let meta = {}; try { meta = JSON.parse(r.body); } catch (e) {}
+    check('the helper says what punch file it has',
+      r.status === 200 && meta.ok === true && meta.name === 'DailyAttendanceLogsDetails.csv' && meta.size > 0,
+      r.body);
+    r = await req('GET', '/file', Object.assign({ origin: DASH }, H));
+    check('and hands the file over, named, so it can be imported',
+      r.status === 200 && /Asha Test/.test(r.body)
+        && r.headers['x-file-name'] === 'DailyAttendanceLogsDetails.csv'
+        && /x-file-name/i.test(r.headers['access-control-expose-headers'] || ''),
+      { status: r.status, headers: r.headers });
+    r = await req('GET', '/file', H);
+    check('the punch file is not handed to a page with no Origin', r.status === 403, r.status);
+    r = await req('GET', '/file', Object.assign({ origin: 'https://evil.example' }, H));
+    check('nor to another site', r.status === 403, r.status);
     // Running the stand-in build needs PowerShell, which only the office PC has.
     if (process.platform === 'win32') {
       r = await req('GET', '/sync', Object.assign({ origin: DASH }, H));

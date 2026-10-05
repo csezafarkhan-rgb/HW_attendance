@@ -26,12 +26,29 @@
 'use strict';
 
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
 const PORT = 8765;
 const HERE = __dirname;
 const SCRIPT = path.join(HERE, 'Build-AttendanceCsv.ps1');
+
+/*  Where the punch file is written. The dashboard used to reach it only
+    through a folder the browser had been granted, which Chrome drops whenever
+    it clears site data - and the attendance then quietly stopped updating
+    until somebody noticed and picked the folder again. The helper is already
+    the thing that writes the file, so it can hand it over as well, and the
+    browser needs no folder at all.
+
+    Taken from the build script's own default so there is one answer to where
+    the file lives, and replaced by whatever that script says it wrote. */
+let OUT_FILE = (function () {
+  try {
+    const m = /\$OutFile\s*=\s*'([^']+)'/.exec(fs.readFileSync(SCRIPT, 'utf8'));
+    return m ? m[1] : '';
+  } catch (e) { return ''; }
+})();
 
 // Only the dashboard, and a local copy of it for testing.
 const ALLOWED = [
@@ -89,6 +106,8 @@ function rebuild(quick, days, force) {
         const text = String(stdout || '');
         // The script prints a line per figure; lift the ones worth reporting.
         const pick = re => { const m = text.match(re); return m ? m[1].trim() : null; };
+        const wrote = pick(/written\s*:\s*(.+)/);
+        if (wrote) OUT_FILE = wrote;           // the script has the last word on where it put it
         resolve({
           ok: !err,
           seconds: Math.round((Date.now() - started) / 1000),
@@ -144,7 +163,7 @@ const server = http.createServer((req, res) => {
   /*  Rebuilding reads both readers and rewrites the watched file, so only the
       dashboard may ask for it. Any other page could trigger it with a plain
       <img src="http://127.0.0.1:8765/sync"> - which sends no Origin at all. */
-  if (url === '/sync' && !allowed) {
+  if ((url === '/sync' || url === '/file') && !allowed) {
     res.writeHead(403, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: false, error: 'not from the dashboard' }));
   }
@@ -152,6 +171,31 @@ const server = http.createServer((req, res) => {
   if (url === '/ping') {                      // is the helper here at all?
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, service: 'hw-attendance-sync' }));
+  }
+
+  /*  The punch file itself, straight from disk. ?meta=1 answers with its name
+      and the moment it was written, which is all the dashboard needs to decide
+      whether it is worth fetching. */
+  if (url === '/file') {
+    let st = null;
+    try { st = OUT_FILE ? fs.statSync(OUT_FILE) : null; } catch (e) { st = null; }
+    if (!st || !st.isFile()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'nothing built yet' }));
+    }
+    const name = path.basename(OUT_FILE);
+    if (/(^|&)meta=1(&|$)/.test((req.url || '').split('?')[1] || '')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, name, size: st.size, mtime: st.mtimeMs }));
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Length': st.size,
+      'X-File-Name': name,
+      'X-File-Modified': String(Math.round(st.mtimeMs)),
+      'Access-Control-Expose-Headers': 'X-File-Name, X-File-Modified'
+    });
+    return fs.createReadStream(OUT_FILE).on('error', () => res.end()).pipe(res);
   }
 
   if (url === '/sync') {
