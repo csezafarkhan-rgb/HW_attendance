@@ -410,6 +410,11 @@ process.env.SESSION_SECRET = SECRET;
   check('the month message is built for looking at first',
     monthPv.status === 200 && /September 2026/.test(monthPv.body.preview.subject)
       && monthPv.body.file === true, monthPv.body && (monthPv.body.error || monthPv.body.preview));
+  /* Two sends of the same month were the same message word for word, and Gmail
+     hides a repeat behind a "..." - which is how one arrived looking as though
+     it had no content at all. */
+  check('the header says which month it is and when it went',
+    /September 2026 · sent /.test(monthPv.body.preview.html), monthPv.body.preview.html.slice(0, 600));
   check('and it says what is in the file',
     /Attendance_Grid_2026-09\.xlsx/.test(monthPv.body.preview.html)
       && /how they did over the month/.test(monthPv.body.preview.html));

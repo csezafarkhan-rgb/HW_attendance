@@ -212,7 +212,7 @@ const DEFAULT_TEXT = {
   },
   month: {
     subject: 'Attendance \u00b7 {month}',
-    intro: 'Hello,\n\nPlease find the full attendance record for {month} below, and attached as a spreadsheet.',
+    intro: 'Hello,\n\nPlease find the full attendance record for {month} attached as a spreadsheet.',
     footer: 'Best regards,\n{org}'
   },
   holiday: {
@@ -524,8 +524,13 @@ function monthEmail(o) {
   }
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
+  /* Two sends of the same month are otherwise the same message word for word,
+     and Gmail hides a repeat behind a "..." - which is how one arrived looking
+     as though it had no content at all. The hour it went makes each one its
+     own. */
+  const stamp = (o.monthLabel || 'The month') + (o.sentAt ? (' \u00b7 sent ' + o.sentAt) : '');
   return { subject: subject,
-           html: layout(o.orgName || 'Attendance', 'The month\u2019s attendance record', body) };
+           html: layout(o.orgName || 'Attendance', stamp, body) };
 }
 
 /* The holiday reminder: what is closed, when, and how far off it is. */

@@ -1810,7 +1810,9 @@ async function sendMonthEmail(orgId, opts) {
     hidden: Number.isFinite(opts.hidden) ? opts.hidden : 0,
     days: Number.isFinite(opts.days) ? opts.days : null,
     subject: settings.month.subject, intro: settings.month.intro, footer: settings.month.footer,
-    fileName: fileSent, siteUrl: mailer.baseUrl()
+    fileName: fileSent, siteUrl: mailer.baseUrl(),
+    sentAt: mailer.clock(Math.floor(istParts().min / 60) + ':'
+                         + String(istParts().min % 60).padStart(2, '0'))
   });
   const cc = (settings.month.cc.length ? settings.month.cc : settings.cc) || [];
   const msg = { to, cc, subject: mail.subject, html: mail.html, attachments };
