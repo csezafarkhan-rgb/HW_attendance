@@ -5976,7 +5976,11 @@ function ensureDirPerm(dir, byClick, mode){
            minutes over and a week forty minutes under is not two steady weeks,
            and one netted figure cannot tell the two apart. */
         { n:(wk.extraMin || 0) / 1440, s:(wk.extraMin ? 'ok' : zeb) + '||t' },
-        { n:(wk.shortMin || 0) / 1440, s:(wk.shortMin ? 'bad' : zeb) + '||t' },
+        /* Red only where a week broke the leverage it is allowed; a shortfall
+           that stayed inside it is amber, the same reading the week column
+           beside it gives. */
+        { n:(wk.shortMin || 0) / 1440,
+          s:(wk.shortMin ? (wk.s === 'bad' ? 'bad' : 'warn') : zeb) + '||t' },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
         /* Hours met is itself a sum of two columns further along: what was put

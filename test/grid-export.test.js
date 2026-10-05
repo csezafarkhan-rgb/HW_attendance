@@ -317,9 +317,27 @@ check('how the weeks went is stated, and coloured by the worst of them',
   check('the weeks say what they ran short by',
     at('Weekly short') > -1 && Math.abs(zafar[at('Weekly short')].n - 45 / 1440) < 1e-9
       && /\|t$/.test(zafar[at('Weekly short')].s), ph);
-  check('and it reads red where there is any',
+  check('and it reads red where a week broke its leverage',
     String(zafar[at('Weekly short')].s).split('|')[0] === 'bad',
     zafar[at('Weekly short')].s);
+  /* A shortfall that stayed inside the leverage is amber, not red - the same
+     reading the week column beside it gives. */
+  {
+    const easy = {};
+    EMPS.forEach(e => { easy[e.name] = { weekTotals: { '2026-09-28': -20, '2026-10-05': 0 },
+                                         weekDays: { '2026-09-28': 5, '2026-10-05': 5 },
+                                         weekOpen: {} }; });
+    const mild = ctx.gridPerformanceSheet(EMPS, DATES, easy, 'Test Co');
+    const mh = mild.rows[1].map(c => c.v);
+    const row = mild.rows.find(r => r.length > 1 && r[0].v === 'Zafar Khan');
+    check('a shortfall inside the leverage reads amber, not red',
+      String(row[mh.indexOf('Weekly short')].s).split('|')[0] === 'warn'
+        && /within leverage/.test(row[mh.indexOf('Weeks completed')].v),
+      { short: row[mh.indexOf('Weekly short')], weeks: row[mh.indexOf('Weeks completed')].v });
+    check('and nought short is left plain either way',
+      String(row[mh.indexOf('Weekly extra')].s).split('|')[0] !== 'ok',
+      row[mh.indexOf('Weekly extra')]);
+  }
   /* Over and under stand apart: a week over and a week under is not two steady
      weeks, and a single netted figure cannot tell them apart. */
   check('and what they ran over, beside it',
