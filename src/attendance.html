@@ -5846,19 +5846,27 @@ function ensureDirPerm(dir, byClick, mode){
       var wk = mondayOf(d);
       if(!seen[wk]){ seen[wk] = 1; weeks.push(wk); }
     });
-    var ok = 0, warn = 0, bad = 0, open = 0;
+    var ok = 0, warn = 0, bad = 0, open = 0, extra = 0, short = 0;
     weeks.forEach(function(wk){
+      /* Hours over and hours under, kept apart rather than netted off: a week
+         forty minutes over and a week forty minutes under is not the same thing
+         as two weeks on the nose, and a net figure cannot tell them apart.
+         Counted over every week in view, finished or not - time put in is time
+         put in, whether or not the week has ended. */
+      var net = (info && info.weekTotals && info.weekTotals[wk]) || 0;
+      if(net > 0) extra += net; else short += -net;
       if(info && info.weekOpen && info.weekOpen[wk]){ open++; return; }
       var v = gridWeekVerdict(info, wk);
       if(v.s === 'bad') bad++; else if(v.s === 'warn') warn++; else ok++;
     });
     var done = ok + warn + bad;
-    if(!done) return { v: open ? (open + ' week' + (open===1?'':'s') + ' in progress') : '—',
-                       s: open ? 'warn' : 'none' };
+    var said = function(v, st){ return { v:v, s:st, extraMin:extra, shortMin:short }; };
+    if(!done) return said(open ? (open + ' week' + (open===1?'':'s') + ' in progress') : '—',
+                          open ? 'warn' : 'none');
     var tail = open ? (' · ' + open + ' in progress') : '';
-    if(bad)  return { v: bad + ' of ' + done + ' not completed' + tail, s:'bad' };
-    if(warn) return { v: warn + ' of ' + done + ' within leverage' + tail, s:'warn' };
-    return { v: done + ' week' + (done===1?'':'s') + ' completed' + tail, s:'ok' };
+    if(bad)  return said(bad + ' of ' + done + ' not completed' + tail, 'bad');
+    if(warn) return said(warn + ' of ' + done + ' within leverage' + tail, 'warn');
+    return said(done + ' week' + (done===1?'':'s') + ' completed' + tail, 'ok');
   }
 
   /* ---- how people did, ranked ----
@@ -5874,10 +5882,10 @@ function ensureDirPerm(dir, byClick, mode){
     /* Spelled out: a column heading should not need the person reading it to
        remember what we meant by it. Absent is gone - a day missed is recorded
        as leave here, so it stood at nought against every name. */
-    var head = ['Employee','Shift','Score /100','Weeks completed','Attendance %','On-time %',
-                'Target hours','Hours worked','Days worked on offs','Extra hours',
-                'Days present','Late days','Total late by','Early-leave days',
-                'Total early by','Days from home','Days visiting','Leave days',
+    var head = ['Employee','Shift','Score /100','Weeks completed','Weekly extra','Weekly short',
+                'Attendance %','On-time %','Target hours','Hours worked',
+                'Days worked on offs','Extra hours','Days present','Late days','Total late by',
+                'Early-leave days','Total early by','Days from home','Days visiting','Leave days',
                 'Hours vs target'];
     var SCORE = head.indexOf('Score /100'), WORKED = head.indexOf('Hours worked');
     var last = C(head.length-1);
@@ -5912,6 +5920,10 @@ function ensureDirPerm(dir, byClick, mode){
         { v:getShift(r.emp.name), s:zeb },
         { n:r.score, s:band },
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
+        /* Over and under across the weeks, each on its own. "Hours vs target"
+           at the end is the two netted off; these are what made it. */
+        { n:(wk.extraMin || 0) / 1440, s:(wk.extraMin ? 'ok' : zeb) + '||t' },
+        { n:(wk.shortMin || 0) / 1440, s:(wk.shortMin ? 'bad' : zeb) + '||t' },
         { n:(st.attendancePct || 0) / 100, s: zeb + '||p' },
         { n:(st.onTimePct || 0) / 100, s: zeb + '||p' },
         /* What the days asked for and what was actually put in, side by side.
@@ -5965,7 +5977,7 @@ function ensureDirPerm(dir, byClick, mode){
       bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
     });
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 12, 9, 20, 12, 10, 12, 12, 12, 11, 11, 10, 12, 12, 12, 12, 11, 10, 13],
+             widths:[20, 12, 9, 20, 12, 12, 12, 10, 12, 12, 12, 11, 11, 10, 12, 12, 12, 12, 11, 10, 13],
              bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }

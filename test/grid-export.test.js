@@ -64,8 +64,13 @@ const ctx = {
   monthLabelShort: ym => 'Oct 2026',
   weekdayName: d => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(d + 'T00:00:00').getDay()],
   pad2: n => String(n).padStart(2, '0'),
-  mondayOf: d => '2026-09-28',
-  computeWeeklyShortHours: () => ({ weekTotals: { '2026-09-28': -45 }, weekDays: { '2026-09-28': 5 }, weekOpen: {} }),
+  /* Two weeks in the stand-in month: the first ran 90 minutes over, the second
+     45 minutes under. Netted off that is 45 minutes to the good, which is not
+     at all the same as two steady weeks - which is why the sheet states the two
+     apart. */
+  mondayOf: d => (d <= '2026-10-04' ? '2026-09-28' : '2026-10-05'),
+  computeWeeklyShortHours: () => ({ weekTotals: { '2026-09-28': 90, '2026-10-05': -45 },
+                                    weekDays: { '2026-09-28': 5, '2026-10-05': 5 }, weekOpen: {} }),
   dispName: n => n,
   /* The Dashboard page's own reckoning, stood in for: the sheet is tested on
      what it does with the figures, not on how they are arrived at. */
@@ -178,7 +183,7 @@ check('the shift is stated beside the name',
   sum.rows[2][col('Shift')].v === '9:30-6:30', sum.rows[2][col('Shift')]);
 const weekCell = sum.rows[2][col('Weeks completed')];
 check('how the weeks went is stated, and coloured by the worst of them',
-  /of 1 not completed/.test(weekCell.v) && weekCell.s === 'bad', weekCell);
+  /1 of 2 not completed/.test(weekCell.v) && weekCell.s === 'bad', weekCell);
 
 {
   const p = sum, ph = headCells, at = col;
@@ -252,7 +257,21 @@ check('how the weeks went is stated, and coloured by the worst of them',
     rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
     { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
   check('with a bar along the score and another along the hours worked',
-    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'H3:H4', p.bars.map(b => b.ref));
+    p.bars[0].ref === 'C3:C4' && p.bars[1].ref === 'J3:J4', p.bars.map(b => b.ref));
+  /* Hours over and hours under across the weeks, each on its own. The last
+     column nets them off; these two say what made it. */
+  check('the weeks say how much was over and how much short, apart',
+    at('Weekly extra') > -1 && at('Weekly short') === at('Weekly extra') + 1
+      && typeof zafar[at('Weekly extra')].n === 'number'
+      && /\|t$/.test(zafar[at('Weekly extra')].s), ph);
+  check('and both are counted, not netted off against each other',
+    Math.abs(zafar[at('Weekly extra')].n - 90 / 1440) < 1e-9
+      && Math.abs(zafar[at('Weekly short')].n - 45 / 1440) < 1e-9,
+    { extra: zafar[at('Weekly extra')], short: zafar[at('Weekly short')] });
+  check('over reads green, short reads red',
+    String(zafar[at('Weekly extra')].s).split('|')[0] === 'ok'
+      && String(zafar[at('Weekly short')].s).split('|')[0] === 'bad',
+    { extra: zafar[at('Weekly extra')].s, short: zafar[at('Weekly short')].s });
 }
 /* ---- the file itself ---- */
 const parts = [];
