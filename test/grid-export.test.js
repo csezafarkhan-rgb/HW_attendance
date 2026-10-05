@@ -47,8 +47,11 @@ const ctx = {
   getOverride: (e, d) => OVER[e + '|' + d] || null,
   getOfficialLeave: d => HOLS[d] || null,
   getHalfDay: () => null,
-  getLateExcuse: () => null,
-  getEarlyExcuse: () => null,
+  getLateExcuse: (e, d) => (e === 'Zafar Khan' && d === '2026-10-05')
+    ? { note: 'client meeting ran over', at: '2026-10-05T04:00:00Z' } : null,
+  getEarlyExcuse: (e, d) => (e === 'Rahul Mishra' && d === '2026-10-05')
+    ? { note: '', at: '2026-10-05T04:00:00Z' } : null,
+  getMispunch: () => null,
   isLate: (e, r) => !!(r && r['in'] && r['in'] >= '9:40'),
   isEarly: () => false,
   computeDurations: r => ({ totalMin: r && r.dur ? 544 : null, inMin: 540, outMin: 4 }),
@@ -88,7 +91,8 @@ vm.createContext(ctx);
 vm.runInContext('var XLKEYS = Object.keys(XLF);', ctx);
 /* the CRC table the zip writer leans on */
 vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
-['_colLetter', '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
+['_colLetter', '_refParts', '_commentsXml', '_vmlXml',
+ '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
  '_crc32', '_zipStore', 'buildStyledXlsxMulti', 'gridDayCells', 'gridWeekVerdict', 'gridDateLabel',
  'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet', 'buildGridWorkbook'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
@@ -130,6 +134,27 @@ check('work from home is written across its block',
   /Work from home/.test(monRow[15].v) && /wfh/.test(monRow[15].s), monRow[15]);
 const absRow = sheets[0].rows.find(r => r[0] && /Oct 01/.test(r[0].v));
 check('an absence is called an absence', /Absent/.test(absRow[15].v) && /alert/.test(absRow[15].s), absRow[15]);
+
+/* ---- why a lateness was let pass ---- */
+{
+  const wide = sheets[0];
+  const notes = wide.notes || [];
+  const late = notes.find(n => /Late, excused/.test(n.title));
+  check('an excused lateness is noted on the cell it explains',
+    !!late && /client meeting ran over/.test(late.text), notes);
+  /* The in time is the first column of a block, so the note belongs on it. */
+  const monRow = wide.rows.findIndex(r => r[0] && /Oct 05/.test(r[0].v || ''));
+  check('and the note sits on the in time, not somewhere near it',
+    !!late && late.ref === 'B' + (monRow + 1), { ref: late && late.ref, row: monRow + 1 });
+  const early = notes.find(n => /Left early, excused/.test(n.title));
+  check('an excuse with nothing written down still says so',
+    !!early && /No reason was written down/.test(early.text), early);
+  check('and sits on the out time of the person it belongs to',
+    !!early && early.ref === 'J' + (monRow + 1), early && early.ref);
+  check('a day nobody excused carries no note',
+    notes.every(n => n.ref !== 'B' + (wide.rows.findIndex(r => r[0] && /Oct 01/.test(r[0].v || '')) + 1)),
+    notes.map(n => n.ref));
+}
 
 /* ---- how people did: the one sheet of figures ---- */
 const sum = sheets[1];
@@ -268,11 +293,31 @@ check('a border exists for every combination of heavy edges',
 check('the heavy rule is a medium dark line, the rest hairline',
   /style="medium"><color rgb="FF334155"/.test(styleXml) && /style="thin"><color rgb="FFC9CFD8"/.test(styleXml));
 
+const names2 = Object.keys(zip);
+check('a sheet with notes brings the three parts a note needs',
+  names2.indexOf('xl/comments1.xml') > -1
+    && names2.indexOf('xl/drawings/vmlDrawing1.vml') > -1
+    && names2.indexOf('xl/worksheets/_rels/sheet1.xml.rels') > -1, names2);
+check('the notes are declared in the content types, vml and all',
+  /Extension="vml"/.test(zip['[Content_Types].xml'].toString())
+    && /comments1\.xml/.test(zip['[Content_Types].xml'].toString()),
+  zip['[Content_Types].xml'].toString().slice(0, 400));
+const cmt = zip['xl/comments1.xml'].toString();
+check('and the text of the excuse is in them',
+  /client meeting ran over/.test(cmt) && /<comment ref="B\d+"/.test(cmt), cmt.slice(0, 400));
+const vml = zip['xl/drawings/vmlDrawing1.vml'].toString();
+check('with a shape to draw each one, anchored to its cell',
+  /ObjectType="Note"/.test(vml)
+    && (vml.match(/<v:shape /g) || []).length === (sheets[0].notes || []).length, vml.slice(0, 200));
+
 const sheet1 = zip['xl/worksheets/sheet1.xml'].toString();
 check('the wide sheet freezes its panes',
   /<pane xSplit="1" ySplit="5" topLeftCell="B6"[^>]*state="frozen"/.test(sheet1), sheet1.slice(0, 500));
 check('and is set up to print landscape, fitted to the page width',
   /<pageSetup orientation="landscape"[^>]*fitToWidth="1"/.test(sheet1) && /fitToPage="1"/.test(sheet1));
+check('the sheet points at the shape that draws its notes, last of all',
+  /<legacyDrawing r:id="rId1"\/><\/worksheet>$/.test(sheet1)
+    && /xmlns:r=/.test(sheet1), sheet1.slice(-200));
 check('its parts come in the order a spreadsheet insists on',
   sheet1.indexOf('<sheetPr>') < sheet1.indexOf('<sheetViews>')
     && sheet1.indexOf('<sheetViews>') < sheet1.indexOf('<cols>')

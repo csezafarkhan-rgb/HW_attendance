@@ -5357,6 +5357,15 @@ function ensureDirPerm(dir, byClick, mode){
     return new Blob(parts,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   }
   function _xesc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  /* "B7" -> {col:1, row:6}, both counted from nought, which is how a comment
+     anchor and the VML behind it address a cell. */
+  function _refParts(ref){
+    var m = /^([A-Z]+)(\d+)$/.exec(String(ref || 'A1'));
+    if(!m) return { col:0, row:0 };
+    var col = 0;
+    for(var i=0;i<m[1].length;i++) col = col * 26 + (m[1].charCodeAt(i) - 64);
+    return { col: col - 1, row: parseInt(m[2], 10) - 1 };
+  }
   function _colLetter(n){ var s=''; n++; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-(m+1))/26; } return s; }
   function _sheetXml(headers, rows){
     var all=[headers].concat(rows||[]), sd='';
@@ -5528,12 +5537,14 @@ function ensureDirPerm(dir, byClick, mode){
     }
     /* Children have to come in this order or Excel calls the file corrupt. */
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-      + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+      + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
       + '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
       + views + cols + '<sheetData>'+sd+'</sheetData>' + mg + bars
       + '<pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>'
       + '<pageSetup orientation="'+(o.landscape===false?'portrait':'landscape')+'" '
       +   'fitToWidth="1" fitToHeight="0" paperSize="9"/>'
+      + ((o.notes && o.notes.length) ? '<legacyDrawing r:id="rId1"/>' : '')
       + '</worksheet>';
   }
   /* Several styled sheets in one workbook. The single-sheet builder below is
@@ -5543,18 +5554,34 @@ function ensureDirPerm(dir, byClick, mode){
     /* Settled once: two people with the same name get different tabs, and the
        print titles below must point at the name the tab actually carries. */
     var tabNames = sheets.map(function(sh){ return _safeSheetName(sh.name, used); });
+    var anyNotes = false;
     sheets.forEach(function(sh, i){
       var idx = i + 1;
+      var notes = (sh.notes || []).slice(0, 2000);
       files.push({ name:'xl/worksheets/sheet'+idx+'.xml',
                    data:_sheetXmlStyled(sh.rows, sh.merges, sh.widths, sh) });
       ov  += '<Override PartName="/xl/worksheets/sheet'+idx+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
       wbs += '<sheet name="'+_xesc(tabNames[i])+'" sheetId="'+idx+'" r:id="rId'+idx+'"/>';
       wbr += '<Relationship Id="rId'+idx+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+idx+'.xml"/>';
+      if(!notes.length) return;
+      /* A note needs three things beside the sheet: its text, the shape that
+         draws the yellow box, and a relationship file saying where both are. */
+      anyNotes = true;
+      files.push({ name:'xl/comments'+idx+'.xml', data:_commentsXml(notes) });
+      files.push({ name:'xl/drawings/vmlDrawing'+idx+'.vml', data:_vmlXml(notes) });
+      files.push({ name:'xl/worksheets/_rels/sheet'+idx+'.xml.rels',
+        data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+          + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing'+idx+'.vml"/>'
+          + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments'+idx+'.xml"/>'
+          + '</Relationships>' });
+      ov += '<Override PartName="/xl/comments'+idx+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>';
     });
     var styleId = sheets.length + 1;
     var CT='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
       +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
       +'<Default Extension="xml" ContentType="application/xml"/>'
+      + (anyNotes ? '<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>' : '')
       +'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
       +'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
       + ov + '</Types>';
@@ -5582,6 +5609,49 @@ function ensureDirPerm(dir, byClick, mode){
       {name:'xl/styles.xml', data:_stylesXml()}
     ].concat(files));
   }
+  /* A note on a cell - what Excel shows when you hover over the little red
+     corner. Two parts are needed and neither is optional: the text, and a
+     legacy VML shape to draw the box it sits in. Written only for the sheets
+     that have any. */
+  function _commentsXml(notes){
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + '<authors><author>Attendance</author></authors><commentList>'
+      + notes.map(function(n){
+          return '<comment ref="' + _xesc(n.ref) + '" authorId="0"><text>'
+            + '<r><rPr><sz val="9"/><b/><color indexed="81"/><rFont val="Tahoma"/></rPr>'
+            +   '<t xml:space="preserve">' + _xesc(n.title || 'Note') + '</t></r>'
+            + '<r><rPr><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/></rPr>'
+            +   '<t xml:space="preserve">\n' + _xesc(n.text || '') + '</t></r>'
+            + '</text></comment>';
+        }).join('')
+      + '</commentList></comments>';
+  }
+  function _vmlXml(notes){
+    return '<xml xmlns:v="urn:schemas-microsoft-com:vml" '
+      +   'xmlns:o="urn:schemas-microsoft-com:office:office" '
+      +   'xmlns:x="urn:schemas-microsoft-com:office:excel">'
+      + '<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>'
+      + '<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" '
+      +   'path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/>'
+      +   '<v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>'
+      + notes.map(function(n, i){
+          var at = _refParts(n.ref);
+          return '<v:shape id="_x0000_s' + (1025 + i) + '" type="#_x0000_t202" '
+            +   'style="position:absolute;width:168pt;height:60pt;z-index:' + (i + 1) + ';visibility:hidden" '
+            +   'fillcolor="#FFFFE1" o:insetmode="auto"><v:fill color2="#FFFFE1"/>'
+            +   '<v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>'
+            +   '<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>'
+            +   '<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>'
+            +     '<x:Anchor>' + (at.col + 1) + ', 15, ' + at.row + ', 10, '
+            +       (at.col + 4) + ', 15, ' + (at.row + 4) + ', 4</x:Anchor>'
+            +     '<x:AutoFill>False</x:AutoFill>'
+            +     '<x:Row>' + at.row + '</x:Row><x:Column>' + at.col + '</x:Column>'
+            +   '</x:ClientData></v:shape>';
+        }).join('')
+      + '</xml>';
+  }
+
   function buildStyledXlsx(sheetName, rows, merges, colWidths){
     var CT='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
       +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -5638,7 +5708,18 @@ function ensureDirPerm(dir, byClick, mode){
     var outFill = isEarly(empName, rec) ? (ex?'earlyExc':'early') : 'none';
     var hd = getHalfDay(empName, dateStr);
     var durs = computeDurations(rec);
-    return { cells:[
+    var mp = getMispunch(empName, dateStr);
+    /* Why a late arrival or an early leaving was let pass. The grid shows it on
+       hover; the sheet keeps it as a note on the cell it belongs to, so the
+       reason travels with the figure instead of being lost on the way out. */
+    var note = function(o, title){
+      if(!o) return null;
+      var words = (typeof o === 'string') ? o : (o.note || o.reason || '');
+      return { title: title, text: String(words || '').trim() || 'No reason was written down.' };
+    };
+    return { notes:[ note(lx, 'Late, excused'), note(ex, 'Left early, excused'),
+                     note(mp, 'Mispunch') ],
+             cells:[
       { v:fmtTime(rec['in']), s:inFill },
       { v:fmtTime(rec.out),   s:outFill },
       { v:(durs.totalMin!==null?fmtMin(durs.totalMin):'')+(hd?(' '+hdMark(hd.kind)):''),
@@ -5676,7 +5757,7 @@ function ensureDirPerm(dir, byClick, mode){
   /* ---- sheet one: everyone, each walled off from the next ---- */
   function gridAllSheet(emps, dates, weekInfo, coName){
     var COLS = GRID_COLS.length, STEP = COLS + 1;        // six columns and the lane beside them
-    var rows = [], merges = [];
+    var rows = [], merges = [], notes = [];
     var C = _colLetter;
     var lastCol = C(emps.length * STEP);
     var edge = function(i, extra){                        // the walls of block i
@@ -5725,6 +5806,12 @@ function ensureDirPerm(dir, byClick, mode){
             var fill = (c.s === 'none' && zeb) ? 'zebra' : c.s;      // the stripe only where nothing else speaks
             row.push({ v:c.v, s:fill + '|' + (k===0 ? 'L' : (k===COLS-1 ? 'R' : '')) });
           });
+          /* The reason sits on the cell it explains: the in time for a late
+             arrival, the out time for an early one, the total for a mispunch. */
+          [0, 1, 2].forEach(function(k){
+            var n = day.notes && day.notes[k];
+            if(n) notes.push({ ref: C(at(i) + k) + (rows.length + 1), title:n.title, text:n.text });
+          });
         }
         row.push({ v:'', s:'gap' });
       });
@@ -5746,7 +5833,7 @@ function ensureDirPerm(dir, byClick, mode){
 
     var widths = [17];
     emps.forEach(function(){ widths.push(9.5, 9.5, 8, 8, 8, 5.5, 1.2); });
-    return { name:'All employees', rows:rows, merges:merges, widths:widths,
+    return { name:'All employees', rows:rows, merges:merges, widths:widths, notes:notes,
              freeze:{ row:5, col:1 }, repeatRows:5, landscape:true };
   }
 
