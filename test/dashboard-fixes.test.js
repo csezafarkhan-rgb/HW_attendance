@@ -136,6 +136,14 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     const menu = grab('renderEmailDropdown');
     const at = id => menu.indexOf("id=\"" + id + "\"");
     const order = ['emShot', 'emSendDay', 'emSendLeave', 'emSendHol', 'emSendMonth', 'emMonthPick'];
+    /* The settings tabs read in the same order as the things they settle, with
+       the month last - it is the one sent by hand. */
+    const tabs = ['att', 'lv', 'hol', 'mo'].map(k => menu.indexOf('data-em-tab="' + k + '"'));
+    check('the settings tabs read Attendance, Leave, Holiday, Month',
+      tabs.every(p => p > -1) && tabs.every((p, i) => i === 0 || p > tabs[i - 1]), tabs);
+    const panes = ['att', 'lv', 'hol', 'mo'].map(k => menu.indexOf('data-em-pane="' + k + '"'));
+    check('and the panes are written in that order too',
+      panes.every(p => p > -1) && panes.every((p, i) => i === 0 || p > panes[i - 1]), panes);
     const pos = order.map(at);
     check('the Share menu reads screenshot, today, leave, holiday, then the month',
       pos.every(p => p > -1) && pos.every((p, i) => i === 0 || p > pos[i - 1]),

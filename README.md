@@ -231,7 +231,8 @@ the leave message — and pressing the first one shows the message exactly as it
 will arrive, to be looked at before it goes.
 
 **Settings** (folded under the buttons) has a tab a message — Attendance,
-Leave, Month and Holiday — each with its own addresses and wording; a field
+Leave, Holiday and Month, in the order the buttons above them run — each with
+its own addresses and wording; a field
 left blank on any of the three falls back to the Attendance one. A box left
 empty shows the wording the message is built with, so what is on screen is what
 goes out. The Attendance tab

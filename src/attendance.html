@@ -9861,8 +9861,8 @@ function buildExcelBackup(){
          field is left empty. */
       + '<div class="em-tabs"><button type="button" class="em-tab on" data-em-tab="att">Attendance</button>'
       +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button>'
-      +   '<button type="button" class="em-tab" data-em-tab="mo">Month</button>'
-      +   '<button type="button" class="em-tab" data-em-tab="hol">Holiday</button></div>'
+      +   '<button type="button" class="em-tab" data-em-tab="hol">Holiday</button>'
+      +   '<button type="button" class="em-tab" data-em-tab="mo">Month</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
       + '<div class="em-lab">To <span>blank: every Super Admin</span></div>'
@@ -9923,29 +9923,6 @@ function buildExcelBackup(){
       +   (((s.leave || {}).confirm !== false) ? ' checked' : '') + '>'
       +   '<span>Tell the employee once their leave is decided</span></label>'
       + '</div>'
-      /* ---- the full month ---- */
-      + (function(){
-          var m = s.month || {};
-          return '<div data-em-pane="mo" style="display:none;">'
-            + '<div class="em-note" style="padding-top:0;">Sent by hand from the menu above \u2014 '
-            +   'there is no hour for it, only who it goes to and what it says.</div>'
-            + '<div class="em-lab">To <span>blank: the same as the attendance message</span></div>'
-            + '<div class="em-row"><input type="text" id="emMoTo" placeholder="comma separated" value="'
-            +   mailEscape((m.to || []).join(', ')) + '"></div>'
-            + '<div class="em-lab">Cc</div>'
-            + '<div class="em-row"><input type="text" id="emMoCc" placeholder="comma separated" value="'
-            +   mailEscape((m.cc || []).join(', ')) + '"></div>'
-            + '<div class="em-lab">Subject <span>{month} {n} {days} {org}</span></div>'
-            + '<div class="em-row"><input type="text" id="emMoSubject" value="'
-            +   mailEscape(text(m.subject, W.month.subject)) + '"></div>'
-            + '<div class="em-lab">Message at the top</div>'
-            + '<div class="em-row"><textarea id="emMoIntro" rows="3">'
-            +   mailEscape(text(m.intro, W.month.intro)) + '</textarea></div>'
-            + '<div class="em-lab">Note at the foot</div>'
-            + '<div class="em-row"><textarea id="emMoFooter" rows="2">'
-            +   mailEscape(text(m.footer, W.month.footer)) + '</textarea></div>'
-            + '</div>';
-        })()
       /* ---- the holiday reminder ---- */
       + (function(){
           var h = s.holiday || {};
@@ -9970,6 +9947,29 @@ function buildExcelBackup(){
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emHolFooter" rows="2">'
             +   mailEscape(text(h.footer, W.holiday.footer)) + '</textarea></div>'
+            + '</div>';
+        })()
+      /* ---- the full month ---- */
+      + (function(){
+          var m = s.month || {};
+          return '<div data-em-pane="mo" style="display:none;">'
+            + '<div class="em-note" style="padding-top:0;">Sent by hand from the menu above \u2014 '
+            +   'there is no hour for it, only who it goes to and what it says.</div>'
+            + '<div class="em-lab">To <span>blank: the same as the attendance message</span></div>'
+            + '<div class="em-row"><input type="text" id="emMoTo" placeholder="comma separated" value="'
+            +   mailEscape((m.to || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Cc</div>'
+            + '<div class="em-row"><input type="text" id="emMoCc" placeholder="comma separated" value="'
+            +   mailEscape((m.cc || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Subject <span>{month} {n} {days} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emMoSubject" value="'
+            +   mailEscape(text(m.subject, W.month.subject)) + '"></div>'
+            + '<div class="em-lab">Message at the top</div>'
+            + '<div class="em-row"><textarea id="emMoIntro" rows="3">'
+            +   mailEscape(text(m.intro, W.month.intro)) + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emMoFooter" rows="2">'
+            +   mailEscape(text(m.footer, W.month.footer)) + '</textarea></div>'
             + '</div>';
         })()
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
