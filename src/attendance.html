@@ -5884,9 +5884,9 @@ function ensureDirPerm(dir, byClick, mode){
        as leave here, so it stood at nought against every name. */
     var head = ['Employee','Shift','Score /100','Weeks completed','Weekly extra','Weekly short',
                 'Attendance %','On-time %','Target hours','Hours worked',
-                'Days worked on offs','Extra hours','Days present','Late days','Total late by',
-                'Early-leave days','Total early by','Days from home','Days visiting','Leave days',
-                'Hours vs target'];
+                'Days worked on offs','Extra hours','Saturdays worked','Saturday extra',
+                'Days present','Late days','Total late by',
+                'Early-leave days','Total early by','Days from home','Days visiting','Leave days'];
     var SCORE = head.indexOf('Score /100'), WORKED = head.indexOf('Hours worked');
     var last = C(head.length-1);
     rows.push([{ v:coName+' · '+state.selectedMonths.map(monthLabel).join(', ')
@@ -5895,6 +5895,23 @@ function ensureDirPerm(dir, byClick, mode){
     rows.push(head.map(function(h, i){
       return { v:h, s:'colHdr|B'+(i===0?'L':(i===head.length-1?'R':'')) };
     }));
+
+    /* Saturdays put in beyond what that Saturday asked for. A Saturday that is
+       a full day off asks for nothing, so all of it counts; one set as a half
+       day counts only what was given past the half. Kept apart from the general
+       extra-hours figure because a Saturday is the one people ask about. */
+    var saturdays = function(name){
+      var days = 0, extra = 0;
+      dates.forEach(function(d){
+        if(new Date(d + 'T00:00:00').getDay() !== 6) return;      // Saturdays only
+        if(getOfficialLeave(d)) return;
+        var worked = workedMinutes(name, d) || 0;
+        if(worked <= 0) return;
+        days++;
+        extra += Math.max(0, worked - (owedMinutes(name, d) || 0));
+      });
+      return { days: days, extra: extra };
+    };
 
     var ranked = emps.map(function(emp){
       var st = computeEmployeeStats(emp.name, dates);
@@ -5913,7 +5930,10 @@ function ensureDirPerm(dir, byClick, mode){
       /* The same three bands the dashboard colours its scores with. */
       var band = r.score >= 85 ? 'ok' : (r.score >= 70 ? 'warn' : 'bad');
       var wk = gridWeekSummary(weekInfo[r.emp.name], dates);
-      var count = function(v, fill){ return { n: v || 0, s: (v && fill) ? fill : zeb }; };
+      var sat = saturdays(r.emp.name);
+      var count = function(v, fill, edge){
+        return { n: v || 0, s: ((v && fill) ? fill : zeb) + (edge || '') };
+      };
       var mins = function(v){ return { n: (v || 0) / 1440, s: zeb + '||t' }; };
       rows.push([
         { v:dispName(r.emp.name), s:'zebra|L' },
@@ -5940,6 +5960,8 @@ function ensureDirPerm(dir, byClick, mode){
            the total, and worth seeing in green. */
         count(st.extraDays, 'ok'),
         { n:(st.extraMin || 0) / 1440, s:(st.extraMin ? 'ok' : zeb) + '||t' },
+        count(sat.days, 'ok'),
+        { n:(sat.extra || 0) / 1440, s:(sat.extra ? 'ok' : zeb) + '||t' },
         count(st.presentDays),
         count(st.lateDays, 'late'),
         mins(st.totalLateMin),
@@ -5947,12 +5969,10 @@ function ensureDirPerm(dir, byClick, mode){
         mins(st.totalEarlyMin),
         count(st.wfhDays, 'wfh'),
         count(st.visitDays, 'visit'),
-        count(st.leaveDays, 'leave'),
-        /* Hours over or under what the days asked for. A span that can be
-           negative, which [h]:mm cannot show, so it stays in words. */
-        { v:(st.netMin > 0 ? '+' : (st.netMin < 0 ? '−' : ''))
-             + fmtMin(Math.abs(st.netMin || 0)),
-          s:(st.netMin < 0 ? 'bad' : (st.netMin > 0 ? 'ok' : zeb)) + '|R' }
+        /* Last column, so it closes the row off. The net of over and short
+           used to sit here; Weekly extra and Weekly short say it better, and
+           say which way round it was. */
+        count(st.leaveDays, 'leave', '|R')
       ]);
     };
 
@@ -5977,7 +5997,7 @@ function ensureDirPerm(dir, byClick, mode){
       bars.push({ ref: C(WORKED)+b[0]+':'+C(WORKED)+b[1], color:'FF9CC4F5' });
     });
     return { name:'Performance', rows:rows, merges:merges,
-             widths:[20, 12, 9, 20, 12, 12, 12, 10, 12, 12, 12, 11, 11, 10, 12, 12, 12, 12, 11, 10, 13],
+             widths:[20, 12, 9, 20, 12, 12, 12, 10, 12, 12, 12, 11, 12, 12, 11, 10, 12, 12, 12, 12, 11, 10],
              bars: bars,
              freeze:{ row:2, col:1 }, repeatRows:2, landscape:true };
   }

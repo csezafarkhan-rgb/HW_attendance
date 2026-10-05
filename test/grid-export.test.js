@@ -55,7 +55,11 @@ const ctx = {
   isLate: (e, r) => !!(r && r['in'] && r['in'] >= '9:40'),
   isEarly: () => false,
   computeDurations: r => ({ totalMin: r && r.dur ? 544 : null, inMin: 540, outMin: 4 }),
-  workedMinutes: (e, d) => (RECS[e + '|' + d] && RECS[e + '|' + d].dur) ? 544 : 0,
+  workedMinutes: (e, d) => (e === 'Zafar Khan' && d === '2026-10-03') ? 240
+    : ((RECS[e + '|' + d] && RECS[e + '|' + d].dur) ? 544 : 0),
+  /* 3 October is a Saturday and a full day off here, so it asks for nothing and
+     everything worked on it counts as given over. */
+  owedMinutes: (e, d) => (new Date(d + 'T00:00:00').getDay() === 6 ? 0 : 540),
   wfhCellDuration: () => '9:00',
   hdMark: () => '',
   fmtTime: t => t || '',
@@ -246,13 +250,24 @@ check('how the weeks went is stated, and coloured by the worst of them',
       && Math.abs(zafar[at('Extra hours')].n - 230 / 1440) < 1e-9
       && /^ok\|\|t$/.test(zafar[at('Extra hours')].s),
     { days: zafar[at('Days worked on offs')], time: zafar[at('Extra hours')] });
+  check('a Saturday worked is counted on its own, with what it gave past target',
+    zafar[at('Saturdays worked')].n === 1
+      && Math.abs(zafar[at('Saturday extra')].n - 240 / 1440) < 1e-9
+      && String(zafar[at('Saturday extra')].s).split('|')[0] === 'ok',
+    { days: zafar[at('Saturdays worked')], extra: zafar[at('Saturday extra')] });
+  check('and somebody who worked none of them is left plain',
+    karan[at('Saturdays worked')].n === 0
+      && String(karan[at('Saturday extra')].s).split('|')[0] !== 'ok',
+    { days: karan[at('Saturdays worked')], extra: karan[at('Saturday extra')] });
   check('and left plain for somebody who worked none',
     karan[at('Days worked on offs')].n === 0 && karan[at('Days worked on offs')].s !== 'ok',
     karan[at('Days worked on offs')]);
-  check('hours over or under target keep their sign, which [h]:mm cannot show',
-    /^\+/.test(zafar[at('Hours vs target')].v)
-      && /^\u2212/.test(rahul[at('Hours vs target')].v),
-    [zafar[at('Hours vs target')].v, rahul[at('Hours vs target')].v]);
+  /* The net of over and short used to close the row; Weekly extra and Weekly
+     short say the same thing and say which way round it was. */
+  check('there is no netted hours-vs-target column any more',
+    at('Hours vs target') === -1 && ph[ph.length - 1] === 'Leave days', ph);
+  check('and the last column still closes the row off',
+    /\|R$/.test(zafar[ph.length - 1].s), zafar[ph.length - 1]);
   check('a lateness and a day from home each keep their colour',
     rahul[at('Late days')].s === 'late' && karan[at('Days from home')].s === 'wfh',
     { late: rahul[at('Late days')].s, wfh: karan[at('Days from home')].s });
