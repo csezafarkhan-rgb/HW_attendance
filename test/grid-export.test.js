@@ -60,6 +60,9 @@ const ctx = {
   /* 3 October is a Saturday and a full day off here, so it asks for nothing and
      everything worked on it counts as given over. */
   owedMinutes: (e, d) => (new Date(d + 'T00:00:00').getDay() === 6 ? 0 : 540),
+  /* Zafar and Rahul have Saturday off - Zafar came in on one anyway, Rahul did
+     not. karan is due in on Saturdays, so one he works is simply attendance. */
+  getSatPolicy: e => ({ mode: e === 'karan Ahuja' ? 'FULL' : 'OFF', hours: 4 }),
   wfhCellDuration: () => '9:00',
   hdMark: () => '',
   fmtTime: t => t || '',
@@ -255,7 +258,13 @@ check('how the weeks went is stated, and coloured by the worst of them',
       && Math.abs(zafar[at('Saturday extra')].n - 240 / 1440) < 1e-9
       && String(zafar[at('Saturday extra')].s).split('|')[0] === 'ok',
     { days: zafar[at('Saturdays worked')], extra: zafar[at('Saturday extra')] });
-  check('and somebody who worked none of them is left plain',
+  /* A Saturday given up is worth marking; a Saturday you are due in on is not. */
+  check('a worked Saturday reads green only where Saturday was theirs to keep',
+    zafar[at('Saturdays worked')].s === 'ok', zafar[at('Saturdays worked')]);
+  check('somebody whose Saturday is off and who worked none is told so, not nought',
+    rahul[at('Saturdays worked')].v === 'Saturday off'
+      && rahul[at('Saturdays worked')].n === undefined, rahul[at('Saturdays worked')]);
+  check('and somebody due in on Saturdays who worked none stands at nought',
     karan[at('Saturdays worked')].n === 0
       && String(karan[at('Saturday extra')].s).split('|')[0] !== 'ok',
     { days: karan[at('Saturdays worked')], extra: karan[at('Saturday extra')] });

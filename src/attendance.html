@@ -5931,6 +5931,11 @@ function ensureDirPerm(dir, byClick, mode){
       var band = r.score >= 85 ? 'ok' : (r.score >= 70 ? 'warn' : 'bad');
       var wk = gridWeekSummary(weekInfo[r.emp.name], dates);
       var sat = saturdays(r.emp.name);
+      /* Whether Saturday is theirs to begin with. Somebody whose Saturday is a
+         full day off and who worked none of them has not failed to do
+         something - the column says so rather than standing at nought beside
+         people who are due in every Saturday. */
+      var satOff = (getSatPolicy(r.emp.name) || {}).mode === 'OFF';
       var count = function(v, fill, edge){
         return { n: v || 0, s: ((v && fill) ? fill : zeb) + (edge || '') };
       };
@@ -5960,7 +5965,10 @@ function ensureDirPerm(dir, byClick, mode){
            the total, and worth seeing in green. */
         count(st.extraDays, 'ok'),
         { n:(st.extraMin || 0) / 1440, s:(st.extraMin ? 'ok' : zeb) + '||t' },
-        count(sat.days, 'ok'),
+        (satOff && !sat.days) ? { v:'Saturday off', s:zeb }
+          /* Green only where the Saturday was theirs to keep: coming in on a
+             Saturday you are due in on is attendance, not a gift. */
+          : count(sat.days, satOff ? 'ok' : null),
         { n:(sat.extra || 0) / 1440, s:(sat.extra ? 'ok' : zeb) + '||t' },
         count(st.presentDays),
         count(st.lateDays, 'late'),
