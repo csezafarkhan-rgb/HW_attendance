@@ -9995,23 +9995,48 @@ function buildExcelBackup(){
       + '</div>'
       /* ---- the leave message ---- */
       + '<div data-em-pane="lv" style="display:none;">'
-      /* Leave can be granted in two stages. Where somebody is marked in Users
-         to look at every request first, the first message goes to them and not
-         to the addresses below, so the panel says so rather than leaving the
-         boxes looking as though they govern everything. */
+      /* Leave can be granted in two stages, and the two are different messages
+         to different people. Where somebody is marked in Users to look at every
+         request first, this pane splits in two so neither set of boxes can be
+         taken for the other; with nobody marked there is one stage and no need
+         for the split. */
       + (function(){
           var fa = MAIL_CFG.firstApprover;
           if(!fa) return '<div class="em-note" style="padding-top:0;">'
             + 'Leave is granted in one stage: every request goes straight to the addresses below. '
             + 'Tick somebody in Users to have them look at each request first.</div>';
-          return '<div class="em-note" style="padding-top:0;">'
-            + '<b>' + mailEscape(fa.name) + '</b> sees every request first, before the addresses below '
-            + 'are asked for the final word. Change that in Users.</div>'
-            + '<div class="em-lab">Message to ' + mailEscape(fa.name)
-            +   ' <span>blank: the message below</span></div>'
-            + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
-            +   mailEscape(text((s.leave || {}).firstIntro, (W.leave || {}).firstIntro)) + '</textarea></div>';
+          return '<div class="em-note" style="padding-top:0;"><b>' + mailEscape(fa.name)
+            +   '</b> sees every request first. Change that in Users.</div>'
+            + '<div class="em-tabs"><button type="button" class="em-tab on" data-lv-tab="first">'
+            +   '1. ' + mailEscape(fa.name) + '</button>'
+            +   '<button type="button" class="em-tab" data-lv-tab="final">2. Final approval</button></div>';
         })()
+      /* ---- the first word ---- */
+      + (function(){
+          var fa = MAIL_CFG.firstApprover;
+          if(!fa) return '';
+          return '<div data-lv-pane="first">'
+            + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is raised. '
+            +   'Approving here does not grant the leave — it passes it on.</div>'
+            + '<div class="em-lab">Also to <span>' + mailEscape(fa.name)
+            +   ' is always written to</span></div>'
+            + '<div class="em-row"><input type="text" id="emLvFirstTo" placeholder="comma separated" value="'
+            +   mailEscape(((s.leave || {}).firstTo || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Cc</div>'
+            + '<div class="em-row"><input type="text" id="emLvFirstCc" placeholder="comma separated" value="'
+            +   mailEscape(((s.leave || {}).firstCc || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Message at the top <span>blank: the wording it comes with</span></div>'
+            + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
+            +   mailEscape(text((s.leave || {}).firstIntro, (W.leave || {}).firstIntro)) + '</textarea></div>'
+            + '</div>';
+        })()
+      /* ---- and the one that grants it ---- */
+      + '<div data-lv-pane="final"' + (MAIL_CFG.firstApprover ? ' style="display:none;"' : '') + '>'
+      + (MAIL_CFG.firstApprover
+          ? ('<div class="em-note" style="padding-top:2px;">Goes out once '
+             + mailEscape(MAIL_CFG.firstApprover.name) + ' has approved it, and carries their name. '
+             + 'This is the word that puts the day on the record.</div>')
+          : '')
       + '<div class="em-lab">To <span>'
       +   (MAIL_CFG.firstApprover ? 'who gives the final word' : 'blank: the same as the attendance message')
       +   '</span></div>'
@@ -10029,7 +10054,10 @@ function buildExcelBackup(){
       + '<div class="em-lab">Note at the foot</div>'
       + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
       +   mailEscape(text((s.leave || {}).footer, W.leave.footer)) + '</textarea></div>'
-      + '<div class="em-lab">When it goes on its own</div>'
+      + '</div>'
+      /* ---- true of both stages ---- */
+      + '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
+      +   'When it goes on its own</div>'
       + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
       +   '<span>A note as each request is raised</span></label>'
       + '<label class="em-row"><input type="checkbox" id="emUnreq"' + (s.unrequested !== false ? ' checked' : '') + '>'
@@ -10100,6 +10128,20 @@ function buildExcelBackup(){
         });
         Array.prototype.forEach.call(document.querySelectorAll('[data-em-pane]'), function(p){
           p.style.display = (p.getAttribute('data-em-pane') === which) ? '' : 'none';
+        });
+      };
+    });
+    /* The two stages of a leave grant, under the Leave tab. Their own attribute
+       rather than the one above, so switching between the stages does not reach
+       the tabs the panel itself is built from. */
+    Array.prototype.forEach.call(document.querySelectorAll('[data-lv-tab]'), function(t){
+      t.onclick = function(){
+        var which = t.getAttribute('data-lv-tab');
+        Array.prototype.forEach.call(document.querySelectorAll('[data-lv-tab]'), function(x){
+          x.classList.toggle('on', x === t);
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-lv-pane]'), function(p){
+          p.style.display = (p.getAttribute('data-lv-pane') === which) ? '' : 'none';
         });
       };
     });
@@ -10423,6 +10465,10 @@ function buildExcelBackup(){
           firstIntro: document.getElementById('emLvFirstIntro')
             ? document.getElementById('emLvFirstIntro').value
             : (((MAIL_CFG.settings || {}).leave || {}).firstIntro || ''),
+          firstTo: document.getElementById('emLvFirstTo')
+            ? list('emLvFirstTo') : (((MAIL_CFG.settings || {}).leave || {}).firstTo || []),
+          firstCc: document.getElementById('emLvFirstCc')
+            ? list('emLvFirstCc') : (((MAIL_CFG.settings || {}).leave || {}).firstCc || []),
           footer: document.getElementById('emLvFooter').value,
           confirm: document.getElementById('emConfirm').checked
         },

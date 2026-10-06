@@ -201,6 +201,39 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       off('Asha', MON, null) === null);
   }
 
+  /* ---- the two stages of a leave grant, under the Leave tab ----
+     Two messages to two sets of people; the pane splits so neither set of
+     boxes can be taken for the other. */
+  {
+    const menu = grab('renderEmailDropdown');
+    check('the Leave tab offers a stage each, in order',
+      menu.indexOf('data-lv-tab="first"') > -1
+        && menu.indexOf('data-lv-tab="first"') < menu.indexOf('data-lv-tab="final"'),
+      [menu.indexOf('data-lv-tab="first"'), menu.indexOf('data-lv-tab="final"')]);
+    check('each stage keeps its own addresses',
+      ['emLvFirstTo', 'emLvFirstCc', 'emLvFirstIntro'].every(id => menu.indexOf(id) > -1)
+        && ['emLvTo', 'emLvCc', 'emLvIntro'].every(id => menu.indexOf(id) > -1), menu.length);
+    check('the final stage is the one folded away to begin with',
+      /data-lv-pane="final"' \+ \(MAIL_CFG\.firstApprover \? ' style="display:none;"'/.test(menu));
+    check('and with nobody marked there are no stages to choose between',
+      menu.indexOf("if(!fa) return ''") > -1
+        && /Leave is granted in one stage/.test(menu), menu.indexOf('one stage'));
+
+    /* Switching between the stages must not disturb the panel's own tabs. */
+    const wiring = menu.slice(menu.indexOf('data-lv-tab]'));
+    check('switching stages reaches only the stage panes',
+      wiring.indexOf('data-lv-pane]') > -1 && wiring.slice(0, 400).indexOf('data-em-pane]') === -1,
+      wiring.slice(0, 300));
+
+    /* Saving from a pane that has no first-stage boxes must not wipe what is
+       stored for the next time somebody is marked. */
+    const save = grab('renderEmailDropdown');
+    check('saving with nobody marked keeps the first stage\'s settings',
+      /firstTo: document\.getElementById\('emLvFirstTo'\)\s*\n?\s*\? list\('emLvFirstTo'\) : \(\(\(MAIL_CFG/.test(save)
+        || save.indexOf("(((MAIL_CFG.settings || {}).leave || {}).firstTo || [])") > -1,
+      save.indexOf('firstTo:'));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

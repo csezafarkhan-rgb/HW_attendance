@@ -1384,7 +1384,8 @@ const MAIL_DEFAULTS = {
   /* The leave message goes to different people and says a different thing, so
      it keeps its own address list and wording. Anything left blank here falls
      back to the attendance settings above. */
-  leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true, firstIntro: '' },
+  leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true,
+           firstIntro: '', firstTo: [], firstCc: [] },
   /* The full month is sent by hand, so it has no hour of its own - only who it
      goes to and what it says. */
   month: { to: [], cc: [], subject: '', intro: '', footer: '' },
@@ -1435,7 +1436,14 @@ async function mailSettings(orgId) {
     /* The first approver is written to before the super admins are, so the
        words addressed to the super admins would be addressed to the wrong
        person. Left empty, the message carries the ordinary wording. */
-    firstIntro: String(lv.firstIntro == null ? '' : lv.firstIntro).slice(0, 2000)
+    firstIntro: String(lv.firstIntro == null ? '' : lv.firstIntro).slice(0, 2000),
+    /* The first stage is a different message to different people, so it keeps
+       its own addresses. The first approver is written to whatever is here -
+       they are the one being asked - and these are who else sees it. */
+    firstTo: (Array.isArray(lv.firstTo) ? lv.firstTo : []).map(x => String(x).trim())
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    firstCc: (Array.isArray(lv.firstCc) ? lv.firstCc : []).map(x => String(x).trim())
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20)
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
@@ -1941,8 +1949,17 @@ async function notifyNewRequests(orgId, added) {
        them and to nobody else: asking both at once would have the office
        granting leave the first approver had not seen. */
     const first = await firstApproverOf(orgId);
-    const to = (first && first.email) ? [first.email]
-                                      : await mailRecipients(orgId, settings, 'leave');
+    let to, cc;
+    if (first && first.email) {
+      /* The one being asked is always written to; the Leave tab's first-stage
+         addresses are who else sees it. */
+      to = [first.email].concat(settings.leave.firstTo || [])
+        .filter((a, i, all) => all.indexOf(a) === i);
+      cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
+    } else {
+      to = await mailRecipients(orgId, settings, 'leave');
+      cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    }
     if (!to.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
@@ -1955,7 +1972,6 @@ async function notifyNewRequests(orgId, added) {
         intro: (first && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
         footer: settings.leave.footer
       });
-      const cc = (first && first.email) ? [] : ((settings.leave.cc.length ? settings.leave.cc : settings.cc) || []);
       const sentOne = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
       await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, sentOne);
     }

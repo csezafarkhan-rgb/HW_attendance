@@ -190,11 +190,15 @@ to them instead:
    <name>** and carrying the words they added, if any. Their yes grants it and
    the day is written on the record; the employee is told once, at the end.
 
-The **Leave** tab under Share → Settings follows suit: with somebody ticked it
-names them, and gives their message a box of its own — the wording below it
-greets the Super Admins, which is the wrong greeting for the person who reads it
-first. Leave that box empty and they get the same wording as everyone else. The
-**To** addresses on that tab are the ones asked for the final word.
+The **Leave** tab under Share → Settings follows suit. With somebody ticked it
+splits in two, a stage a tab: **1. <their name>** holds the addresses and the
+wording for the message that goes out the moment a request is raised — they are
+always written to, and anyone in *Also to* or *Cc* sees it with them — and
+**2. Final approval** holds the people asked for the word that grants it, who
+get the card naming the first approver. Each stage keeps its own To, Cc and
+message, because they are two messages to two sets of people; the greeting
+addressed to the Super Admins is the wrong greeting for whoever reads it first.
+With nobody ticked the tab is one pane, as it was.
 
 One person holds the first word, so ticking somebody unticks whoever had it.
 They need no admin rights — the buttons in the message work without signing in,
