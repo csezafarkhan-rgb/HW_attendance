@@ -702,6 +702,26 @@ process.env.SESSION_SECRET = SECRET;
         && !(raised.cc || []).length,
       raised && { to: raised.to, cc: raised.cc });
 
+    /* The one who looks first is addressed in words of their own: the message
+       to the super admins opens "Hello Shivani ma'am and Nitish Sir", which is
+       the wrong greeting for the person it reaches before them. */
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
+      leave: { to: [], cc: [], intro: 'Hello Shivani and Nitish,',
+               firstIntro: 'Hello karan, please look at this one first.' } }));
+    const wordedBefore = sent.length;
+    const another = JSON.parse(kvFind(1, 'leaveRequests').value);
+    another.push({ id: 'req_worded', empName: 'Keshav Garg', dateFrom: '2026-11-14', dateTo: '2026-11-14',
+                   leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T06:00:00Z',
+                   updatedAt: '2026-11-01T06:00:00Z' });
+    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(another), shared: true });
+    await new Promise(r => setTimeout(r, 700));
+    const toFirst = sent[sent.length - 1];
+    check('the one who looks first is greeted in words of their own',
+      sent.length === wordedBefore + 1 && /Hello karan, please look at this one first/.test(toFirst.html)
+        && !/Hello Shivani and Nitish/.test(toFirst.html), toFirst && toFirst.subject);
+    check('and the message says it is theirs to look at first',
+      /for you to look at first/.test(toFirst.html), toFirst && toFirst.subject);
+
     /* The first word: approve. It is recommended, not granted. */
     const recBefore = sent.length;
     const stage1 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve',

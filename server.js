@@ -1384,7 +1384,7 @@ const MAIL_DEFAULTS = {
   /* The leave message goes to different people and says a different thing, so
      it keeps its own address list and wording. Anything left blank here falls
      back to the attendance settings above. */
-  leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true },
+  leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true, firstIntro: '' },
   /* The full month is sent by hand, so it has no hour of its own - only who it
      goes to and what it says. */
   month: { to: [], cc: [], subject: '', intro: '', footer: '' },
@@ -1431,7 +1431,11 @@ async function mailSettings(orgId) {
     subject: String(lv.subject || '').slice(0, 200),
     intro: String(lv.intro || '').slice(0, 2000),
     footer: String(lv.footer || '').slice(0, 2000),
-    confirm: lv.confirm !== false
+    confirm: lv.confirm !== false,
+    /* The first approver is written to before the super admins are, so the
+       words addressed to the super admins would be addressed to the wrong
+       person. Left empty, the message carries the ordinary wording. */
+    firstIntro: String(lv.firstIntro == null ? '' : lv.firstIntro).slice(0, 2000)
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
@@ -1946,7 +1950,10 @@ async function notifyNewRequests(orgId, added) {
         orgName: orgNameOf(kv.companyInfo), req: r,
         links: await requestLinks(orgId, r.id, first ? 1 : 0),
         siteUrl: mailer.baseUrl(),
-        intro: settings.leave.intro, footer: settings.leave.footer
+        heading: first ? 'A request for you to look at first'
+                       : 'A request is waiting for a decision',
+        intro: (first && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        footer: settings.leave.footer
       });
       const cc = (first && first.email) ? [] : ((settings.leave.cc.length ? settings.leave.cc : settings.cc) || []);
       const sentOne = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
@@ -2376,6 +2383,7 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
 app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
   const s = await mailSettings(req.session.orgId);
   const to = await mailRecipients(req.session.orgId, s);
+  const first = await firstApproverOf(req.session.orgId);
   const mine = String((req.user && req.user.email) || '');
   /* The wording each message is built with. The panel shows it in the box when
      nothing has been saved over it, so what is on screen is what goes out - it
@@ -2383,6 +2391,7 @@ app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
      looked empty until somebody typed in it. */
   res.json({ configured: mailer.ready(), from: mailer.conf().from, siteUrl: mailer.baseUrl(),
              settings: s, to, defaults: mailer.DEFAULT_TEXT,
+             firstApprover: first ? { name: first.name, email: first.email } : null,
              you: EMAIL_RE.test(mine) ? mine : '' });
 });
 app.post('/api/mail/test', requireRole('admin'), async (req, res) => {

@@ -9995,7 +9995,26 @@ function buildExcelBackup(){
       + '</div>'
       /* ---- the leave message ---- */
       + '<div data-em-pane="lv" style="display:none;">'
-      + '<div class="em-lab">To <span>blank: the same as the attendance message</span></div>'
+      /* Leave can be granted in two stages. Where somebody is marked in Users
+         to look at every request first, the first message goes to them and not
+         to the addresses below, so the panel says so rather than leaving the
+         boxes looking as though they govern everything. */
+      + (function(){
+          var fa = MAIL_CFG.firstApprover;
+          if(!fa) return '<div class="em-note" style="padding-top:0;">'
+            + 'Leave is granted in one stage: every request goes straight to the addresses below. '
+            + 'Tick somebody in Users to have them look at each request first.</div>';
+          return '<div class="em-note" style="padding-top:0;">'
+            + '<b>' + mailEscape(fa.name) + '</b> sees every request first, before the addresses below '
+            + 'are asked for the final word. Change that in Users.</div>'
+            + '<div class="em-lab">Message to ' + mailEscape(fa.name)
+            +   ' <span>blank: the message below</span></div>'
+            + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
+            +   mailEscape(text((s.leave || {}).firstIntro, (W.leave || {}).firstIntro)) + '</textarea></div>';
+        })()
+      + '<div class="em-lab">To <span>'
+      +   (MAIL_CFG.firstApprover ? 'who gives the final word' : 'blank: the same as the attendance message')
+      +   '</span></div>'
       + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
       +   mailEscape(((s.leave || {}).to || []).join(', ')) + '"></div>'
       + '<div class="em-lab">Cc</div>'
@@ -10397,6 +10416,13 @@ function buildExcelBackup(){
           to: list('emLvTo'), cc: list('emLvCc'),
           subject: document.getElementById('emLvSubject').value.trim(),
           intro: document.getElementById('emLvIntro').value,
+          /* The box is only on the pane when somebody is marked to look first.
+             With nobody marked there is nothing to read, so what is already
+             stored is written back - saving the other settings must not quietly
+             wipe wording that is waiting for the next time somebody is. */
+          firstIntro: document.getElementById('emLvFirstIntro')
+            ? document.getElementById('emLvFirstIntro').value
+            : (((MAIL_CFG.settings || {}).leave || {}).firstIntro || ''),
           footer: document.getElementById('emLvFooter').value,
           confirm: document.getElementById('emConfirm').checked
         },

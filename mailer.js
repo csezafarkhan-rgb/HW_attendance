@@ -200,6 +200,8 @@ const DEFAULT_TEXT = {
     footer: 'Best regards,\n{org}'
   },
   leave: {
+    firstIntro: 'Hello,\n\nA leave request is waiting for your word before it goes to the '
+      + 'management for final approval. Approve or reject it from the buttons below.',
     subject: 'Leave \u00b7 {n} waiting for a decision',
     intro: 'Hello,\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
     footer: 'Best regards,\n{org}'

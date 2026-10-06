@@ -190,6 +190,12 @@ to them instead:
    <name>** and carrying the words they added, if any. Their yes grants it and
    the day is written on the record; the employee is told once, at the end.
 
+The **Leave** tab under Share → Settings follows suit: with somebody ticked it
+names them, and gives their message a box of its own — the wording below it
+greets the Super Admins, which is the wrong greeting for the person who reads it
+first. Leave that box empty and they get the same wording as everyone else. The
+**To** addresses on that tab are the ones asked for the final word.
+
 One person holds the first word, so ticking somebody unticks whoever had it.
 They need no admin rights — the buttons in the message work without signing in,
 as the existing ones do. A Super Admin can still decide on the Requests page at
