@@ -753,7 +753,8 @@ app.post('/api/users/:id/invite', requireRole('admin'), async (req, res) => {
 
 app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, email, name, role, is_active, last_login_at, created_at, totp_enabled AS two_step
+    `SELECT id, email, name, role, is_active, last_login_at, created_at,
+            totp_enabled AS two_step, leave_approver
        FROM users WHERE org_id = $1 ORDER BY email`,
     [req.session.orgId]
   );
@@ -793,8 +794,24 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
 
 app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { role, is_active, password, name, resetTwoStep } = req.body || {};
+  const { role, is_active, password, name, resetTwoStep, leaveApprover } = req.body || {};
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  /* One person looks at every request first, so marking somebody unmarks
+     whoever held it. Done on its own, not folded in with the rest of the row:
+     it is a change to how leave is granted, not to an account. */
+  if (leaveApprover !== undefined) {
+    const t = await pool.query('SELECT id FROM users WHERE id = $1 AND org_id = $2',
+      [id, req.session.orgId]);
+    if (!t.rows[0]) return res.status(404).json({ error: 'not_found' });
+    if (leaveApprover) {
+      await pool.query('UPDATE users SET leave_approver = (id = $1) WHERE org_id = $2', [id, req.session.orgId]);
+    } else {
+      await pool.query('UPDATE users SET leave_approver = FALSE WHERE id = $1 AND org_id = $2',
+        [id, req.session.orgId]);
+    }
+    await logChange(pool, req.session.orgId, 'kv', 'leaveApprover', req.session.userId);
+    return res.json({ ok: true, leaveApprover: !!leaveApprover });
+  }
   /* Another super admin's lost phone: switch two-step off for them, so they
      can sign in with the password and set it up again. Your own account is
      switched off from "Your sign-in", which asks for a code. */
@@ -1480,6 +1497,14 @@ function linksFor(payload) {
   const mk = act => base + '/e/' + mailer.actionToken(Object.assign({ act }, payload), secret);
   return { approve: mk('approve'), reject: mk('reject') };
 }
+/* The same, with the first approver's name sealed into the link, so the record
+   can say who recommended it without trusting anything the browser sends. */
+async function requestLinks(orgId, reqId, stage) {
+  if (stage !== 1) return linksFor({ k: 'req', org: orgId, id: reqId, s: stage || 0 });
+  const first = await firstApproverOf(orgId);
+  return linksFor({ k: 'req', org: orgId, id: reqId, s: 1,
+                    by: first ? first.name : 'the first approver' });
+}
 /* Leave marked on the record that no request accounts for, newest first. The
    dashboard's own rule: a rejected request or a punch correction covers nothing,
    and a part-day is only covered by a part-day request of the same size. */
@@ -1634,15 +1659,28 @@ async function buildLeaveEmail(orgId) {
   const settings = await mailSettings(orgId);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'companyInfo']);
   const requests = parseJson(kv.leaveRequests) || [];
+  /* Where somebody looks at requests first, this message goes to the super
+     admins, so the buttons on it are the ones that grant. A request the first
+     approver has not seen yet still shows, so the office can see it is there -
+     with the buttons that grant it, because a super admin pressing them is a
+     grant made without waiting, which is theirs to make. */
+  const first = await firstApproverOf(orgId);
   /* An archived request is out of the way by definition - the dashboard keeps
      it off the Requests page, and the message said seven were waiting when the
      portal said none. */
-  const pending = requests.filter(r => r && !r.archived && (r.status === 'pending' || r.status === 'query'))
+  const live = r => r && !r.archived
+    && (r.status === 'pending' || r.status === 'query' || r.status === 'recommended');
+  const pending = requests.filter(live)
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
-    .map(r => ({ req: r, heading: r.status === 'query' ? 'A query was raised'
-                          : 'Waiting since ' + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)),
-                 links: linksFor({ k: 'req', org: orgId, id: r.id }) }));
+    .map(r => ({ req: r,
+                 heading: r.status === 'recommended'
+                   ? ('Approved by ' + (r.recommendedBy || 'the first approver') + ', waiting on you')
+                   : (r.status === 'query' ? 'A query was raised'
+                      : (first ? ('With ' + first.name + ' first, since '
+                                  + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))
+                               : 'Waiting since ' + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))),
+                 links: linksFor({ k: 'req', org: orgId, id: r.id, s: 2 }) }));
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
   const unreq = settings.unrequested
     ? unrequestedFrom(parseJson(kv.overrides) || {}, parseJson(kv.halfDays) || {}, requests, since)
@@ -1895,17 +1933,22 @@ async function notifyNewRequests(orgId, added) {
     if (!mailer.ready() || !added.length) return;
     const settings = await mailSettings(orgId);
     if (!settings.requests) return;
-    const to = await mailRecipients(orgId, settings, 'leave');
+    /* Where somebody is marked to look at requests first, the request goes to
+       them and to nobody else: asking both at once would have the office
+       granting leave the first approver had not seen. */
+    const first = await firstApproverOf(orgId);
+    const to = (first && first.email) ? [first.email]
+                                      : await mailRecipients(orgId, settings, 'leave');
     if (!to.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
       const mail = mailer.requestEmail({
         orgName: orgNameOf(kv.companyInfo), req: r,
-        links: linksFor({ k: 'req', org: orgId, id: r.id }),
+        links: await requestLinks(orgId, r.id, first ? 1 : 0),
         siteUrl: mailer.baseUrl(),
         intro: settings.leave.intro, footer: settings.leave.footer
       });
-      const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+      const cc = (first && first.email) ? [] : ((settings.leave.cc.length ? settings.leave.cc : settings.cc) || []);
       const sentOne = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
       await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, sentOne);
     }
@@ -1913,6 +1956,19 @@ async function notifyNewRequests(orgId, added) {
     console.error('request email failed (request itself was saved):', e && e.message);
   }
 }
+/* The one person who looks at every leave request before a super admin grants
+   it, if anybody is marked for it. Nobody marked means leave is granted in one
+   stage, as it was before this existed. */
+async function firstApproverOf(orgId) {
+  const r = await pool.query(
+    `SELECT id, email, name FROM users
+      WHERE org_id = $1 AND is_active AND leave_approver ORDER BY id LIMIT 1`, [orgId]);
+  const u = r.rows[0];
+  if (!u) return null;
+  return { id: u.id, email: EMAIL_RE.test(String(u.email || '')) ? u.email : '',
+           name: String(u.name || u.email || 'the first approver') };
+}
+
 /* The person the leave belongs to, by their own account. Accounts are made
    with the employee's name against them, so that is what ties a request to an
    address; without an account there is nobody to write to. */
@@ -1949,6 +2005,35 @@ async function notifyDecision(orgId, req) {
     await logMail(orgId, 'decision', { to: [to], cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {
     console.error('the decision stands but its message failed:', e && e.message);
+  }
+}
+
+/* The first approver has said yes. The super admins are asked for the word
+   that grants it, and are told whose recommendation they are acting on. */
+async function notifyRecommended(orgId, req) {
+  try {
+    if (!mailer.ready() || !req || !req.id) return;
+    const settings = await mailSettings(orgId);
+    if (!settings.requests) return;
+    const to = await mailRecipients(orgId, settings, 'leave');
+    if (!to.length) return;
+    const job = 'recommended-email:' + orgId + ':' + req.id;
+    const claimed = await pool.query(
+      'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+    if (!claimed.rows.length) return;
+    const kv = await sharedKeys(orgId, ['companyInfo']);
+    const mail = mailer.requestEmail({
+      orgName: orgNameOf(kv.companyInfo), req,
+      links: linksFor({ k: 'req', org: orgId, id: req.id, s: 2 }),
+      siteUrl: mailer.baseUrl(),
+      heading: 'Approved by ' + (req.recommendedBy || 'the first approver') + ', waiting on you',
+      intro: settings.leave.intro, footer: settings.leave.footer
+    });
+    const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+    await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, r);
+  } catch (e) {
+    console.error('the recommendation stands but its message failed:', e && e.message);
   }
 }
 
@@ -2102,19 +2187,41 @@ async function applyEmailDecision(p, note) {
     const now = new Date().toISOString();
     const reqsText = await read('leaveRequests');
     const reqs = parseJson(reqsText) || [];
-    let skipped = 0, kept = 0, summary = '', decided = null;
+    let skipped = 0, kept = 0, summary = '', decided = null, recommended = null;
 
     if (p.k === 'req') {
       const req = reqs.filter(r => r && r.id === p.id)[0];
       if (!req) { await client.query('ROLLBACK'); return { ok: false, title: 'That request is gone', detail: 'It is no longer on file.' }; }
-      if (req.status !== 'pending' && req.status !== 'query') {
+      /* Two stages, where somebody is marked to look at requests first. Their
+         yes moves it on to a super admin rather than granting it; their no ends
+         it there. A link made before anybody was marked carries no stage and
+         grants in one, as it always did. */
+      const firstStage = p.s === 1;
+      const waiting = firstStage ? ['pending', 'query'] : ['pending', 'query', 'recommended'];
+      if (waiting.indexOf(req.status) === -1) {
         await client.query('ROLLBACK');
         return settledSay(dispReq(req), req.status);
+      }
+      if (firstStage && p.act === 'approve') {
+        /* Recommended, not granted: nothing is written on the record yet. */
+        req.status = 'recommended';
+        req.updatedAt = now;
+        req.recommendedBy = clip(p.by || '', 120) || 'the first approver';
+        req.recommendedAt = now;
+        if (note) req.recommendNote = note;
+        summary = dispReq(req);
+        recommended = req;
+        await write('leaveRequests', reqsText, JSON.stringify(reqs));
+        await client.query('COMMIT');
+        notifyRecommended(p.org, req);
+        return { ok: true, title: 'Passed on for approval',
+                 detail: summary + ' goes to a super admin for the final word. '
+                       + 'Nothing is on the record until they give it.' };
       }
       req.status = p.act === 'approve' ? 'approved' : 'rejected';
       req.updatedAt = now;
       if (note) req.adminNote = note;                  // the reason, in their own words
-      if (p.act === 'approve') req.approvedBy = 'email';
+      if (p.act === 'approve') req.approvedBy = firstStage ? (p.by || 'email') : 'email';
       else delete req.approvedBy;
       summary = dispReq(req);
       decided = req;

@@ -558,6 +558,9 @@ body{
 /* A day taken without a request - a record of what happened, not something
    still waiting on a decision. */
 .req-status.recorded{ background:#FFF6D6; color:#8A5A00; border:1px solid #E8D07A; }
+/* Halfway: the first approver has said it should go forward, a Super Admin has
+   not yet granted it, and nothing is on the record. */
+.req-status.recommended{ background:#E3F1E8; color:#1B5E36; border:1px solid #B6DCC4; }
 .req-drift{ margin-top:9px; padding:9px 12px; border-radius:9px; font-size:11.5px;
   line-height:1.5; background:#FBE6E4; border:1px solid #EDA9A2; color:#8C2C24; }
 .req-drift b{ display:block; margin-bottom:2px; }
@@ -7859,7 +7862,10 @@ function buildExcelBackup(){
      attributes unescaped - the id in data-id, the leave type in a class name.
      Keep those fields to the characters they are made of, so a request edited
      by hand before it was saved cannot carry markup into an admin's page. */
-  var REQ_STATUSES = ['pending', 'query', 'approved', 'rejected', 'recorded'];
+  /* "recommended" is the middle of the two-stage grant: the first approver has
+     said it should go forward and a super admin has not yet granted it. Nothing
+     is written on the record until they do. */
+  var REQ_STATUSES = ['pending', 'query', 'recommended', 'approved', 'rejected', 'recorded'];
   function cleanRequests(list){
     if(!Array.isArray(list)) return [];
     return list.filter(function(r){ return r && typeof r === 'object'; }).map(function(r){
@@ -8311,7 +8317,10 @@ function buildExcelBackup(){
     return from + ' → ' + to;
   }
   var REQ_STATUS_LABEL = {pending:'Pending', approved:'Approved', rejected:'Rejected',
-                          query:'Query', recorded:'Taken \u2014 not requested'};
+                          query:'Query', recorded:'Taken \u2014 not requested',
+                          /* The middle of the two-stage grant: said yes to once,
+                             waiting on the word that puts it on the record. */
+                          recommended:'Approved by first \u00b7 awaiting final'};
   /* A request is no longer always leave, so the list has to name the kind. */
   /* The part-day sizes, matching what the grid can already mark. */
   function isPartDay(t){ return t === 'HALF' || t === 'SHORT' || t === 'THREEQ'; }
@@ -8413,7 +8422,8 @@ function buildExcelBackup(){
     if(!reqInScope(r)) return false;
     if(REQ_VIEW === 'arch')     return reqIsArchived(r);
     if(reqIsArchived(r))        return false;
-    if(REQ_VIEW === 'live')     return r.status === 'pending' || r.status === 'query';
+    if(REQ_VIEW === 'live')     return r.status === 'pending' || r.status === 'query'
+                                    || r.status === 'recommended';
     if(REQ_VIEW === 'approved') return r.status === 'approved';
     if(REQ_VIEW === 'rejected') return r.status === 'rejected';
     return true;                                    // 'all'
@@ -8893,7 +8903,10 @@ function buildExcelBackup(){
     list.innerHTML = bar + (REQ_VIEW === 'arch' ? '' : unrequestedHtml()) + sorted.map(function(req){
       var statusCls = req.status || 'pending';
       var actionsHtml = '';
-      if(req.status === 'pending' || req.status === 'query'){
+      /* A request the first approver has passed on is still waiting on
+         somebody, so it keeps its buttons: pressing Approve here is the word
+         that grants it. */
+      if(req.status === 'pending' || req.status === 'query' || req.status === 'recommended'){
         actionsHtml =
           '<div class="req-actions">'+
             '<button class="btn primary" data-act="approve" data-id="'+req.id+'">Approve</button>'+
@@ -8921,6 +8934,12 @@ function buildExcelBackup(){
         + '<button class="btn ghost" data-act="'+(reqIsArchived(req)?'unarchive':'archive')+'" data-id="'+req.id+'">'
         +   (reqIsArchived(req) ? '\u21a9 Restore' : '\u2913 Archive') + '</button></div>';
       var noteHtml = unmarkedNoteHtml(req, true);
+      /* Who gave the first word, so whoever gives the second knows whose
+         recommendation they are acting on. */
+      if(req.recommendedBy) noteHtml += '<div class="req-note"><strong>✓ Approved by '
+        + escapeHtml(req.recommendedBy) + ':</strong> '
+        + (req.recommendNote ? req.recommendNote.replace(/</g,'&lt;') : 'passed on for final approval.')
+        + '</div>';
       if(req.adminNote) noteHtml += '<div class="req-note"><strong>Admin:</strong> '+req.adminNote.replace(/</g,'&lt;')+'</div>';
       if(req.employeeReply) noteHtml += '<div class="req-note"><strong>'+escapeHtml(req.empName)+':</strong> '+req.employeeReply.replace(/</g,'&lt;')+'</div>';
       return '<div class="req-card st-'+statusCls+(reqIsArchived(req)?' is-arch':'')+'">'+

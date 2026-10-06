@@ -237,6 +237,20 @@ function kindName(t) { return KIND_NAME[t] || String(t || 'Leave'); }
 
 /* One request, with its two buttons. `links` is {approve, reject}. */
 function requestCard(req, links, heading) {
+  /* Leave can be granted in two stages: one person looks at every request first
+     and says whether it should go forward, and a super admin then grants it.
+     Whoever is being asked for the second word is told who gave the first. */
+  const recommended = (req.recommendedBy)
+    ? ('<div style="margin:0 0 9px;padding:7px 10px;border-radius:7px;background:#EAF6EE;'
+       + 'color:#137A3B;font-size:12.5px;font-weight:600;">&#10003; Approved by '
+       + esc(req.recommendedBy)
+       + (req.recommendedAt ? (' &middot; ' + esc(fmtDay(String(req.recommendedAt).slice(0, 10)))) : '')
+       + (req.recommendNote
+           ? ('<div style="font-weight:500;margin-top:3px;">&ldquo;'
+              + esc(String(req.recommendNote).slice(0, 200)) + '&rdquo;</div>')
+           : '')
+       + '</div>')
+    : '';
   return '<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + BLUE + ';border-radius:10px;padding:12px 14px;margin:0 0 12px;">'
     + (heading ? ('<div style="font-size:11.5px;color:' + SOFT + ';margin-bottom:4px;">' + esc(heading) + '</div>') : '')
     + '<div style="font-weight:700;">' + esc(req.empName) + '</div>'
@@ -245,6 +259,7 @@ function requestCard(req, links, heading) {
     +   ' · ' + esc(dateRange(req.dateFrom, req.dateTo))
     +   (req.message ? ('<br>“' + esc(String(req.message).slice(0, 300)) + '”') : '')
     + '</div>'
+    + recommended
     + (links ? (button(links.approve, 'Approve', 'approve') + button(links.reject, 'Reject', 'reject')) : '')
     + '</div>';
 }
@@ -573,7 +588,8 @@ function requestEmail(o) {
   return {
     subject: (r.leaveType === 'PUNCH' ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
              + ' · ' + dateRange(r.dateFrom, r.dateTo),
-    html: layout(o.orgName || 'Attendance', 'A request is waiting for a decision', [
+    html: layout(o.orgName || 'Attendance',
+      o.heading || 'A request is waiting for a decision', [
       o.intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
                  + esc(o.intro) + '</div>') : '',
       requestCard(r, o.links, 'Raised ' + (r.createdAt ? fmtDay(String(r.createdAt).slice(0, 10)) : 'just now')),

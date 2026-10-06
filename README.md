@@ -175,6 +175,28 @@ are a signed link sent to the account's own address, and both need
   a password is set, whether from that link or by an admin. Nothing is stored
   for it, and setting a password signs that account out everywhere else.
 
+## Leave, approved in two stages
+
+By default a leave request goes straight to the Super Admins and one yes grants
+it. Tick **Sees every leave request first** on somebody in **Users** and it goes
+to them instead:
+
+1. The request is raised. Only the first approver is written to, with Approve
+   and Reject in the message.
+2. Their **Reject** ends it there, and the employee is told.
+   Their **Approve** does not grant the leave — nothing reaches the attendance
+   record. The request becomes *Approved by first · awaiting final*.
+3. The Super Admins are then written to, with the card saying **Approved by
+   <name>** and carrying the words they added, if any. Their yes grants it and
+   the day is written on the record; the employee is told once, at the end.
+
+One person holds the first word, so ticking somebody unticks whoever had it.
+They need no admin rights — the buttons in the message work without signing in,
+as the existing ones do. A Super Admin can still decide on the Requests page at
+either stage; approving there grants it outright.
+
+Untick everybody and leave goes back to one stage, exactly as before.
+
 ## Two-step sign-in
 
 Admins can turn on two-step sign-in for their own account: **Users → Your sign-in

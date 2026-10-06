@@ -132,3 +132,10 @@ CREATE TABLE IF NOT EXISTS change_log (
   changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS change_log_idx ON change_log (org_id, id);
+
+-- Leave is approved in two stages: one person looks at every request first and
+-- says whether it should go forward, and a super admin then grants it. This
+-- marks the person who does the looking. Added here rather than in the table
+-- above so an existing database gains it on the next deploy; without a first
+-- approver marked, leave is granted in one stage as it always was.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS leave_approver BOOLEAN NOT NULL DEFAULT FALSE;

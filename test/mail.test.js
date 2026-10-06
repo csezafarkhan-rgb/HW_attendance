@@ -236,6 +236,16 @@ function query(sql, p) {
     const r = db.kv.find(x => x.key === 'visibleEmployees' && x.user_id === 1);
     return rows(r ? [{ value: r.value }] : []);
   }
+  /* Who looks at every leave request before a super admin grants it. Nobody is
+     marked unless a test marks them, so leave is granted in one stage. */
+  if (s.startsWith('SELECT id, email, name FROM users')) {
+    return rows(db.users.filter(u => u.org_id === p[0] && u.is_active && u.leave_approver)
+      .map(u => ({ id: u.id, email: u.email, name: u.name })));
+  }
+  if (s.startsWith('UPDATE users SET leave_approver')) {
+    db.users.forEach(u => { if (u.org_id === p[1] || u.org_id === p[0]) u.leave_approver = (u.id === p[0]); });
+    return rows([]);
+  }
   if (s.startsWith('SELECT email FROM users WHERE org_id = $1 AND is_active AND lower(COALESCE(name')) {
     const hit = db.users.find(u => u.org_id === p[0] && u.is_active
       && String(u.name || '').toLowerCase() === String(p[1]).toLowerCase());
@@ -660,6 +670,102 @@ process.env.SESSION_SECRET = SECRET;
   await asAdmin('POST', '/api/mail/leave', {});
   check('with no box filled in anywhere it falls back to the admins',
     (sent[sent.length - 1].to || []).indexOf('boss@x.com') > -1, sent[sent.length - 1].to);
+
+  /* ---- leave granted in two stages ----
+     One person looks at every request first and says whether it should go
+     forward; a super admin then grants it. Nothing reaches the record until the
+     second word is given. */
+  {
+    db.users.push({ id: 11, org_id: 1, email: 'karan@homeweavers.net', name: 'karan Ahuja',
+                    role: 'employee', is_active: true, leave_approver: true });
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
+                                              leave: { to: [], cc: [] } }));
+    kvSet(1, 'overrides', '{}');
+    kvSet(1, 'leaveRequests', JSON.stringify([
+      { id: 'req_two', empName: 'Keshav Garg', dateFrom: '2026-11-10', dateTo: '2026-11-10',
+        leaveType: 'CL', status: 'pending', message: 'family',
+        createdAt: '2026-11-01T04:00:00Z', updatedAt: '2026-11-01T04:00:00Z' }
+    ]));
+
+    /* Raised: it goes to the one who looks first, and to nobody else. */
+    const raisedBefore = sent.length;
+    const withNew = JSON.parse(kvFind(1, 'leaveRequests').value);
+    withNew.push({ id: 'req_new', empName: 'Keshav Garg', dateFrom: '2026-11-12', dateTo: '2026-11-12',
+                   leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T05:00:00Z',
+                   updatedAt: '2026-11-01T05:00:00Z' });
+    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(withNew), shared: true });
+    await new Promise(r => setTimeout(r, 700));
+    const raised = sent[sent.length - 1];
+    check('a new request goes to whoever looks at them first, and to them alone',
+      sent.length === raisedBefore + 1
+        && JSON.stringify(raised.to) === JSON.stringify(['karan@homeweavers.net'])
+        && !(raised.cc || []).length,
+      raised && { to: raised.to, cc: raised.cc });
+
+    /* The first word: approve. It is recommended, not granted. */
+    const recBefore = sent.length;
+    const stage1 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve',
+                                        s: 1, by: 'karan Ahuja' }, SECRET);
+    const passed = await hit('POST', '/e/' + stage1);
+    const afterOne = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_two');
+    check('the first approver\'s yes passes it on rather than granting it',
+      passed.status === 200 && afterOne.status === 'recommended'
+        && afterOne.recommendedBy === 'karan Ahuja', { status: passed.status, req: afterOne });
+    check('and the page says so, in those words',
+      /Passed on for approval/.test(passed.body) && /Nothing is on the record/.test(passed.body),
+      passed.body.slice(0, 400));
+    check('nothing is written on the record yet',
+      !JSON.parse(kvFind(1, 'overrides').value)['Keshav Garg|2026-11-10'],
+      kvFind(1, 'overrides').value);
+
+    /* The super admins are asked for the word that grants it, and told whose
+       recommendation they are acting on. */
+    await new Promise(r => setTimeout(r, 700));
+    const onward = sent[sent.length - 1];
+    check('the super admins are then asked, and told who approved it first',
+      sent.length === recBefore + 1 && (onward.to || []).indexOf('boss@x.com') > -1
+        && /Approved by karan Ahuja/.test(onward.html),
+      onward && { to: onward.to, subject: onward.subject });
+    check('the employee is not told yet, because it is not settled',
+      !(onward.to || []).some(a => /keshav/.test(a)), onward && onward.to);
+
+    /* The second word grants it, and the record is written. */
+    const stage2 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve', s: 2 }, SECRET);
+    const granted = await hit('POST', '/e/' + stage2);
+    const afterTwo = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_two');
+    check('the second word grants it',
+      granted.status === 200 && afterTwo.status === 'approved', { status: granted.status, req: afterTwo });
+    check('and the day reaches the record then, not before',
+      !!JSON.parse(kvFind(1, 'overrides').value)['Keshav Garg|2026-11-10'],
+      kvFind(1, 'overrides').value);
+    check('the name of whoever recommended it is kept',
+      afterTwo.recommendedBy === 'karan Ahuja', afterTwo);
+
+    /* A no at the first stage ends it there. */
+    kvSet(1, 'leaveRequests', JSON.stringify([
+      { id: 'req_no', empName: 'Keshav Garg', dateFrom: '2026-11-20', dateTo: '2026-11-20',
+        leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T04:00:00Z',
+        updatedAt: '2026-11-01T04:00:00Z' }
+    ]));
+    const no = await hit('POST', '/e/' + mailer.actionToken(
+      { k: 'req', org: 1, id: 'req_no', act: 'reject', s: 1, by: 'karan Ahuja' }, SECRET));
+    const refused = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_no');
+    check('a no at the first stage ends it, with no second asking',
+      no.status === 200 && refused.status === 'rejected', { status: no.status, req: refused });
+
+    /* And with nobody marked, leave is granted in one stage as it always was. */
+    db.users.forEach(u => { u.leave_approver = false; });
+    kvSet(1, 'leaveRequests', JSON.stringify([
+      { id: 'req_one', empName: 'Keshav Garg', dateFrom: '2026-11-24', dateTo: '2026-11-24',
+        leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T04:00:00Z',
+        updatedAt: '2026-11-01T04:00:00Z' }
+    ]));
+    const straight = await hit('POST', '/e/' + mailer.actionToken(
+      { k: 'req', org: 1, id: 'req_one', act: 'approve', s: 0 }, SECRET));
+    const once = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_one');
+    check('with nobody marked to look first, one yes still grants it',
+      straight.status === 200 && once.status === 'approved', { status: straight.status, req: once });
+  }
 
   /* ---- a password set from a link in an email ---- */
   const pwBefore = sent.length;
