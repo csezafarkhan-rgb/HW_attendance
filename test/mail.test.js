@@ -676,10 +676,13 @@ process.env.SESSION_SECRET = SECRET;
      forward; a super admin then grants it. Nothing reaches the record until the
      second word is given. */
   {
+    /* Who looks first is an address on the Leave tab. It belongs to an account
+       here, so the message that follows can name them rather than reciting the
+       address - but it need not. */
     db.users.push({ id: 11, org_id: 1, email: 'karan@homeweavers.net', name: 'karan Ahuja',
-                    role: 'employee', is_active: true, leave_approver: true });
+                    role: 'employee', is_active: true });
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-                                              leave: { to: [], cc: [] } }));
+      leave: { to: [], cc: [], firstTo: ['karan@homeweavers.net'] } }));
     kvSet(1, 'overrides', '{}');
     kvSet(1, 'leaveRequests', JSON.stringify([
       { id: 'req_two', empName: 'Keshav Garg', dateFrom: '2026-11-10', dateTo: '2026-11-10',
@@ -706,7 +709,8 @@ process.env.SESSION_SECRET = SECRET;
        to the super admins opens "Hello Shivani ma'am and Nitish Sir", which is
        the wrong greeting for the person it reaches before them. */
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-      leave: { to: [], cc: [], intro: 'Hello Shivani and Nitish,',
+      leave: { to: [], cc: [], firstTo: ['karan@homeweavers.net'],
+               intro: 'Hello Shivani and Nitish,',
                firstIntro: 'Hello karan, please look at this one first.' } }));
     const wordedBefore = sent.length;
     const another = JSON.parse(kvFind(1, 'leaveRequests').value);
@@ -721,6 +725,45 @@ process.env.SESSION_SECRET = SECRET;
         && !/Hello Shivani and Nitish/.test(toFirst.html), toFirst && toFirst.subject);
     check('and the message says it is theirs to look at first',
       /for you to look at first/.test(toFirst.html), toFirst && toFirst.subject);
+
+    /* Where the first-stage tab names addresses, the first message goes to them
+       and to nobody else - not even the approver. The buttons work for whoever
+       holds the message, so it is still answerable, and the two stages can be
+       tried out without writing to the office. */
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
+      leave: { to: [], cc: [], firstTo: ['support@x.com'], firstCc: ['watch@x.com'] } }));
+    const sentToBefore = sent.length;
+    const redirected = JSON.parse(kvFind(1, 'leaveRequests').value);
+    redirected.push({ id: 'req_redir', empName: 'Keshav Garg', dateFrom: '2026-11-16', dateTo: '2026-11-16',
+                      leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T07:00:00Z',
+                      updatedAt: '2026-11-01T07:00:00Z' });
+    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(redirected), shared: true });
+    await new Promise(r => setTimeout(r, 700));
+    const sentTo = sent[sent.length - 1];
+    check('the first message goes only where the first-stage tab says',
+      sent.length === sentToBefore + 1
+        && JSON.stringify(sentTo.to) === JSON.stringify(['support@x.com'])
+        && JSON.stringify(sentTo.cc) === JSON.stringify(['watch@x.com']),
+      sentTo && { to: sentTo.to, cc: sentTo.cc });
+    check('and the approver is not written to alongside them',
+      !(sentTo.to || []).concat(sentTo.cc || []).some(a => /karan/.test(a)),
+      sentTo && { to: sentTo.to, cc: sentTo.cc });
+
+    /* Naming nobody there is how the second stage is turned off: leave is
+       granted in one, and the request goes straight to the people who grant it. */
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
+      leave: { to: [], cc: [], firstTo: [], firstCc: [] } }));
+    const backBefore = sent.length;
+    const back = JSON.parse(kvFind(1, 'leaveRequests').value);
+    back.push({ id: 'req_back', empName: 'Keshav Garg', dateFrom: '2026-11-18', dateTo: '2026-11-18',
+                leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T08:00:00Z',
+                updatedAt: '2026-11-01T08:00:00Z' });
+    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(back), shared: true });
+    await new Promise(r => setTimeout(r, 700));
+    check('with no address there, leave is granted in one stage again',
+      sent.length === backBefore + 1
+        && JSON.stringify(sent[sent.length - 1].to) === JSON.stringify(['boss@x.com']),
+      sent[sent.length - 1].to);
 
     /* The first word: approve. It is recommended, not granted. */
     const recBefore = sent.length;
@@ -773,8 +816,9 @@ process.env.SESSION_SECRET = SECRET;
     check('a no at the first stage ends it, with no second asking',
       no.status === 200 && refused.status === 'rejected', { status: no.status, req: refused });
 
-    /* And with nobody marked, leave is granted in one stage as it always was. */
-    db.users.forEach(u => { u.leave_approver = false; });
+    /* And with no address named, leave is granted in one stage as it always was. */
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
+      leave: { to: [], cc: [], firstTo: [] } }));
     kvSet(1, 'leaveRequests', JSON.stringify([
       { id: 'req_one', empName: 'Keshav Garg', dateFrom: '2026-11-24', dateTo: '2026-11-24',
         leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T04:00:00Z',

@@ -221,9 +221,13 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
         && ['emLvTo', 'emLvCc', 'emLvIntro'].every(id => menu.indexOf(id) > -1), menu.length);
     check('the final stage is the one folded away to begin with',
       /data-lv-pane="final"' \+ \(MAIL_CFG\.firstApprover \? ' style="display:none;"'/.test(menu));
-    check('and with nobody marked there are no stages to choose between',
-      menu.indexOf("if(!fa) return ''") > -1
-        && /Leave is granted in one stage/.test(menu), menu.indexOf('one stage'));
+    /* Both tabs are always there. The first is where somebody is named as the
+       one who looks at every request; hide it when nobody is and there is
+       nowhere left to name them. */
+    check('both stages are offered whether or not anybody is named',
+      menu.indexOf("if(!fa) return ''") === -1
+        && /Leave is granted in one stage/.test(menu)
+        && /Put an address under/.test(menu), menu.indexOf('one stage'));
 
     /* Switching between the stages must not disturb the panel's own tabs. */
     const wiring = menu.slice(menu.indexOf('data-lv-tab]'));

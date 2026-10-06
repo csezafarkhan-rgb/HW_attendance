@@ -39,8 +39,11 @@ function columnsOf(table) {
 
 const userCols = columnsOf('users');
 check('schema.sql declares the users table', userCols.size > 5, [...userCols]);
-check('and carries the column the two-stage leave approval needs',
-  userCols.has('leave_approver'), [...userCols]);
+/* Who approves first is an address in the mail settings, not a mark on an
+   account, so the users table carries nothing for it - and the server must not
+   ask for anything it does not have. */
+check('and nothing is asked of it for the two-stage leave approval',
+  !/leave_approver/.test(server), 'server.js still mentions leave_approver');
 
 /* What the server asks for. Only the plain select lists - anything with a
    function call or a sub-select in it is left alone rather than guessed at. */

@@ -753,8 +753,7 @@ app.post('/api/users/:id/invite', requireRole('admin'), async (req, res) => {
 
 app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, email, name, role, is_active, last_login_at, created_at,
-            totp_enabled AS two_step, leave_approver
+    `SELECT id, email, name, role, is_active, last_login_at, created_at, totp_enabled AS two_step
        FROM users WHERE org_id = $1 ORDER BY email`,
     [req.session.orgId]
   );
@@ -794,24 +793,8 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
 
 app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { role, is_active, password, name, resetTwoStep, leaveApprover } = req.body || {};
+  const { role, is_active, password, name, resetTwoStep } = req.body || {};
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  /* One person looks at every request first, so marking somebody unmarks
-     whoever held it. Done on its own, not folded in with the rest of the row:
-     it is a change to how leave is granted, not to an account. */
-  if (leaveApprover !== undefined) {
-    const t = await pool.query('SELECT id FROM users WHERE id = $1 AND org_id = $2',
-      [id, req.session.orgId]);
-    if (!t.rows[0]) return res.status(404).json({ error: 'not_found' });
-    if (leaveApprover) {
-      await pool.query('UPDATE users SET leave_approver = (id = $1) WHERE org_id = $2', [id, req.session.orgId]);
-    } else {
-      await pool.query('UPDATE users SET leave_approver = FALSE WHERE id = $1 AND org_id = $2',
-        [id, req.session.orgId]);
-    }
-    await logChange(pool, req.session.orgId, 'kv', 'leaveApprover', req.session.userId);
-    return res.json({ ok: true, leaveApprover: !!leaveApprover });
-  }
   /* Another super admin's lost phone: switch two-step off for them, so they
      can sign in with the password and set it up again. Your own account is
      switched off from "Your sign-in", which asks for a code. */
@@ -1948,13 +1931,11 @@ async function notifyNewRequests(orgId, added) {
     /* Where somebody is marked to look at requests first, the request goes to
        them and to nobody else: asking both at once would have the office
        granting leave the first approver had not seen. */
-    const first = await firstApproverOf(orgId);
+    const first = await firstApproverOf(orgId, settings);
     let to, cc;
     if (first && first.email) {
-      /* The one being asked is always written to; the Leave tab's first-stage
-         addresses are who else sees it. */
-      to = [first.email].concat(settings.leave.firstTo || [])
-        .filter((a, i, all) => all.indexOf(a) === i);
+      /* Everybody named on the first-approval line, and nobody else. */
+      to = (settings.leave.firstTo || []).slice();
       cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
     } else {
       to = await mailRecipients(orgId, settings, 'leave');
@@ -1979,17 +1960,28 @@ async function notifyNewRequests(orgId, added) {
     console.error('request email failed (request itself was saved):', e && e.message);
   }
 }
-/* The one person who looks at every leave request before a super admin grants
-   it, if anybody is marked for it. Nobody marked means leave is granted in one
-   stage, as it was before this existed. */
-async function firstApproverOf(orgId) {
-  const r = await pool.query(
-    `SELECT id, email, name FROM users
-      WHERE org_id = $1 AND is_active AND leave_approver ORDER BY id LIMIT 1`, [orgId]);
-  const u = r.rows[0];
-  if (!u) return null;
-  return { id: u.id, email: EMAIL_RE.test(String(u.email || '')) ? u.email : '',
-           name: String(u.name || u.email || 'the first approver') };
+/* Who looks at every leave request before a super admin grants it: the first
+   address on the Leave tab's first-approval line. An address rather than an
+   account, so it can be anybody - somebody with no login, a shared inbox, or
+   wherever the office wants the first word to go while it is trying the two
+   stages out. No address there means leave is granted in one stage, as it was
+   before this existed.
+
+   Where that address does belong to an account, their name is used, so the
+   message that follows can say who approved it rather than reciting an
+   address. */
+async function firstApproverOf(orgId, settings) {
+  const s = settings || await mailSettings(orgId);
+  const email = ((s.leave && s.leave.firstTo) || [])[0] || '';
+  if (!EMAIL_RE.test(email)) return null;
+  let name = email;
+  try {
+    const r = await pool.query(
+      'SELECT name FROM users WHERE org_id = $1 AND lower(email) = lower($2) ORDER BY id LIMIT 1',
+      [orgId, email]);
+    if (r.rows[0] && String(r.rows[0].name || '').trim()) name = String(r.rows[0].name).trim();
+  } catch (e) { /* the address stands in for the name */ }
+  return { email, name };
 }
 
 /* The person the leave belongs to, by their own account. Accounts are made
@@ -2399,7 +2391,7 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
 app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
   const s = await mailSettings(req.session.orgId);
   const to = await mailRecipients(req.session.orgId, s);
-  const first = await firstApproverOf(req.session.orgId);
+  const first = await firstApproverOf(req.session.orgId, s);
   const mine = String((req.user && req.user.email) || '');
   /* The wording each message is built with. The panel shows it in the box when
      nothing has been saved over it, so what is on screen is what goes out - it

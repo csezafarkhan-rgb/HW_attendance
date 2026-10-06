@@ -9996,33 +9996,41 @@ function buildExcelBackup(){
       /* ---- the leave message ---- */
       + '<div data-em-pane="lv" style="display:none;">'
       /* Leave can be granted in two stages, and the two are different messages
-         to different people. Where somebody is marked in Users to look at every
-         request first, this pane splits in two so neither set of boxes can be
-         taken for the other; with nobody marked there is one stage and no need
-         for the split. */
+         to different people, so the pane splits in two: a tab a stage, and
+         neither set of boxes can be taken for the other.
+
+         Both tabs are always here. The first one is where somebody is named as
+         the one who looks at every request first - hide it when nobody is and
+         there is nowhere left to name them. */
       + (function(){
           var fa = MAIL_CFG.firstApprover;
-          if(!fa) return '<div class="em-note" style="padding-top:0;">'
-            + 'Leave is granted in one stage: every request goes straight to the addresses below. '
-            + 'Tick somebody in Users to have them look at each request first.</div>';
-          return '<div class="em-note" style="padding-top:0;"><b>' + mailEscape(fa.name)
-            +   '</b> sees every request first. Change that in Users.</div>'
-            /* The tab names the stage, not the person: whoever holds the first
-               word can change in Users, and a tab labelled with yesterday's name
-               is worse than one labelled with what it is for. */
-            + '<div class="em-tabs"><button type="button" class="em-tab on" data-lv-tab="first">'
-            +   '1. First approval</button>'
-            +   '<button type="button" class="em-tab" data-lv-tab="final">2. Final approval</button></div>';
+          return '<div class="em-note" style="padding-top:0;">'
+            + (fa
+                ? ('<b>' + mailEscape(fa.name) + '</b> sees every request first, '
+                   + 'before the final approval is asked for.')
+                : ('Leave is granted in one stage. Put an address under '
+                   + '<b>First approval</b> to have somebody look at each request before it is granted.'))
+            + '</div>'
+            /* The tab names the stage, not whoever holds it: the address can
+               change, and a tab labelled with yesterday's name is worse than
+               one labelled with what it is for. */
+            + '<div class="em-tabs">'
+            +   '<button type="button" class="em-tab' + (fa ? ' on' : '') + '" data-lv-tab="first">'
+            +     '1. First approval</button>'
+            +   '<button type="button" class="em-tab' + (fa ? '' : ' on') + '" data-lv-tab="final">'
+            +     '2. Final approval</button></div>';
         })()
       /* ---- the first word ---- */
       + (function(){
           var fa = MAIL_CFG.firstApprover;
-          if(!fa) return '';
-          return '<div data-lv-pane="first">'
+          /* Shown whether or not anybody is named, because this is where
+             somebody is named: hiding it would leave no way to turn the two
+             stages on. */
+          return '<div data-lv-pane="first"' + (fa ? '' : ' style="display:none;"') + '>'
             + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is raised. '
             +   'Approving here does not grant the leave — it passes it on.</div>'
-            + '<div class="em-lab">Also to <span>' + mailEscape(fa.name)
-            +   ' is always written to</span></div>'
+            + '<div class="em-lab">To <span>whoever looks at it first '
+            +   '· empty means leave is granted in one stage</span></div>'
             + '<div class="em-row"><input type="text" id="emLvFirstTo" placeholder="comma separated" value="'
             +   mailEscape(((s.leave || {}).firstTo || []).join(', ')) + '"></div>'
             + '<div class="em-lab">Cc</div>'
@@ -10035,11 +10043,12 @@ function buildExcelBackup(){
         })()
       /* ---- and the one that grants it ---- */
       + '<div data-lv-pane="final"' + (MAIL_CFG.firstApprover ? ' style="display:none;"' : '') + '>'
-      + (MAIL_CFG.firstApprover
-          ? ('<div class="em-note" style="padding-top:2px;">Goes out once the first approval is '
-             + 'given, and carries the name of whoever gave it. This is the word that puts the day '
-             + 'on the record.</div>')
-          : '')
+      + '<div class="em-note" style="padding-top:2px;">'
+      +   (MAIL_CFG.firstApprover
+            ? ('Goes out once the first approval is given, and carries the name of whoever gave it. '
+               + 'This is the word that puts the day on the record.')
+            : 'Goes out the moment a request is raised, and grants it outright.')
+      + '</div>'
       + '<div class="em-lab">To <span>'
       +   (MAIL_CFG.firstApprover ? 'who gives the final word' : 'blank: the same as the attendance message')
       +   '</span></div>'

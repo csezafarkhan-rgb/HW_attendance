@@ -178,8 +178,8 @@ are a signed link sent to the account's own address, and both need
 ## Leave, approved in two stages
 
 By default a leave request goes straight to the Super Admins and one yes grants
-it. Tick **Sees every leave request first** on somebody in **Users** and it goes
-to them instead:
+it. Put an address under **Share → Settings → Leave → 1. First approval → To**
+and it goes there instead:
 
 1. The request is raised. Only the first approver is written to, with Approve
    and Reject in the message.
@@ -200,12 +200,15 @@ message, because they are two messages to two sets of people; the greeting
 addressed to the Super Admins is the wrong greeting for whoever reads it first.
 With nobody ticked the tab is one pane, as it was.
 
-One person holds the first word, so ticking somebody unticks whoever had it.
-They need no admin rights — the buttons in the message work without signing in,
-as the existing ones do. A Super Admin can still decide on the Requests page at
-either stage; approving there grants it outright.
+The first approver is an **address**, not an account — it can be anybody, with
+a login or without one, or a shared inbox, and it can be pointed somewhere else
+while the two stages are being tried out. Where the address belongs to an
+account, that person's name is what the second message says approved it;
+otherwise it says the address. The buttons work without signing in, as the
+existing ones do. A Super Admin can still decide on the Requests page at either
+stage; approving there grants it outright.
 
-Untick everybody and leave goes back to one stage, exactly as before.
+Clear that address and leave goes back to one stage, exactly as before.
 
 ### Trying it out without writing to anybody
 

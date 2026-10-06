@@ -2746,29 +2746,7 @@ function _initLoginGateReal(startWorkspace){
             inv.disabled=false; inv.textContent='Email a link';
             serverFlash('A link to set a password is on its way to '+u.email+'.',true);
           }).catch(function(e){ inv.disabled=false; inv.textContent='Email a link'; serverFlash(serverErrorMessage(e),false); }); };
-        /* Leave is granted in two stages where somebody is marked here: every
-           request goes to them first, and a super admin grants it after. One
-           person holds it, so ticking somebody unticks whoever had it. */
-        var fa=document.createElement('label'); fa.className='um-row';
-        fa.style.cssText='display:flex;align-items:center;gap:7px;font-size:12px;margin-top:6px;cursor:pointer;';
-        var faBox=document.createElement('input'); faBox.type='checkbox'; faBox.checked=!!u.leave_approver;
-        var faTxt=document.createElement('span');
-        faTxt.textContent='Sees every leave request first, before a Super Admin grants it';
-        fa.appendChild(faBox); fa.appendChild(faTxt);
-        faBox.onchange=function(){
-          faBox.disabled=true;
-          userApi('/api/users/'+u.id,{method:'PATCH',body:JSON.stringify({leaveApprover:faBox.checked})})
-            .then(function(){
-              faBox.disabled=false;
-              serverFlash(faBox.checked
-                ? (u.email+' now sees every leave request first.')
-                : ('Leave no longer goes to '+u.email+' first \u2014 it goes straight to the Super Admins.'), true);
-              serverRenderUsers();
-            })
-            .catch(function(e){ faBox.disabled=false; faBox.checked=!faBox.checked; serverFlash(serverErrorMessage(e),false); });
-        };
         var pwr=document.createElement('div'); pwr.className='um-pw'; pwr.appendChild(pw); pwr.appendChild(pwBtn); pwr.appendChild(inv); row.appendChild(pwr);
-        row.appendChild(fa);
         list.appendChild(row);
       });
     }).catch(function(e){ list.innerHTML=''; serverFlash(serverErrorMessage(e),false); });
