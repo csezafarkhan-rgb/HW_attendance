@@ -191,7 +191,7 @@ to them instead:
    the day is written on the record; the employee is told once, at the end.
 
 The **Leave** tab under Share → Settings follows suit. With somebody ticked it
-splits in two, a stage a tab: **1. <their name>** holds the addresses and the
+splits in two, a stage a tab: **1. First approval** holds the addresses and the
 wording for the message that goes out the moment a request is raised — they are
 always written to, and anyone in *Also to* or *Cc* sees it with them — and
 **2. Final approval** holds the people asked for the word that grants it, who
@@ -206,6 +206,19 @@ as the existing ones do. A Super Admin can still decide on the Requests page at
 either stage; approving there grants it outright.
 
 Untick everybody and leave goes back to one stage, exactly as before.
+
+### Trying it out without writing to anybody
+
+Set **`MAIL_TEST_TO`** on the server to one address and every message the system
+sends goes there and nowhere else — daily attendance, leave at either stage, the
+holiday reminder, the answer to an employee, password links, all of it. The
+message is the real one; a band across the top says it was held back and names
+everybody it was addressed to, and the subject is prefixed `[test]`. Nobody is
+copied.
+
+It is applied where the sending happens rather than at each of the dozen places
+that send, so a message cannot slip past it. A value that is not an email
+address is ignored. Unset the variable to let messages reach people again.
 
 ## Two-step sign-in
 

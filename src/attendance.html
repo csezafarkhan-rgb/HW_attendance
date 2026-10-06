@@ -10007,8 +10007,11 @@ function buildExcelBackup(){
             + 'Tick somebody in Users to have them look at each request first.</div>';
           return '<div class="em-note" style="padding-top:0;"><b>' + mailEscape(fa.name)
             +   '</b> sees every request first. Change that in Users.</div>'
+            /* The tab names the stage, not the person: whoever holds the first
+               word can change in Users, and a tab labelled with yesterday's name
+               is worse than one labelled with what it is for. */
             + '<div class="em-tabs"><button type="button" class="em-tab on" data-lv-tab="first">'
-            +   '1. ' + mailEscape(fa.name) + '</button>'
+            +   '1. First approval</button>'
             +   '<button type="button" class="em-tab" data-lv-tab="final">2. Final approval</button></div>';
         })()
       /* ---- the first word ---- */
@@ -10033,9 +10036,9 @@ function buildExcelBackup(){
       /* ---- and the one that grants it ---- */
       + '<div data-lv-pane="final"' + (MAIL_CFG.firstApprover ? ' style="display:none;"' : '') + '>'
       + (MAIL_CFG.firstApprover
-          ? ('<div class="em-note" style="padding-top:2px;">Goes out once '
-             + mailEscape(MAIL_CFG.firstApprover.name) + ' has approved it, and carries their name. '
-             + 'This is the word that puts the day on the record.</div>')
+          ? ('<div class="em-note" style="padding-top:2px;">Goes out once the first approval is '
+             + 'given, and carries the name of whoever gave it. This is the word that puts the day '
+             + 'on the record.</div>')
           : '')
       + '<div class="em-lab">To <span>'
       +   (MAIL_CFG.firstApprover ? 'who gives the final word' : 'blank: the same as the attendance message')

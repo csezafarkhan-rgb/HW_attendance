@@ -38,6 +38,18 @@ function baseUrl() {
 
 /* Resend's API. Returns {ok, id} or {ok:false, error} - a failed email must
    never take a request or a scheduled job down with it. */
+/* While the office is trying something out, every message can be made to go to
+   one address and nobody else's. Set MAIL_TEST_TO and nothing reaches an
+   employee, an approver or an admin until it is unset again.
+
+   Done here rather than at each of the places that send, because there are a
+   dozen of those and one of them would eventually be missed - and the one that
+   was missed would be the one that wrote to the whole office. */
+function testRecipient() {
+  const a = String(process.env.MAIL_TEST_TO || '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(a) ? a : '';
+}
+
 async function send(msg) {
   const c = conf();
   if (!c.key || !c.from) return { ok: false, error: 'RESEND_API_KEY or RESEND_FROM is not set' };
@@ -45,11 +57,21 @@ async function send(msg) {
   const to = (Array.isArray(msg.to) ? msg.to : [msg.to]).filter(Boolean)
     .filter(function (e) { const k = String(e).toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
   if (!to.length) return { ok: false, error: 'no recipients' };
+  /* Held back: the message is built for the people it names, and then sent to
+     the one address instead, carrying a line that says who it was for. The
+     testing is still worth something that way - the message is the real one. */
+  const held = testRecipient();
+  const wouldHaveGone = held
+    ? (to.join(', ')
+       + ((Array.isArray(msg.cc) ? msg.cc : (msg.cc ? [msg.cc] : [])).filter(Boolean).length
+           ? (' \u00b7 cc ' + (Array.isArray(msg.cc) ? msg.cc : [msg.cc]).filter(Boolean).join(', '))
+           : ''))
+    : '';
   const body = {
     from: c.from,
-    to: to,
-    subject: String(msg.subject || '(no subject)'),
-    html: msg.html || '',
+    to: held ? [held] : to,
+    subject: (held ? '[test] ' : '') + String(msg.subject || '(no subject)'),
+    html: held ? testBanner(wouldHaveGone) + (msg.html || '') : (msg.html || ''),
     text: msg.text || stripHtml(msg.html || '')
   };
   if (c.replyTo) body.reply_to = c.replyTo;
@@ -57,7 +79,7 @@ async function send(msg) {
      them the message twice over. The TO line wins. */
   const cc = (Array.isArray(msg.cc) ? msg.cc : (msg.cc ? [msg.cc] : [])).filter(Boolean)
     .filter(function (e) { const k = String(e).toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
-  if (cc.length) body.cc = cc;
+  if (cc.length && !held) body.cc = cc;
   /* Resend takes an attachment as base64 in `content`. The daily message
      carries the same picture the HD Screenshot button makes. */
   /* A daily report to the same people, every day, reads to a spam filter as
@@ -137,6 +159,17 @@ function stripHtml(h) {
 }
 
 const INK = '#1B2330', SOFT = '#5B6675', LINE = '#E6EBF4', BLUE = '#2F6FE4';
+
+/* The band across the top of a held-back message, so nobody mistakes it for
+   one the office has actually been sent. */
+function testBanner(wouldHaveGone) {
+  return '<div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#7C2D12;'
+    + 'color:#fff;padding:10px 14px;font-size:12.5px;line-height:1.5;">'
+    + '<b>Testing \u2014 held back.</b> Nobody else was sent this. '
+    + (wouldHaveGone ? ('It was addressed to ' + esc(wouldHaveGone) + '.') : '')
+    + '<br>Unset <b>MAIL_TEST_TO</b> on the server to let messages reach them again.'
+    + '</div>';
+}
 
 function layout(title, subtitle, blocks) {
   return '<!doctype html><html><body style="margin:0;padding:0;background:#F3F6FB;">'
@@ -693,7 +726,7 @@ function resultPage(title, detail, ok, link) {
 module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
-  esc, stripHtml, layout, button, kindName, dateRange, fmtDay,
+  esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
   dailyEmail, monthEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
