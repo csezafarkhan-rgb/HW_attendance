@@ -2750,16 +2750,21 @@ process.on('unhandledRejection', function (err) {
 async function ensureSchema() {
   const r = await pool.query("SELECT to_regclass('public.users') AS t");
   if (r.rows[0] && r.rows[0].t) {
-    /* Tables but nobody in them: the first admin is created by the migration,
-       and it only fires when the users table is empty. Without this a database
-       created before ADMIN_EMAIL was set could never be signed into at all. */
     const n = await pool.query('SELECT count(*)::int AS n FROM users');
-    if (n.rows[0].n > 0) return;
-    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
+    if (n.rows[0].n > 0) {
+      /* Tables and people in them - but the schema still has to be applied.
+         It is written to be run over and over (CREATE TABLE IF NOT EXISTS, ADD
+         COLUMN IF NOT EXISTS), and this used to return here instead, so a
+         column added to schema.sql never reached a database that already had
+         accounts in it. Deploying the two-stage leave approval left the users
+         list answering 500 for exactly that reason: the query asked for a
+         column the table had never been given. */
+      console.log('bringing the schema up to date');
+    } else if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
       console.log('no accounts yet - set ADMIN_EMAIL and ADMIN_PASSWORD, then restart');
-      return;
+    } else {
+      console.log('no accounts yet - creating the first admin');
     }
-    console.log('no accounts yet - creating the first admin');
   } else {
     console.log('no tables yet - creating them');
   }
