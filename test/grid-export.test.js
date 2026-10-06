@@ -540,7 +540,7 @@ check('the header rows repeat on every printed page',
       && /^SUM\(C\d+:N\d+\)$/.test(lv.rows[CHG][14].f),
     [lv.rows[CL][14], lv.rows[CHG][14]]);
   check('what is left is the entitlement less what was taken',
-    lv.rows[CL][16].f === 'P' + (CL + 1) + '-O' + (CL + 1), lv.rows[CL][16]);
+    lv.rows[CL][16].f === 'ROUND(P' + (CL + 1) + '-O' + (CL + 1) + ',2)', lv.rows[CL][16]);
   check('and the entitlement itself is the accrual halved, capped at the ten',
     lv.rows[CL][15].f === 'MIN(10,ROUND(SUM(C' + (EARN + 1) + ':N' + (EARN + 1) + ')/2,2))',
     lv.rows[CL][15]);
@@ -549,9 +549,19 @@ check('the header rows repeat on every printed page',
   check('every month after it carries the month before forward',
     lv.rows[BAL][3].f === 'MAX(0,C' + (BAL + 1) + '+D' + (EARN + 1) + '-D' + (BOTH + 1) + ')',
     lv.rows[BAL][3]);
-  check('and a charge is the part there was no balance for',
-    lv.rows[CHG][3].f === 'MAX(0,D' + (BOTH + 1) + '-C' + (BAL + 1) + '-D' + (EARN + 1) + ')',
+  /* Rounded month by month, where the page rounds it. Worked exactly instead,
+     three months a third of a day short come to 2.00 and the page says 1.99 -
+     and the page's figure is the one that gets paid. */
+  check('and a charge is the part there was no balance for, to the paisa',
+    lv.rows[CHG][3].f === 'ROUND(MAX(0,D' + (BOTH + 1) + '-C' + (BAL + 1) + '-D' + (EARN + 1) + '),2)',
     lv.rows[CHG][3]);
+  check('while the balance itself carries on unrounded, as the page carries it',
+    lv.rows[BAL][3].f.indexOf('ROUND') === -1, lv.rows[BAL][3]);
+  check('the days are formatted as days, not as bare decimals',
+    /\|\|d$/.test(lv.rows[CL][2].s) && /\|\|d$/.test(lv.rows[CHG][14].s),
+    [lv.rows[CL][2].s, lv.rows[CHG][14].s]);
+  check('and the accrual is given in full, for the charge to be reckoned off',
+    lv.rows[EARN][2].n === 10 / 12 * 2, lv.rows[EARN][2].n);
   /* The two rows that are figures, because nothing in the sheet can work them
      out: what was taken, and what a part-month of service earned. */
   check('what was taken and what was earned are the only figures given',
@@ -596,7 +606,8 @@ check('the header rows repeat on every printed page',
     const earned = lv.rows[kCL + 3][i + 2].n || 0;
     taken += t;
     const set = SETDED['karan Ahuja|2026-' + String(i + 1).padStart(2, '0')];
-    charged += set === undefined ? Math.max(0, t - bal - earned) : set;
+    /* Rounded here too, because the sheet rounds it here. */
+    charged += set === undefined ? Math.round(Math.max(0, t - bal - earned) * 100) / 100 : set;
     bal = Math.max(0, bal + earned - t);
   }
   check('the formulas come to what the Leave Record page itself works out',

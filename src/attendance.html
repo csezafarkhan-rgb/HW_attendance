@@ -5428,8 +5428,11 @@ function ensureDirPerm(dir, byClick, mode){
   /* And a number format, where the cell holds a figure rather than words: 't'
      is a span of hours and minutes, written as a fraction of a day so the
      spreadsheet can total it and draw a bar along it. */
-  var XL_FMTS = ['', 't', 'p'];
-  var XL_FMT_ID = { t: 164, p: 165 };
+  /* 'd' is a count of days, which can run to a quarter: it shows 1 as 1 and
+     1.25 as 1.25, so a ledger of leave reads as days rather than as decimals
+     padded out to a fixed width. */
+  var XL_FMTS = ['', 't', 'p', 'd'];
+  var XL_FMT_ID = { t: 164, p: 165, d: 166 };
   function xlEdgeIdx(e){
     var want = String(e || '').split('').sort().join('');
     for(var i=0;i<XL_EDGES.length;i++){
@@ -5480,8 +5483,9 @@ function ensureDirPerm(dir, byClick, mode){
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
       /* [h]:mm, so twenty-six hours reads as 26:00 rather than rolling over. */
-      + '<numFmts count="2"><numFmt numFmtId="164" formatCode="[h]:mm"/>'
-      +   '<numFmt numFmtId="165" formatCode="0%"/></numFmts>'
+      + '<numFmts count="3"><numFmt numFmtId="164" formatCode="[h]:mm"/>'
+      +   '<numFmt numFmtId="165" formatCode="0%"/>'
+      +   '<numFmt numFmtId="166" formatCode="0.##"/></numFmts>'
       + '<fonts count="2"><font><sz val="10"/><name val="Calibri"/></font>'
       + '<font><sz val="10"/><color rgb="FFFFFFFF"/><b/><name val="Calibri"/></font></fonts>'
       + '<fills count="'+(XLKEYS.length+2)+'">'+fills+'</fills>'
@@ -6146,38 +6150,40 @@ function ensureDirPerm(dir, byClick, mode){
         var r = [{ v:'', s:'lvLabel|L' }, { v:label, s:'lvLabel' }];
         for(var i = 0; i < 12; i++){
           r.push(past(i) ? { n:Math.round((arr[i] || 0) * 100) / 100,
-                             s:(arr[i] ? fill : 'none') }
+                             s:(arr[i] ? fill : 'none') + '||d' }
                          : { v:'', s:'none' });
         }
-        r.push({ f:sum(rowNo), s:'lvSub' });
+        r.push({ f:sum(rowNo), s:'lvSub||d' });
         return r;
       };
 
       var rCL = taken(m.clM, 'Casual leave taken', 'leave', CL);
       /* What they are entitled to by now is the accrual added up and halved -
          each kind earns its own ten - and never more than the ten. */
-      rCL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub' });
-      rCL.push({ f:C(ASG) + CL + '-' + C(TOT) + CL,
-                 s:(m.clRem < 0 ? 'bad' : 'lvSub') });
+      rCL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub||d' });
+      rCL.push({ f:'ROUND(' + C(ASG) + CL + '-' + C(TOT) + CL + ',2)',
+                 s:(m.clRem < 0 ? 'bad' : 'lvSub') + '||d' });
       rows.push(rCL);
 
       var rSL = taken(m.slM, 'Sick leave taken', 'short', SL);
-      rSL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub' });
-      rSL.push({ f:C(ASG) + SL + '-' + C(TOT) + SL,
-                 s:(m.slRem < 0 ? 'bad' : 'lvSub') });
+      rSL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub||d' });
+      rSL.push({ f:'ROUND(' + C(ASG) + SL + '-' + C(TOT) + SL + ',2)',
+                 s:(m.slRem < 0 ? 'bad' : 'lvSub') + '||d' });
       rows.push(rSL);
 
       /* The two kinds added up. A row of its own because the balance and the
          charge are both worked out against the total, not against either kind. */
       var rB = [{ v:'', s:'lvHead|L' }, { v:'Both kinds together', s:'lvHead' }];
       for(var b = 0; b < 12; b++){
-        rB.push(past(b) ? { f:col(b) + CL + '+' + col(b) + SL, s:'lvHead' }
+        rB.push(past(b) ? { f:col(b) + CL + '+' + col(b) + SL, s:'lvHead||d' }
                         : { v:'', s:'lvHead' });
       }
-      rB.push({ f:sum(BOTH), s:'lvHead' });
-      rB.push({ f:C(ASG) + CL + '+' + C(ASG) + SL, s:'lvHead' });
-      rB.push({ f:C(ASG) + BOTH + '-' + C(TOT) + BOTH,
-                s:(m.combinedRem <= 0 ? 'bad' : 'ok') });
+      rB.push({ f:sum(BOTH), s:'lvHead||d' });
+      rB.push({ f:C(ASG) + CL + '+' + C(ASG) + SL, s:'lvHead||d' });
+      /* What is left over both kinds, added from the two rounded figures above
+         rather than worked out afresh - the page adds the rounded ones. */
+      rB.push({ f:'ROUND(' + C(LEFT) + CL + '+' + C(LEFT) + SL + ',2)',
+                s:(m.combinedRem <= 0 ? 'bad' : 'ok') + '||d' });
       rows.push(rB);
 
       /* The other row of figures: what the month earned them. A full month earns
@@ -6186,12 +6192,15 @@ function ensureDirPerm(dir, byClick, mode){
          worked out here. */
       var rE = [{ v:'', s:'lvLabel|L' }, { v:'Earned in the month', s:'lvLabel' }];
       for(var e = 0; e < 12; e++){
+        /* Written out in full, not rounded: the cell's own format decides how
+           many places to show, and the charge below is reckoned off this. Ten
+           days a year over twelve months does not divide, so rounding it here
+           would quietly shift the charge. */
         rE.push(past(e)
-          ? { n:Math.round(MONTHLY * 2 * accrualShare(emp.name, year, e + 1) * 10000) / 10000,
-              s:'none' }
+          ? { n:MONTHLY * 2 * accrualShare(emp.name, year, e + 1), s:'none||d' }
           : { v:'', s:'none' });
       }
-      rE.push({ f:sum(EARN), s:'lvSub' });
+      rE.push({ f:sum(EARN), s:'lvSub||d' });
       rows.push(rE);
 
       /* What is left after the month: what was carried in, plus what the month
@@ -6202,8 +6211,10 @@ function ensureDirPerm(dir, byClick, mode){
       for(var v = 0; v < 12; v++){
         if(!past(v)){ rBal.push({ v:'', s:'none' }); continue; }
         var carried = v === 0 ? '0' : (col(v - 1) + BAL);
+        /* Not rounded, because the page does not round it either: it carries the
+           balance on in full and rounds only the charge it takes out of it. */
         rBal.push({ f:'MAX(0,' + carried + '+' + col(v) + EARN + '-' + col(v) + BOTH + ')',
-                    s:'none' });
+                    s:'none||d' });
       }
       rBal.push({ v:'', s:'lvSub' });
       rows.push(rBal);
@@ -6218,17 +6229,20 @@ function ensureDirPerm(dir, byClick, mode){
           /* Someone has set this month's charge by hand, so it is no longer
              worked out - say so where it stands rather than let a formula
              quietly disagree with the page. */
-          rChg.push({ n:set, s:set ? 'alert' : 'none' });
+          rChg.push({ n:set, s:(set ? 'alert' : 'none') + '||d' });
           notes.push({ ref:col(c) + CHG, title:'Set by hand',
                        text:'This month\u2019s charge was entered on the Leave Record, '
                           + 'so it stands as typed rather than worked out from the balance.' });
           continue;
         }
         var had = c === 0 ? '0' : (col(c - 1) + BAL);
-        rChg.push({ f:'MAX(0,' + col(c) + BOTH + '-' + had + '-' + col(c) + EARN + ')',
-                    s:(m.ded[c] ? 'alert' : 'none') });
+        /* Rounded to the paisa here, where the page rounds it. Three months a
+           third of a day short come to 1.99 rounded month by month and 2.00
+           worked exactly, and the figure that gets paid is the first. */
+        rChg.push({ f:'ROUND(MAX(0,' + col(c) + BOTH + '-' + had + '-' + col(c) + EARN + '),2)',
+                    s:(m.ded[c] ? 'alert' : 'none') + '||d' });
       }
-      rChg.push({ f:sum(CHG), s:(m.totalDed ? 'alert' : 'lvSub') });
+      rChg.push({ f:sum(CHG), s:(m.totalDed ? 'alert' : 'lvSub') + '||d' });
       rows.push(rChg);
 
       /* Days the file calls absent that nobody has marked as leave yet. They are
