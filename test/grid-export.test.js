@@ -31,6 +31,7 @@ const OVER = { 'Rahul Mishra|2026-10-05': null, 'karan Ahuja|2026-10-05': { cat:
 /* Leave typed in by hand for a month with no punch data at all, which is the
    only case a hand-typed figure stands in for. */
 const MANUAL = { 'Rahul Mishra|2026-03': { cl: 2, sl: 1 } };
+const HIDDEN = [];                    // months switched off in the Months picker
 /* And one month whose charge somebody set themselves on the Leave Record. */
 const SETDED = { 'karan Ahuja|2026-07': 3 };
 const HOLS = { '2026-10-02': { name: 'Gandhi Jayanti', note: 'Emaar Building Closed' } };
@@ -75,7 +76,9 @@ const ctx = {
   hdMark: () => '',
   fmtTime: t => t || '',
   fmtMin: m => Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'),
-  monthLabel: ym => 'October 2026',
+  monthLabel: ym => ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                     'August', 'September', 'October', 'November', 'December'][+ym.slice(5, 7) - 1]
+                    + ' ' + ym.slice(0, 4),
   monthLabelShort: ym => 'Oct 2026',
   weekdayName: d => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(d + 'T00:00:00').getDay()],
   pad2: n => String(n).padStart(2, '0'),
@@ -111,7 +114,9 @@ const ctx = {
      screen cannot quietly come to different answers. */
   ALL_MONTHS: ['2026-10'],
   leaveAsOfMonth: '2026-10',
-  leaveMonthShown: () => true,
+  /* Every month is on by default; a check below switches two off to see that
+     the Leave tab's own download leaves them out. */
+  leaveMonthShown: mi => HIDDEN.indexOf(mi) === -1,
   getManualLeave: (e, ym) => MANUAL[e + '|' + ym] || null,
   getLeaveDeduction: (e, ym) => (SETDED[e + '|' + ym] === undefined ? null : SETDED[e + '|' + ym]),
   getJoinDate: () => '',
@@ -129,7 +134,7 @@ vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
 ['_colLetter', '_refParts', '_commentsXml', '_vmlXml',
  '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
  '_crc32', '_zipStore', 'buildStyledXlsxMulti', 'gridDayCells', 'gridWeekVerdict', 'gridDateLabel',
- 'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet',
+ 'exportCoName', 'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet',
  /* The leave ledger and the whole of the reckoning behind it. */
  'eachDateInMonth', 'normJoin', 'beforeJoining', 'monthBeforeJoining', 'accrualShare', 'classifyLeaveDetail',
  'hdQty', 'hdLabel', 'computeLeaveMatrix', 'gridLeaveSheet', 'buildGridWorkbook'
@@ -626,6 +631,52 @@ check('the header rows repeat on every printed page',
       { sheet: { cl, sl, comb, ded }, page: { cl: mm.clTaken, sl: mm.slTaken,
         comb: mm.combinedRem, ded: mm.totalDed, after: mm.afterDed } });
   });
+}
+
+/* ---- the Leave Record tab downloads the same sheet ----
+   It used to lift the table off the screen with tableToStyledRows. That was
+   fine while the page was the only place the figures existed; once the workbook
+   built its own from the reckoning there were two builders for one thing, which
+   is two answers waiting to differ. The tab now asks for the same sheet, told
+   which month to reckon to and to honour its own picker. */
+{
+  const tab = /function exportLeaveExcel\(\)[\s\S]*?\n  \}/.exec(src)[0];
+  check('the Leave tab builds the sheet rather than lifting the table',
+    /gridLeaveSheet\(/.test(tab) && !/tableToStyledRows/.test(tab), tab.slice(0, 200));
+  check('and nothing lifts a table into a spreadsheet any more',
+    src.indexOf('function tableToStyledRows') === -1
+      && src.indexOf('function buildStyledXlsx(') === -1);
+  check('it reckons to the month the page is showing, not the month in the grid',
+    /asOfMonth:leaveAsOfMonth/.test(tab) && /allMonths:false/.test(tab), tab);
+
+  /* The workbook's own copy counts every month and reckons to the month it
+     reports on: a balance that travels with a month's figures is a balance as
+     at that month, whatever the Leave tab happens to be showing. */
+  const wb2 = /function buildGridWorkbook\(\)[\s\S]*?\n  \}/.exec(src)[0];
+  check('while the workbook counts every month of the year',
+    /allMonths:true/.test(wb2), wb2.slice(-400));
+
+  /* And the options do what they say. Two months switched off in the picker, and
+     the balances stated as at September rather than October. */
+  HIDDEN.push(0, 1);
+  const own = ctx.gridLeaveSheet(EMPS, 'AllyConnect Pvt. Ltd.',
+                                 { asOfMonth: '2026-09', allMonths: false });
+  HIDDEN.length = 0;
+  const labels = own.rows.map(r => r[0].v);
+  check('a month switched off in the picker is left out of both runs',
+    labels.indexOf('January 26') === -1 && labels.indexOf('February 26') === -1
+      && labels.filter(v => v === 'March 26').length === 2, labels);
+  check('and the sheet says which month it is reckoned to',
+    /as at September 2026/.test(own.rows[0][0].v), own.rows[0][0].v);
+  /* The sums must follow the rows that are actually there, not the twelve that
+     would have been. */
+  const oat = l => own.rows.findIndex(r => r[0] && r[0].v === l) + 1;
+  check('the sums follow the rows that are there, not the ones left out',
+    own.rows[oat('Leave Taken') - 1][1].f
+      === 'SUM(B' + oat('March 26') + ':B' + oat('December 26') + ')',
+    own.rows[oat('Leave Taken') - 1][1]);
+  check('October is empty once the balances are stated as at September',
+    own.rows[oat('October 26') - 1][1].v === '', own.rows[oat('October 26') - 1][1]);
 }
 
 /* ---- and the ledger survives the trip through the zip ---- */

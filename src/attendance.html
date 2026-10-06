@@ -5668,30 +5668,6 @@ function ensureDirPerm(dir, byClick, mode){
       + '</xml>';
   }
 
-  function buildStyledXlsx(sheetName, rows, merges, colWidths){
-    var CT='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-      +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-      +'<Default Extension="xml" ContentType="application/xml"/>'
-      +'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-      +'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-      +'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
-    var RELS='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-      +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
-    var WB='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-      +'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
-      +'<sheet name="'+_xesc(_safeSheetName(sheetName,{}))+'" sheetId="1" r:id="rId1"/></sheets></workbook>';
-    var WBR='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-      +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-      +'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
-    return _zipStore([
-      {name:'[Content_Types].xml', data:CT},
-      {name:'_rels/.rels', data:RELS},
-      {name:'xl/workbook.xml', data:WB},
-      {name:'xl/_rels/workbook.xml.rels', data:WBR},
-      {name:'xl/styles.xml', data:_stylesXml()},
-      {name:'xl/worksheets/sheet1.xml', data:_sheetXmlStyled(rows, merges, colWidths)}
-    ]);
-  }
 
 
   /* ---------- The grid as a workbook ----------
@@ -6107,19 +6083,31 @@ function ensureDirPerm(dir, byClick, mode){
      somebody put there.
 
      Built from computeLeaveMatrix, so the sheet and the page cannot disagree. */
-  function gridLeaveSheet(emps, coName){
+  function gridLeaveSheet(emps, coName, opts){
     var rows = [], merges = [], notes = [], C = _colLetter;
     var MN = ['January','February','March','April','May','June',
               'July','August','September','October','November','December'];
+    /* Which month the balances are stated as at, and whether the Months picker
+       on the page is to be honoured.
+
+       The workbook reckons to the month it reports on and counts every month,
+       because a balance sent out with a month's figures is a balance as at that
+       month. The Leave Record tab reckons to its own "as at" and honours its own
+       picker, because a sheet downloaded from a page should say what the page
+       says. */
     var sel = state.selectedMonths || [];
-    var asOfMonth = sel.length ? sel[sel.length - 1] : leaveAsOfMonth;
+    var asOfMonth = (opts && opts.asOfMonth)
+      || (sel.length ? sel[sel.length - 1] : leaveAsOfMonth);
+    var showAll = !(opts && opts.allMonths === false);
+    var monthOn = function(mi){ return showAll || leaveMonthShown(mi); };
     if(!asOfMonth) return null;
     var year = asOfMonth.split('-')[0], yy = year.slice(2);
     var asOf = parseInt(asOfMonth.split('-')[1], 10);
 
     var mtx = [];
     emps.forEach(function(e){
-      try{ mtx.push({ e:e, m:computeLeaveMatrix(e.name, { allMonths:true, asOfMonth:asOfMonth }) }); }
+      try{ mtx.push({ e:e, m:computeLeaveMatrix(e.name,
+             { allMonths:showAll, asOfMonth:asOfMonth }) }); }
       catch(err){ console.error('the leave record for ' + e.name, err); }
     });
     if(!mtx.length) return null;
@@ -6166,6 +6154,7 @@ function ensureDirPerm(dir, byClick, mode){
        of noughts says nothing and hides the months that do. */
     var first = rows.length + 1;
     for(var mi = 0; mi < 12; mi++){
+      if(!monthOn(mi)) continue;                 // switched off in the picker
       (function(mi){
         var ym = year + '-' + pad2(mi + 1);
         var filled = (mi + 1) <= asOf;
@@ -6223,6 +6212,7 @@ function ensureDirPerm(dir, byClick, mode){
       }, [])));
     var dedTop = rows.length + 1;
     for(var di = 0; di < 12; di++){
+      if(!monthOn(di)) continue;                 // and in the deductions too
       (function(di){
         var ymk = year + '-' + pad2(di + 1);
         var dfilled = (di + 1) <= asOf;
@@ -6269,6 +6259,12 @@ function ensureDirPerm(dir, byClick, mode){
              widths:widths, freeze:{ row:3, col:1 }, repeatRows:3, landscape:true };
   }
 
+  /* Whose records these are, for the band across the top of a sheet. */
+  function exportCoName(){
+    return (coNameEl && coNameEl.textContent)
+      ? coNameEl.textContent.trim() : 'Attendance Record';
+  }
+
   /* Every sheet of the grid workbook, in the order they open. */
   function buildGridWorkbook(){
     var emps = visibleEmployees();
@@ -6280,65 +6276,50 @@ function ensureDirPerm(dir, byClick, mode){
       try{ weekInfo[e.name] = computeWeeklyShortHours(e.name, dates); }
       catch(err){ weekInfo[e.name] = {weekTotals:{}, weekDays:{}}; }
     });
-    var coName = (coNameEl && coNameEl.textContent) ? coNameEl.textContent.trim() : 'Attendance Record';
-    var sheets = [ gridAllSheet(emps, dates, weekInfo, coName) ];
+    var sheets = [ gridAllSheet(emps, dates, weekInfo, exportCoName()) ];
     /* The performance reckoning is the Dashboard page's; a failure in it must
        not cost the workbook its attendance, which is the point of the file. */
-    try{ sheets.push(gridPerformanceSheet(emps, dates, weekInfo, coName)); }
+    try{ sheets.push(gridPerformanceSheet(emps, dates, weekInfo, exportCoName())); }
     catch(e){ console.error('the performance sheet was left out', e); }
     /* The leave ledger, the Leave Record page's own reckoning. In a try for the
        same reason: the attendance is what this file is for. */
     try{
-      var lv = gridLeaveSheet(emps, coName);
+      /* Reckoned to the month being reported, over every month of the year: a
+         balance that travels with a month's figures is a balance as at that
+         month, whatever the Leave tab happens to be showing. */
+      var lv = gridLeaveSheet(emps, exportCoName(), { allMonths:true });
       if(lv) sheets.push(lv);
     }catch(e){ console.error('the leave sheet was left out', e); }
     return sheets;
   }
-  /* The Leave Record is already a table on screen; lift it straight out rather
-     than rebuilding its logic, so the two can never drift apart. */
-  function tableToStyledRows(table){
-    if(!table) return null;
-    var rows=[], merges=[], maxCols=0;
-    var trs = table.querySelectorAll('tr');
-    var fillOf = function(td){
-      var c = (td.className||'');
-      if(/leave-sub|leave-corner/.test(c)) return 'lvSub';
-      if(/leave-emp/.test(c)) return 'lvHead';
-      if(/leave-label|leave-assign/.test(c)) return 'lvLabel';
-      if(/\bok\b|good/.test(c)) return 'ok';
-      if(/\bwarn\b/.test(c)) return 'warn';
-      if(/\bbad\b|alert/.test(c)) return 'bad';
-      return 'none';
-    };
-    Array.prototype.forEach.call(trs, function(tr, ri){
-      var row=[], ci=0;
-      Array.prototype.forEach.call(tr.children, function(td){
-        var span = parseInt(td.getAttribute('colspan')||'1', 10) || 1;
-        var txt = (td.textContent||'').replace(/\s+/g,' ').trim();
-        row.push({v:txt, s:fillOf(td)});
-        if(span>1){
-          merges.push(_colLetter(ci)+(ri+1)+':'+_colLetter(ci+span-1)+(ri+1));
-          for(var k=1;k<span;k++) row.push({v:'', s:fillOf(td)});
-        }
-        ci += span;
-      });
-      maxCols = Math.max(maxCols, row.length);
-      rows.push(row);
-    });
-    var widths=[]; for(var i=0;i<maxCols;i++) widths.push(i===0?22:12);
-    return {rows:rows, merges:merges, widths:widths};
-  }
+  /* The same sheet the workbook carries, reckoned to what this page is showing.
+     It used to be lifted off the table with tableToStyledRows, which was fine
+     while the page was the only place the figures existed - but the workbook now
+     builds its own from the reckoning, and two builders for one thing is two
+     answers waiting to differ. */
   function exportLeaveExcel(){
     try{ downloadDailySnapshot(false); }catch(e){ console.error(e); }
-    var g = tableToStyledRows(document.getElementById('leaveTable'));
-    if(!g || !g.rows.length){ showUploadStatus('Open the Leave Record tab first.', true); return; }
-    var blob = buildStyledXlsx('Leave Record', g.rows, g.merges, g.widths);
+    var emps = visibleEmployees();
+    var sheet = null;
+    try{
+      sheet = gridLeaveSheet(emps, exportCoName(),
+                             { asOfMonth:leaveAsOfMonth, allMonths:false });
+    }catch(e){
+      console.error(e);
+      showUploadStatus('Could not build the Leave Record: '+((e&&e.message)||e), true);
+      return;
+    }
+    if(!sheet){ showUploadStatus('Nothing to export \u2014 no employees in view.', true); return; }
+    var blob = buildStyledXlsxMulti([sheet]);
     var a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
-    a.download='Leave_Record_'+(state.selectedMonths[0]||'export')+'.xlsx';
+    a.download='Leave_Record_'+((leaveAsOfMonth||'').slice(0,4)
+                 || state.selectedMonths[0] || 'export')+'.xlsx';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ try{a.remove();}catch(_){ } URL.revokeObjectURL(a.href); }, 1500);
-    showUploadStatus('Leave Record exported to Excel.', false);
+    showUploadStatus('Leave Record exported \u2014 ' + emps.length + ' '
+      + (emps.length === 1 ? 'person' : 'people') + ', as at '
+      + monthLabel(leaveAsOfMonth) + '.', false);
   }
   function exportGridExcel(){
     try{ downloadDailySnapshot(false); }catch(e){ console.error(e); }

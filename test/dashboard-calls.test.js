@@ -90,7 +90,7 @@ const WATCHED = [
   'sendMonth', 'exportGridExcel', 'exportLeaveExcel', 'buildGridWorkbook',
   'gridAllSheet', 'gridWeekSummary', 'gridDayCells',
   'gridDateLabel', 'gridWeekVerdict', 'gridPerformanceSheet', 'gridLeaveSheet',
-  'buildStyledXlsxMulti', 'buildStyledXlsx',
+  'buildStyledXlsxMulti',
   'blobBase64', 'runFolderSync', 'checkImportFolder', 'takeImportFile'
 ];
 
