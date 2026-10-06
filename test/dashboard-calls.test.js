@@ -89,7 +89,8 @@ const BUILTIN = new Set([
 const WATCHED = [
   'sendMonth', 'exportGridExcel', 'exportLeaveExcel', 'buildGridWorkbook',
   'gridAllSheet', 'gridWeekSummary', 'gridDayCells',
-  'gridDateLabel', 'gridWeekVerdict', 'gridPerformanceSheet', 'buildStyledXlsxMulti', 'buildStyledXlsx',
+  'gridDateLabel', 'gridWeekVerdict', 'gridPerformanceSheet', 'gridLeaveSheet',
+  'buildStyledXlsxMulti', 'buildStyledXlsx',
   'blobBase64', 'runFolderSync', 'checkImportFolder', 'takeImportFile'
 ];
 

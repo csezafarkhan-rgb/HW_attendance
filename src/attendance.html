@@ -6086,6 +6086,174 @@ function ensureDirPerm(dir, byClick, mode){
     });
   }
 
+  /* ---- the leave ledger ----
+     What the Leave Record page works out, written so the working shows. Each
+     person gets a block of rows: the two kinds of leave they took month by
+     month, what those come to together, what they earned, and what the balance
+     did - and the last three are formulas over the first, so anybody can open a
+     cell and see how a charged day came about.
+
+     Only two rows per person hold figures of their own: the leave taken, and the
+     entitlement earned in each month. Everything else is derived, which means
+     changing a month's leave in the sheet re-works the balance and the charge
+     the way the page would.
+
+     Built from computeLeaveMatrix rather than lifted off the screen, because
+     the workbook is built without rendering anything. */
+  function gridLeaveSheet(emps, coName){
+    var rows = [], merges = [], notes = [], C = _colLetter;
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun',
+                  'Jul','Aug','Sep','Oct','Nov','Dec'];
+    /* The ledger runs over a leave year, so it is the year of the months on
+       show, reckoned up to the last of them. */
+    var sel = state.selectedMonths || [];
+    var asOfMonth = sel.length ? sel[sel.length - 1] : (leaveAsOfMonth || null);
+    if(!asOfMonth) return null;
+    var year = asOfMonth.split('-')[0];
+    var MONTHLY = 10/12;                       // each kind earns ten days a year
+
+    var head = ['Employee','What it is'].concat(MONTHS)
+                 .concat(['Over the year','Earned','Left']);
+    var MON0 = 2, TOT = head.indexOf('Over the year'),
+        ASG = head.indexOf('Earned'), LEFT = head.indexOf('Left');
+    var last = C(head.length - 1);
+    var col = function(mi){ return C(MON0 + mi); };
+
+    rows.push([{ v:coName + ' \u00b7 Leave record ' + year
+                 + ' \u00b7 as at ' + monthLabel(asOfMonth), s:'empBand|LRT' }]);
+    merges.push('A1:' + last + '1');
+    rows.push(head.map(function(h, i){
+      return { v:h, s:'colHdr|B' + (i === 0 ? 'L' : (i === head.length - 1 ? 'R' : '')) };
+    }));
+
+    emps.forEach(function(emp){
+      var m;
+      /* One person's ledger failing must not cost the sheet the rest of them. */
+      try{ m = computeLeaveMatrix(emp.name, { allMonths:true, asOfMonth:asOfMonth }); }
+      catch(e){ console.error('the leave ledger for ' + emp.name, e); return; }
+
+      var top = rows.length + 1;               // the row the block starts on
+      var CL = top, SL = top + 1, BOTH = top + 2,
+          EARN = top + 3, BAL = top + 4, CHG = top + 5, PEND = top + 6;
+      var sum = function(r){ return 'SUM(' + col(0) + r + ':' + col(11) + r + ')'; };
+      /* A month the year has not reached yet is left empty. A nought there would
+         read as a month in which nobody took any leave. */
+      var past = function(mi){ return mi < m.asOf; };
+
+      /* Two rows of figures - what was taken, of each kind. Everything below is
+         worked out from these. */
+      var taken = function(arr, label, fill, rowNo){
+        var r = [{ v:'', s:'lvLabel|L' }, { v:label, s:'lvLabel' }];
+        for(var i = 0; i < 12; i++){
+          r.push(past(i) ? { n:Math.round((arr[i] || 0) * 100) / 100,
+                             s:(arr[i] ? fill : 'none') }
+                         : { v:'', s:'none' });
+        }
+        r.push({ f:sum(rowNo), s:'lvSub' });
+        return r;
+      };
+
+      var rCL = taken(m.clM, 'Casual leave taken', 'leave', CL);
+      /* What they are entitled to by now is the accrual added up and halved -
+         each kind earns its own ten - and never more than the ten. */
+      rCL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub' });
+      rCL.push({ f:C(ASG) + CL + '-' + C(TOT) + CL,
+                 s:(m.clRem < 0 ? 'bad' : 'lvSub') });
+      rows.push(rCL);
+
+      var rSL = taken(m.slM, 'Sick leave taken', 'short', SL);
+      rSL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub' });
+      rSL.push({ f:C(ASG) + SL + '-' + C(TOT) + SL,
+                 s:(m.slRem < 0 ? 'bad' : 'lvSub') });
+      rows.push(rSL);
+
+      /* The two kinds added up. A row of its own because the balance and the
+         charge are both worked out against the total, not against either kind. */
+      var rB = [{ v:'', s:'lvHead|L' }, { v:'Both kinds together', s:'lvHead' }];
+      for(var b = 0; b < 12; b++){
+        rB.push(past(b) ? { f:col(b) + CL + '+' + col(b) + SL, s:'lvHead' }
+                        : { v:'', s:'lvHead' });
+      }
+      rB.push({ f:sum(BOTH), s:'lvHead' });
+      rB.push({ f:C(ASG) + CL + '+' + C(ASG) + SL, s:'lvHead' });
+      rB.push({ f:C(ASG) + BOTH + '-' + C(TOT) + BOTH,
+                s:(m.combinedRem <= 0 ? 'bad' : 'ok') });
+      rows.push(rB);
+
+      /* The other row of figures: what the month earned them. A full month earns
+         ten days of each kind over the year; somebody who joined partway through
+         one earns that part of it, which is why this is given rather than
+         worked out here. */
+      var rE = [{ v:'', s:'lvLabel|L' }, { v:'Earned in the month', s:'lvLabel' }];
+      for(var e = 0; e < 12; e++){
+        rE.push(past(e)
+          ? { n:Math.round(MONTHLY * 2 * accrualShare(emp.name, year, e + 1) * 10000) / 10000,
+              s:'none' }
+          : { v:'', s:'none' });
+      }
+      rE.push({ f:sum(EARN), s:'lvSub' });
+      rows.push(rE);
+
+      /* What is left after the month: what was carried in, plus what the month
+         earned, less what was taken - and never below nothing, because days you
+         have not got cannot be carried forward as a debt. They are charged
+         instead, on the row below. */
+      var rBal = [{ v:'', s:'lvLabel|L' }, { v:'Balance after the month', s:'lvLabel' }];
+      for(var v = 0; v < 12; v++){
+        if(!past(v)){ rBal.push({ v:'', s:'none' }); continue; }
+        var carried = v === 0 ? '0' : (col(v - 1) + BAL);
+        rBal.push({ f:'MAX(0,' + carried + '+' + col(v) + EARN + '-' + col(v) + BOTH + ')',
+                    s:'none' });
+      }
+      rBal.push({ v:'', s:'lvSub' });
+      rows.push(rBal);
+
+      /* And the part there was no balance for, which is what comes off the pay.
+         The same reckoning the other way round. */
+      var rChg = [{ v:'', s:'lvLabel|L' }, { v:'Charged days', s:'lvLabel' }];
+      for(var c = 0; c < 12; c++){
+        if(!past(c)){ rChg.push({ v:'', s:'none' }); continue; }
+        var set = getLeaveDeduction(emp.name, year + '-' + (c < 9 ? '0' : '') + (c + 1));
+        if(set !== null){
+          /* Someone has set this month's charge by hand, so it is no longer
+             worked out - say so where it stands rather than let a formula
+             quietly disagree with the page. */
+          rChg.push({ n:set, s:set ? 'alert' : 'none' });
+          notes.push({ ref:col(c) + CHG, title:'Set by hand',
+                       text:'This month\u2019s charge was entered on the Leave Record, '
+                          + 'so it stands as typed rather than worked out from the balance.' });
+          continue;
+        }
+        var had = c === 0 ? '0' : (col(c - 1) + BAL);
+        rChg.push({ f:'MAX(0,' + col(c) + BOTH + '-' + had + '-' + col(c) + EARN + ')',
+                    s:(m.ded[c] ? 'alert' : 'none') });
+      }
+      rChg.push({ f:sum(CHG), s:(m.totalDed ? 'alert' : 'lvSub') });
+      rows.push(rChg);
+
+      /* Days the file calls absent that nobody has marked as leave yet. They are
+         not in any of the above, which is the point of showing them. */
+      var rP = taken(m.pendM, 'Awaiting confirmation', 'warn', PEND);
+      rP[0] = { v:'', s:'lvLabel|LB' };
+      rP[1] = { v:'Awaiting confirmation', s:'lvLabel|B' };
+      for(var p = 2; p < rP.length; p++) rP[p].s = (rP[p].s || 'none') + '|B';
+      rows.push(rP);
+
+      /* The name down the side of the person's own block, so the seven rows read
+         as one thing however far across the sheet the eye has got. */
+      rows[top - 1][0] = { v:dispName(emp.name), s:'lvHead|LT' };
+      merges.push('A' + top + ':A' + PEND);
+    });
+
+    if(rows.length <= 2) return null;           // nobody to account for
+
+    var widths = [20, 24];
+    for(var w = 0; w < 12; w++) widths.push(7.5);
+    widths.push(13, 9, 9);
+    return { name:'Leave record', rows:rows, merges:merges, notes:notes,
+             widths:widths, freeze:{ row:2, col:2 }, repeatRows:2, landscape:true };
+  }
+
   /* Every sheet of the grid workbook, in the order they open. */
   function buildGridWorkbook(){
     var emps = visibleEmployees();
@@ -6103,6 +6271,12 @@ function ensureDirPerm(dir, byClick, mode){
        not cost the workbook its attendance, which is the point of the file. */
     try{ sheets.push(gridPerformanceSheet(emps, dates, weekInfo, coName)); }
     catch(e){ console.error('the performance sheet was left out', e); }
+    /* The leave ledger, the Leave Record page's own reckoning. In a try for the
+       same reason: the attendance is what this file is for. */
+    try{
+      var lv = gridLeaveSheet(emps, coName);
+      if(lv) sheets.push(lv);
+    }catch(e){ console.error('the leave sheet was left out', e); }
     return sheets;
   }
   /* The Leave Record is already a table on screen; lift it straight out rather

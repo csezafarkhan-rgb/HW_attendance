@@ -24,7 +24,15 @@ const RECS = {
   'karan Ahuja|2026-10-01': { st: 'AB' },
   'karan Ahuja|2026-10-04': { st: 'WO' }
 };
-const OVER = { 'Rahul Mishra|2026-10-05': null, 'karan Ahuja|2026-10-05': { cat: 'WFH', detail: '' } };
+const OVER = { 'Rahul Mishra|2026-10-05': null, 'karan Ahuja|2026-10-05': { cat: 'WFH', detail: '' },
+               /* Saturday the 3rd, marked as leave: a day off taken is a day off
+                  taken whichever day of the week it falls on. */
+               'karan Ahuja|2026-10-03': { cat: 'LEAVE', detail: 'sick, fever' } };
+/* Leave typed in by hand for a month with no punch data at all, which is the
+   only case a hand-typed figure stands in for. */
+const MANUAL = { 'Rahul Mishra|2026-03': { cl: 2, sl: 1 } };
+/* And one month whose charge somebody set themselves on the Leave Record. */
+const SETDED = { 'karan Ahuja|2026-07': 3 };
 const HOLS = { '2026-10-02': { name: 'Gandhi Jayanti', note: 'Emaar Building Closed' } };
 
 const ctx = {
@@ -95,7 +103,19 @@ const ctx = {
                       lateDays: 0, totalLateMin: 0, earlyDays: 0, totalEarlyMin: 0, wfhDays: 2,
                       visitDays: 0, leaveDays: 0, netMin: 0 }
   }[name]),
-  perfScore: st => Math.round(0.6 * st.attendancePct + 0.4 * st.onTimePct)
+  perfScore: st => Math.round(0.6 * st.attendancePct + 0.4 * st.onTimePct),
+
+  /* ---- what the leave reckoning reads ----
+     The reckoning itself is lifted below rather than stood in for: the ledger is
+     checked against the Leave Record page's own arithmetic, so the sheet and the
+     screen cannot quietly come to different answers. */
+  ALL_MONTHS: ['2026-10'],
+  leaveAsOfMonth: '2026-10',
+  leaveMonthShown: () => true,
+  getManualLeave: (e, ym) => MANUAL[e + '|' + ym] || null,
+  getLeaveDeduction: (e, ym) => (SETDED[e + '|' + ym] === undefined ? null : SETDED[e + '|' + ym]),
+  getJoinDate: () => '',
+  localStorage: { getItem: () => null, setItem: () => {} }
 };
 vm.createContext(ctx);
 
@@ -109,7 +129,10 @@ vm.runInContext(/var _CRC=\(function\(\)[\s\S]*?\}\)\(\);/.exec(src)[0], ctx);
 ['_colLetter', '_refParts', '_commentsXml', '_vmlXml',
  '_xesc', '_safeSheetName', 'xlEdgeIdx', 'xlStyleIdx', '_stylesXml', '_sheetXmlStyled',
  '_crc32', '_zipStore', 'buildStyledXlsxMulti', 'gridDayCells', 'gridWeekVerdict', 'gridDateLabel',
- 'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet', 'buildGridWorkbook'
+ 'gridAllSheet', 'gridWeekSummary', 'gridPerformanceSheet',
+ /* The leave ledger and the whole of the reckoning behind it. */
+ 'eachDateInMonth', 'normJoin', 'beforeJoining', 'accrualShare', 'classifyLeaveDetail',
+ 'hdQty', 'hdLabel', 'computeLeaveMatrix', 'gridLeaveSheet', 'buildGridWorkbook'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
 vm.runInContext('var GRID_COLS = ' + JSON.stringify(['IN', 'OUT', 'TOTAL', 'IN DUR', 'OUT DUR', 'PUN']) + ';', ctx);
 vm.runInContext(/ {2}var SCORE_GIVEN_FULL = [^;]*;/.exec(src)[0], ctx);
@@ -117,8 +140,9 @@ vm.runInContext(/ {2}var SCORE_GIVEN_FULL = [^;]*;/.exec(src)[0], ctx);
 const sheets = ctx.buildGridWorkbook();
 
 /* ---- the shape of the workbook ---- */
-check('two sheets: everyone side by side, and how they did',
-  sheets.length === 2 && sheets[0].name === 'All employees' && sheets[1].name === 'Performance',
+check('three sheets: everyone side by side, how they did, and their leave',
+  sheets.length === 3 && sheets[0].name === 'All employees' && sheets[1].name === 'Performance'
+    && sheets[2].name === 'Leave record',
   sheets.map(s => s.name));
 check('and none of its own for any one person',
   !sheets.some(s => EMPS.some(e => e.name === s.name)), sheets.map(s => s.name));
@@ -474,6 +498,125 @@ check('every style a cell names exists in the table',
   (sheet1.match(/ s="(\d+)"/g) || []).every(m => parseInt(m.slice(4, -1), 10) < xfCount));
 check('the header rows repeat on every printed page',
   /_xlnm\.Print_Titles/.test(wb) && /\$1:\$5/.test(wb), wb.slice(wb.indexOf('definedNames'), wb.indexOf('definedNames') + 300));
+
+/* ---- the leave ledger ----
+   Seven rows a person: the two kinds taken, the two together, what the month
+   earned, what the balance did, what was charged, and what is still unconfirmed.
+   Only the taken rows and the earned row hold figures of their own; the rest are
+   formulas, so the sheet can be opened and the reckoning read off it. */
+{
+  const lv = sheets[2];
+  const lab = v => lv.rows.findIndex(r => r[1] && r[1].v === v);
+  const head = lv.rows[1].map(c => c.v);
+  check('the ledger runs a column a month, then the year and the balance',
+    head[0] === 'Employee' && head[2] === 'Jan' && head[13] === 'Dec'
+      && head[14] === 'Over the year' && head[15] === 'Earned' && head[16] === 'Left',
+    head);
+  check('and freezes the two columns that say whose row it is',
+    lv.freeze.col === 2 && lv.freeze.row === 2, lv.freeze);
+
+  /* Zafar's block, the first. The rows are in a fixed order, so the formulas
+     below can name each other by number. */
+  const CL = lab('Casual leave taken'), SL = CL + 1, BOTH = CL + 2,
+        EARN = CL + 3, BAL = CL + 4, CHG = CL + 5, PEND = CL + 6;
+  check('each person gets the seven rows, in order',
+    lv.rows[SL][1].v === 'Sick leave taken' && lv.rows[BOTH][1].v === 'Both kinds together'
+      && lv.rows[EARN][1].v === 'Earned in the month'
+      && lv.rows[BAL][1].v === 'Balance after the month'
+      && lv.rows[CHG][1].v === 'Charged days'
+      && lv.rows[PEND][1].v === 'Awaiting confirmation',
+    lv.rows.slice(CL, PEND + 1).map(r => r[1].v));
+  check('with the name merged down the side of its own block',
+    lv.rows[CL][0].v === 'Zafar Khan'
+      && lv.merges.indexOf('A' + (CL + 1) + ':A' + (PEND + 1)) > -1,
+    lv.merges.slice(0, 3));
+
+  /* The derived rows are formulas, not answers. This is the whole point of the
+     sheet: change a month's leave in it and the charge re-works itself. */
+  check('what the two kinds come to is added up by the sheet',
+    lv.rows[BOTH][2].f === 'C' + (CL + 1) + '+C' + (SL + 1), lv.rows[BOTH][2]);
+  check('the year totals are sums, not figures',
+    /^SUM\(C\d+:N\d+\)$/.test(lv.rows[CL][14].f)
+      && /^SUM\(C\d+:N\d+\)$/.test(lv.rows[CHG][14].f),
+    [lv.rows[CL][14], lv.rows[CHG][14]]);
+  check('what is left is the entitlement less what was taken',
+    lv.rows[CL][16].f === 'P' + (CL + 1) + '-O' + (CL + 1), lv.rows[CL][16]);
+  check('and the entitlement itself is the accrual halved, capped at the ten',
+    lv.rows[CL][15].f === 'MIN(10,ROUND(SUM(C' + (EARN + 1) + ':N' + (EARN + 1) + ')/2,2))',
+    lv.rows[CL][15]);
+  check('January carries nothing in, so its balance starts from what it earned',
+    lv.rows[BAL][2].f === 'MAX(0,0+C' + (EARN + 1) + '-C' + (BOTH + 1) + ')', lv.rows[BAL][2]);
+  check('every month after it carries the month before forward',
+    lv.rows[BAL][3].f === 'MAX(0,C' + (BAL + 1) + '+D' + (EARN + 1) + '-D' + (BOTH + 1) + ')',
+    lv.rows[BAL][3]);
+  check('and a charge is the part there was no balance for',
+    lv.rows[CHG][3].f === 'MAX(0,D' + (BOTH + 1) + '-C' + (BAL + 1) + '-D' + (EARN + 1) + ')',
+    lv.rows[CHG][3]);
+  /* The two rows that are figures, because nothing in the sheet can work them
+     out: what was taken, and what a part-month of service earned. */
+  check('what was taken and what was earned are the only figures given',
+    lv.rows[CL][2].f === undefined && lv.rows[EARN][2].f === undefined
+      && typeof lv.rows[EARN][2].n === 'number', [lv.rows[CL][2], lv.rows[EARN][2]]);
+
+  /* A month the year has not reached is empty, not nought: a nought there reads
+     as a month in which nobody took any leave. */
+  check('the months still to come are left empty',
+    lv.rows[CL][13].v === '' && lv.rows[CL][13].n === undefined
+      && lv.rows[BAL][13].f === undefined, lv.rows[CL][13]);
+  check('and the ones already gone are filled in',
+    typeof lv.rows[CL][2].n === 'number' && lv.rows[BAL][11].f !== undefined,
+    [lv.rows[CL][2], lv.rows[BAL][11]]);
+
+  /* Against the page's own arithmetic. karan took a day's sick leave on the
+     Saturday; Rahul's March was typed in by hand. */
+  const kCL = lv.rows.findIndex((r, i) => i > CL && r[0] && r[0].v === 'karan Ahuja');
+  check('a day marked as leave on a Saturday still counts as leave',
+    lv.rows[kCL + 1][11].n === 1 && lv.rows[kCL][11].n === 0,
+    [lv.rows[kCL][11], lv.rows[kCL + 1][11]]);
+  const rCL = lv.rows.findIndex((r, i) => i > CL && r[0] && r[0].v === 'Rahul Mishra');
+  check('leave typed in by hand for a month with no data is in the ledger',
+    lv.rows[rCL][4].n === 2 && lv.rows[rCL + 1][4].n === 1,
+    [lv.rows[rCL][4], lv.rows[rCL + 1][4]]);
+
+  /* A charge somebody set themselves is no longer worked out, so it is written
+     as what they typed and says as much. */
+  const kCHG = kCL + 5;
+  check('a charge set by hand stands as typed, not as a formula',
+    lv.rows[kCHG][8].n === 3 && lv.rows[kCHG][8].f === undefined, lv.rows[kCHG][8]);
+  check('and says on the cell that somebody set it',
+    (lv.notes || []).some(n => n.ref === 'I' + (kCHG + 1) && /Set by hand/.test(n.title)),
+    lv.notes);
+
+  /* The sheet must agree with the page. Worked here the way the formulas will
+     be worked by the spreadsheet, and checked against computeLeaveMatrix. */
+  const m = ctx.computeLeaveMatrix('karan Ahuja', { allMonths: true, asOfMonth: '2026-10' });
+  let bal = 0, charged = 0, taken = 0;
+  for (let i = 0; i < m.asOf; i++) {
+    const t = (lv.rows[kCL][i + 2].n || 0) + (lv.rows[kCL + 1][i + 2].n || 0);
+    const earned = lv.rows[kCL + 3][i + 2].n || 0;
+    taken += t;
+    const set = SETDED['karan Ahuja|2026-' + String(i + 1).padStart(2, '0')];
+    charged += set === undefined ? Math.max(0, t - bal - earned) : set;
+    bal = Math.max(0, bal + earned - t);
+  }
+  check('the formulas come to what the Leave Record page itself works out',
+    Math.abs(taken - (m.clTaken + m.slTaken)) < 0.005
+      && Math.abs(charged - m.totalDed) < 0.005,
+    { taken, charged, page: { taken: m.clTaken + m.slTaken, charged: m.totalDed } });
+}
+
+/* ---- and the ledger survives the trip through the zip ---- */
+{
+  const lvXml = zip['xl/worksheets/sheet3.xml'].toString();
+  check('the leave sheet carries its formulas into the file',
+    /<f>SUM\(C\d+:N\d+\)<\/f>/.test(lvXml) && /<f>MAX\(0,/.test(lvXml), lvXml.slice(0, 300));
+  check('and the file asks the spreadsheet to work them out on opening',
+    /<calcPr[^>]*fullCalcOnLoad="1"/.test(wb), wb.slice(-300));
+  check('it prints landscape with its headings repeated, like the others',
+    /<pageSetup orientation="landscape"/.test(lvXml) && /\$1:\$2/.test(wb), lvXml.slice(-400));
+  check('every style the ledger names exists in the table',
+    (lvXml.match(/ s="(\d+)"/g) || []).every(x => parseInt(x.slice(4, -1), 10) < xfCount));
+}
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;
