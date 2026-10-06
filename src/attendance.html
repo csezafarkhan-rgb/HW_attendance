@@ -5428,9 +5428,9 @@ function ensureDirPerm(dir, byClick, mode){
   /* And a number format, where the cell holds a figure rather than words: 't'
      is a span of hours and minutes, written as a fraction of a day so the
      spreadsheet can total it and draw a bar along it. */
-  /* 'd' is a count of days, which can run to a quarter: it shows 1 as 1 and
-     1.25 as 1.25, so a ledger of leave reads as days rather than as decimals
-     padded out to a fixed width. */
+  /* 'd' is a count of days, written to two places exactly as the Leave Record
+     page writes them - 1.00, 0.25, 11.66 - so a figure read off the sheet and
+     the same figure read off the page are the same string. */
   var XL_FMTS = ['', 't', 'p', 'd'];
   var XL_FMT_ID = { t: 164, p: 165, d: 166 };
   function xlEdgeIdx(e){
@@ -5485,7 +5485,7 @@ function ensureDirPerm(dir, byClick, mode){
       /* [h]:mm, so twenty-six hours reads as 26:00 rather than rolling over. */
       + '<numFmts count="3"><numFmt numFmtId="164" formatCode="[h]:mm"/>'
       +   '<numFmt numFmtId="165" formatCode="0%"/>'
-      +   '<numFmt numFmtId="166" formatCode="0.##"/></numFmts>'
+      +   '<numFmt numFmtId="166" formatCode="0.00"/></numFmts>'
       + '<fonts count="2"><font><sz val="10"/><name val="Calibri"/></font>'
       + '<font><sz val="10"/><color rgb="FFFFFFFF"/><b/><name val="Calibri"/></font></fonts>'
       + '<fills count="'+(XLKEYS.length+2)+'">'+fills+'</fills>'
@@ -6090,182 +6090,183 @@ function ensureDirPerm(dir, byClick, mode){
     });
   }
 
-  /* ---- the leave ledger ----
-     What the Leave Record page works out, written so the working shows. Each
-     person gets a block of rows: the two kinds of leave they took month by
-     month, what those come to together, what they earned, and what the balance
-     did - and the last three are formulas over the first, so anybody can open a
-     cell and see how a charged day came about.
+  /* ---- the leave record ----
+     The Leave Record page, as a sheet. Months down the side, two columns a
+     person - casual and sick - and the bands reading across everybody at once:
+     what they were assigned, what they took, what is left, what was charged to
+     salary, and what remains after it.
 
-     Only two rows per person hold figures of their own: the leave taken, and the
-     entitlement earned in each month. Everything else is derived, which means
-     changing a month's leave in the sheet re-works the balance and the charge
-     the way the page would.
+     The first version of this wrote a ledger instead, a block of rows per
+     person with the months across the top. Every figure in it was right and
+     nobody could read it, because it was not the thing they already knew.
 
-     Built from computeLeaveMatrix rather than lifted off the screen, because
-     the workbook is built without rendering anything. */
+     The four bands that are arithmetic are written as formulas over the rows
+     above them, so the sums can be read rather than taken on trust. The months
+     themselves, and the salary deduction against each one, are figures: on the
+     page they are typed into, and a formula would quietly overwrite what
+     somebody put there.
+
+     Built from computeLeaveMatrix, so the sheet and the page cannot disagree. */
   function gridLeaveSheet(emps, coName){
     var rows = [], merges = [], notes = [], C = _colLetter;
-    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun',
-                  'Jul','Aug','Sep','Oct','Nov','Dec'];
-    /* The ledger runs over a leave year, so it is the year of the months on
-       show, reckoned up to the last of them. */
+    var MN = ['January','February','March','April','May','June',
+              'July','August','September','October','November','December'];
     var sel = state.selectedMonths || [];
-    var asOfMonth = sel.length ? sel[sel.length - 1] : (leaveAsOfMonth || null);
+    var asOfMonth = sel.length ? sel[sel.length - 1] : leaveAsOfMonth;
     if(!asOfMonth) return null;
-    var year = asOfMonth.split('-')[0];
-    var MONTHLY = 10/12;                       // each kind earns ten days a year
+    var year = asOfMonth.split('-')[0], yy = year.slice(2);
+    var asOf = parseInt(asOfMonth.split('-')[1], 10);
 
-    var head = ['Employee','What it is'].concat(MONTHS)
-                 .concat(['Over the year','Earned','Left']);
-    var MON0 = 2, TOT = head.indexOf('Over the year'),
-        ASG = head.indexOf('Earned'), LEFT = head.indexOf('Left');
-    var last = C(head.length - 1);
-    var col = function(mi){ return C(MON0 + mi); };
+    var mtx = [];
+    emps.forEach(function(e){
+      try{ mtx.push({ e:e, m:computeLeaveMatrix(e.name, { allMonths:true, asOfMonth:asOfMonth }) }); }
+      catch(err){ console.error('the leave record for ' + e.name, err); }
+    });
+    if(!mtx.length) return null;
+
+    /* Two columns a person: casual on the left, sick on the right. */
+    var cl = function(i){ return C(1 + i * 2); };
+    var sl = function(i){ return C(2 + i * 2); };
+    var last = sl(mtx.length - 1);
+    var wall = '|L';                              // where one person's pair opens
+
+    /* A band that reads across everybody, with a label down the first column. */
+    var band = function(label, fill, make){
+      var r = [{ v:label, s:'lvLabel|L' }];
+      mtx.forEach(function(x, i){ make(r, x, i); });
+      rows.push(r);
+      return rows.length;                          // the row it landed on
+    };
 
     rows.push([{ v:coName + ' \u00b7 Leave record ' + year
                  + ' \u00b7 as at ' + monthLabel(asOfMonth), s:'empBand|LRT' }]);
     merges.push('A1:' + last + '1');
-    rows.push(head.map(function(h, i){
-      return { v:h, s:'colHdr|B' + (i === 0 ? 'L' : (i === head.length - 1 ? 'R' : '')) };
-    }));
 
-    emps.forEach(function(emp){
-      var m;
-      /* One person's ledger failing must not cost the sheet the rest of them. */
-      try{ m = computeLeaveMatrix(emp.name, { allMonths:true, asOfMonth:asOfMonth }); }
-      catch(e){ console.error('the leave ledger for ' + emp.name, e); return; }
+    /* The two header rows the page has: the name over the pair, and the pair
+       named underneath it. */
+    var hName = [{ v:'Employee', s:'lvHead|L' }];
+    var hKind = [{ v:'', s:'lvHead|LB' }];
+    mtx.forEach(function(x, i){
+      hName.push({ v:dispName(x.e.name), s:'lvHead' + wall });
+      hName.push({ v:'', s:'lvHead' });
+      merges.push(cl(i) + '2:' + sl(i) + '2');
+      hKind.push({ v:'Casual Leave', s:'lvSub|LB' });
+      hKind.push({ v:'Sick Leave', s:'lvSub|B' });
+    });
+    rows.push(hName); rows.push(hKind);
+    merges.push('A2:A3');
 
-      var top = rows.length + 1;               // the row the block starts on
-      var CL = top, SL = top + 1, BOTH = top + 2,
-          EARN = top + 3, BAL = top + 4, CHG = top + 5, PEND = top + 6;
-      var sum = function(r){ return 'SUM(' + col(0) + r + ':' + col(11) + r + ')'; };
-      /* A month the year has not reached yet is left empty. A nought there would
-         read as a month in which nobody took any leave. */
-      var past = function(mi){ return mi < m.asOf; };
-
-      /* Two rows of figures - what was taken, of each kind. Everything below is
-         worked out from these. */
-      var taken = function(arr, label, fill, rowNo){
-        var r = [{ v:'', s:'lvLabel|L' }, { v:label, s:'lvLabel' }];
-        for(var i = 0; i < 12; i++){
-          r.push(past(i) ? { n:Math.round((arr[i] || 0) * 100) / 100,
-                             s:(arr[i] ? fill : 'none') + '||d' }
-                         : { v:'', s:'none' });
-        }
-        r.push({ f:sum(rowNo), s:'lvSub||d' });
-        return r;
-      };
-
-      var rCL = taken(m.clM, 'Casual leave taken', 'leave', CL);
-      /* What they are entitled to by now is the accrual added up and halved -
-         each kind earns its own ten - and never more than the ten. */
-      rCL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub||d' });
-      rCL.push({ f:'ROUND(' + C(ASG) + CL + '-' + C(TOT) + CL + ',2)',
-                 s:(m.clRem < 0 ? 'bad' : 'lvSub') + '||d' });
-      rows.push(rCL);
-
-      var rSL = taken(m.slM, 'Sick leave taken', 'short', SL);
-      rSL.push({ f:'MIN(10,ROUND(' + sum(EARN) + '/2,2))', s:'lvSub||d' });
-      rSL.push({ f:'ROUND(' + C(ASG) + SL + '-' + C(TOT) + SL + ',2)',
-                 s:(m.slRem < 0 ? 'bad' : 'lvSub') + '||d' });
-      rows.push(rSL);
-
-      /* The two kinds added up. A row of its own because the balance and the
-         charge are both worked out against the total, not against either kind. */
-      var rB = [{ v:'', s:'lvHead|L' }, { v:'Both kinds together', s:'lvHead' }];
-      for(var b = 0; b < 12; b++){
-        rB.push(past(b) ? { f:col(b) + CL + '+' + col(b) + SL, s:'lvHead||d' }
-                        : { v:'', s:'lvHead' });
-      }
-      rB.push({ f:sum(BOTH), s:'lvHead||d' });
-      rB.push({ f:C(ASG) + CL + '+' + C(ASG) + SL, s:'lvHead||d' });
-      /* What is left over both kinds, added from the two rounded figures above
-         rather than worked out afresh - the page adds the rounded ones. */
-      rB.push({ f:'ROUND(' + C(LEFT) + CL + '+' + C(LEFT) + SL + ',2)',
-                s:(m.combinedRem <= 0 ? 'bad' : 'ok') + '||d' });
-      rows.push(rB);
-
-      /* The other row of figures: what the month earned them. A full month earns
-         ten days of each kind over the year; somebody who joined partway through
-         one earns that part of it, which is why this is given rather than
-         worked out here. */
-      var rE = [{ v:'', s:'lvLabel|L' }, { v:'Earned in the month', s:'lvLabel' }];
-      for(var e = 0; e < 12; e++){
-        /* Written out in full, not rounded: the cell's own format decides how
-           many places to show, and the charge below is reckoned off this. Ten
-           days a year over twelve months does not divide, so rounding it here
-           would quietly shift the charge. */
-        rE.push(past(e)
-          ? { n:MONTHLY * 2 * accrualShare(emp.name, year, e + 1), s:'none||d' }
-          : { v:'', s:'none' });
-      }
-      rE.push({ f:sum(EARN), s:'lvSub||d' });
-      rows.push(rE);
-
-      /* What is left after the month: what was carried in, plus what the month
-         earned, less what was taken - and never below nothing, because days you
-         have not got cannot be carried forward as a debt. They are charged
-         instead, on the row below. */
-      var rBal = [{ v:'', s:'lvLabel|L' }, { v:'Balance after the month', s:'lvLabel' }];
-      for(var v = 0; v < 12; v++){
-        if(!past(v)){ rBal.push({ v:'', s:'none' }); continue; }
-        var carried = v === 0 ? '0' : (col(v - 1) + BAL);
-        /* Not rounded, because the page does not round it either: it carries the
-           balance on in full and rounds only the charge it takes out of it. */
-        rBal.push({ f:'MAX(0,' + carried + '+' + col(v) + EARN + '-' + col(v) + BOTH + ')',
-                    s:'none||d' });
-      }
-      rBal.push({ v:'', s:'lvSub' });
-      rows.push(rBal);
-
-      /* And the part there was no balance for, which is what comes off the pay.
-         The same reckoning the other way round. */
-      var rChg = [{ v:'', s:'lvLabel|L' }, { v:'Charged days', s:'lvLabel' }];
-      for(var c = 0; c < 12; c++){
-        if(!past(c)){ rChg.push({ v:'', s:'none' }); continue; }
-        var set = getLeaveDeduction(emp.name, year + '-' + (c < 9 ? '0' : '') + (c + 1));
-        if(set !== null){
-          /* Someone has set this month's charge by hand, so it is no longer
-             worked out - say so where it stands rather than let a formula
-             quietly disagree with the page. */
-          rChg.push({ n:set, s:(set ? 'alert' : 'none') + '||d' });
-          notes.push({ ref:col(c) + CHG, title:'Set by hand',
-                       text:'This month\u2019s charge was entered on the Leave Record, '
-                          + 'so it stands as typed rather than worked out from the balance.' });
-          continue;
-        }
-        var had = c === 0 ? '0' : (col(c - 1) + BAL);
-        /* Rounded to the paisa here, where the page rounds it. Three months a
-           third of a day short come to 1.99 rounded month by month and 2.00
-           worked exactly, and the figure that gets paid is the first. */
-        rChg.push({ f:'ROUND(MAX(0,' + col(c) + BOTH + '-' + had + '-' + col(c) + EARN + '),2)',
-                    s:(m.ded[c] ? 'alert' : 'none') + '||d' });
-      }
-      rChg.push({ f:sum(CHG), s:(m.totalDed ? 'alert' : 'lvSub') + '||d' });
-      rows.push(rChg);
-
-      /* Days the file calls absent that nobody has marked as leave yet. They are
-         not in any of the above, which is the point of showing them. */
-      var rP = taken(m.pendM, 'Awaiting confirmation', 'warn', PEND);
-      rP[0] = { v:'', s:'lvLabel|LB' };
-      rP[1] = { v:'Awaiting confirmation', s:'lvLabel|B' };
-      for(var p = 2; p < rP.length; p++) rP[p].s = (rP[p].s || 'none') + '|B';
-      rows.push(rP);
-
-      /* The name down the side of the person's own block, so the seven rows read
-         as one thing however far across the sheet the eye has got. */
-      rows[top - 1][0] = { v:dispName(emp.name), s:'lvHead|LT' };
-      merges.push('A' + top + ':A' + PEND);
+    /* What the year has earned them by now. */
+    var ASSIGN = band('Leave Assign', null, function(r, x){
+      r.push({ n:x.m.clAssign || 0, s:'lvSub' + wall + '|d' });
+      r.push({ n:x.m.slAssign || 0, s:'lvSub||d' });
     });
 
-    if(rows.length <= 2) return null;           // nobody to account for
+    /* The months. A zero reads as a dash, the way the page writes it - a column
+       of noughts says nothing and hides the months that do. */
+    var first = rows.length + 1;
+    for(var mi = 0; mi < 12; mi++){
+      (function(mi){
+        var ym = year + '-' + pad2(mi + 1);
+        var filled = (mi + 1) <= asOf;
+        band(MN[mi] + ' ' + yy, null, function(r, x, i){
+          if(monthBeforeJoining(x.e.name, ym)){
+            /* Not employed yet, so there is nothing to say and no nought to
+               mistake for one. */
+            var t = dispName(x.e.name) + ' joined on ' + normJoin(getJoinDate(x.e.name));
+            notes.push({ ref:cl(i) + (rows.length + 1), title:'Not yet joined', text:t });
+            r.push({ v:'\u00b7', s:'none' + wall });
+            r.push({ v:'\u00b7', s:'none' });
+            return;
+          }
+          if(!filled){ r.push({ v:'', s:'none' + wall }); r.push({ v:'', s:'none' }); return; }
+          var c = x.m.clM[mi] || 0, k = x.m.slM[mi] || 0;
+          r.push(c ? { n:c, s:'leave' + wall + '|d' } : { v:'\u2014', s:'none' + wall });
+          r.push(k ? { n:k, s:'short||d' } : { v:'\u2014', s:'none' });
+        });
+      })(mi);
+    }
+    var lastMon = rows.length;
 
-    var widths = [20, 24];
-    for(var w = 0; w < 12; w++) widths.push(7.5);
-    widths.push(13, 9, 9);
+    /* Days the punch file calls absent that nobody has marked yet. Not deducted,
+       which is exactly why they are worth a line of their own. */
+    if(mtx.some(function(x){ return (x.m.pendTotal || 0) > 0; })){
+      band('Awaiting confirmation', null, function(r, x){
+        var p = x.m.pendTotal || 0;
+        r.push(p ? { n:p, s:'warn' + wall + '|d' } : { v:'\u2014', s:'lvSub' + wall });
+        r.push({ v:'\u2014', s:'lvSub' });
+      });
+    }
+
+    /* ---- the arithmetic, written as the sums themselves ---- */
+    var TAKEN = band('Leave Taken', null, function(r, x, i){
+      r.push({ f:'SUM(' + cl(i) + first + ':' + cl(i) + lastMon + ')', s:'lvSub' + wall + '|d' });
+      r.push({ f:'SUM(' + sl(i) + first + ':' + sl(i) + lastMon + ')', s:'lvSub||d' });
+    });
+    var REM = band('Remaining Leave', null, function(r, x, i){
+      r.push({ f:'ROUND(' + cl(i) + ASSIGN + '-' + cl(i) + TAKEN + ',2)',
+               s:((x.m.clRem < 0 ? 'bad' : 'ok')) + wall + '|d' });
+      r.push({ f:'ROUND(' + sl(i) + ASSIGN + '-' + sl(i) + TAKEN + ',2)',
+               s:((x.m.slRem < 0 ? 'bad' : 'ok')) + '||d' });
+    });
+    var COMB = band('Remaining CL + Sick', null, function(r, x, i){
+      r.push({ f:'ROUND(' + cl(i) + REM + '+' + sl(i) + REM + ',2)',
+               s:((x.m.combinedRem < 0 ? 'bad' : 'ok')) + wall + '|d' });
+      r.push({ v:'', s:'ok' });
+    });
+    mtx.forEach(function(x, i){ merges.push(cl(i) + COMB + ':' + sl(i) + COMB); });
+
+    /* ---- what it cost ---- */
+    rows.push([{ v:'Salary Deductions', s:'empShift|L' }].concat(
+      mtx.reduce(function(a, x, i){
+        a.push({ v:'', s:'empShift' + wall }); a.push({ v:'', s:'empShift' }); return a;
+      }, [])));
+    var dedTop = rows.length + 1;
+    for(var di = 0; di < 12; di++){
+      (function(di){
+        var ymk = year + '-' + pad2(di + 1);
+        var dfilled = (di + 1) <= asOf;
+        band(MN[di] + ' ' + yy, null, function(r, x, i){
+          if(monthBeforeJoining(x.e.name, ymk) || !dfilled){
+            r.push({ v:'', s:'none' + wall }); r.push({ v:'', s:'none' });
+            return;
+          }
+          /* A figure, not a formula: on the page this is a box somebody types
+             into, and any month can be set by hand. Working it out here would
+             quietly overwrite what they put there. */
+          var dv = (x.m.ded && x.m.ded[di]) || 0;
+          var auto = (x.m.autoDed && x.m.autoDed[di]) || 0;
+          if(getLeaveDeduction(x.e.name, ymk) !== null && Math.abs(dv - auto) > 0.005){
+            notes.push({ ref:cl(i) + (rows.length + 1), title:'Typed in by hand',
+                         text:'Set on the Leave Record. The calculated figure is '
+                            + (Math.round(auto * 100) / 100).toFixed(2) + '.' });
+          }
+          r.push({ n:dv, s:(dv > 0 ? 'alert' : 'none') + wall + '|d' });
+          r.push({ v:'', s:(dv > 0 ? 'alert' : 'none') });
+        });
+        mtx.forEach(function(x, i){ merges.push(cl(i) + rows.length + ':' + sl(i) + rows.length); });
+      })(di);
+    }
+    var dedEnd = rows.length;
+
+    /* What is left once the charged days are paid for. The charge restores the
+       balance - a day docked from the salary is a day not taken out of the
+       entitlement - so the two are added, not subtracted. */
+    var FINAL = band('Remaining Leaves after deductions', null, function(r, x, i){
+      /* fill | edges | format, three parts: 'ok|LB|d' and never 'ok|L|B|d',
+         which reads the B as a number format, finds none, and quietly drops
+         both the rule under the line and the two decimal places. */
+      r.push({ f:'ROUND(' + cl(i) + COMB + '+SUM(' + cl(i) + dedTop + ':' + cl(i) + dedEnd + '),2)',
+               s:((x.m.afterDed < 0 ? 'bad' : 'ok')) + '|LB|d' });
+      r.push({ v:'', s:((x.m.afterDed < 0 ? 'bad' : 'ok')) + '|B' });
+    });
+    mtx.forEach(function(x, i){ merges.push(cl(i) + FINAL + ':' + sl(i) + FINAL); });
+    rows[FINAL - 1][0] = { v:'Remaining Leaves after deductions', s:'lvLabel|LB' };
+
+    var widths = [28];
+    mtx.forEach(function(){ widths.push(10, 10); });
     return { name:'Leave record', rows:rows, merges:merges, notes:notes,
-             widths:widths, freeze:{ row:2, col:2 }, repeatRows:2, landscape:true };
+             widths:widths, freeze:{ row:3, col:1 }, repeatRows:3, landscape:true };
   }
 
   /* Every sheet of the grid workbook, in the order they open. */
