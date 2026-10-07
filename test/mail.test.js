@@ -959,6 +959,62 @@ process.env.SESSION_SECRET = SECRET;
   check('a day from home is not something to decide, so nothing is sent',
     sent.length === marksBefore + 2, sent.length - marksBefore);
 
+  /* ---- a day marked without a request, where somebody looks first ----
+     Leave marked straight on the grid is the same news as a request arriving by
+     another door, so it has to take the same two stages. It used to go straight
+     to the people who grant, carrying buttons that granted on the first press -
+     the first approver never saw it at all. */
+  {
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true, requests: true,
+      leave: { to: ['final@x.com'], cc: [], firstTo: ['karan@homeweavers.net'], firstCc: ['watch@x.com'] } }));
+    kvSet(1, 'leaveRequests', JSON.stringify([]));
+    await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
+    await new Promise(r => setTimeout(r, 350));
+
+    const before = sent.length;
+    await asAdmin('PUT', '/api/kv/overrides', {
+      value: JSON.stringify({ 'Asha Test|2026-09-29': { cat: 'LEAVE', detail: 'CL', reason: 'family' } }),
+      shared: true });
+    await new Promise(r => setTimeout(r, 650));
+    const firstMail = sent[sent.length - 1];
+    check('a day marked without a request goes to whoever looks at leave first',
+      sent.length === before + 1 && firstMail
+        && JSON.stringify(firstMail.to) === JSON.stringify(['karan@homeweavers.net'])
+        && JSON.stringify(firstMail.cc) === JSON.stringify(['watch@x.com']),
+      firstMail && { to: firstMail.to, cc: firstMail.cc });
+
+    /* Their yes passes it on; it does not grant it. */
+    const link = (String((firstMail && firstMail.html) || '').match(/\/e\/[A-Za-z0-9_.\-]+/g) || [])[0];
+    check('and the message carries a button to press', !!link, link);
+    const pressed = link ? await hit('POST', link) : { status: 0, body: '' };
+    const after = JSON.parse(kvFind(1, 'leaveRequests').value);
+    check('their yes passes it on for approval rather than granting it',
+      after.length === 1 && after[0].status === 'recommended'
+        && after[0].approvedBy === undefined,
+      after.map(r => ({ status: r.status, approvedBy: r.approvedBy })));
+    check('and says so, rather than saying it is done',
+      /passed on|final word|approval/i.test(String(pressed.body || '')),
+      String(pressed.body || '').slice(0, 200));
+
+    await new Promise(r => setTimeout(r, 450));
+    const onward = sent[sent.length - 1];
+    check('the people who grant are then told, with who approved it first',
+      sent.length > before + 1 && onward
+        && JSON.stringify(onward.to) === JSON.stringify(['final@x.com'])
+        && /waiting on you/i.test(onward.html),
+      onward && { to: onward.to, has: /waiting on you/i.test(onward.html) });
+
+    /* The day keeps its mark throughout: a recommendation writes nothing. */
+    const marks = JSON.parse(kvFind(1, 'overrides').value);
+    check('and the day keeps the mark it already had',
+      !!marks['Asha Test|2026-09-29'], marks);
+
+    await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
+    kvSet(1, 'leaveRequests', JSON.stringify([]));
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+
   global.fetch = realFetch;
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 

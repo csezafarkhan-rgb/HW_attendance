@@ -2122,20 +2122,39 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
     }
     if (!worth.length) return;
 
+    /* The same two stages a request takes. A mark is a request by another
+       door, so where somebody is named to look at leave first it goes to them
+       and to nobody else, and their yes passes it on rather than granting it.
+       The stage is sealed into the buttons, so a link cannot be made to grant
+       by stripping it. */
+    const first = await firstApproverOf(orgId, settings);
+    const stage = (first && first.email) ? 1 : 0;
     const mail = mailer.leaveEmail({
       orgName: orgNameOf(kv.companyInfo), pending: [],
       unrequested: worth.slice(0, 15).map(m => ({
-        req: m, heading: 'Marked on the record, no request',
-        links: linksFor({ k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
-                          t: m.leaveType, h: m.half || '' })
+        req: m,
+        heading: stage ? 'Marked on the record, for you to look at first'
+                       : 'Marked on the record, no request',
+        links: linksFor(stage
+          ? { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
+              t: m.leaveType, h: m.half || '', s: 1, by: first.name }
+          : { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
+              t: m.leaveType, h: m.half || '' })
       })),
-      subject: settings.leave.subject, intro: settings.leave.intro,
+      subject: settings.leave.subject,
+      intro: (stage && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
       footer: settings.leave.footer, siteUrl: mailer.baseUrl()
     });
     if (!mail) return;
-    const to = await mailRecipients(orgId, settings, 'leave');
+    let to, cc;
+    if (stage) {
+      to = (settings.leave.firstTo || []).slice();
+      cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
+    } else {
+      to = await mailRecipients(orgId, settings, 'leave');
+      cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    }
     if (!to.length) return;
-    const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
     const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
     await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {
@@ -2275,14 +2294,38 @@ async function applyEmailDecision(p, note) {
         await client.query('ROLLBACK');
         return settledSay(dispReq(covered), covered.status);
       }
+      /* Two stages, the same as a request: where the link carries a first
+         stage, a yes recommends and a no ends it there. A link made before
+         anybody was named carries no stage and grants in one, as it did. */
+      const firstUnreq = p.s === 1;
       const fresh = {
         id: 'req_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex'),
         empName: p.e, dateFrom: p.d, dateTo: p.d, leaveType: p.t, half: p.h || '',
-        message: 'Taken without a request', status: p.act === 'approve' ? 'approved' : 'rejected',
+        message: 'Taken without a request',
+        status: p.act !== 'approve' ? 'rejected' : (firstUnreq ? 'recommended' : 'approved'),
         adminNote: note || (p.act === 'approve' ? 'Approved by email'
                                                  : 'Not authorised — the day was removed from the record.'),
         employeeReply: '', createdAt: now, updatedAt: now
       };
+      if (p.act === 'approve' && firstUnreq) {
+        /* Recommended, not granted. The day already carries its mark - that is
+           what made it unrequested - so nothing is written either way; what
+           changes is that a request now stands against it, awaiting the final
+           word. */
+        fresh.recommendedBy = clip(p.by || '', 120) || 'the first approver';
+        fresh.recommendedAt = now;
+        if (note) fresh.recommendNote = note;
+        delete fresh.adminNote;
+        reqs.push(fresh);
+        await client.query('DELETE FROM maintenance_done WHERE job = $1',
+          ['unreq-email:' + p.org + ':' + p.e + '|' + p.d]);
+        await write('leaveRequests', reqsText, JSON.stringify(reqs));
+        await client.query('COMMIT');
+        notifyRecommended(p.org, fresh);
+        return { ok: true, title: 'Passed on for approval',
+                 detail: dispReq(fresh) + ' goes to a super admin for the final word. '
+                       + 'The day keeps the mark it already had until they give it.' };
+      }
       if (p.act === 'approve') fresh.approvedBy = 'email';
       reqs.push(fresh);
       summary = dispReq(fresh);
