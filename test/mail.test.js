@@ -923,6 +923,64 @@ process.env.SESSION_SECRET = SECRET;
   await new Promise(r => setTimeout(r, 400));
   check('saving the same decision again tells nobody twice', sent.length === portalBefore + 1);
 
+  /* ---- the digest takes the two stages too ----
+     The periodic leave message went to the super admins whatever the Leave tab
+     said, carrying buttons that granted - for days the first approver had not
+     so much as seen. Each stage now gets its own message holding only what is
+     actually its to decide. */
+  {
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true, requests: true,
+      leave: { to: ['final@x.com'], cc: [], firstTo: ['karan@homeweavers.net'], firstCc: [] } }));
+    kvSet(1, 'leaveRequests', JSON.stringify([
+      { id: 'dg_new', empName: 'Ravi Test', dateFrom: '2026-11-10', dateTo: '2026-11-10',
+        leaveType: 'CL', status: 'pending',
+        createdAt: '2026-11-01T06:00:00Z', updatedAt: '2026-11-01T06:00:00Z' },
+      { id: 'dg_rec', empName: 'Asha Test', dateFrom: '2026-11-11', dateTo: '2026-11-11',
+        leaveType: 'CL', status: 'recommended', recommendedBy: 'karan Ahuja',
+        createdAt: '2026-11-01T06:00:00Z', updatedAt: '2026-11-02T06:00:00Z' }
+    ]));
+    /* Written straight into the store rather than saved through the API, so the
+       mark itself does not send a message of its own and muddle the count. */
+    kvSet(1, 'overrides', JSON.stringify({
+      'Meena Test|2026-09-20': { cat: 'LEAVE', detail: 'CL', reason: 'family' } }));
+
+    const before = sent.length;
+    const out = await asAdmin('POST', '/api/mail/leave', {});
+    const msgs = sent.slice(before);
+    const toFirst = msgs.find(m => (m.to || []).indexOf('karan@homeweavers.net') > -1);
+    const toFinal = msgs.find(m => (m.to || []).indexOf('final@x.com') > -1);
+    check('the digest goes to both stages, each with a message of its own',
+      out.status === 200 && msgs.length === 2 && !!toFirst && !!toFinal,
+      msgs.map(m => m.to));
+    check('the first approver gets what is still theirs to look at',
+      !!toFirst && /Ravi Test/.test(toFirst.html) && !/Asha Test/.test(toFirst.html),
+      toFirst && { ravi: /Ravi Test/.test(toFirst.html), asha: /Asha Test/.test(toFirst.html) });
+    check('including a day marked with no request behind it',
+      !!toFirst && /Meena Test/.test(toFirst.html), toFirst && /Meena Test/.test(toFirst.html));
+    check('the super admins get only what has been passed on to them',
+      !!toFinal && /Asha Test/.test(toFinal.html)
+        && !/Ravi Test/.test(toFinal.html) && !/Meena Test/.test(toFinal.html),
+      toFinal && { asha: /Asha Test/.test(toFinal.html), ravi: /Ravi Test/.test(toFinal.html),
+                   meena: /Meena Test/.test(toFinal.html) });
+    check('and it says who passed it on',
+      !!toFinal && /waiting on you/i.test(toFinal.html) && /karan Ahuja/.test(toFinal.html),
+      toFinal && toFinal.html.slice(0, 0));
+
+    /* With nobody named to look first, it is one message again, as it was. */
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true,
+      leave: { to: ['final@x.com'], cc: [], firstTo: [] } }));
+    const oneBefore = sent.length;
+    await asAdmin('POST', '/api/mail/leave', {});
+    const oneMsgs = sent.slice(oneBefore);
+    check('with nobody named first it is one message, holding everything',
+      oneMsgs.length === 1 && /Ravi Test/.test(oneMsgs[0].html)
+        && /Asha Test/.test(oneMsgs[0].html) && /Meena Test/.test(oneMsgs[0].html),
+      oneMsgs.map(m => m.to));
+
+    kvSet(1, 'overrides', JSON.stringify({}));
+    kvSet(1, 'leaveRequests', JSON.stringify([]));
+  }
+
   /* A day marked as leave straight on the grid is the same news as a request,
      and goes out the same way - once. */
   kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true }));

@@ -1649,45 +1649,63 @@ async function buildDailyEmail(orgId, day, opts) {
 }
 
 /* The leave message: everything waiting for a decision, with its buttons.
-   Returns null when there is nothing to decide. */
-async function buildLeaveEmail(orgId) {
+   Returns null when there is nothing to decide.
+
+   Where leave is granted in two stages this is built twice, once for each, and
+   each message holds only what is that stage's to decide - stage 1 what the
+   first approver has not passed on, stage 2 what they have. It used to be one
+   message to the super admins holding the lot, with buttons that granted even
+   on days the first approver had not so much as seen, which is the one thing
+   two stages exist to prevent. Stage 0 is leave granted in one, where
+   everything shows and the buttons grant, as it always did. */
+async function buildLeaveEmail(orgId, stage) {
   const settings = await mailSettings(orgId);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'companyInfo']);
   const requests = parseJson(kv.leaveRequests) || [];
-  /* Where somebody looks at requests first, this message goes to the super
-     admins, so the buttons on it are the ones that grant. A request the first
-     approver has not seen yet still shows, so the office can see it is there -
-     with the buttons that grant it, because a super admin pressing them is a
-     grant made without waiting, which is theirs to make. */
   const first = await firstApproverOf(orgId);
+  const st = (first && first.email) ? (stage === 2 ? 2 : 1) : 0;
   /* An archived request is out of the way by definition - the dashboard keeps
      it off the Requests page, and the message said seven were waiting when the
      portal said none. */
   const live = r => r && !r.archived
     && (r.status === 'pending' || r.status === 'query' || r.status === 'recommended');
-  const pending = requests.filter(live)
+  /* Whose decision it is. At one stage, everybody's. */
+  const mine = r => st === 0 ? true
+    : (st === 2 ? r.status === 'recommended' : r.status !== 'recommended');
+  const pending = requests.filter(r => live(r) && mine(r))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
     .map(r => ({ req: r,
                  heading: r.status === 'recommended'
                    ? ('Approved by ' + (r.recommendedBy || 'the first approver') + ', waiting on you')
                    : (r.status === 'query' ? 'A query was raised'
-                      : (first ? ('With ' + first.name + ' first, since '
-                                  + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))
+                      : (st === 1 ? ('For you to look at first, since '
+                                     + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))
                                : 'Waiting since ' + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))),
-                 links: linksFor({ k: 'req', org: orgId, id: r.id, s: 2 }) }));
+                 /* The stage is sealed into the button, so a link cannot be made
+                    to grant by stripping it. */
+                 links: linksFor(st === 1
+                   ? { k: 'req', org: orgId, id: r.id, s: 1, by: first.name }
+                   : { k: 'req', org: orgId, id: r.id, s: 2 }) }));
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
-  const unreq = settings.unrequested
+  /* A day marked with no request behind it has been through no stage at all, so
+     it belongs to the first approver where there is one, and to nobody else. */
+  const unreq = (settings.unrequested && st !== 2)
     ? unrequestedFrom(parseJson(kv.overrides) || {}, parseJson(kv.halfDays) || {}, requests, since)
         .slice(0, 15).map(u => ({
-          req: u, heading: 'No request on file',
-          links: linksFor({ k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
-                            t: u.leaveType, h: u.half || '' })
+          req: u,
+          heading: st === 1 ? 'For you to look at first' : 'No request on file',
+          links: linksFor(st === 1
+            ? { k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
+                t: u.leaveType, h: u.half || '', s: 1, by: first.name }
+            : { k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
+                t: u.leaveType, h: u.half || '' })
         }))
     : [];
   return mailer.leaveEmail({
     orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
-    subject: settings.leave.subject, intro: settings.leave.intro, footer: settings.leave.footer
+    subject: settings.leave.subject, footer: settings.leave.footer,
+    intro: (st === 1 && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro
   });
 }
 
@@ -1911,14 +1929,37 @@ async function sendHolidayEmail(orgId, opts) {
 async function sendLeaveEmail(orgId) {
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
-  const to = await mailRecipients(orgId, settings, 'leave');
-  if (!to.length) return { ok: false, error: NO_ADDRESS };
-  const mail = await buildLeaveEmail(orgId);
-  if (!mail) return { ok: true, nothing: true };          // nothing waiting: no message
-  const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
-  const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
-  await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
-  return Object.assign({ to: to.length, cc: cc.length }, r);
+  const first = await firstApproverOf(orgId, settings);
+  /* One message where leave is granted in one stage; where it is granted in
+     two, one for each, so neither set of people is handed a decision that is
+     not theirs to make. A stage with nothing waiting sends nothing. */
+  const legs = [];
+  if (first && first.email) {
+    const ft = (settings.leave.firstTo || []).slice();
+    legs.push({ stage: 1, to: ft,
+                cc: (settings.leave.firstCc || []).filter(a => ft.indexOf(a) === -1) });
+    legs.push({ stage: 2, to: await mailRecipients(orgId, settings, 'leave'),
+                cc: (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [] });
+  } else {
+    legs.push({ stage: 0, to: await mailRecipients(orgId, settings, 'leave'),
+                cc: (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [] });
+  }
+  let addressed = 0, sent = 0, toN = 0, ccN = 0, failed = null;
+  for (const leg of legs) {
+    if (!leg.to.length) continue;
+    addressed++;
+    const mail = await buildLeaveEmail(orgId, leg.stage);
+    if (!mail) continue;                                   // nothing at this stage
+    const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
+    const r = await mailer.send(msg);
+    await logMail(orgId, 'leave', msg, r);
+    if (r.ok) { sent++; toN += leg.to.length; ccN += leg.cc.length; }
+    else failed = failed || r;
+  }
+  if (!addressed) return { ok: false, error: NO_ADDRESS };
+  if (!sent && failed) return failed;
+  if (!sent) return { ok: true, nothing: true };           // nothing waiting: no message
+  return { ok: true, to: toN, cc: ccN, messages: sent };
 }
 
 /* One new request, emailed as it is raised. Never throws: a request must be
