@@ -1258,7 +1258,8 @@ tr.holiday-row .date-col .hol-flag{ color:#FFFFFF; }
 .hdr-total em{ display:block; font-style:normal; font-family:'Inter',sans-serif;
   font-size:10px; font-weight:600; color:rgba(255,255,255,.55); letter-spacing:.02em; }
 .dash-dlt{ margin-top:3px; }
-/* The daily average under a duration total, and an out time past the 1:00 allowance. */
+/* The daily average under a duration total, and an out time past the allowance
+   set on the Options panel. */
 .dash-sub{ font-size:10px; color:var(--ink-soft); font-weight:600; margin-top:2px; white-space:nowrap; }
 td.dash-over{ color:#B42318; font-weight:700; }
 td.dash-over .dash-sub{ color:#B42318; }
@@ -3101,6 +3102,12 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <label class="mrow num" title="Grace before an early departure is marked"><span>Early ≥</span><span><input type="number" id="earlyThreshInput" min="0" max="180" value="10"/><i class="u">min</i></span></label>
       <label class="mrow num"><span>Leverage</span><span><input type="number" id="leverageInput" min="0" max="600" value="30"/><i class="u">min/wk</i></span></label>
       <div class="opt-sep"></div>
+      <!-- What a day may be spent away from the desk. Only the time-out figure
+           is judged against this; the hours and the shift are untouched. -->
+      <label class="mrow num" title="Time away from the desk allowed for lunch"><span>Lunch</span><span><input type="number" id="lunchBreakInput" min="0" max="240" value="45"/><i class="u">min</i></span></label>
+      <label class="mrow num" title="The first short break of the day"><span>Break 1</span><span><input type="number" id="break1Input" min="0" max="120" value="15"/><i class="u">min</i></span></label>
+      <label class="mrow num" title="The second short break of the day"><span>Break 2</span><span><input type="number" id="break2Input" min="0" max="120" value="0"/><i class="u">min</i></span></label>
+      <div class="opt-sep"></div>
       <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
     </div>
   </div>
@@ -4193,6 +4200,7 @@ function showUploadStatus(msg, isError){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
+    'lunchBreakMin','break1Min','break2Min',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
   /* Settings kept in localStorage rather than the shared store - they belong in
@@ -6429,6 +6437,10 @@ function ensureDirPerm(dir, byClick, mode){
       ['Late threshold (min)', lateThresholdMin],
       ['Early threshold (min)', earlyThresholdMin],
       ['Weekly leverage (min)', weeklyLeverageMin],
+      ['Lunch (min)', LUNCH_BREAK_MIN],
+      ['Break 1 (min)', BREAK1_MIN],
+      ['Break 2 (min)', BREAK2_MIN],
+      ['Time away allowed', fmtMin(BREAK_ALLOW_MIN)],
       ['Week status row', state.showWeekStatus ? 'on' : 'off'],
       ['Hide Sunday', state.hideSunday ? 'on' : 'off'],
       ['All leave unpaid', payRules.allLeaveUnpaid ? 'yes' : 'no'],
@@ -6597,6 +6609,7 @@ function backupSettingsSheet(){
         signatures: (typeof SIGNS !== 'undefined' ? SIGNS : null),
         lockedMonths: (typeof lockedMonths !== 'undefined' ? lockedMonths : null),
         lateThresholdMin: lateThresholdMin, earlyThresholdMin: earlyThresholdMin, weeklyLeverageMin: weeklyLeverageMin,
+        lunchBreakMin: LUNCH_BREAK_MIN, break1Min: BREAK1_MIN, break2Min: BREAK2_MIN,
         showWeekStatus: state.showWeekStatus, hideSunday: state.hideSunday,
         visibleEmployees: (typeof visibleEmpSet !== 'undefined' ? visibleEmpSet : null),
         authAccounts: (typeof authAccounts !== 'undefined' ? authAccounts : null)
@@ -8263,7 +8276,9 @@ function buildExcelBackup(){
       v:function(s){ return s.avgInDurMin; },                                         f:function(v){ return fmtMin(Math.round(v)); } },
     { k:'outdur',   t:'Out duration a day',    better:'low',  min:10, dur:true,
       v:function(s){ return s.avgOutDurMin; },                                        f:function(v){ return fmtMin(Math.round(v)); } },
-    { k:'breaks',   t:'Days within the 1:00 break', better:'high', min:10, dur:true,
+    /* Named rather than numbered: this table is built once, and the allowance
+       can be changed afterwards on the Options panel. */
+    { k:'breaks',   t:'Days within the break allowance', better:'high', min:10, dur:true,
       v:function(s){ return s.breakOkPct; },                                          f:function(v){ return Math.round(v) + '%'; }, unit:' points' }
   ];
   /* Worked out once and shared by the panel and the bell: one render used to
@@ -8316,8 +8331,9 @@ function buildExcelBackup(){
     if((s.durDays || 0) >= 3 && s.avgOutDurMin > BREAK_ALLOW_MIN
        && !items.some(function(it){ return it.key === 'outdur' && !it.good; })){
       items.push({ key:'outallow', good:false, word:'over', sig: ym + '|outallow|down',
-        title: 'Time out is over the 1:00 allowance',
-        detail: 'Averaging ' + fmtMin(s.avgOutDurMin) + ' out a day this month; lunch ' + LUNCH_BREAK_MIN + ' + tea ' + TEA_BREAK_MIN + ' min is allowed.',
+        title: 'Time out is over the ' + fmtMin(BREAK_ALLOW_MIN) + ' allowance',
+        detail: 'Averaging ' + fmtMin(s.avgOutDurMin) + ' out a day this month; '
+              + breakAllowWords() + ' is allowed.',
         now: fmtMin(s.avgOutDurMin), was: fmtMin(BREAK_ALLOW_MIN) });
     }
     // Drops first: they are the ones to act on.
@@ -9944,7 +9960,40 @@ function buildExcelBackup(){
       storage.set('weeklyLeverageMin', String(v), true).catch(function(){});
       refreshActivePage();
     });
+    /* Lunch and the two breaks. The three behave alike, so they are wired alike
+       rather than three times over. */
+    [['lunchBreakInput', 'lunchBreakMin', function(v){ LUNCH_BREAK_MIN = v; }, function(){ return LUNCH_BREAK_MIN; }],
+     ['break1Input',     'break1Min',     function(v){ BREAK1_MIN = v; },      function(){ return BREAK1_MIN; }],
+     ['break2Input',     'break2Min',     function(v){ BREAK2_MIN = v; },      function(){ return BREAK2_MIN; }]
+    ].forEach(function(b){
+      var el = document.getElementById(b[0]);
+      if(!el) return;
+      el.value = b[3]();
+      el.addEventListener('change', function(){
+        var v = parseFloat(el.value);
+        if(isNaN(v) || v < 0){ el.value = b[3](); return; }
+        b[2](v); el.value = v;
+        recalcBreakAllow();
+        storage.set(b[1], String(v), true).catch(function(){});
+        renderLegend(); refreshActivePage();
+      });
+    });
   })();
+  /* What the office set last time. Each is read on its own, so one of them
+     missing from an older store leaves the other two alone. */
+  [['lunchBreakMin', 'lunchBreakInput', function(v){ LUNCH_BREAK_MIN = v; }],
+   ['break1Min',     'break1Input',     function(v){ BREAK1_MIN = v; }],
+   ['break2Min',     'break2Input',     function(v){ BREAK2_MIN = v; }]
+  ].forEach(function(b){
+    storage.get(b[0], true).then(function(res){
+      if(!res || res.value == null || res.value === '' || isNaN(parseFloat(res.value))) return;
+      b[2](parseFloat(res.value));
+      recalcBreakAllow();
+      var el = document.getElementById(b[1]);
+      if(el) el.value = parseFloat(res.value);
+      if(adminInitDone) refreshActivePage();
+    }).catch(function(){});
+  });
   storage.get('earlyThresholdMin', true).then(function(res){
     if(res && res.value && !isNaN(parseFloat(res.value))){
       earlyThresholdMin = parseFloat(res.value);
@@ -13211,10 +13260,28 @@ function buildExcelBackup(){
       inOfficePct: durDays ? Math.round(inOfficeSum / durDays) : 100
     };
   }
-  /* Lunch and tea, the same for every employee: out duration within this is
-     not held against anyone. */
-  var LUNCH_BREAK_MIN = 45, TEA_BREAK_MIN = 15;
-  var BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + TEA_BREAK_MIN;
+  /* Lunch and two breaks, the same for every employee: time out within this is
+     not held against anyone, and beyond it the figure is marked red. Set on the
+     Options panel - it used to be written in here, as 45 and a single 15.
+
+     It decides nothing else. The hours owed, when somebody is due to leave and
+     the score are all measured from the shift, which already has these breaks
+     inside it; this is only what the time away from the desk is read against. */
+  var LUNCH_BREAK_MIN = 45, BREAK1_MIN = 15, BREAK2_MIN = 0;
+  var BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + BREAK1_MIN + BREAK2_MIN;
+  function recalcBreakAllow(){
+    BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + BREAK1_MIN + BREAK2_MIN;
+  }
+  /* The allowance spelled out, for the places that say where it comes from. A
+     break set to nothing is not mentioned rather than written as "0". */
+  function breakAllowWords(){
+    var b = [];
+    if(BREAK1_MIN > 0) b.push(BREAK1_MIN);
+    if(BREAK2_MIN > 0) b.push(BREAK2_MIN);
+    return 'lunch ' + LUNCH_BREAK_MIN
+      + (b.length ? (' + ' + (b.length > 1 ? 'breaks ' : 'break ') + b.join(' + ')) : '')
+      + ' min';
+  }
   /* Performance score, out of 100. Five questions, in the order they matter:
 
        30  did they turn up        - days attended of the days due in, leave
@@ -13227,7 +13294,7 @@ function buildExcelBackup(){
                                      the old way, a day missed took its own hours
                                      out of the reckoning with it. Excused time
                                      counts towards them
-       15  were they at the desk   - in duration against the span less the 1:00
+       15  were they at the desk   - in duration against the span less the
                                      break allowance. The only reading of break
                                      discipline, and counted once
         5  did they give more      - hours past what the weeks asked for, where
@@ -13285,7 +13352,7 @@ function buildExcelBackup(){
        them best on time out and worst on time in. */
     avgin:   {t:'Avg In Duration',   unit:'avg', better:'high', get:function(x){ return x.durDays ? x.avgInDurMin : null; }, fmt:function(v){ return fmtMin(Math.round(v)); }},
     avgout:  {t:'Avg Out Duration',  unit:'avg', better:'low',  get:function(x){ return x.durDays ? x.avgOutDurMin : null; }, fmt:function(v){ return fmtMin(Math.round(v)); }},
-    breakover:{t:'Breaks Over 1:00', unit:'days',better:'low',  get:function(x){ return x.durDays ? (x.breakOverDays||0) : null; }, fmt:function(v){ return Math.round(v); }}
+    breakover:{t:'Breaks Over Allowance', unit:'days',better:'low',  get:function(x){ return x.durDays ? (x.breakOverDays||0) : null; }, fmt:function(v){ return Math.round(v); }}
   };
   function kpiBreakdown(key, stats, prevBy){
     var d = KPI_DEFS[key];
@@ -13332,7 +13399,7 @@ function buildExcelBackup(){
         var du = computeDurations(rec);
         if(du.totalMin > 0 && du.inMin > 0 && (key !== 'breakover' || du.outMin > BREAK_ALLOW_MIN))
           add('total '+fmtMin(du.totalMin)+' · in '+fmtMin(du.inMin)+' · out '+fmtMin(du.outMin)
-              + (du.outMin > BREAK_ALLOW_MIN ? (' · '+fmtMin(du.outMin - BREAK_ALLOW_MIN)+' over the 1:00 allowance') : ''));
+              + (du.outMin > BREAK_ALLOW_MIN ? (' · '+fmtMin(du.outMin - BREAK_ALLOW_MIN)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' allowance') : ''));
       }
       if(key === 'attend'  && rec && rec.st === 'AB') add('missed');
       if(key === 'ontime'  && rec && isLate(empName, rec)) add('not on time');
@@ -13444,7 +13511,7 @@ function buildExcelBackup(){
       +       cmp('Late days', s.lateDays, tLate, function(v){ return Math.round(v*10)/10; }, false)
       +       cmp('Worked hrs', s.workedMin, tWork, function(v){ return fmtMin(Math.round(v)); }, true)
       +       cmp('Avg out / day', s.avgOutDurMin||0, tOut, function(v){ return fmtMin(Math.round(v)); }, false)
-      +       cmp('Breaks within 1:00', s.breakOkPct==null?100:s.breakOkPct, tBrk, function(v){ return Math.round(v)+'%'; }, true)
+      +       cmp('Breaks within '+fmtMin(BREAK_ALLOW_MIN), s.breakOkPct==null?100:s.breakOkPct, tBrk, function(v){ return Math.round(v)+'%'; }, true)
       +     '</tbody></table></div>'
       +   '<div class="ed-card"><div class="ed-h">Everything on record</div>'
       +     '<table class="ed-tbl"><tbody>'
@@ -13476,8 +13543,8 @@ function buildExcelBackup(){
                 + row('In duration', s.durDays ? (fmtMin(s.inDurMin)+' · '+fmtMin(s.avgInDurMin)+' a day') : '—',
                       s.durDays ? (s.inOfficePct+'% in office') : '')
                 + row('Out duration', s.durDays ? (fmtMin(s.outDurMin)+' · '+fmtMin(s.avgOutDurMin)+' a day') : '—',
-                      'allowed '+fmtMin(BREAK_ALLOW_MIN)+' (lunch '+LUNCH_BREAK_MIN+' + tea '+TEA_BREAK_MIN+')')
-                + row('Breaks over 1:00', s.breakOverDays ? (s.breakOverDays+' days, '+fmtMin(s.breakOverMin)+' over') : '—',
+                      'allowed '+fmtMin(BREAK_ALLOW_MIN)+' ('+breakAllowWords()+')')
+                + row('Breaks over '+fmtMin(BREAK_ALLOW_MIN), s.breakOverDays ? (s.breakOverDays+' days, '+fmtMin(s.breakOverMin)+' over') : '—',
                       s.durDays ? (s.breakOkPct+'% of days within') : '')
                 + row('Worked on days off', s.extraDays ? (s.extraDays+' days, '+fmtMin(s.extraMin)) : '\u2014', '')
                 + row('Company holidays', s.holidayDays || '\u2014', '')
@@ -13496,7 +13563,7 @@ function buildExcelBackup(){
               + cmp('Absences', s.absentDays, q.absentDays, function(v){ return Math.round(v); }, false)
               + cmp('Worked hrs', s.workedMin, q.workedMin, function(v){ return fmtMin(Math.round(v)); }, true)
               + cmp('Avg out / day', s.avgOutDurMin||0, q.avgOutDurMin||0, function(v){ return fmtMin(Math.round(v)); }, false)
-              + cmp('Breaks over 1:00', s.breakOverDays||0, q.breakOverDays||0, function(v){ return Math.round(v); }, false)
+              + cmp('Breaks over '+fmtMin(BREAK_ALLOW_MIN), s.breakOverDays||0, q.breakOverDays||0, function(v){ return Math.round(v); }, false)
               + '</tbody></table>'
             : '<div class="ed-none">No data for '+shotEsc(prevLabel||'the previous month')+'.</div>')
       +   '</div>'
@@ -13650,7 +13717,7 @@ function buildExcelBackup(){
       var outMost = stats.filter(function(x){ return x.breakOverDays > 0; })
         .sort(function(a,b){ return b.breakOverMin - a.breakOverMin; })[0];
       if(outMost)
-        out.push({k:'warn', t:'Most time out', d:outMost.name+' — '+outMost.breakOverDays+' days over the 1:00 break, '+fmtMin(outMost.breakOverMin)+' beyond it'});
+        out.push({k:'warn', t:'Most time out', d:outMost.name+' — '+outMost.breakOverDays+' days over the '+fmtMin(BREAK_ALLOW_MIN)+' break, '+fmtMin(outMost.breakOverMin)+' beyond it'});
       var lateSum = stats.slice().sort(function(a,b){ return b.totalLateMin - a.totalLateMin; })[0];
       if(lateSum && lateSum.lateDays > 0)
         out.push({k:'info', t:'Most lateness', d:lateSum.name+' \u2014 '+lateSum.lateDays+' days, '+fmtMin(lateSum.totalLateMin)+' in total'});
@@ -13731,7 +13798,7 @@ function buildExcelBackup(){
           (dDays && qDays) ? delta(dOut/dDays, qOut/qDays, false, function(v){ return fmtMin(Math.round(v)); }) : '', 'avgout')
       /* The change is per punch day: a month under way has fewer days than a
          finished one, so its raw count always looked like an improvement. */
-      + K(dOver, 'Breaks Over 1:00', (dDays && qDays)
+      + K(dOver, 'Breaks Over '+fmtMin(BREAK_ALLOW_MIN), (dDays && qDays)
           ? delta(dOver/dDays*100, qOver/qDays*100, false, function(v){ return Math.round(v)+' pts'; }) : '', 'breakover')
       + '</div>';
     stats.forEach(function(x){
@@ -13767,13 +13834,13 @@ function buildExcelBackup(){
           var dd = function(total, avg){ return s.durDays ? (fmtMin(total)+'<div class="dash-sub">'+fmtMin(avg)+' / day</div>') : '—'; };
           return '<td title="First in to last out, on '+s.durDays+' punch days">'+dd(s.totalDurMin, s.avgTotalDurMin)+'</td>'
             + '<td title="Time in, from the reader">'+dd(s.inDurMin, s.avgInDurMin)+'</td>'
-            + '<td title="Time out: total less in. Allowed '+fmtMin(BREAK_ALLOW_MIN)+' a day (lunch '+LUNCH_BREAK_MIN+' + tea '+TEA_BREAK_MIN+' min)"'
+            + '<td title="Time out: total less in. Allowed '+fmtMin(BREAK_ALLOW_MIN)+' a day ('+breakAllowWords()+')"'
             +   ((s.avgOutDurMin||0) > BREAK_ALLOW_MIN ? ' class="dash-over"' : '')+'>'+dd(s.outDurMin, s.avgOutDurMin)+'</td>'
-            + '<td title="Days with time out within 1:00 · days over, and minutes beyond the allowance">'
+            + '<td title="Days with time out within '+fmtMin(BREAK_ALLOW_MIN)+' · days over, and minutes beyond the allowance">'
             +   (s.durDays ? (bar(s.breakOkPct, barColor(s.breakOkPct), s.breakOkPct+'%')
                   + (s.breakOverDays ? '<div class="dash-sub">'+s.breakOverDays+' over · +'+fmtMin(s.breakOverMin)+'</div>' : ''))
                 : '—')+'</td>'
-            + '<td title="In duration against total less the 1:00 allowance">'
+            + '<td title="In duration against total less the '+fmtMin(BREAK_ALLOW_MIN)+' allowance">'
             +   (s.durDays ? bar(s.inOfficePct, barColor(s.inOfficePct), s.inOfficePct+'%') : '—')+'</td>';
         })()+
         '<td>'+(s.lateDays>0?s.lateDays+' ('+fmtMin(s.totalLateMin)+')':'\u2014')+'</td>'+
@@ -13819,7 +13886,7 @@ function buildExcelBackup(){
             {t:'On-time', k:'onTimePct'}, {t:'Worked Hrs', k:'workedMin'},
             {t:'Avg/Day', k:'avgDayMin'},
             {t:'Total Dur', k:'totalDurMin'}, {t:'In Dur', k:'inDurMin'}, {t:'Out Dur', k:'outDurMin'},
-            {t:'Breaks ≤ 1:00', k:'breakOkPct'}, {t:'In-office', k:'inOfficePct'},
+            {t:'Breaks ≤ '+fmtMin(BREAK_ALLOW_MIN), k:'breakOkPct'}, {t:'In-office', k:'inOfficePct'},
             {t:'Late (min)', k:'totalLateMin'},
             {t:'Early (min)', k:'totalEarlyMin'}, {t:'Absent', k:'absentDays'},
             {t:'Leave', k:'leaveDays'}, {t:'Part-day', k:'halfDays'},
@@ -14247,10 +14314,11 @@ function buildExcelBackup(){
               +hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note.replace(/"/g,'&quot;')):'')+'">'
               +hdMark(hdFlag.kind)+'</span>'):'')+'</td>';
           html += '<td class="att-cell dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.dur||(durs.inMin?fmtMin(durs.inMin):'—'))+'</td>';
-          // Time out past the lunch + tea allowance, on a finished day with real punches.
+          // Time out past the allowance set on the Options panel, on a finished
+          // day with real punches.
           var outOver = durs.outMin !== null && durs.outMin > BREAK_ALLOW_MIN && !rec.manual && !mp && !dayStillOpen;
           html += '<td class="att-cell dur-col'+(outOver?' out-over':'')+'" data-emp="'+emp.name+'" data-date="'+dateStr+'"'
-            + (outOver ? ' title="Out '+fmtMin(durs.outMin)+': '+fmtMin(durs.outMin - BREAK_ALLOW_MIN)+' over the 1:00 allowed (lunch '+LUNCH_BREAK_MIN+' + tea '+TEA_BREAK_MIN+' min)"' : '')
+            + (outOver ? ' title="Out '+fmtMin(durs.outMin)+': '+fmtMin(durs.outMin - BREAK_ALLOW_MIN)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' allowed ('+breakAllowWords()+')"' : '')
             + '>'+(durs.outMin!==null?fmtMin(durs.outMin):'—')+'</td>';
           html += '<td class="att-cell punches-cell" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.manual?'—':(rec.c||0))+'</td>';
         } else {

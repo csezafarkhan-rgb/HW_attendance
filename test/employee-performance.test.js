@@ -21,7 +21,11 @@ const ctx = {
   computeEmployeeStats: (name, dates) => stats[dates[0].slice(0, 7)]
 };
 vm.createContext(ctx);
-vm.runInContext('var LUNCH_BREAK_MIN = 45, TEA_BREAK_MIN = 15; var BREAK_ALLOW_MIN = 60;', ctx);
+/* The break allowance is set on the Options panel now, so the figures and the
+   words that recite them are lifted rather than stood in for. */
+vm.runInContext(/ {2}var LUNCH_BREAK_MIN = [^;]*;/.exec(src)[0], ctx);
+vm.runInContext(/ {2}var BREAK_ALLOW_MIN = [^;]*;/.exec(src)[0], ctx);
+vm.runInContext(lift(src, 'breakAllowWords'), ctx);
 vm.runInContext(lift(src, 'perfScore'), ctx);
 vm.runInContext(/var PERF_METRICS = \[[\s\S]*?\n  \];/.exec(src)[0], ctx);
 vm.runInContext('var EMP_PERF_CACHE = null, overrides = {}, halfDays = {}, RECORDS = []; function todayIsoNow(){ return todayISO_full; }', ctx);

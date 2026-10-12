@@ -244,6 +244,68 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       save.indexOf('firstTo:'));
   }
 
+  /* ---- the break allowance ----
+     Lunch and two breaks, set on the Options panel. It decides one thing only:
+     when the time-out figure is marked red. The hours owed, when somebody is due
+     to leave and the score are all measured from the shift, which already has
+     these breaks inside it. */
+  {
+    const panel = src.slice(src.indexOf('id="viewOptsDropdown"'),
+                            src.indexOf('id="viewOptsDropdown"') + 2500);
+    const boxes = ['lunchBreakInput', 'break1Input', 'break2Input'];
+    check('the panel offers lunch and two breaks',
+      boxes.every(id => panel.indexOf('id="' + id + '"') > -1), boxes.filter(id => panel.indexOf(id) === -1));
+
+    /* Each box has to be wired, and to remember what it was set to. */
+    const wired = boxes.every(id => src.indexOf("'" + id + "'") > -1);
+    const keys = ['lunchBreakMin', 'break1Min', 'break2Min'];
+    check('each box is wired and remembered under its own key',
+      wired && keys.every(k => src.indexOf("'" + k + "'") > -1),
+      keys.filter(k => src.indexOf("'" + k + "'") === -1));
+    check('and every one of them travels in a backup',
+      keys.every(k => new RegExp("BACKUP_KEYS[\\s\\S]{0,900}'" + k + "'").test(src)), keys);
+
+    /* The total is worked out from the three, never written down. */
+    check('the allowance is the three added up, not a figure of its own',
+      /var BREAK_ALLOW_MIN = LUNCH_BREAK_MIN \+ BREAK1_MIN \+ BREAK2_MIN;/.test(src)
+        && /function recalcBreakAllow\(\)/.test(src),
+      (/var BREAK_ALLOW_MIN = [^;]*;/.exec(src) || [])[0]);
+    check('and changing a box works it out again',
+      /recalcBreakAllow\(\);\s*\n\s*storage\.set\(b\[1\]/.test(src), 'the change handler');
+    check('the single tea break it replaced is gone',
+      src.indexOf('TEA_BREAK_MIN') === -1);
+
+    /* Nothing may recite the old fixed hour: it is the office's to change. */
+    const saysHour = src.split('\n')
+      .map((l, i) => ({ n: i + 1, l }))
+      .filter(x => /1:00/.test(x.l) && !/->\s*2\s+out twice/.test(x.l));
+    check('nothing still says "1:00" where the figure is now the office\'s',
+      saysHour.length === 0, saysHour.map(x => x.n + ': ' + x.l.trim().slice(0, 70)));
+
+    /* The two tables of metric definitions are built once, at load, long before
+       the stored settings arrive - so a figure baked into a label there would be
+       wrong for the rest of the session. They name the allowance instead. */
+    const once = [/t:'Days within the break allowance'/, /t:'Breaks Over Allowance'/];
+    check('the tables built once name the allowance rather than numbering it',
+      once.every(re => re.test(src)), once.map(String));
+    /* Everywhere that is written out on each render may state it. */
+    check('while what is drawn each time states the figure set',
+      /'Breaks within '\+fmtMin\(BREAK_ALLOW_MIN\)/.test(src)
+        && /breakAllowWords\(\)/.test(src), 'the rendered labels');
+
+    /* A break set to nothing is left out of the wording rather than written
+       as "0 min", which is what the second break reads until it is set. */
+    const words = grab('breakAllowWords');
+    check('a break set to nothing is not recited',
+      /if\(BREAK1_MIN > 0\)/.test(words) && /if\(BREAK2_MIN > 0\)/.test(words), words);
+
+    /* And it must not have reached the things it has no business in. */
+    ['owedMinutes', 'getLateEarly', 'perfScore'].forEach(fn => {
+      check(fn + ' is untouched by the allowance',
+        grab(fn).indexOf('BREAK_ALLOW_MIN') === -1, fn);
+    });
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();
