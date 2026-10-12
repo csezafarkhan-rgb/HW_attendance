@@ -9626,6 +9626,28 @@ function buildExcelBackup(){
   }
 
   // ---------- weekly late-arrival budget (30 min total, Mon–Fri) ----------
+  /* Lunch and two breaks, the same for every employee: time out within this is
+     not held against anyone, and beyond it the figure is marked red. Set on the
+     Options panel - it used to be written in here, as 45 and a single 15.
+
+     It decides nothing else. The hours owed, when somebody is due to leave and
+     the score are all measured from the shift, which already has these breaks
+     inside it; this is only what the time away from the desk is read against. */
+  var LUNCH_BREAK_MIN = 45, BREAK1_MIN = 15, BREAK2_MIN = 0;
+  var BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + BREAK1_MIN + BREAK2_MIN;
+  function recalcBreakAllow(){
+    BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + BREAK1_MIN + BREAK2_MIN;
+  }
+  /* The allowance spelled out, for the places that say where it comes from. A
+     break set to nothing is not mentioned rather than written as "0". */
+  function breakAllowWords(){
+    var b = [];
+    if(BREAK1_MIN > 0) b.push(BREAK1_MIN);
+    if(BREAK2_MIN > 0) b.push(BREAK2_MIN);
+    return 'lunch ' + LUNCH_BREAK_MIN
+      + (b.length ? (' + ' + (b.length > 1 ? 'breaks ' : 'break ') + b.join(' + ')) : '')
+      + ' min';
+  }
   var lateThresholdMin = 10;   // minutes past shift start before an arrival counts as late (editable)
   var earlyThresholdMin = 10;  // minutes before shift end before a departure counts as early (editable)
   var weeklyLeverageMin = 30;  // short-hours leeway across a full 5-day week, pro-rated per counted day (editable)
@@ -13401,28 +13423,6 @@ function buildExcelBackup(){
          lowers the figure. */
       inOfficePct: durDays ? Math.round(inOfficeSum / durDays) : 100
     };
-  }
-  /* Lunch and two breaks, the same for every employee: time out within this is
-     not held against anyone, and beyond it the figure is marked red. Set on the
-     Options panel - it used to be written in here, as 45 and a single 15.
-
-     It decides nothing else. The hours owed, when somebody is due to leave and
-     the score are all measured from the shift, which already has these breaks
-     inside it; this is only what the time away from the desk is read against. */
-  var LUNCH_BREAK_MIN = 45, BREAK1_MIN = 15, BREAK2_MIN = 0;
-  var BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + BREAK1_MIN + BREAK2_MIN;
-  function recalcBreakAllow(){
-    BREAK_ALLOW_MIN = LUNCH_BREAK_MIN + BREAK1_MIN + BREAK2_MIN;
-  }
-  /* The allowance spelled out, for the places that say where it comes from. A
-     break set to nothing is not mentioned rather than written as "0". */
-  function breakAllowWords(){
-    var b = [];
-    if(BREAK1_MIN > 0) b.push(BREAK1_MIN);
-    if(BREAK2_MIN > 0) b.push(BREAK2_MIN);
-    return 'lunch ' + LUNCH_BREAK_MIN
-      + (b.length ? (' + ' + (b.length > 1 ? 'breaks ' : 'break ') + b.join(' + ')) : '')
-      + ' min';
   }
   /* Performance score, out of 100. Five questions, in the order they matter:
 

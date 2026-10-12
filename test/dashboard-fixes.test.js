@@ -299,6 +299,25 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     check('a break set to nothing is not recited',
       /if\(BREAK1_MIN > 0\)/.test(words) && /if\(BREAK2_MIN > 0\)/.test(words), words);
 
+    /* The boxes are filled from the variables when the panel is wired, and a
+       `var` read before its line has run is undefined - which emptied all three
+       on the live page while every test here still passed. The figures have to
+       be declared before the panel that reads them. */
+    const declAt = src.indexOf('var LUNCH_BREAK_MIN');
+    const wireAt = src.indexOf("var lt = document.getElementById('lateThreshInput')");
+    check('the figures are declared before the panel that fills itself from them',
+      declAt > -1 && wireAt > -1 && declAt < wireAt, { declAt, wireAt });
+    /* And what the markup starts at has to be what the variables start at, or
+       the panel lies until something is saved. */
+    const decl = /var LUNCH_BREAK_MIN = (\d+), BREAK1_MIN = (\d+), BREAK2_MIN = (\d+);/.exec(src);
+    const markup = ['lunchBreakInput', 'break1Input', 'break2Input'].map(id => {
+      const m = new RegExp('id="' + id + '"[^>]*value="(\\d+)"').exec(panel);
+      return m ? m[1] : null;
+    });
+    check('and the boxes start at the same figures the variables do',
+      !!decl && markup.join(',') === [decl[1], decl[2], decl[3]].join(','),
+      { markup, decl: decl && decl.slice(1, 4) });
+
     /* And it must not have reached the things it has no business in. */
     ['owedMinutes', 'getLateEarly', 'perfScore'].forEach(fn => {
       check(fn + ' is untouched by the allowance',
