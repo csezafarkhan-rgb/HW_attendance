@@ -1258,6 +1258,16 @@ tr.holiday-row .date-col .hol-flag{ color:#FFFFFF; }
 .hdr-total em{ display:block; font-style:normal; font-family:'Inter',sans-serif;
   font-size:10px; font-weight:600; color:rgba(255,255,255,.55); letter-spacing:.02em; }
 .dash-dlt{ margin-top:3px; }
+/* What somebody has been on, and since when, under their shift picker. */
+.shf-runs{ display:flex; flex-wrap:wrap; gap:4px; padding:0 6px 8px; }
+.shf-run{ display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--ink-soft);
+          background:#F1F4F8; border:1px solid var(--line); border-radius:999px; padding:2px 4px 2px 8px; }
+.shf-run b{ color:var(--ink); font-weight:700; }
+.shf-run.now{ background:#E6F3EA; border-color:#9ED0AF; }
+.shf-run-x{ border:0; background:transparent; cursor:pointer; color:#B42318; font-size:13px;
+            line-height:1; padding:0 3px; border-radius:50%; }
+.shf-run-x:hover{ background:#F8C9C4; }
+
 /* The daily average under a duration total, and an out time past the allowance
    set on the Options panel. */
 .dash-sub{ font-size:10px; color:var(--ink-soft); font-weight:600; margin-top:2px; white-space:nowrap; }
@@ -5774,7 +5784,9 @@ function ensureDirPerm(dir, byClick, mode){
     var band = [{ v:'', s:'empBand|T' }], shift = [{ v:'', s:'empShift' }];
     emps.forEach(function(e, i){
       band.push({ v:e.name, s:'empBand|'+edge(i,'T') });
-      shift.push({ v:'Shift '+getShift(e.name), s:'empShift|'+edge(i) });
+      /* The slot they were on in the month being exported, not whichever is
+         set today - the file is a record of that month. */
+      shift.push({ v:'Shift '+getShift(e.name, dates[0]), s:'empShift|'+edge(i) });
       for(var k=1;k<COLS;k++){ band.push({v:'', s:'empBand|T'}); shift.push({v:'', s:'empShift'}); }
       band.push({ v:'', s:'gap' }); shift.push({ v:'', s:'gap' });
       merges.push(C(at(i))+'3:'+C(at(i)+COLS-1)+'3');
@@ -5961,7 +5973,7 @@ function ensureDirPerm(dir, byClick, mode){
       var mins = function(v){ return { n: (v || 0) / 1440, s: zeb + '||t' }; };
       rows.push([
         { v:dispName(r.emp.name), s:'zebra|L' },
-        { v:getShift(r.emp.name), s:zeb },
+        { v:getShift(r.emp.name, dates[0]), s:zeb },
         /* 30 parts turning up, 25 keeping the day, 25 doing the hours, 15 at the
            desk, 5 for time given past what the weeks asked for. Written as the
            sum itself, so the spreadsheet works it out and anybody can see what it
@@ -6854,7 +6866,12 @@ function buildExcelBackup(){
     mergeInto(halfDays, obj.halfDays);
     mergeInto(manualLeave, obj.manualLeave);
     mergeInto(leaveDeductions, obj.leaveDeductions);
-    if(obj.shift && name){ shiftAssignments[name]=obj.shift; }
+    /* An imported file carries one slot, not a history. It stands for what that
+       person was on, so it seeds the run that has always been in force - and it
+       never replaces a history already here, which says more than it does. */
+    if(obj.shift && name && !shiftRuns(name).length){
+      shiftAssignments[name] = [{ from:SHIFT_DAWN, shift:obj.shift }];
+    }
     if(obj.leaveRequests && obj.leaveRequests.length){ var byId={}; leaveRequests.forEach(function(r,i){ byId[r.id]=i; }); obj.leaveRequests.forEach(function(r){ if(r.id!=null && byId[r.id]!=null) leaveRequests[byId[r.id]]=r; else leaveRequests.push(r); }); }
     // 5) make the employee visible + select the imported months
     if(!visibleEmpSet) visibleEmpSet = {};
@@ -7644,21 +7661,85 @@ function buildExcelBackup(){
   function allShifts(){
     var out = SHIFT_PRESETS.concat(customShifts);
     try{
-      Object.keys(shiftAssignments).forEach(function(k){ if(shiftAssignments[k] && out.indexOf(shiftAssignments[k])<0) out.push(shiftAssignments[k]); });
+      Object.keys(shiftAssignments).forEach(function(k){
+        shiftRuns(k).forEach(function(r){ if(r.shift && out.indexOf(r.shift) < 0) out.push(r.shift); });
+      });
       Object.keys(dayShifts).forEach(function(k){ if(dayShifts[k] && out.indexOf(dayShifts[k])<0) out.push(dayShifts[k]); });
     }catch(e){}
     return out.sort(function(a,b){ return parseShift(a).startMin - parseShift(b).startMin; });
   }
-  var shiftAssignments = {}; // empName -> "H:MM-H:MM"
+  var shiftAssignments = {}; // empName -> [{from:'YYYY-MM-DD', shift:'H:MM-H:MM'}]
+  /* ---- a shift has a history ----
+     It used to be one value a person, used for every date there has ever been,
+     so moving somebody to a new slot re-worked every month they had ever been
+     paid for - on hours they were not on at the time.
+
+     Each run says when it came into force. A value left from before the history
+     existed is one run in force since the beginning, which is what it meant. */
+  var SHIFT_DAWN = '0000-01-01';
+  function shiftRuns(empName){
+    var v = shiftAssignments[empName];
+    if(!v) return [];
+    if(typeof v === 'string') return [{ from:SHIFT_DAWN, shift:v }];
+    if(!Array.isArray(v)) return [];
+    return v.filter(function(r){ return r && r.shift; })
+      .map(function(r){ return { from:String(r.from || SHIFT_DAWN), shift:String(r.shift) }; })
+      .sort(function(a, b){ return a.from < b.from ? -1 : (a.from > b.from ? 1 : 0); });
+  }
+  /* The slot in force on a day; with no day, the one in force now. A day before
+     the first run falls to that run - there is nothing earlier to go on. */
+  function shiftOn(empName, dateStr){
+    var runs = shiftRuns(empName);
+    if(!runs.length) return '';
+    if(!dateStr) return runs[runs.length - 1].shift;
+    for(var i = runs.length - 1; i >= 0; i--) if(runs[i].from <= dateStr) return runs[i].shift;
+    return runs[0].shift;
+  }
+  /* When a shift set today comes into force: the first of this month, so a
+     month is never half on one slot and half on another and the figures a month
+     was closed on stay put. Not the month on show - changing a shift while
+     reading August should not rewrite August. */
+  function shiftFromDay(){
+    return String(todayISO_full || '').slice(0, 7) + '-01';
+  }
+  function setShiftFrom(empName, shift, from){
+    var runs = shiftRuns(empName);
+    /* Nothing on file yet: what they were on until now has to be written down
+       first, or the new slot reaches back over every month there is. */
+    if(!runs.length) runs.push({ from:SHIFT_DAWN, shift:shiftBaseDefault(empName) });
+    runs = runs.filter(function(r){ return r.from !== from; });
+    runs.push({ from:from, shift:shift });
+    runs.sort(function(a, b){ return a.from < b.from ? -1 : (a.from > b.from ? 1 : 0); });
+    /* A run saying the same as the one before it is not a change. */
+    var out = [];
+    runs.forEach(function(r){ if(!out.length || out[out.length - 1].shift !== r.shift) out.push(r); });
+    shiftAssignments[empName] = out;
+  }
+  /* Undo a run, for a change entered against the wrong month. The first run is
+     what they were on before anything was recorded and cannot be dropped. */
+  function dropShiftRun(empName, from){
+    var runs = shiftRuns(empName).filter(function(r, i){ return i === 0 || r.from !== from; });
+    shiftAssignments[empName] = runs;
+  }
+  /* "from Oct 2026", or "from the start" for the run that has no beginning. A
+     run normally opens a month, so the month is what it is called; one that
+     does not is named by its day. */
+  function shiftRunFrom(from){
+    if(!from || from === SHIFT_DAWN) return 'from the start';
+    var ym = from.slice(0, 7), d = parseInt(from.slice(8), 10);
+    if(d === 1) return 'from ' + monthLabelShort(ym);
+    return 'from ' + monthLabelShort(ym).split(' ')[0] + ' ' + d + ', ' + ym.slice(0, 4);
+  }
   var shiftWorking = null;   // in-panel edits (applied to the grid on Save)
 
   function getShift(empName, dateStr){
-    // A one-off shift for that date wins, then the employee's standing shift.
+    // A one-off shift for that date wins, then whichever standing shift was in
+    // force on it - not whichever is in force today.
     if(dateStr){
       var d = dayShifts[empName+'|'+dateStr];
       if(d) return d;
     }
-    return shiftAssignments[empName] || (employeesByName[empName] ? employeesByName[empName].shift : '9:00-6:00');
+    return shiftOn(empName, dateStr) || shiftBaseDefault(empName);
   }
   function loadDayShifts(){
     return storage.get('dayShifts', true).then(function(res){
@@ -7938,6 +8019,18 @@ function buildExcelBackup(){
   function loadShiftAssignments(){
     return storage.get('shiftAssignments', true).then(function(res){
       if(res && res.value){ try{ shiftAssignments = JSON.parse(res.value); }catch(e){ shiftAssignments = {}; } }
+      /* Anything written before shifts had a history is pinned as having been in
+         force since the beginning - which is what it meant - and written back,
+         so the months already closed keep the slot they were worked out on and
+         the panel has a run to show. */
+      var pinned = 0;
+      Object.keys(shiftAssignments).forEach(function(k){
+        if(typeof shiftAssignments[k] === 'string'){
+          shiftAssignments[k] = [{ from:SHIFT_DAWN, shift:shiftAssignments[k] }];
+          pinned++;
+        }
+      });
+      if(pinned) saveShiftAssignments();
     }).catch(function(){ shiftAssignments = {}; });
   }
   function saveShiftAssignments(){
@@ -11002,8 +11095,7 @@ function buildExcelBackup(){
       var ds0 = getDayShift(emp.name, todayISO_full);
       if(ds0){
         var ovS = getOverride(emp.name, todayISO_full);
-        var row0 = { name:emp.name, shift:ds0,
-          std: shiftAssignments[emp.name] || (employeesByName[emp.name] ? employeesByName[emp.name].shift : '9:00-6:00') };
+        var row0 = { name:emp.name, shift:ds0, std: getShift(emp.name) };
         /* A moved shift on a home day belongs in the home section, so the
            office list only covers people expected in. */
         (ovS && ovS.cat === 'WFH' ? wfhShift : shifted).push(row0);
@@ -11064,7 +11156,7 @@ function buildExcelBackup(){
       // one that was - otherwise "45 min late" reads as wrong to anyone who
       // knows the person was asked to come in on a different slot.
       var dayShift = getDayShift(emp.name, todayISO_full);
-      var stdShift = shiftAssignments[emp.name] || (employeesByName[emp.name] ? employeesByName[emp.name].shift : '9:00-6:00');
+      var stdShift = getShift(emp.name);
       var item = {name:emp.name, inT:fmtTime(rec['in']), mins:Math.round(mins), note:(lx&&lx.note)?lx.note:'',
                   shift:getShift(emp.name, todayISO_full), stdShift:stdShift, changed:!!dayShift};
       (lx ? excused : late).push(item);
@@ -11836,7 +11928,7 @@ function buildExcelBackup(){
        which in a month starting on a Saturday is a 4-hour home Saturday - making
        the hourly rate, and every overtime hour that month, 2.25 times too high. */
     var shiftMin = (function(){
-      var sh = parseShift(getShift(emp));
+      var sh = parseShift(getShift(emp, ym + '-01'));
       var len = sh.endMin - sh.startMin;
       return len > 0 ? len : 540;
     })();
@@ -12761,7 +12853,10 @@ function buildExcelBackup(){
       return list.map(function(p){ return '<option value="'+p+'" '+(cur===p?'selected':'')+'>'+p+'</option>'; }).join('')+
         '<option value="__custom" '+(!known?'selected':'')+'>Custom\u2026</option>';
     }
-    var html = '<div class="ord-hint">Set each person\u2019s work slot \u2014 a pick applies straight away. Use \u201cApply to all\u201d to give everyone the same slot at once.</div>';
+    var html = '<div class="ord-hint">Set each person\u2019s work slot \u2014 a pick applies straight away, '+
+      'from the <b>1st of '+monthLabelShort(String(todayISO_full||'').slice(0,7))+'</b>. '+
+      'Months before that keep the slot they were worked out on. '+
+      'Use \u201cApply to all\u201d to give everyone the same slot at once.</div>';
     // bulk apply-to-all
     html += '<div class="shf-bulk">'+
       '<select id="shfAllSel">'+allShifts().map(function(p){ return '<option value="'+p+'">'+p+'</option>'; }).join('')+'</select>'+
@@ -12799,7 +12894,23 @@ function buildExcelBackup(){
         '</div>'+
         '<div style="padding:0 6px 6px;">'+
         '<input type="text" data-shift-custom="'+e.name+'" placeholder="e.g. 7:00-4:00" value="'+(!isPreset?cur:'')+'" style="display:'+(!isPreset?'block':'none')+';width:100%;font-size:11.5px;padding:5px 8px;border-radius:6px;border:1px solid #9AA3B0;"/>'+
-        '</div>';
+        '</div>'+
+        /* What they have been on, and since when. Only worth showing once there
+           is more than one run - a single one is just the slot in the box. */
+        (function(){
+          var runs = shiftRuns(e.name);
+          if(runs.length < 2) return '';
+          return '<div class="shf-runs">'+
+            runs.map(function(r, i){
+              return '<span class="shf-run'+(i === runs.length - 1 ? ' now' : '')+'">'+
+                '<b>'+r.shift+'</b> '+shiftRunFrom(r.from)+
+                (i === 0 ? '' :
+                  '<button type="button" class="shf-run-x" data-run-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
+                  ' data-run-from="'+r.from+'" title="Take this change back - the slot before it carries on">\u00d7</button>')+
+              '</span>';
+            }).join('')+
+          '</div>';
+        })();
     });
     html += '</div>';
     html += '<div class="actions">'+
@@ -12835,7 +12946,7 @@ function buildExcelBackup(){
         // happened to be pressed afterwards
         EMPLOYEES.forEach(function(e){
           shiftWorking[e.name] = v;
-          shiftAssignments[e.name] = v;
+          setShiftFrom(e.name, v, shiftFromDay());
         });
         saveShiftAssignments();
         renderTable();
@@ -12860,7 +12971,7 @@ function buildExcelBackup(){
         }
         if(customInput) customInput.style.display = 'none';
         shiftWorking[name] = sel.value;
-        shiftAssignments[name] = sel.value;
+        setShiftFrom(name, sel.value, shiftFromDay());
         saveShiftAssignments();
         renderTable();
       };
@@ -12921,17 +13032,47 @@ function buildExcelBackup(){
         inp.style.borderColor = ''; inp.title = '';
         addCustomShift(val);          // remember it for every other picker
         shiftWorking[name] = val;
-        shiftAssignments[name] = val;
+        setShiftFrom(name, val, shiftFromDay());
         saveShiftAssignments();
         renderTable();
         renderShiftDropdown();
       });
     });
+    /* Taking a run back: the slot before it carries on over those months, so
+       the figures go back to what they were before the change was entered. */
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('button[data-run-emp]'), function(x){
+      x.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        var emp = x.getAttribute('data-run-emp'), from = x.getAttribute('data-run-from');
+        var runs = shiftRuns(emp);
+        var gone = runs.filter(function(r){ return r.from === from; })[0];
+        var back = runs.filter(function(r){ return r.from < from; }).pop();
+        hwConfirm({
+          title: 'Take this shift change back?',
+          message: dispName(emp) + ' goes back to ' + (back ? back.shift : 'their default slot')
+                 + ' ' + (back ? shiftRunFrom(back.from) : '') + ', and the months from '
+                 + shiftRunFrom(from).replace(/^from /, '') + ' are worked out on that again.',
+          items: gone ? [gone.shift + ' ' + shiftRunFrom(gone.from)] : [],
+          confirmLabel: 'Take it back',
+          danger: true
+        }).then(function(ok){
+          if(!ok) return;
+          dropShiftRun(emp, from);
+          saveShiftAssignments();
+          shiftWorking = null;
+          renderTable();
+          renderShiftDropdown();
+        });
+      });
+    });
+
     // save / reset
     var saveBtn = shiftDropdown.querySelector('button[data-act="save"]');
     if(saveBtn) saveBtn.addEventListener('click', function(ev){
       ev.stopPropagation();
-      EMPLOYEES.forEach(function(e){ if(shiftWorking[e.name]) shiftAssignments[e.name] = shiftWorking[e.name]; });
+      EMPLOYEES.forEach(function(e){
+        if(shiftWorking[e.name]) setShiftFrom(e.name, shiftWorking[e.name], shiftFromDay());
+      });
       saveShiftAssignments();
       renderTable();
       saveBtn.textContent = '\u2713 Saved';
@@ -12944,8 +13085,9 @@ function buildExcelBackup(){
       hwConfirm({
         title: 'Reset every shift to the default?',
         message: saved.length
-          ? ('The ' + saved.length + ' shift' + (saved.length === 1 ? '' : 's') + ' set here are cleared and '
-             + 'everyone goes back to their default slot. Late and short hours are recalculated.')
+          ? ('The ' + saved.length + ' shift' + (saved.length === 1 ? '' : 's') + ' set here are cleared, '
+             + 'along with every record of when each one came into force, and everyone goes back to their '
+             + 'default slot. Late and short hours are recalculated for every month, closed ones included.')
           : 'No shift has been changed from the default, so this only discards unsaved edits in this panel.',
         items: saved.map(function(n){ return dispName(n) + ' — ' + shiftAssignments[n]; }),
         confirmLabel: 'Reset shifts',
@@ -14208,8 +14350,11 @@ function buildExcelBackup(){
     // The shift belongs on its own line: a label in the date column, the time
     // under each person - it read as an afterthought inside the meter caption.
     html += '<tr class="shift-row"><th class="date-col">Shift Timing</th>';
+    /* The slot in force over the month on show, which is not always the one set
+       now - somebody moved in October was on something else in September. */
+    var shiftDay = dates[0] || '';
     emps.forEach(function(emp){
-      html += '<th colspan="6" class="emp-block-start">'+getShift(emp.name)+'</th>';
+      html += '<th colspan="6" class="emp-block-start">'+getShift(emp.name, shiftDay)+'</th>';
     });
     html += '</tr>';
     // row3: subheaders
@@ -15418,7 +15563,7 @@ function buildExcelBackup(){
     // A one-off shift for this date - late/early and the weekly requirement all
     // judge against it, so a changed start time doesn't read as lateness.
     var dsCur = getDayShift(emp, dateStr);
-    var dsStd = shiftAssignments[emp] || (employeesByName[emp] ? employeesByName[emp].shift : '9:00-6:00');
+    var dsStd = getShift(emp, dateStr);
     var dayShiftHtml = '<div class="override-section" style="border-top:1px dashed var(--line-dk);margin-top:16px;padding-top:14px;">'+
       '<label class="lbl">Shift for this day</label>'+
       '<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;">Standing shift: <b>'+dsStd+'</b>'+
