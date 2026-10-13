@@ -513,6 +513,46 @@ process.env.SESSION_SECRET = SECRET;
   const twice = await asAdmin('POST', '/api/mail/daily', { send: 'preview' });
   check('the same preview cannot be sent twice', twice.status === 410, twice.body);
 
+  /* ---- the slot somebody was on, in the message ----
+     A shift is a list of runs now, each saying when it came into force, so that
+     moving somebody does not rewrite months already closed. This message says
+     who was late, and late is measured against the slot they were actually on.
+     Read as though it were still a plain string, the whole late list came out
+     empty - for everybody, every day - and nothing noticed, because an empty
+     late list is exactly what a good day looks like. */
+  {
+    const was = kvFind(1, 'shiftAssignments');
+    const htmlOf = r => (r.body && r.body.preview && r.body.preview.html) || '';
+    /* Asha punched in at 9:33 and is on a 9:00 start, so she is 33 minutes late
+       against a threshold of ten. */
+    kvSet(1, 'shiftAssignments', JSON.stringify({
+      'Asha Test': [{ from: '0000-01-01', shift: '9:00-6:00' }] }));
+    const runs = await asAdmin('POST', '/api/mail/daily', { preview: true });
+    check('somebody past their slot is marked late when shifts carry a history',
+      /min late/.test(htmlOf(runs)) && /Asha Test/.test(htmlOf(runs)),
+      htmlOf(runs) ? 'no "min late" in the message' : runs.body);
+    check('and nothing in the message reads as an object',
+      htmlOf(runs).indexOf('[object Object]') === -1);
+
+    /* A store that has not been through the dashboard since still holds the old
+       shape, and must go on working. */
+    kvSet(1, 'shiftAssignments', JSON.stringify({ 'Asha Test': '9:00-6:00' }));
+    const plain = await asAdmin('POST', '/api/mail/daily', { preview: true });
+    check('a shift stored the old way still marks them late',
+      /min late/.test(htmlOf(plain)), plain.body);
+
+    /* And the run in force is the one for the day being reported, not whichever
+       came last: a slot starting tomorrow says nothing about today. */
+    kvSet(1, 'shiftAssignments', JSON.stringify({
+      'Asha Test': [{ from: '0000-01-01', shift: '9:00-6:00' },
+                    { from: '2099-01-01', shift: '11:00-8:00' }] }));
+    const future = await asAdmin('POST', '/api/mail/daily', { preview: true });
+    check('a slot that starts in the future is not used for today',
+      /min late/.test(htmlOf(future)), future.body);
+
+    kvSet(1, 'shiftAssignments', was ? was.value : JSON.stringify({}));
+  }
+
   /* The office writes its own message: who is copied, the subject, the words
      at the top and foot, and which parts of the message appear at all. */
   kvSet(1, 'mailSettings', JSON.stringify({

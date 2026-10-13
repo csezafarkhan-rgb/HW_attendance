@@ -350,12 +350,15 @@ function dailyEmail(o) {
         return x === y ? String(a.name).localeCompare(String(b.name)) : x - y;
       });
     };
+    /* Who is not in yet comes second, straight after who is: it is the card
+       somebody opening this at ten in the morning is looking for. Work from
+       home goes last - it is a settled arrangement, not something to chase. */
     const kinds = [
       ['Present', who('present'), '#137A3B'],
-      ['Work from home', who('wfh'), '#2F6FE4'],
+      ['Not Reached Office', who('missing'), '#B3261E'],
       ['Visiting', who('visit'), '#7C3AED'],
       ['On leave', who('leave'), '#B45309'],
-      ['No punch', who('missing'), '#B3261E']
+      ['Work from home', who('wfh'), '#2F6FE4']
     ].filter(function (k) { return k[1].length; });
     if (kinds.length) {
       const w = Math.floor(100 / kinds.length);

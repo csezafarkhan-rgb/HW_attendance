@@ -1539,6 +1539,30 @@ function unrequestedFrom(overrides, halfDays, requests, sinceDay) {
 /* "9:30-6:30" as minutes past midnight. The first half is the arrival: an hour
    under 8 is read as the afternoon only for the end of the shift, never the
    start, which is how the dashboard reads it too. */
+/* The slot somebody was on upon a given day.
+
+   A shift is a list of runs, each saying when it came into force, so that
+   moving somebody to a new slot does not rewrite the months already closed. A
+   value left from before that existed is one run that has always been in force,
+   which is what it meant.
+
+   The dashboard works it out the same way. It has to: this message says who was
+   late, and late is measured against the slot they were actually on. Reading
+   the list as though it were still a plain string left `usual` holding an
+   array, shiftStartMin could make nothing of it, and the late list came out
+   empty for everybody. */
+function shiftInForce(assigned, empName, day) {
+  const v = assigned ? assigned[empName] : null;
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  if (!Array.isArray(v)) return null;
+  const runs = v.filter(r => r && r.shift)
+    .map(r => ({ from: String(r.from || '0000-01-01'), shift: String(r.shift) }))
+    .sort((a, b) => (a.from < b.from ? -1 : (a.from > b.from ? 1 : 0)));
+  if (!runs.length) return null;
+  for (let i = runs.length - 1; i >= 0; i--) if (runs[i].from <= day) return runs[i].shift;
+  return runs[0].shift;                    // before any of them: the earliest known
+}
 function shiftStartMin(text) {
   const m = /^\s*(\d{1,2}):(\d{2})/.exec(String(text || ''));
   if (!m) return null;
@@ -1582,7 +1606,9 @@ async function buildDailyEmail(orgId, day, opts) {
     const name = shownNames[e.name] || e.name;
     const ov = overrides[e.name + '|' + day];
     const rec = byEmp[e.name] || {};
-    let state = 'missing', label = 'No punch', away = '', kind = 'missing';
+    /* "No punch" described the file; this describes the person, which is what
+       somebody reading the message at ten in the morning wants to know. */
+    let state = 'missing', label = 'Not Reached Office', away = '', kind = 'missing';
     if (ov && ov.cat === 'LEAVE') { state = 'leave'; kind = 'leave'; label = 'Leave' + (ov.detail ? (' · ' + ov.detail) : ''); }
     else if (ov && ov.cat === 'WFH') { state = 'remote'; kind = 'wfh'; label = 'From home'; away = 'WFH'; }
     else if (ov && ov.cat === 'VISIT') { state = 'remote'; kind = 'visit'; label = 'Visit' + (ov.detail ? (' · ' + ov.detail) : ''); away = 'Visit'; }
@@ -1611,7 +1637,7 @@ async function buildDailyEmail(orgId, day, opts) {
     const rec = byEmp[empName] || {};
     const ov = overrides[key];
     const todayShift = dayShifts[key] || null;
-    const usual = assigned[empName] || null;
+    const usual = shiftInForce(assigned, empName, day);
     if (todayShift && usual && todayShift !== usual) {
       shifts.push({ name: shown, detail: todayShift + ' today \u00b7 usual ' + usual });
     }
