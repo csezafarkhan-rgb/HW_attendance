@@ -1594,9 +1594,27 @@ async function buildDailyEmail(orgId, day, opts) {
   const recs = await pool.query(
     'SELECT employee, data FROM records WHERE org_id = $1 AND day = $2', [orgId, day]);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'empNames', 'leaveRequests', 'companyInfo',
-                                      'dayShifts', 'shiftAssignments', 'lateThresholdMin', 'lateExcuses']);
+                                      'dayShifts', 'shiftAssignments', 'lateThresholdMin', 'lateExcuses',
+                                      'manualRecords']);
   const byEmp = {};
   recs.rows.forEach(r => { byEmp[r.employee] = r.data || {}; });
+  /* Somebody who works where there is no reader is entered by hand, every day.
+     The message only ever read the punch file, so they came out under the card
+     for people who have not arrived - which was tolerable while that card was
+     called "No punch", since it was true of the file, and is not tolerable now
+     it says they have not reached the office, which is false of the person.
+
+     A punch always wins; this only fills the silence. "-" is how the day is
+     written while somebody is still in, and is not an out time. */
+  const manualRecs = parseJson(kv.manualRecords) || {};
+  names.forEach(n => {
+    const m = manualRecs[n + '|' + day];
+    if (!m || !m['in']) return;
+    const rec = byEmp[n];
+    if (rec && rec['in']) return;
+    byEmp[n] = { 'in': m['in'], out: (m.out && m.out !== '-') ? m.out : '',
+                 st: m.st || 'PR', manual: true };
+  });
   const overrides = parseJson(kv.overrides) || {};
   const halfDays = parseJson(kv.halfDays) || {};
 

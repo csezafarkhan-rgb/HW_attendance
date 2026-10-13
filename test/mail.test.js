@@ -553,6 +553,57 @@ process.env.SESSION_SECRET = SECRET;
     kvSet(1, 'shiftAssignments', was ? was.value : JSON.stringify({}));
   }
 
+  /* ---- a day entered by hand is a day at work ----
+     Somebody who works where there is no card reader is entered by hand, every
+     day. The message read the punch file and nothing else, so they came out
+     under the card for people who have not arrived. That was tolerable while
+     the card was called "No punch" - true of the file - and is not tolerable
+     now it says they have not reached the office, which is false of the person. */
+  {
+    const wasOv = kvFind(1, 'overrides'), wasMan = kvFind(1, 'manualRecords');
+    const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+    const htmlOf = r => (r.body && r.body.preview && r.body.preview.html) || '';
+    /* Nothing standing in the way: Ravi has no punch and no override, so he is
+       somebody who has not turned up. */
+    kvSet(1, 'overrides', JSON.stringify({}));
+    kvSet(1, 'manualRecords', JSON.stringify({}));
+    const without = htmlOf(await asAdmin('POST', '/api/mail/daily', { preview: true }));
+    /* The names inside the Present card, and only those. Comparing positions
+       instead does not work: a card with nobody on it is left out altogether,
+       so once the last missing person is accounted for there is no "Not Reached
+       Office" heading to be before. */
+    const presentNames = h => {
+      const m = /Present<\/div><div[^>]*>([\s\S]*?)<\/div><\/div><\/td>/.exec(h);
+      return m ? m[1] : '';
+    };
+    const inPresent = h => presentNames(h).indexOf('Ravi Test') > -1;
+    check('with no punch and nothing entered, they have not reached the office',
+      !inPresent(without), 'Ravi Test was counted present with nothing on file');
+
+    kvSet(1, 'manualRecords', JSON.stringify({
+      ['Ravi Test|' + today]: { 'in': '10:00', out: '-', st: 'PR' } }));
+    const withMan = htmlOf(await asAdmin('POST', '/api/mail/daily', { preview: true }));
+    check('a day entered by hand puts them with the people who are in',
+      inPresent(withMan) && /10:00 AM/.test(withMan), 'not in the Present card');
+    check('and they are no longer counted as not having reached the office',
+      withMan.indexOf('Not Reached Office') === -1
+        || presentNames(withMan).indexOf('Ravi Test') > -1, 'still under the missing card');
+    /* "-" is how the day is written while somebody is still in. It is not an
+       out time and must not be printed as one. */
+    check('still being in is not printed as an out time of "-"',
+      withMan.indexOf('>-<') === -1 && !/>\s*-\s*</.test(withMan));
+
+    /* A real punch is the better record and must win. */
+    kvSet(1, 'manualRecords', JSON.stringify({
+      ['Asha Test|' + today]: { 'in': '7:00', out: '12:00', st: 'PR' } }));
+    const punched = htmlOf(await asAdmin('POST', '/api/mail/daily', { preview: true }));
+    check('a punch beats a figure entered by hand',
+      /9:33 AM/.test(punched) && !/7:00 AM/.test(punched), 'the hand-typed time won');
+
+    kvSet(1, 'overrides', wasOv ? wasOv.value : JSON.stringify({}));
+    kvSet(1, 'manualRecords', wasMan ? wasMan.value : JSON.stringify({}));
+  }
+
   /* The office writes its own message: who is copied, the subject, the words
      at the top and foot, and which parts of the message appear at all. */
   kvSet(1, 'mailSettings', JSON.stringify({
