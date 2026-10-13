@@ -59,8 +59,9 @@ const SECRET = 'test-secret-for-signing-links';
            { name: 'Late One', state: 'present', kind: 'present', 'in': '10:13', inMin: 613, late: 43 }],
     sections: { table: false }
   });
-  check('a late arrival has its hour picked out',
-    /Late One<span style="background:#FFF3C4[^>]*> \(10:13 AM\)/.test(marked.html));
+  check('a late arrival has its hour picked out, and says by how much',
+    /Late One<span style="background:#FFF3C4[^>]*> \(10:13 AM · 43 min late\)/.test(marked.html),
+    (/Late One<span[^>]*>[^<]*/.exec(marked.html) || [])[0]);
   check('and an on-time arrival is left plain',
     /Early One<span style="color:#5B6675[^>]*> \(9:16 AM\)/.test(marked.html));
   check('the names on a card are numbered', /1_Asha Test/.test(cards.html) && /1_Ravi Test/.test(cards.html));

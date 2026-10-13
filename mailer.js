@@ -376,11 +376,14 @@ function dailyEmail(o) {
           +   k[1].map(function (r, i) {
                 const at = (r.inMin != null) ? clock(r['in']) : '';
                 /* Anyone past their shift's start has that hour picked out in
-                   yellow, so a late arrival is seen without reading the list
-                   below. */
+                   yellow and says by how much, so a late arrival is both seen
+                   and measured without reading the list below. Only the late
+                   carry the longer text, and there are seldom more than one or
+                   two of them, so the card keeps its width. */
                 const time = r.late
                   ? ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
-                     + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>')
+                     + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ' · '
+                     + Math.round(r.late) + ' min late)</span>')
                   : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
                 return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
                      + (at ? time : '')
