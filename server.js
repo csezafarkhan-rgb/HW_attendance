@@ -1964,10 +1964,25 @@ async function sendHolidayEmail(orgId, opts) {
   const to = await mailRecipients(orgId, settings, 'holiday');
   if (!to.length) return { ok: false, error: NO_ADDRESS };
   const cc = (settings.holiday.cc.length ? settings.holiday.cc : settings.cc) || [];
-  if (opts.preview) return { ok: true, mail: { to, cc, subject: mail.subject, html: mail.html, attachments: [] } };
+  /* The preview carries which holiday it is for, so that pressing Send on it -
+     which is how the word normally goes out - marks that holiday as spoken for
+     the same as any other route. */
+  if (opts.preview) return { ok: true, holiday: holidays[0].day,
+    mail: { to, cc, subject: mail.subject, html: mail.html, attachments: [], holiday: holidays[0].day } };
   const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
   await logMail(orgId, 'holiday', { to, cc, subject: mail.subject, html: mail.html }, r);
+  if (r.ok) await markHolidaySaid(orgId, holidays[0].day);
   return Object.assign({ to: to.length, cc: cc.length, holiday: holidays[0].day }, r);
+}
+/* Spoken for, however the word went out - by hand, from a preview, or on the
+   tick. Sending by hand used to leave no mark, so the tick would say it again
+   the next day as though nobody had. */
+async function markHolidaySaid(orgId, day) {
+  if (!day) return;
+  try {
+    await pool.query('INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING',
+                     ['holiday-email:' + orgId + ':' + day]);
+  } catch (e) { console.error('the holiday word went out but was not marked:', e && e.message); }
 }
 
 async function sendLeaveEmail(orgId) {
@@ -2602,6 +2617,7 @@ app.post('/api/mail/holiday', requireRole('admin'), async (req, res) => {
     previews.delete(req.session.userId);
     const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject, html: held.html });
     await logMail(req.session.orgId, 'holiday', held, r);
+    if (r.ok) await markHolidaySaid(req.session.orgId, held.holiday);
     return res.status(r.ok ? 200 : 502).json(Object.assign({ to: held.to.length }, r));
   }
   const out = await sendHolidayEmail(req.session.orgId, { preview: !!body.preview });
@@ -2655,15 +2671,27 @@ async function dailyEmailTick() {
   for (const org of orgs.rows) {
     try {
       const s = await mailSettings(org.id);
-      /* A holiday that many days off gets its word first, once, whatever the
-         daily message is doing. */
+      /* Every holiday between today and `days` ahead gets its word, once,
+         whatever the daily message is doing.
+
+         This used to ask for one date - exactly `days` off - and nothing else.
+         That works only if the service is awake on that one day. It sleeps when
+         nobody is using it, so a holiday whose turn came up on a Sunday had its
+         only chance taken with it: Dussehra fell on a Monday, its word was due
+         on the Sunday, and nothing went out at all.
+
+         Looking across the whole window instead means a missed day is caught
+         the next time the service wakes. A word the morning before is late, and
+         still stops somebody turning up to a locked building. */
       if (s.holiday.on && min >= hhmmToMin(s.holiday.at)) {
-        const target = new Date(Date.now() + IST_MS + s.holiday.days * 86400000).toISOString().slice(0, 10);
-        const job = 'holiday-email:' + org.id + ':' + target;
-        const claimed = await pool.query(
-          'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
-        if (claimed.rows.length) {
-          const hr = await sendHolidayEmail(org.id, { on: target });
+        const until = new Date(Date.now() + IST_MS + s.holiday.days * 86400000)
+          .toISOString().slice(0, 10);
+        for (const h of await holidaysFrom(org.id, day, until)) {
+          const job = 'holiday-email:' + org.id + ':' + h.day;
+          const claimed = await pool.query(
+            'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+          if (!claimed.rows.length) continue;            // already spoken for
+          const hr = await sendHolidayEmail(org.id, { on: h.day });
           if (!hr.ok || hr.nothing) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
         }
       }
@@ -2934,4 +2962,7 @@ if (require.main === module) {
     console.log('email is off: set RESEND_API_KEY and RESEND_FROM to turn it on');
   }
 }
-module.exports = { app, pool };
+/* dailyEmailTick is exported so the scheduler itself can be tested, rather
+   than only the sending it calls. The holiday word going missing was a fault in
+   the timing, not in the message. */
+module.exports = { app, pool, dailyEmailTick };

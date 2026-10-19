@@ -279,7 +279,7 @@ Module._load = function (request) {
 process.env.SESSION_SECRET = SECRET;
 
 (async function run() {
-  const { app } = require(path.join(REPO, 'server.js'));
+  const { app, dailyEmailTick } = require(path.join(REPO, 'server.js'));
   const srv = app.listen(0);
   await new Promise(r => srv.once('listening', r));
   const base = 'http://127.0.0.1:' + srv.address().port;
@@ -657,6 +657,70 @@ process.env.SESSION_SECRET = SECRET;
   kvSet(1, 'officialLeaves', JSON.stringify({}));
   const none = await asAdmin('POST', '/api/mail/holiday', { preview: true });
   check('with no holiday on the calendar, nothing is built', none.body && none.body.nothing === true, none.body);
+
+  /* ---- the word before a holiday has to survive a quiet day ----
+     The tick asked for one date - exactly `days` off - and nothing else. The
+     service sleeps when nobody is using it, so a holiday whose turn came up on
+     a day nobody opened the dashboard had its only chance taken with it:
+     Dussehra fell on a Monday, its word was due on the Sunday, and nothing went
+     out at all. Looking across the window instead means a missed day is caught
+     the next time the service wakes. */
+  {
+    const istDay = n => new Date(Date.now() + 5.5 * 3600 * 1000 + n * 86400000)
+      .toISOString().slice(0, 10);
+    const setHoliday = (n, name) => kvSet(1, 'officialLeaves',
+      JSON.stringify({ [istDay(n)]: { name: name, note: '' } }));
+    /* daily off, so the tick is only doing the holiday; `at` in the small hours
+       so the time of day this runs at never decides the answer. */
+    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], daily: false,
+      holiday: { on: true, days: 2, at: '00:01', to: ['team@x.com'], cc: [] } }));
+    const tick = async () => { const n = sent.length; await dailyEmailTick(); return sent.length - n; };
+
+    db.jobs = {}; setHoliday(2, 'Dussehra');
+    const onTime = await tick();
+    check('a holiday two days off is announced',
+      onTime === 1 && /Dussehra/.test(sent[sent.length - 1].html), onTime);
+    check('and not announced a second time', (await tick()) === 0);
+
+    /* The day it was due passed with the service asleep. It is now one day off
+       and nobody has been told. */
+    db.jobs = {}; setHoliday(1, 'Dussehra');
+    const late = await tick();
+    check('a holiday whose day was missed is still announced, late',
+      late === 1 && /Dussehra/.test(sent[sent.length - 1].html), late);
+
+    /* Even on the morning of it: late is better than silent. */
+    db.jobs = {}; setHoliday(0, 'Dussehra');
+    check('and on the day itself, rather than not at all', (await tick()) === 1);
+
+    /* One further off than the window waits its turn. */
+    db.jobs = {}; setHoliday(5, 'Diwali');
+    check('one further off than the window is left for later', (await tick()) === 0);
+
+    /* Two inside the window each get their own word, not just the first. */
+    db.jobs = {};
+    kvSet(1, 'officialLeaves', JSON.stringify({
+      [istDay(1)]: { name: 'Dussehra', note: '' }, [istDay(2)]: { name: 'Goverdhan', note: '' } }));
+    const both = await tick();
+    check('two inside the window are both announced', both === 2, both);
+
+    /* Sent by hand, the tick must not say it again the next morning. */
+    db.jobs = {}; setHoliday(2, 'Dussehra');
+    const byHand = await asAdmin('POST', '/api/mail/holiday', {});
+    check('a word sent by hand goes out', byHand.status === 200 && !byHand.body.nothing, byHand.body);
+    check('and the tick does not repeat it', (await tick()) === 0);
+
+    /* The same when it goes out from a preview, which is how it is normally
+       sent - that route used to leave no mark at all. */
+    db.jobs = {}; setHoliday(2, 'Dussehra');
+    const pv = await asAdmin('POST', '/api/mail/holiday', { preview: true });
+    const viaPv = await asAdmin('POST', '/api/mail/holiday', { send: 'preview' });
+    check('a word sent from a preview goes out',
+      pv.status === 200 && viaPv.status === 200, { pv: pv.body, sent: viaPv.body });
+    check('and the tick does not repeat that either', (await tick()) === 0);
+
+    db.jobs = {}; kvSet(1, 'officialLeaves', JSON.stringify({}));
+  }
 
   kvSet(1, 'mailSettings', JSON.stringify({ to: [], cc: [] }));
 
