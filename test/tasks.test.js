@@ -227,5 +227,143 @@ const check = (name, ok, got) => {
     /currentPage === 'worklog'\)\{ WLOG_DAY = null; renderWorkLogPage\(\); \}/.test(app));
 }
 
+/* ---- nothing goes out unseen ----
+   Both ways of sending the work log by hand used to post straight at the send
+   route: one press, and the day's work was on its way to whoever the
+   attendance record goes to. That is how it reached four addresses before
+   anybody had read it. Both now build the message, show it, and send only on
+   a second press - the same two steps the attendance record, the month and
+   the holiday reminder take. */
+{
+  const fs = require('fs');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+
+  const handler = (marker, end) => {
+    const i = app.indexOf(marker);
+    return i < 0 ? '' : app.slice(i, app.indexOf(end, i));
+  };
+  const fromMenu = handler("var workBtn = document.getElementById('emSendWork');", "var testBtn");
+  const fromPage = handler("var mb = document.getElementById('wlogMail');", "\n  }\n\n  function renderHolidaysPage");
+
+  check('the Share menu shows the work log before sending it',
+    /showPreview\(/.test(fromMenu) && /send:'preview'/.test(fromMenu), fromMenu.slice(0, 120));
+  check('and so does the Work Log page',
+    /showPreview\(/.test(fromPage) && /send:'preview'/.test(fromPage), fromPage.slice(0, 120));
+  /* The giveaway of the old way: a post to the route carrying neither a
+     request for a preview nor the word that sends one. */
+  const blind = [fromMenu, fromPage].filter(h =>
+    /\/api\/mail\/tasks/.test(h) && !/send:'preview'/.test(h));
+  check('neither of them posts at the send route on the first press', blind.length === 0, blind.length);
+
+  check('there is one preview window, not a copy a caller',
+    (app.match(/function showPreview\(/g) || []).length === 1
+      && (app.match(/var showPreview = function/g) || []).length === 0,
+    (app.match(/showPreview/g) || []).length);
+
+  /* And the server only sends when it is told to, not when it is asked to
+     build. Anything else and the preview would send the thing it is showing. */
+  const route = server.slice(server.indexOf("app.post('/api/mail/tasks'"),
+                             server.indexOf("app.post('/api/mail/leave'"));
+  check('the route holds the message rather than sending it',
+    /keepPreview\(/.test(route) && /body\.send === 'preview'/.test(route)
+      && /sendTasksEmail\([^)]*\{ preview: true \}\)/.test(route), route.slice(0, 80));
+}
+
+/* ---- an hour of its own ----
+   The work log could only go by itself if the attendance record was going too:
+   an office that had turned the record off could not have the work sent at
+   all. It now keeps its own checkbox and its own hour, and whichever path
+   sends it, it goes once a day. */
+{
+  const fs = require('fs');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+
+  check('the settings carry a switch and an hour for it',
+    /tasks: \{ on: false, auto: false, at: '19:30'/.test(server));
+  check('and both are read back, the hour checked before it is trusted',
+    /auto: tk\.auto === true/.test(server) && /test\(String\(tk\.at\)\) \? String\(tk\.at\)/.test(server));
+
+  check('the panel offers the checkbox and the hour',
+    /id="emWkAuto"/.test(app) && /id="emWkAt"/.test(app));
+  check('and saves what was typed in them',
+    /auto: document\.getElementById\('emWkAuto'\)\.checked/.test(app)
+      && /at: document\.getElementById\('emWkAt'\)\.value/.test(app));
+
+  /* Once a day, however its turn came up. Both paths go through the one
+     function that claims the day first. */
+  check('the day is claimed before it is sent, so it cannot go twice',
+    /async function sendTasksOnce/.test(server)
+      && /'tasks-email:' \+ orgId \+ ':' \+ day/.test(server));
+  const tick = server.slice(server.indexOf('async function dailyEmailTick'),
+                            server.indexOf('index.html carries the whole dashboard'));
+  check('its own hour is read before the attendance record decides to stop',
+    tick.indexOf('s.tasks.auto && min >= hhmmToMin(s.tasks.at)')
+      < tick.indexOf('if (!s.daily || min < hhmmToMin(s.dailyAt)) continue;'));
+  check('and both paths send it through the claim',
+    (tick.match(/sendTasksOnce\(/g) || []).length === 2
+      && !/sendTasksEmail\(org\.id/.test(tick),
+    (tick.match(/sendTasksOnce\(/g) || []).length);
+  /* A day that sends nothing must not be marked as done, or the first person
+     to write something after the hour would never be heard. */
+  check('a day that sent nothing gives the claim back',
+    /if \(!r\.ok \|\| r\.nothing\) await pool\.query\('DELETE FROM maintenance_done/.test(server));
+}
+
+/* ---- what the office calls them ---- */
+{
+  const one = mailer.tasksEmail({ orgName: 'Co', dateLabel: 'Thu',
+    people: [{ name: 'A', count: 1, items: ['x'] }] });
+  const many = mailer.tasksEmail({ orgName: 'Co', dateLabel: 'Thu',
+    people: [{ name: 'A', count: 4, items: ['w', 'x', 'y', 'z'] }] });
+  check('a card counts tasks, not items',
+    /1 task</.test(one.html) && /4 tasks</.test(many.html) && !/item/.test(many.html),
+    (many.html.match(/\d+ \w+</g) || []).slice(0, 3));
+  /* The wording lives with every other message's wording, so the settings
+     panel can show it in the box rather than behind a placeholder. */
+  check('its wording sits with the rest, and is what the message uses',
+    !!mailer.DEFAULT_TEXT.tasks && /Work done/.test(mailer.DEFAULT_TEXT.tasks.subject)
+      && many.subject === 'Work done · Thu',
+    many.subject);
+  check('and it signs off like the others do',
+    /Best regards/.test(many.html), many.html.slice(-200));
+}
+
+/* ---- the Work tab is laid out like the others ----
+   It was built with bare inputs where every other tab wraps them in a row, so
+   its boxes came out half the width of the Attendance tab's and the panel read
+   as two different panels. The check is structural rather than visual: every
+   box on the tab sits in a row, as it does everywhere else. */
+{
+  const fs = require('fs');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  /* Found by the tab it draws, not by a line of its code, so a pane built some
+     other way is still read rather than silently skipped. */
+  const paneAt = app.indexOf('data-em-pane="wk"');
+  check('the Work tab is there to look at', paneAt > -1);
+  const pane = app.slice(paneAt, app.indexOf('data-em-pane="hol"'));
+
+  const boxes = pane.match(/<(?:input|textarea)[^>]*/g) || [];
+  check('the Work tab has the boxes the others have', boxes.length >= 7, boxes.length);
+  const bare = boxes.filter(b => {
+    const at = pane.indexOf(b);
+    const before = pane.slice(Math.max(0, at - 160), at);
+    return !/em-row[^"]*">\s*(?:\+\s*)?$|em-row[^"]*">[^<]*$/.test(before.replace(/\n\s*/g, ''));
+  });
+  check('and every one of them sits in a row, as on the Attendance tab',
+    bare.length === 0, bare.map(b => b.slice(0, 60)));
+
+  /* The same words over the same boxes - "Message at the top", not "Top line". */
+  const att = app.slice(app.indexOf("<div data-em-pane=\"att\">"), app.indexOf('---- the leave message ----'));
+  const labels = css => (css.match(/class="em-lab">([^<]*)/g) || []).map(x => x.slice(15).trim());
+  const shared = ['To', 'Cc', 'Subject', 'Message at the top', 'Note at the foot', 'When it goes on its own'];
+  const mine = labels(pane);
+  check('and is labelled with the same words the Attendance tab uses',
+    shared.every(w => mine.indexOf(w) > -1), mine);
+  check('which are the Attendance tab\u2019s own words',
+    shared.every(w => labels(att).indexOf(w) > -1), labels(att));
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

@@ -261,6 +261,14 @@ const DEFAULT_TEXT = {
     subject: 'Holiday \u00b7 {name} \u00b7 {date}',
     intro: 'Hello,\n\nA holiday is coming up. Please plan your work around it.',
     footer: 'Best regards,\n{org}'
+  },
+  /* What everybody wrote they did. Kept here with the rest so the settings
+     panel can fill its boxes with it: what is on screen is then what goes out,
+     and it can be edited from there. */
+  tasks: {
+    subject: 'Work done \u00b7 {date}',
+    intro: 'Hello,\n\nHere is what the team worked on today.',
+    footer: 'Best regards,\n{org}'
   }
 };
 /* {name} {date} {days} {org} and the rest, wherever they are written. */
@@ -479,7 +487,7 @@ function dailyEmail(o) {
 function tasksEmail(o) {
   const people = (o.people || []).filter(function (p) { return p.items && p.items.length; });
   if (!people.length) return null;
-  const words = { intro: 'Hello,\n\nHere is what the team worked on today.' };
+  const words = DEFAULT_TEXT.tasks;
   const say = { n: people.length, org: o.orgName || 'Attendance', date: o.dateLabel || '' };
   const body = [];
   const intro = fillText(o.intro || words.intro, say);
@@ -492,7 +500,7 @@ function tasksEmail(o) {
       + '<div style="padding:7px 12px;background:#F4F7FC;border-bottom:1px solid ' + LINE + ';'
       +   'font-size:13px;font-weight:700;color:' + INK + ';">' + esc(p.name)
       +   (p.count ? ('<span style="float:right;font-weight:600;color:' + SOFT + ';font-size:11.5px;">'
-                      + p.count + (p.count === 1 ? ' item' : ' items') + '</span>') : '')
+                      + p.count + (p.count === 1 ? ' task' : ' tasks') + '</span>') : '')
       + '</div>'
       + '<ul style="margin:0;padding:9px 12px 10px 28px;font-size:13px;line-height:1.55;color:' + INK + ';">'
       +   p.items.map(function (t) { return '<li style="margin:0 0 3px;">' + esc(t) + '</li>'; }).join('')
@@ -505,13 +513,13 @@ function tasksEmail(o) {
       + 'font-size:12px;color:' + SOFT + ';">Nothing written today by '
       + o.silent.map(esc).join(', ') + '.</div>');
   }
-  const footer = fillText(o.footer || '', say);
+  const footer = fillText(o.footer == null || o.footer === '' ? words.footer : o.footer, say);
   if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
       + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
   }
   return {
-    subject: fillText(o.subject || 'Work done \u00b7 {date}', say),
+    subject: fillText(o.subject || words.subject, say),
     html: layout(o.orgName || 'Attendance', o.dateLabel || 'Work done', body)
   };
 }

@@ -344,6 +344,51 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       loose.length === 0, loose.map(x => x.l.slice(0, 90)));
   }
 
+  /* ---- the import notice is dark green, and still readable ----
+     Pale green on white read as part of the page and was missed. It is now a
+     dark green card, which only works if every colour written on it is light
+     enough to carry. WCAG AA wants 4.5:1 for body text; these are held to 7:1,
+     the AAA line, because the card is small and sits over a busy page. */
+  {
+    const styles = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
+    /* Anchored to the start of a line, so asking for `.ui-x` does not land on
+       `.undo-import .ui-x{...}`, which only moves the thing about. */
+    const rule = n => (new RegExp('^\\' + '.' + n + '\\{[^}]*\\}', 'm').exec(styles) || [''])[0];
+    const prop = (css, p) => (new RegExp('(?:^|[;{])\\s*' + p + '\\s*:\\s*(#[0-9A-Fa-f]{6})').exec(css) || [])[1];
+
+    const lum = hex => {
+      const c = [1, 3, 5].map(i => {
+        const v = parseInt(hex.substr(i, 2), 16) / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    };
+    const ratio = (a, b) => {
+      const l = [lum(a), lum(b)];
+      return (Math.max(l[0], l[1]) + 0.05) / (Math.min(l[0], l[1]) + 0.05);
+    };
+
+    const card = rule('undo-import');
+    const bg = prop(card, 'background'), ink = prop(card, 'color');
+    check('the notice is a dark green card', !!bg && lum(bg) < 0.1 && /^#(0|1)/.test(bg), bg);
+
+    const against = [
+      ['what it says', ink],
+      ['the file name', prop(rule('undo-import b'), 'color')],
+      ['the close cross', prop(rule('ui-x'), 'color')]
+    ];
+    const thin = against.filter(([, c]) => !c || ratio(c, bg) < 7);
+    check('everything written on the green reads clearly against it',
+      thin.length === 0,
+      against.map(([w, c]) => w + ': ' + c + ' = ' + (c ? ratio(c, bg).toFixed(2) : '?') + ':1'));
+
+    const btn = rule('ui-btn');
+    const bbg = prop(btn, 'background'), bink = prop(btn, 'color');
+    check('and the Undo button reads against its own background',
+      !!bbg && !!bink && ratio(bink, bbg) >= 7,
+      bbg + ' / ' + bink + ' = ' + (bbg && bink ? ratio(bink, bbg).toFixed(2) : '?') + ':1');
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

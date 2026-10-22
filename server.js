@@ -1415,9 +1415,12 @@ const MAIL_DEFAULTS = {
      is how far ahead it goes out; `at` is the hour of that day, India time. */
   holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' },
   /* What everybody worked on, written by them and gathered into one message.
-     It rides out with the attendance record rather than keeping an hour of its
-     own - the two are the same day's news. */
-  tasks: { on: false, to: [], cc: [], subject: '', intro: '', footer: '' }
+     It can ride out with the attendance record - the two are the same day's
+     news - or keep an hour of its own, for an office that wants the work log
+     earlier than the record, or wants it when the record is turned off. Either
+     way it goes once a day: both paths claim the same job. */
+  tasks: { on: false, auto: false, at: '19:30',
+           to: [], cc: [], subject: '', intro: '', footer: '' }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1454,6 +1457,10 @@ async function mailSettings(orgId) {
   const tk = isPlainObject(s.tasks) ? s.tasks : {};
   s.tasks = {
     on: tk.on === true,
+    /* Its own hour, kept apart from the attendance record's: an office that
+       turns the record off should still be able to have the work log sent. */
+    auto: tk.auto === true,
+    at: /^\d{1,2}:\d{2}$/.test(String(tk.at)) ? String(tk.at) : MAIL_DEFAULTS.tasks.at,
     to: (Array.isArray(tk.to) ? tk.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
     cc: (Array.isArray(tk.cc) ? tk.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
     subject: String(tk.subject || '').slice(0, 200),
@@ -2753,8 +2760,21 @@ app.post('/api/mail/month', requireRole('admin'), bigJson, async (req, res) => {
 app.post('/api/mail/tasks', requireRole('admin'), async (req, res) => {
   const body = req.body || {};
   const day = DAY_RE.test(String(body.day || '')) ? String(body.day) : istParts().day;
-  const out = await sendTasksEmail(req.session.orgId, day, { preview: !!body.preview });
-  if (body.preview && out.ok && out.mail) {
+  /* Sending is a second press, never the first: the dashboard asks for the
+     message, it is held here, and this is the word that lets it go. It used to
+     send on the first press, which is how a work log went to four people
+     before anybody had seen it. */
+  if (body.send === 'preview') {
+    const held = previews.get(req.session.userId);
+    if (!held) return res.status(410).json({ error: 'that preview has expired - open it again' });
+    previews.delete(req.session.userId);
+    const r = await mailer.send({ to: held.to, cc: held.cc, subject: held.subject, html: held.html });
+    await logMail(req.session.orgId, 'tasks', held, r);
+    return res.status(r.ok ? 200 : 502).json(Object.assign({ to: held.to.length }, r));
+  }
+  const out = await sendTasksEmail(req.session.orgId, day, { preview: true });
+  if (out.ok && out.mail) {
+    keepPreview(req.session.userId, out.mail);
     return res.json({ ok: true, preview: { subject: out.mail.subject, html: out.mail.html },
                       to: out.mail.to });
   }
@@ -2770,6 +2790,19 @@ app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {
    timer set once at boot would never fire. `maintenance_done` marks the day as
    sent, so a restart cannot send it twice. */
 const DAILY_CHECK_MS = 5 * 60 * 1000;
+/* The work log, sent once for the day however its turn came up - on its own
+   hour, or beside the attendance record. The day is claimed first, so the two
+   paths cannot both send it; a day that sends nothing, or fails, gives the
+   claim back so the next wake can try again. */
+async function sendTasksOnce(orgId, day, settings) {
+  const job = 'tasks-email:' + orgId + ':' + day;
+  const claimed = await pool.query(
+    'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+  if (!claimed.rows.length) return { ok: true, already: true };
+  const r = await sendTasksEmail(orgId, day, { settings });
+  if (!r.ok || r.nothing) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
+  return r;
+}
 async function dailyEmailTick() {
   if (!mailer.ready()) return;
   const { day, min } = istParts();
@@ -2801,6 +2834,13 @@ async function dailyEmailTick() {
           if (!hr.ok || hr.nothing) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
         }
       }
+      /* The work log on its own hour. Claimed under the same job name the
+         ride-along uses, so an office with both turned on still gets one
+         message a day rather than two. */
+      if (s.tasks.auto && min >= hhmmToMin(s.tasks.at)) {
+        try { await sendTasksOnce(org.id, day, s); }
+        catch (e) { console.error('work email:', e && e.message); }
+      }
       if (!s.daily || min < hhmmToMin(s.dailyAt)) continue;
       const job = 'daily-email:' + org.id + ':' + day;
       const claimed = await pool.query(
@@ -2813,7 +2853,7 @@ async function dailyEmailTick() {
          day, same send - two messages rather than one, because they go to
          different people and answer different questions. */
       if (r.ok && s.tasks.on) {
-        try { await sendTasksEmail(org.id, day, { settings: s }); }
+        try { await sendTasksOnce(org.id, day, s); }
         catch (e) { console.error('work email:', e && e.message); }
       }
       if (!r.ok) {

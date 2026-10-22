@@ -2652,21 +2652,25 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-row:hover .wl-x{ opacity:.8; }
 .wl-x:hover{ background:#FDE7E4; color:#C0392B; opacity:1; }
 .wl-foot{ font-size:11px; color:var(--ink-soft); margin-top:7px; }
+/* Dark green, with the words in white over it. The pale version read as part
+   of the page and was missed; this one is plainly a notice, and every piece of
+   text on it clears 7:1 against the background. */
 .undo-import{position:fixed;right:16px;bottom:16px;z-index:60;max-width:330px;
   display:flex;align-items:flex-start;flex-wrap:wrap;gap:8px;padding:11px 13px;
-  border:1px solid #A8D8BC;background:#ECF8F0;color:#14532D;border-radius:12px;
-  font-size:12.5px;line-height:1.45;box-shadow:0 8px 26px rgba(20,83,45,.18)}
+  border:1px solid #0E3F22;background:#14532D;color:#FFFFFF;border-radius:12px;
+  font-size:12.5px;line-height:1.45;box-shadow:0 8px 26px rgba(20,83,45,.35)}
+.undo-import b{color:#FFFFFF;font-weight:700}
 @media (max-width:820px){ .undo-import{left:16px;right:16px;max-width:none} }
 .undo-import .ui-i{font-size:15px;line-height:1}
-.ui-btn{margin-left:auto;border:1px solid #7FC79A;background:#fff;color:#14532D;border-radius:8px;
+.ui-btn{margin-left:auto;border:1px solid #FFFFFF;background:#FFFFFF;color:#0E3F22;border-radius:8px;
   padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .undo-import .ui-i{flex:none}
 .undo-import > span:nth-of-type(2){flex:1 1 100%;order:2}
 .undo-import .ui-btn{order:3;margin-left:0}
 .undo-import .ui-x{order:1;margin-left:auto}
-.ui-btn:hover{border-color:#2F8F5B;color:#0E3F22}
-.ui-x{border:none;background:transparent;color:#6E9C83;font-size:14px;cursor:pointer;padding:2px 4px}
-.ui-x:hover{color:#14532D}
+.ui-btn:hover{background:#DFF3E6;border-color:#DFF3E6;color:#0E3F22}
+.ui-x{border:none;background:transparent;color:#CFE8D9;font-size:14px;cursor:pointer;padding:2px 4px}
+.ui-x:hover{color:#FFFFFF}
 .emprow{display:flex;align-items:center;gap:6px}
 .emprow .empname{flex:1;display:flex;align-items:center;gap:7px;cursor:pointer;min-width:0}
 .empdel{border:1px solid transparent;background:transparent;color:#B08;opacity:.45;
@@ -10598,6 +10602,41 @@ function buildExcelBackup(){
      sent from. Leave is a message of its own. */
   var MAIL_CFG = null;
   function mailEscape(s){ return escapeHtml(String(s == null ? '' : s)); }
+  /* The message as it will arrive, in a window of its own: the same HTML the
+     server would post, and a line saying who it goes to and what is on it.
+     Nothing is sent until the button here is pressed.
+
+     It sits out here rather than inside the Email menu because the work log is
+     sent from its own page as well, and that page was sending without showing
+     anybody anything. */
+  function showPreview(pv, onSend){
+    var wrap = document.createElement('div');
+    wrap.className = 'em-prev';
+    wrap.innerHTML = '<div class="em-prev-card">'
+      + '<div class="em-prev-top"><b>' + escapeHtml(pv.preview.subject) + '</b>'
+      +   '<span>To ' + escapeHtml((pv.to || []).join(', '))
+      +     (pv.attached === true ? ' · the record is attached'
+             : (pv.attached === false ? ' · without the picture' : '')) + '</span></div>'
+      + '<iframe class="em-prev-body" sandbox=""></iframe>'
+      + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
+      +   '<button type="button" class="btn ghost" data-em-x>Not now</button>'
+      +   '<button type="button" class="btn primary" data-em-send>Send it</button></div>'
+      + '</div>';
+    document.body.appendChild(wrap);
+    try{ wrap.querySelector('iframe').srcdoc = pv.preview.html; }catch(e){}
+    var close = function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+    wrap.addEventListener('click', function(e){ if(e.target === wrap) close(); });
+    wrap.querySelector('[data-em-x]').onclick = close;
+    var go = wrap.querySelector('[data-em-send]');
+    go.onclick = function(){
+      go.disabled = true;
+      wrap.querySelector('.em-prev-msg').textContent = 'Sending…';
+      onSend(function(text, bad){
+        if(bad){ go.disabled = false; wrap.querySelector('.em-prev-msg').textContent = text; return; }
+        close();
+      });
+    };
+  }
   function renderEmailDropdown(){
     var dd = document.getElementById('emailDropdown'), d0 = dd;
     if(!dd) return;
@@ -10620,8 +10659,9 @@ function buildExcelBackup(){
     /* A box left empty uses the wording the message was built with, so that
        wording is shown in the box rather than hidden behind a placeholder:
        what is on screen is what goes out, and it can be edited from there. */
-    var W = MAIL_CFG.defaults || {daily:{}, month:{}, leave:{}, holiday:{}};
+    var W = MAIL_CFG.defaults || {daily:{}, month:{}, leave:{}, holiday:{}, tasks:{}};
     W.month = W.month || {};
+    W.tasks = W.tasks || {};
     var text = function(saved, fallback){ return (saved && String(saved).trim()) ? saved : (fallback || ''); };
     var shown = visibleEmployees().length, all = EMPLOYEES.length;
     dd.innerHTML = '<div class="em-pane">'
@@ -10777,26 +10817,42 @@ function buildExcelBackup(){
       +   (((s.leave || {}).confirm !== false) ? ' checked' : '') + '>'
       +   '<span>Tell the employee once their leave is decided</span></label>'
       + '</div>'
-          /* What everybody wrote they did, gathered into one message. It rides
-             out with the attendance record rather than keeping an hour of its
-             own, so there is no time to set here - only whether, and to whom. */
+          /* What everybody wrote they did, gathered into one message. Laid out
+             the way the other tabs are - boxes in rows, the wording it comes
+             with shown rather than hidden behind a placeholder, and the hours
+             it keeps at the foot. It had none of that: bare inputs, empty
+             boxes, and no way to have it sent unless the attendance record
+             was being sent too. */
           + (function(){
-              var t = s.tasks || {};
+              var t = s.tasks || {}, Wt = W.tasks || {};
               return '<div data-em-pane="wk" style="display:none;">'
-                + '<label class="em-row"><input type="checkbox" id="emWkOn"' + (t.on ? ' checked' : '') + '>'
-                +   '<span>Send the day\u2019s work with the attendance record</span></label>'
                 + '<div class="em-note" style="padding-top:0;">Everyone writes their own on their '
-                +   'page; this gathers it up. A day nobody wrote on sends nothing.</div>'
+                +   'page; this gathers it up into one message, a card a person. '
+                +   'A day nobody wrote on sends nothing.</div>'
                 + '<div class="em-lab">To <span>blank: the same as the attendance record</span></div>'
-                + '<input type="text" id="emWkTo" value="' + shotEsc((t.to || []).join(', ')) + '" placeholder="who the work goes to">'
+                + '<div class="em-row"><input type="text" id="emWkTo" placeholder="comma separated" value="'
+                +   mailEscape((t.to || []).join(', ')) + '"></div>'
                 + '<div class="em-lab">Cc</div>'
-                + '<input type="text" id="emWkCc" value="' + shotEsc((t.cc || []).join(', ')) + '">'
+                + '<div class="em-row"><input type="text" id="emWkCc" placeholder="comma separated" value="'
+                +   mailEscape((t.cc || []).join(', ')) + '"></div>'
                 + '<div class="em-lab">Subject <span>{date} {n} {org}</span></div>'
-                + '<input type="text" id="emWkSubject" value="' + shotEsc(t.subject || '') + '" placeholder="Work done \u00b7 {date}">'
-                + '<div class="em-lab">Top line</div>'
-                + '<textarea id="emWkIntro" rows="2" placeholder="Hello,">' + shotEsc(t.intro || '') + '</textarea>'
-                + '<div class="em-lab">Sign-off</div>'
-                + '<textarea id="emWkFooter" rows="2">' + shotEsc(t.footer || '') + '</textarea>'
+                + '<div class="em-row"><input type="text" id="emWkSubject" value="'
+                +   mailEscape(text(t.subject, Wt.subject)) + '"></div>'
+                + '<div class="em-lab">Message at the top</div>'
+                + '<div class="em-row"><textarea id="emWkIntro" rows="3">'
+                +   mailEscape(text(t.intro, Wt.intro)) + '</textarea></div>'
+                + '<div class="em-lab">Note at the foot</div>'
+                + '<div class="em-row"><textarea id="emWkFooter" rows="2">'
+                +   mailEscape(text(t.footer, Wt.footer)) + '</textarea></div>'
+                /* Two ways for it to go by itself, and it goes once either way:
+                   on its own hour, or beside the attendance record. */
+                + '<div class="em-lab">When it goes on its own</div>'
+                + '<label class="em-row"><input type="checkbox" id="emWkAuto"' + (t.auto ? ' checked' : '') + '>'
+                +   '<span>Every day at</span></label>'
+                + '<div class="em-row em-indent"><input type="text" id="emWkAt" value="'
+                +   mailEscape(t.at || '19:30') + '" size="5"><span>India time</span></div>'
+                + '<label class="em-row"><input type="checkbox" id="emWkOn"' + (t.on ? ' checked' : '') + '>'
+                +   '<span>Or with the attendance record, whenever that goes</span></label>'
                 + '</div>';
             })()
       /* ---- the holiday reminder ---- */
@@ -10903,67 +10959,7 @@ function buildExcelBackup(){
         .catch(function(e){ if(btn) btn.disabled = false; msg(e.message || 'It did not go out.', true); return {ok:false, j:null}; });
     };
 
-    /* The message as it will arrive, in a window of its own: the same HTML the
-       server would post, and a line saying who it goes to and whether the
-       picture is on it. Nothing is sent until the button here is pressed. */
-    var showPreview = function(pv, onSend){
-      var wrap = document.createElement('div');
-      wrap.className = 'em-prev';
-      wrap.innerHTML = '<div class="em-prev-card">'
-        + '<div class="em-prev-top"><b>' + escapeHtml(pv.preview.subject) + '</b>'
-        +   '<span>To ' + escapeHtml((pv.to || []).join(', '))
-        +     (pv.attached ? ' \u00b7 the record is attached' : ' \u00b7 without the picture') + '</span></div>'
-        + '<iframe class="em-prev-body" sandbox=""></iframe>'
-        + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
-        +   '<button type="button" class="btn ghost" data-em-x>Not now</button>'
-        +   '<button type="button" class="btn primary" data-em-send>Send it</button></div>'
-        + '</div>';
-      document.body.appendChild(wrap);
-      try{ wrap.querySelector('iframe').srcdoc = pv.preview.html; }catch(e){}
-      var close = function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
-      wrap.addEventListener('click', function(e){ if(e.target === wrap) close(); });
-      wrap.querySelector('[data-em-x]').onclick = close;
-      var go = wrap.querySelector('[data-em-send]');
-      go.onclick = function(){
-        go.disabled = true;
-        wrap.querySelector('.em-prev-msg').textContent = 'Sending\u2026';
-        onSend(function(text, bad){
-          if(bad){ go.disabled = false; wrap.querySelector('.em-prev-msg').textContent = text; return; }
-          close();
-        });
-      };
-    };
 
-    /* The message as it will arrive, in a window of its own: the same HTML the
-       server would post, with a line saying who it goes to and whether the
-       picture is on it. Nothing is sent until the button here is pressed. */
-    var showPreview = function(pv, onSend){
-      var wrap = document.createElement('div');
-      wrap.className = 'em-prev';
-      wrap.innerHTML = '<div class="em-prev-card">'
-        + '<div class="em-prev-top"><b>' + escapeHtml(pv.preview.subject) + '</b>'
-        +   '<span>To ' + escapeHtml((pv.to || []).join(', '))
-        +     (pv.attached ? ' · the record is attached' : ' · without the picture') + '</span></div>'
-        + '<iframe class="em-prev-body" sandbox=""></iframe>'
-        + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
-        +   '<button type="button" class="btn ghost" data-em-x>Not now</button>'
-        +   '<button type="button" class="btn primary" data-em-send>Send it</button></div>'
-        + '</div>';
-      document.body.appendChild(wrap);
-      try{ wrap.querySelector('iframe').srcdoc = pv.preview.html; }catch(e){}
-      var close = function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
-      wrap.addEventListener('click', function(e){ if(e.target === wrap) close(); });
-      wrap.querySelector('[data-em-x]').onclick = close;
-      var go = wrap.querySelector('[data-em-send]');
-      go.onclick = function(){
-        go.disabled = true;
-        wrap.querySelector('.em-prev-msg').textContent = 'Sending…';
-        onSend(function(text, bad){
-          if(bad){ go.disabled = false; wrap.querySelector('.em-prev-msg').textContent = text; return; }
-          close();
-        });
-      };
-    };
     var shotBtn = document.getElementById('emShot');
     if(shotBtn) shotBtn.onclick = function(){
       d0.classList.remove('open');
@@ -11163,11 +11159,29 @@ function buildExcelBackup(){
                       : ('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + '.'));
       });
     };
+    /* The work log, shown before it is sent - like the attendance record, the
+       month and the holiday reminder. This used to send on the press, which is
+       how a day's work reached four addresses before anybody had read it. */
     var workBtn = document.getElementById('emSendWork');
     if(workBtn) workBtn.onclick = function(){
-      post('/api/mail/tasks', {}, workBtn, 'Sending…', function(j){
-        msg(j.nothing ? 'Nobody has written anything today — no message sent.'
-                      : ('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + '.'));
+      post('/api/mail/tasks', {}, workBtn, 'Building the message…', function(j){
+        if(j.nothing){ msg('Nobody has written anything today — nothing to send.', true); return; }
+        msg('');
+        showPreview(j, function(done){
+          fetch('/api/mail/tasks', {method:'POST', credentials:'same-origin',
+                                    headers:{'Content-Type':'application/json'},
+                                    body: JSON.stringify({send:'preview'})})
+            .then(function(r){ return r.json().then(function(x){ return {ok:r.ok, j:x}; }); })
+            .then(function(out){
+              if(!out.ok || (out.j && out.j.ok === false)){
+                done((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+                return;
+              }
+              done();
+              msg('Sent to ' + (out.j.to || 0) + ' address' + ((out.j.to === 1) ? '' : 'es') + '.');
+            })
+            .catch(function(e){ done(e.message || 'It did not go out.', true); });
+        });
       });
     };
     var testBtn = document.getElementById('emTest');
@@ -11220,6 +11234,8 @@ function buildExcelBackup(){
         },
         tasks: {
           on: document.getElementById('emWkOn').checked,
+          auto: document.getElementById('emWkAuto').checked,
+          at: document.getElementById('emWkAt').value.trim() || '19:30',
           to: list('emWkTo'), cc: list('emWkCc'),
           subject: document.getElementById('emWkSubject').value.trim(),
           intro: document.getElementById('emWkIntro').value,
@@ -13123,21 +13139,36 @@ function buildExcelBackup(){
       });
     });
     var mb = document.getElementById('wlogMail');
+    /* Built first and shown, then sent on a second press. It used to go out on
+       this one press, to whoever the attendance record goes to - which is how
+       a day's work reached four people before anybody had read it. */
     if(mb) mb.addEventListener('click', function(){
       if(!wrote){ showUploadStatus('Nobody has written anything for that day yet.', true); return; }
       mb.disabled = true;
-      fetch('/api/mail/tasks', { method:'POST', credentials:'include',
-          headers:{'Content-Type':'application/json'}, body: JSON.stringify({ day: day }) })
-        .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+      var ask = function(body){
+        return fetch('/api/mail/tasks', { method:'POST', credentials:'include',
+            headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+          .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, j:j }; }); });
+      };
+      ask({ day: day })
         .then(function(o){
           mb.disabled = false;
-          if(o.ok && o.j && o.j.ok && !o.j.nothing){
-            showUploadStatus('The day\u2019s work went to ' + o.j.to + ' address'
-              + (o.j.to === 1 ? '' : 'es') + '.', false);
-          } else {
+          if(!o.ok || !o.j || o.j.ok === false || o.j.nothing){
             showUploadStatus((o.j && (o.j.error || (o.j.nothing ? 'Nothing to send for that day.' : '')))
-              || 'That message did not go out.', true);
+              || 'That message could not be built.', true);
+            return;
           }
+          showPreview(o.j, function(done){
+            ask({ send:'preview' }).then(function(out){
+              if(!out.ok || (out.j && out.j.ok === false)){
+                done((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+                return;
+              }
+              done();
+              showUploadStatus('The day\u2019s work went to ' + (out.j.to || 0) + ' address'
+                + (out.j.to === 1 ? '' : 'es') + '.', false);
+            }).catch(function(e){ done((e && e.message) || 'It did not go out.', true); });
+          });
         })
         .catch(function(){ mb.disabled = false; showUploadStatus('That message did not go out.', true); });
     });
