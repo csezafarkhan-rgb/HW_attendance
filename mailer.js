@@ -485,34 +485,48 @@ function dailyEmail(o) {
    Returns null when nobody has written anything, so a quiet day sends nothing
    rather than a message saying nothing. */
 function tasksEmail(o) {
-  const people = (o.people || []).filter(function (p) { return p.items && p.items.length; });
-  if (!people.length) return null;
+  /* A card a person, in the order they were handed over - whoever wrote
+     something and whoever did not. The ones who wrote nothing used to be a
+     line of names swept under the last card, which read as a footnote about
+     them rather than as their own empty page. They get a card like everybody
+     else now, with nothing written in it, which is the whole point.
+
+     `silent` is still read for anything that hands the two lists over
+     separately; a name in both is only drawn once. */
+  const given = (o.people || []).map(function (p) {
+    return { name: p.name, items: (p.items || []).filter(Boolean) };
+  });
+  const named = {};
+  given.forEach(function (p) { named[p.name] = true; });
+  (o.silent || []).forEach(function (name) {
+    if (!named[name]) { given.push({ name: name, items: [] }); named[name] = true; }
+  });
+  const wrote = given.filter(function (p) { return p.items.length; });
+  if (!wrote.length) return null;              // a day nobody wrote on sends nothing
   const words = DEFAULT_TEXT.tasks;
-  const say = { n: people.length, org: o.orgName || 'Attendance', date: o.dateLabel || '' };
+  const say = { n: wrote.length, org: o.orgName || 'Attendance', date: o.dateLabel || '' };
   const body = [];
   const intro = fillText(o.intro || words.intro, say);
   if (intro) {
     body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
       + esc(intro) + '</div>');
   }
-  people.forEach(function (p) {
+  given.forEach(function (p) {
+    const n = p.items.length;
     body.push('<div style="margin:0 0 12px;border:1px solid ' + LINE + ';border-radius:10px;overflow:hidden;">'
       + '<div style="padding:7px 12px;background:#F4F7FC;border-bottom:1px solid ' + LINE + ';'
       +   'font-size:13px;font-weight:700;color:' + INK + ';">' + esc(p.name)
-      +   (p.count ? ('<span style="float:right;font-weight:600;color:' + SOFT + ';font-size:11.5px;">'
-                      + p.count + (p.count === 1 ? ' task' : ' tasks') + '</span>') : '')
+      +   (n ? ('<span style="float:right;font-weight:600;color:' + SOFT + ';font-size:11.5px;">'
+                 + n + (n === 1 ? ' task' : ' tasks') + '</span>') : '')
       + '</div>'
-      + '<ul style="margin:0;padding:9px 12px 10px 28px;font-size:13px;line-height:1.55;color:' + INK + ';">'
-      +   p.items.map(function (t) { return '<li style="margin:0 0 3px;">' + esc(t) + '</li>'; }).join('')
-      + '</ul></div>');
+      + (n
+          ? ('<ul style="margin:0;padding:9px 12px 10px 28px;font-size:13px;line-height:1.55;color:' + INK + ';">'
+             + p.items.map(function (t) { return '<li style="margin:0 0 3px;">' + esc(t) + '</li>'; }).join('')
+             + '</ul>')
+          : ('<div style="padding:9px 12px 10px;font-size:13px;line-height:1.55;color:' + SOFT + ';">'
+             + 'Nothing written today</div>'))
+      + '</div>');
   });
-  /* Who wrote nothing is worth saying: an empty card would read as a quiet day
-     rather than as a page nobody filled in. */
-  if ((o.silent || []).length) {
-    body.push('<div style="margin:14px 0 0;padding-top:10px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';">Nothing written today by '
-      + o.silent.map(esc).join(', ') + '.</div>');
-  }
   const footer = fillText(o.footer == null || o.footer === '' ? words.footer : o.footer, say);
   if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'

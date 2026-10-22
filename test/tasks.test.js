@@ -29,10 +29,18 @@ const check = (name, ok, got) => {
   check('and lists what each of them said',
     (r.html.match(/<li/g) || []).length === 3
       && /Closed the JCPenney AR queries/.test(r.html), (r.html.match(/<li/g) || []).length);
-  /* Who wrote nothing is worth saying: an empty card would read as a quiet day
-     rather than as a page nobody filled in. */
-  check('it says who wrote nothing, rather than leaving them out silently',
-    /Nothing written today by Rahul Mishra/.test(r.html));
+  /* Everybody gets a card, whether or not they wrote in it. Those who wrote
+     nothing used to be a line of names swept under the last card, which read
+     as a footnote about them rather than as their own empty page. */
+  check('everybody has a card, including whoever wrote nothing',
+    (r.html.match(/border-radius:10px/g) || []).length === 3
+      && /Rahul Mishra/.test(r.html), (r.html.match(/border-radius:10px/g) || []).length);
+  check('and an empty card says so in itself',
+    /Rahul Mishra[\s\S]{0,400}?Nothing written today<\/div>/.test(r.html)
+      && !/Nothing written today by/.test(r.html),
+    (/Rahul Mishra[\s\S]{0,200}/.exec(r.html) || [])[0]);
+  check('an empty card carries no count beside the name',
+    !/Rahul Mishra[\s\S]{0,120}?\d+ tasks?</.test(r.html));
   check('the subject carries the day', / 22 Oct 2026/.test(r.subject), r.subject);
 
   /* A day nobody wrote on sends nothing at all - not a message saying so. */
