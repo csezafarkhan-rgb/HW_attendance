@@ -10636,6 +10636,10 @@ function buildExcelBackup(){
       +   '<span>What is waiting for a decision, with Approve and Reject</span></button>'
       + '<button type="button" class="em-go" id="emSendHol">🏖 Send the holiday reminder'
       +   '<span>The next holiday on the calendar, and what is closed</span></button>'
+      /* Today's work, as everybody wrote it. Beside the attendance message
+         because it is the same day's news, told the other way round. */
+      + '<button type="button" class="em-go" id="emSendWork">📝 Send today’s work log'
+      +   '<span>What everybody wrote they did, one card a person</span></button>'
       /* Last, because it is the one that asks a question back: which month. */
       + '<button type="button" class="em-go" id="emSendMonth">📗 Email the full month'
       +   '<span>A month of the record, as an Excel workbook</span></button>'
@@ -11156,6 +11160,13 @@ function buildExcelBackup(){
     if(leaveBtn) leaveBtn.onclick = function(){
       post('/api/mail/leave', {}, leaveBtn, 'Sending…', function(j){
         msg(j.nothing ? 'Nothing is waiting for a decision — no message sent.'
+                      : ('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + '.'));
+      });
+    };
+    var workBtn = document.getElementById('emSendWork');
+    if(workBtn) workBtn.onclick = function(){
+      post('/api/mail/tasks', {}, workBtn, 'Sending…', function(j){
+        msg(j.nothing ? 'Nobody has written anything today — no message sent.'
                       : ('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + '.'));
       });
     };

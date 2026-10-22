@@ -149,6 +149,13 @@ const check = (name, ok, got) => {
 
   check('a day of work travels in a backup',
     /BACKUP_KEYS[\s\S]{0,700}'dailyTasks'/.test(app));
+  /* The Share menu sends it by hand, beside the attendance record and the
+     leave message - it is the same day's news told the other way round. */
+  check('the Share menu can send it by hand',
+    app.indexOf('id="emSendWork"') > -1
+      && /workBtn\.onclick[\s\S]{0,120}\/api\/mail\/tasks/.test(app), 'no Share entry');
+  check('and says so plainly when nobody has written anything',
+    /Nobody has written anything today/.test(app));
   check('and the office can turn the message on and address it',
     app.indexOf('data-em-tab="wk"') > -1 && app.indexOf('id="emWkOn"') > -1
       && /tasks: \{[\s\S]{0,80}emWkOn/.test(app));
