@@ -32,11 +32,14 @@ const flag = name => {
   return i > -1 ? args[i + 1] : null;
 };
 const DRY = args.includes('--dry-run');
+/* Clear the target before copying. Only ever wanted for a new database the
+   service has already booted against, which `migrate.js` seeds. */
+const WIPE = args.includes('--wipe-target');
 const FROM = flag('from') || process.env.FROM_DATABASE_URL;
 const TO = flag('to') || process.env.TO_DATABASE_URL;
 
 if (!FROM || !TO) {
-  console.error('usage: node scripts/move-database.js --from <old url> --to <new url> [--dry-run]');
+  console.error('usage: node scripts/move-database.js --from <old url> --to <new url> [--dry-run] [--wipe-target]');
   process.exit(2);
 }
 if (FROM === TO) {
@@ -133,13 +136,27 @@ function ident(name) {
   const extra = have.filter(t => ORDER.indexOf(t) === -1);
   if (extra.length) console.log('also carrying over: ' + extra.join(', '));
 
-  /* Nothing is written into a database that already holds something. */
+  /* Nothing is written into a database that already holds something.
+
+     The one case where that is too strict: a new database the service has
+     already booted against. `migrate.js` seeds an organisation and the first
+     admin, so the target is not empty even though it holds nothing anybody
+     typed. --wipe-target clears it first, and says exactly what it is
+     discarding before it does. */
   const already = [];
-  for (const t of order) { if (await countOf(dst, t) > 0) already.push(t); }
-  if (already.length && !DRY) {
-    console.error('the new database is not empty - ' + already.join(', ') + ' already hold rows.');
-    console.error('refusing to run: this would double them. Empty them first, or point --to elsewhere.');
+  for (const t of order) { const n = await countOf(dst, t); if (n > 0) already.push(t + ' (' + n + ')'); }
+  if (already.length && WIPE && !DRY) {
+    console.log('clearing the new database first: ' + already.join(', '));
+    await dst.query('TRUNCATE ' + order.map(ident).join(', ') + ' RESTART IDENTITY CASCADE');
+    console.log('cleared. The old database has not been touched.');
+  } else if (already.length && !DRY) {
+    console.error('the new database is not empty - ' + already.join(', ') + '.');
+    console.error('refusing to run: this would double them.');
+    console.error('If those are only what `migrate.js` seeded, run again with --wipe-target.');
     process.exit(1);
+  } else if (already.length && DRY) {
+    console.log('the new database already holds: ' + already.join(', ')
+      + (WIPE ? ' - these would be cleared first' : ' - it would refuse without --wipe-target'));
   }
 
   const before = {};
