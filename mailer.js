@@ -214,6 +214,13 @@ function dateRange(from, to) {
 }
 /* Times are read at a glance on a phone, so they carry am/pm as the grid does:
    9:33 reads as 9:33 AM, 16:17 as 4:17 PM. */
+/* Minutes, said the way somebody would say them: under an hour in minutes, an
+   hour or more in hours and minutes. The dashboard says it the same way. */
+function minsSaid(m) {
+  m = Math.round(Math.abs(+m || 0));
+  if (m < 60) return m + ' min';
+  return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0');
+}
 function clock(t) {
   const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '').trim());
   if (!m) return String(t || '');
@@ -384,7 +391,7 @@ function dailyEmail(o) {
                   ? ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
                      + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>'
                      + '<span style="color:#7A5200;font-size:9.5px;"> - '
-                     + Math.round(r.late) + ' min late</span>')
+                     + minsSaid(r.late) + ' late</span>')
                   : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
                 return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
                      + (at ? time : '')
@@ -734,7 +741,7 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock,
+  dailyEmail, monthEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

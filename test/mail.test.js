@@ -1098,8 +1098,13 @@ process.env.SESSION_SECRET = SECRET;
     ]));
     /* Written straight into the store rather than saved through the API, so the
        mark itself does not send a message of its own and muddle the count. */
+    /* Dated from today, not written down: "no request behind it" only looks
+       back thirty days, so a date typed in by hand drops out of the window as
+       soon as the calendar moves past it - which it did, and these checks
+       started failing on a day nobody had touched them. */
+    const recently = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
     kvSet(1, 'overrides', JSON.stringify({
-      'Meena Test|2026-09-20': { cat: 'LEAVE', detail: 'CL', reason: 'family' } }));
+      ['Meena Test|' + recently]: { cat: 'LEAVE', detail: 'CL', reason: 'family' } }));
 
     const before = sent.length;
     const out = await asAdmin('POST', '/api/mail/leave', {});

@@ -1671,7 +1671,7 @@ async function buildDailyEmail(orgId, day, opts) {
     const came = hhmmToMinutes(rec['in']);
     if (came != null && start != null && came - start > threshold) {
       late.push({ name: shown,
-                  detail: 'in ' + mailer.clock(rec['in']) + ' (' + (came - start) + ' min late)'
+                  detail: 'in ' + mailer.clock(rec['in']) + ' (' + mailer.minsSaid(came - start) + ' late)'
                         + (excuses[key] ? ' \u2014 excused' : '') });
       /* So the card can mark the hour they came in. An excused lateness has
          been answered for already and is left alone. */
