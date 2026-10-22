@@ -119,5 +119,40 @@ const check = (name, ok, got) => {
     /key === 'dailyTasks' && req\.session\.role === 'employee'/.test(srv));
 }
 
+/* ---- the two pages: one that writes it, one that reads it ---- */
+{
+  const fs = require('fs');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+
+  check('an employee has somewhere to write their day',
+    app.indexOf('id="empTasksCard"') > -1 && /function renderEmpTasks\(\)/.test(app));
+  check('and it is drawn with the rest of their page',
+    /renderEmpTasks\(\);[\s\S]{0,80}renderMyRequests\(\)/.test(app));
+  /* It saves as they leave the box. A Save button is one more thing to forget,
+     and a day of work half-typed is worth nothing. */
+  check('what they type saves itself',
+    /addEventListener\('change', function\(\)\{ keep\(read\(\)\); \}\)/.test(app));
+
+  check('the office has a page of its own for it',
+    app.indexOf('id="page-worklog"') > -1 && /function renderWorkLogPage\(\)/.test(app));
+  check('which is the office’s to read, not an employee’s',
+    /adminOnly = \[[^\]]*'worklog'\]/.test(app), (/adminOnly = \[[^\]]*\]/.exec(app) || [])[0]);
+  check('and is redrawn when the page refreshes',
+    /currentPage === 'worklog'\) renderWorkLogPage/.test(app));
+
+  /* The office reads these words; it does not write them. Somebody amending
+     what another person said they did would make the record worth less than
+     the time it took to write. */
+  const page = /function renderWorkLogPage\(\)[\s\S]*?\n  \}/.exec(app)[0];
+  check('the office can read the log but not write it',
+    page.indexOf('setTasks(') === -1, 'renderWorkLogPage writes to it');
+
+  check('a day of work travels in a backup',
+    /BACKUP_KEYS[\s\S]{0,700}'dailyTasks'/.test(app));
+  check('and the office can turn the message on and address it',
+    app.indexOf('data-em-tab="wk"') > -1 && app.indexOf('id="emWkOn"') > -1
+      && /tasks: \{[\s\S]{0,80}emWkOn/.test(app));
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

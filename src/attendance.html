@@ -2611,6 +2611,43 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 /* A notice, not a banner. It used to sit in the page and push everything down
    for as long as the restore point lasted; it now floats in the corner, out of
    the way of the record, and keeps its Undo where it can still be reached. */
+/* The office's view of it: one card a person, the day across the top. */
+.wlog-wrap{ padding:6px 18px 28px; }
+.wlog-bar{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 12px; }
+.wlog-bar b{ font-size:13px; }
+.wlog-sum{ margin-right:auto; font-size:11.5px; color:var(--ink-soft); }
+.wlog-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; }
+.wlog-card{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:10px 12px; }
+.wlog-card.quiet{ background:transparent; border-style:dashed; }
+.wlog-n{ display:flex; align-items:baseline; gap:8px; font-weight:700; font-size:12.5px;
+  padding-bottom:6px; border-bottom:1px solid var(--line); }
+.wlog-n i{ margin-left:auto; font-style:normal; font-weight:600; font-size:11px; color:var(--ink-soft); }
+.wlog-card.quiet .wlog-n{ border-bottom:none; padding-bottom:0; color:var(--ink-soft); }
+.wlog-card ul{ margin:8px 0 0; padding-left:18px; font-size:12.5px; line-height:1.5; }
+.wlog-card li{ margin:0 0 3px; }
+
+/* ---- the work log ----
+   Where somebody writes down what they did, one line a job. Plain boxes rather
+   than a rich editor: it has to be quicker to fill in than to skip. */
+.wl-card{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:12px 14px; }
+.wl-head{ display:flex; align-items:flex-start; gap:10px; margin-bottom:8px; }
+.wl-head > div:first-child{ margin-right:auto; }
+.wl-head b{ font-size:13px; }
+.wl-head span{ display:block; font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
+.wl-nav{ display:flex; gap:6px; }
+.wl-nav .month-btn{ padding:4px 10px; font-size:12px; }
+.wl-nav .month-btn[disabled]{ opacity:.4; cursor:default; }
+.wl-row{ display:flex; align-items:center; gap:8px; padding:1px 0; }
+.wl-dot{ color:var(--ink-soft); font-size:15px; line-height:1; flex:none; }
+.wl-in{ flex:1; border:1px solid transparent; border-radius:7px; padding:6px 8px;
+  font:inherit; font-size:13px; background:transparent; color:var(--ink); min-width:0; }
+.wl-in:hover{ border-color:var(--line); }
+.wl-in:focus{ border-color:#7FB0E8; background:#fff; outline:none; }
+.wl-x{ flex:none; border:none; background:transparent; color:#B08; opacity:.35;
+  font-size:14px; cursor:pointer; border-radius:6px; padding:2px 5px; }
+.wl-row:hover .wl-x{ opacity:.8; }
+.wl-x:hover{ background:#FDE7E4; color:#C0392B; opacity:1; }
+.wl-foot{ font-size:11px; color:var(--ink-soft); margin-top:7px; }
 .undo-import{position:fixed;right:16px;bottom:16px;z-index:60;max-width:330px;
   display:flex;align-items:flex-start;flex-wrap:wrap;gap:8px;padding:11px 13px;
   border:1px solid #A8D8BC;background:#ECF8F0;color:#14532D;border-radius:12px;
@@ -3113,6 +3150,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button class="page-tab" data-page="dashboard"><span class="ico">📊</span><span class="lbl">Performance</span></button>
     <button class="page-tab" data-page="leave"><span class="ico">🌴</span><span class="lbl">Leave Record</span></button>
     <button class="page-tab" data-page="requests"><span class="ico">📨</span><span class="lbl">Requests</span> <span class="req-badge" id="reqBadge" style="display:none;" title="Waiting on a decision">0</span><span class="req-badge untaken" id="reqUntakenBadge" style="display:none;" title="Leave taken without a request">0</span></button>
+    <button class="page-tab" data-page="worklog"><span class="ico">📝</span><span class="lbl">Work Log</span></button>
     <button class="page-tab" data-page="salary"><span class="ico">💰</span><span class="lbl">Payroll</span></button>
     <button class="page-tab" data-page="holidays"><span class="ico">🏖️</span><span class="lbl">Official Leaves</span></button>
     <!-- User management lives in the Workspace shell, not in here, so this tab
@@ -3301,6 +3339,12 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <button class="month-btn" id="pastFormBtn" title="Print the day-off form for leave already taken, where no request was raised here">🖨 Form for past leave</button>
   </div>
   <div id="requestsList" style="padding:0 18px 24px;"></div>
+</div>
+<div class="page" id="page-worklog">
+  <div style="padding:14px 18px 6px;font-weight:800;font-size:14px;">Work Log
+    <span style="font-weight:500;font-size:11.5px;color:var(--ink-soft);">
+      — what everybody wrote they did, in their own words</span></div>
+  <div class="wlog-wrap" id="worklogWrap"></div>
 </div>
 <div class="page" id="page-salary">
   <div style="display:flex;align-items:center;gap:12px;padding:14px 18px 6px;flex-wrap:wrap;">
@@ -3509,6 +3553,11 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
            well short of the calendar beside it. -->
       <div class="ews" id="empWeekStatus"></div>
     </aside>
+  </div>
+  <!-- What they did today, in their own words. Above the leave requests
+       because it is the thing they come here to write most days. -->
+  <div style="padding:6px 20px 0;">
+    <div class="wl-card" id="empTasksCard"></div>
   </div>
   <div class="ews" id="empHolidays"></div>
   <div style="padding:6px 20px 30px;">
@@ -4288,7 +4337,7 @@ function showUploadStatus(msg, isError){
   // inside the workspace is the parent's IndexedDB — NOT localStorage. Scanning
   // localStorage alone therefore backed up almost nothing. Read the real keys.
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
-    'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy',
+    'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
     'lunchBreakMin','break1Min','break2Min',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
@@ -7866,6 +7915,35 @@ function buildExcelBackup(){
     return storage.set('halfDays', JSON.stringify(halfDays), true).catch(function(e){ console.error(e); });
   }
   function getHalfDay(emp, d){ return halfDays[emp+'|'+d] || null; }
+
+  /* ---- what somebody did today ----
+     A day is a list of lines, kept against "Name|YYYY-MM-DD" the way every
+     other mark is. Written by the person it belongs to, gathered by the office
+     into one message. The server takes only the days under the name that is
+     signed in, so a page carrying a stale copy of everybody else cannot write
+     over them. */
+  var dailyTasks = {};
+  function loadDailyTasks(){
+    return storage.get('dailyTasks', true).then(function(res){
+      if(res && res.value){ try{ dailyTasks = JSON.parse(res.value); }catch(e){ dailyTasks = {}; } }
+    }).catch(function(){ dailyTasks = {}; });
+  }
+  function saveDailyTasks(){
+    return storage.set('dailyTasks', JSON.stringify(dailyTasks), true)
+      .catch(function(e){ console.error(e); });
+  }
+  function getTasks(emp, d){
+    var v = dailyTasks[emp+'|'+d];
+    return (v && Array.isArray(v.items)) ? v.items : [];
+  }
+  function setTasks(emp, d, items){
+    var key = emp+'|'+d;
+    items = (items || []).map(function(x){ return String(x == null ? '' : x).trim(); })
+                         .filter(Boolean).slice(0, 30);
+    if(items.length) dailyTasks[key] = { items: items, at: new Date().toISOString() };
+    else delete dailyTasks[key];
+    return saveDailyTasks();
+  }
   /* What a part-day approval costs, in days, and how it is written. Everything
      that cares about a part-day reads these, so the grid, the leave balance, the
      weekly hours and pay cannot drift apart. */
@@ -10174,6 +10252,87 @@ function buildExcelBackup(){
   document.getElementById('legendToggle').addEventListener('click', function(){
     document.getElementById('legendRow').classList.toggle('open');
   });
+  /* ---- the card where somebody writes their day ----
+     One line a job, as they would say it out loud. Saved as they leave the box
+     rather than behind a Save button, which is one more thing to forget. */
+  var TASK_DAY = null;                       // the day on show, their own time
+  function taskWho(){ return (viewRole && viewRole.name) || ''; }
+  function renderEmpTasks(){
+    var box = document.getElementById('empTasksCard');
+    var TASK_WHO = taskWho();
+    if(!box || !TASK_WHO) return;
+    var day = TASK_DAY || todayISO_full;
+    var mine = getTasks(TASK_WHO, day);
+    var isToday = day === todayISO_full;
+    /* A blank line at the end, so there is always somewhere to type. */
+    var lines = mine.slice();
+    lines.push('');
+    box.innerHTML =
+        '<div class="wl-head">'
+      +   '<div><b>What I worked on</b>'
+      +     '<span>' + (isToday ? 'Today' : 'On') + ' ' + shotEsc(fmtDayLong(day)) + '</span></div>'
+      +   '<div class="wl-nav">'
+      +     '<button type="button" class="month-btn" data-wl-day="-1" title="The day before">\u2039</button>'
+      +     (isToday ? '' : '<button type="button" class="month-btn" data-wl-day="0">Today</button>')
+      +     '<button type="button" class="month-btn" data-wl-day="1" title="The day after"'
+      +       (day >= todayISO_full ? ' disabled' : '') + '>\u203a</button>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="wl-list">'
+      +   lines.map(function(t, i){
+            return '<div class="wl-row"><span class="wl-dot">\u2022</span>'
+              + '<input class="wl-in" data-wl-i="' + i + '" value="' + shotEsc(t).replace(/"/g, '&quot;') + '"'
+              + ' placeholder="' + (i === 0 ? 'What did you work on?' : 'Another one\u2026') + '"'
+              + ' maxlength="300">'
+              + (t ? '<button type="button" class="wl-x" data-wl-del="' + i + '" title="Take this line out">\u00d7</button>' : '')
+              + '</div>';
+          }).join('')
+      + '</div>'
+      + '<div class="wl-foot">' + (mine.length
+          ? (mine.length + (mine.length === 1 ? ' line' : ' lines') + ' \u00b7 saved as you type')
+          : 'One line a job. It saves itself.') + '</div>';
+
+    var read = function(){
+      return Array.prototype.map.call(box.querySelectorAll('.wl-in'), function(el){ return el.value; });
+    };
+    var keep = function(items){
+      setTasks(TASK_WHO, day, items).then(function(){ renderEmpTasks(); });
+    };
+    Array.prototype.forEach.call(box.querySelectorAll('.wl-in'), function(el){
+      el.addEventListener('change', function(){ keep(read()); });
+      /* Enter moves on to the next line rather than submitting anything. */
+      el.addEventListener('keydown', function(ev){
+        if(ev.key !== 'Enter') return;
+        ev.preventDefault();
+        var items = read();
+        setTasks(TASK_WHO, day, items).then(function(){
+          renderEmpTasks();
+          var ins = document.querySelectorAll('#empTasksCard .wl-in');
+          var last = ins[ins.length - 1];
+          if(last) last.focus();
+        });
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-wl-del]'), function(b){
+      b.addEventListener('click', function(){
+        var i = +b.getAttribute('data-wl-del');
+        var items = read(); items.splice(i, 1); keep(items);
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-wl-day]'), function(b){
+      b.addEventListener('click', function(){
+        var step = +b.getAttribute('data-wl-day');
+        if(step === 0){ TASK_DAY = null; renderEmpTasks(); return; }
+        var d = new Date(day + 'T00:00:00');
+        d.setDate(d.getDate() + step);
+        var next = d.toISOString().slice(0, 10);
+        if(next > todayISO_full) return;          // tomorrow has not happened
+        TASK_DAY = next === todayISO_full ? null : next;
+        renderEmpTasks();
+      });
+    });
+  }
+
   /* The two folded notes on the Leave Record. Delegated, because the standing
      notes are rewritten on every render and a handler bound to the button would
      go with them. */
@@ -10489,6 +10648,7 @@ function buildExcelBackup(){
       + '<div class="em-tabs"><button type="button" class="em-tab on" data-em-tab="att">Attendance</button>'
       +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button>'
       +   '<button type="button" class="em-tab" data-em-tab="hol">Holiday</button>'
+      +   '<button type="button" class="em-tab" data-em-tab="wk">Work</button>'
       +   '<button type="button" class="em-tab" data-em-tab="mo">Month</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
@@ -10609,6 +10769,28 @@ function buildExcelBackup(){
       +   (((s.leave || {}).confirm !== false) ? ' checked' : '') + '>'
       +   '<span>Tell the employee once their leave is decided</span></label>'
       + '</div>'
+          /* What everybody wrote they did, gathered into one message. It rides
+             out with the attendance record rather than keeping an hour of its
+             own, so there is no time to set here - only whether, and to whom. */
+          + (function(){
+              var t = s.tasks || {};
+              return '<div data-em-pane="wk" style="display:none;">'
+                + '<label class="em-row"><input type="checkbox" id="emWkOn"' + (t.on ? ' checked' : '') + '>'
+                +   '<span>Send the day\u2019s work with the attendance record</span></label>'
+                + '<div class="em-note" style="padding-top:0;">Everyone writes their own on their '
+                +   'page; this gathers it up. A day nobody wrote on sends nothing.</div>'
+                + '<div class="em-lab">To <span>blank: the same as the attendance record</span></div>'
+                + '<input type="text" id="emWkTo" value="' + shotEsc((t.to || []).join(', ')) + '" placeholder="who the work goes to">'
+                + '<div class="em-lab">Cc</div>'
+                + '<input type="text" id="emWkCc" value="' + shotEsc((t.cc || []).join(', ')) + '">'
+                + '<div class="em-lab">Subject <span>{date} {n} {org}</span></div>'
+                + '<input type="text" id="emWkSubject" value="' + shotEsc(t.subject || '') + '" placeholder="Work done \u00b7 {date}">'
+                + '<div class="em-lab">Top line</div>'
+                + '<textarea id="emWkIntro" rows="2" placeholder="Hello,">' + shotEsc(t.intro || '') + '</textarea>'
+                + '<div class="em-lab">Sign-off</div>'
+                + '<textarea id="emWkFooter" rows="2">' + shotEsc(t.footer || '') + '</textarea>'
+                + '</div>';
+            })()
       /* ---- the holiday reminder ---- */
       + (function(){
           var h = s.holiday || {};
@@ -11020,6 +11202,13 @@ function buildExcelBackup(){
           subject: document.getElementById('emMoSubject').value.trim(),
           intro: document.getElementById('emMoIntro').value,
           footer: document.getElementById('emMoFooter').value
+        },
+        tasks: {
+          on: document.getElementById('emWkOn').checked,
+          to: list('emWkTo'), cc: list('emWkCc'),
+          subject: document.getElementById('emWkSubject').value.trim(),
+          intro: document.getElementById('emWkIntro').value,
+          footer: document.getElementById('emWkFooter').value
         },
         holiday: {
           on: document.getElementById('emHolOn').checked,
@@ -11907,12 +12096,14 @@ function buildExcelBackup(){
       document.getElementById('page-salary').classList.toggle('active', currentPage==='salary');
     document.getElementById('page-holidays').classList.toggle('active', currentPage==='holidays');
       document.getElementById('page-dashboard').classList.toggle('active', currentPage==='dashboard');
+      document.getElementById('page-worklog').classList.toggle('active', currentPage==='worklog');
       document.getElementById('page-backup').classList.toggle('active', currentPage==='backup');
       if(currentPage === 'leave') renderLeavePage();
       if(currentPage === 'requests') renderRequestsPage();
       if(currentPage === 'holidays') renderHolidaysPage();
     if(currentPage === 'salary') renderSalaryPage();
       if(currentPage === 'dashboard') renderDashboardPage();
+      if(currentPage === 'worklog') renderWorkLogPage();
       if(currentPage === 'backup') renderBackupPage();
     });
   });
@@ -11923,6 +12114,7 @@ function buildExcelBackup(){
     if(currentPage === 'holidays') renderHolidaysPage();
     if(currentPage === 'salary') renderSalaryPage();
     if(currentPage === 'dashboard') renderDashboardPage();
+    if(currentPage === 'worklog') renderWorkLogPage();
     renderReqBadge();
   }
 
@@ -12855,6 +13047,78 @@ function buildExcelBackup(){
     document.addEventListener('keydown', function esc(e){
       if(e.key !== 'Escape') return;
       shut(); document.removeEventListener('keydown', esc);
+    });
+  }
+
+  /* ---- the office's view of the work log ----
+     One day at a time, every name on it, in the order the office reads them.
+     Read-only: these are the employee's own words and the office amending them
+     would make the record worth less than the time it took to write. */
+  var WLOG_DAY = null;
+  function renderWorkLogPage(){
+    var wrap = document.getElementById('worklogWrap');
+    if(!wrap) return;
+    var day = WLOG_DAY || todayISO_full;
+    var emps = visibleEmployees();
+    var wrote = 0, lines = 0;
+    var body = emps.map(function(e){
+      var items = getTasks(e.name, day);
+      if(items.length){ wrote++; lines += items.length; }
+      var away = getOverride(e.name, day);
+      var onLeave = away && away.cat === 'LEAVE';
+      return '<div class="wlog-card' + (items.length ? '' : ' quiet') + '">'
+        + '<div class="wlog-n">' + shotEsc(dispName(e.name))
+        +   (items.length
+              ? ('<i>' + items.length + (items.length === 1 ? ' line' : ' lines') + '</i>')
+              : ('<i>' + (onLeave ? 'on leave' : 'nothing written') + '</i>'))
+        + '</div>'
+        + (items.length
+            ? ('<ul>' + items.map(function(t){ return '<li>' + shotEsc(t) + '</li>'; }).join('') + '</ul>')
+            : '')
+        + '</div>';
+    }).join('');
+
+    wrap.innerHTML =
+        '<div class="wlog-bar">'
+      +   '<button type="button" class="month-btn" data-wlog="-1">\u2039 Day before</button>'
+      +   '<b>' + shotEsc(fmtDayLong(day)) + '</b>'
+      +   '<button type="button" class="month-btn" data-wlog="1"'
+      +     (day >= todayISO_full ? ' disabled' : '') + '>Day after \u203a</button>'
+      +   '<span class="wlog-sum">' + wrote + ' of ' + emps.length + ' wrote something'
+      +     (lines ? (' \u00b7 ' + lines + (lines === 1 ? ' line' : ' lines') + ' in all') : '') + '</span>'
+      +   '<button type="button" class="month-btn" id="wlogMail" title="Send the day\u2019s work as one message">\u2197 Email this day</button>'
+      + '</div>'
+      + (emps.length ? ('<div class="wlog-grid">' + body + '</div>')
+                     : '<div class="empty-state">No employees match your filter.</div>');
+
+    Array.prototype.forEach.call(wrap.querySelectorAll('[data-wlog]'), function(b){
+      b.addEventListener('click', function(){
+        var d = new Date(day + 'T00:00:00');
+        d.setDate(d.getDate() + (+b.getAttribute('data-wlog')));
+        var next = d.toISOString().slice(0, 10);
+        if(next > todayISO_full) return;
+        WLOG_DAY = next === todayISO_full ? null : next;
+        renderWorkLogPage();
+      });
+    });
+    var mb = document.getElementById('wlogMail');
+    if(mb) mb.addEventListener('click', function(){
+      if(!wrote){ showUploadStatus('Nobody has written anything for that day yet.', true); return; }
+      mb.disabled = true;
+      fetch('/api/mail/tasks', { method:'POST', credentials:'include',
+          headers:{'Content-Type':'application/json'}, body: JSON.stringify({ day: day }) })
+        .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+        .then(function(o){
+          mb.disabled = false;
+          if(o.ok && o.j && o.j.ok && !o.j.nothing){
+            showUploadStatus('The day\u2019s work went to ' + o.j.to + ' address'
+              + (o.j.to === 1 ? '' : 'es') + '.', false);
+          } else {
+            showUploadStatus((o.j && (o.j.error || (o.j.nothing ? 'Nothing to send for that day.' : '')))
+              || 'That message did not go out.', true);
+          }
+        })
+        .catch(function(){ mb.disabled = false; showUploadStatus('That message did not go out.', true); });
     });
   }
 
@@ -16520,7 +16784,9 @@ function buildExcelBackup(){
   function canEdit(){ return !viewRole || viewRole.tier !== 'admin_view'; }
   function applyRoleVisibility(){
     var isAdmin = !viewRole || viewRole.role === 'admin';
-    var adminOnly = ['dashboard','leave','salary','holidays','backup'];
+    /* The work log is the office's view of what everybody wrote; an employee
+       has their own, on their own page. */
+    var adminOnly = ['dashboard','leave','salary','holidays','backup','worklog'];
     Array.prototype.forEach.call(document.querySelectorAll('.page-tab'), function(t){
       var id = t.getAttribute('data-page');
       if(adminOnly.indexOf(id) > -1) t.style.display = isAdmin ? '' : 'none';
@@ -16947,6 +17213,7 @@ function buildExcelBackup(){
     document.getElementById('empCalMonthLbl').textContent = monthLabel(empCalMonth);
     try{ renderEmpPerf(name); renderEmpAlerts(); }catch(e){ console.error('performance panel', e); }
     renderEmployeeLeaveStrip(name);
+    try{ renderEmpTasks(); }catch(e){ console.error('the work log', e); }
     renderMyRequests();
 
     var pad = firstWeekdayOfMonth(empCalMonth);
@@ -17129,7 +17396,7 @@ function buildExcelBackup(){
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
       loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
-      loadLeaveDeductions, loadLockedMonths].map(safe));
+      loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){
     // Settings arrive after the first paint, and the leave figures depend on
     // them - joining dates in particular. Redraw once they are in.
