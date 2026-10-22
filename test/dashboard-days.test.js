@@ -174,5 +174,35 @@ check('and the switch remembers what you chose',
 check('a cell with nothing in it is not made to look hoverable',
   /var has = String\(inner\) !== '\\u2014'/.test(page), 'the dash guard');
 
+/* ---- the table explains itself, and explains itself correctly ---- */
+{
+  const cols = /var cols = \[[\s\S]*?\];/.exec(page)[0];
+  const named = (cols.match(/\{t:/g) || []).length;
+  const helped = (cols.match(/h:'/g) || []).length;
+  check('every column says what it means', named === helped && named > 15,
+    { columns: named, explained: helped });
+  check('Part-day is gone, its leave already counted in Leave',
+    cols.indexOf("{t:'Part-day'") === -1 && cols.indexOf("{t:'Leave'") > -1);
+  check('and the Part-day card went with it',
+    src.indexOf("'Part-day Leave'") === -1 && src.indexOf('partday') === -1,
+    [src.indexOf("'Part-day Leave'"), src.indexOf('partday')]);
+
+  /* The line over the table described a score the page had stopped using: it
+     said 35 / 25 / 15 / 15 / 10 and named breaks as part of it, which they are
+     not, while leaving out the time given, which is. A page that explains
+     itself wrongly is worse than one that does not explain itself, so the
+     weights it prints are held to the ones perfScore actually uses. */
+  const score = /function perfScore[\s\S]*?return[^;]*;/.exec(src)[0];
+  const weights = (score.match(/0\.\d+\*/g) || []).map(w => Math.round(parseFloat(w) * 100));
+  const said = (/ranked by score: ([^<]*)/.exec(src) || [])[1] || '';
+  const printed = (said.match(/(\d+)%/g) || []).map(x => parseInt(x, 10));
+  check('the weights printed over the table are the weights the score uses',
+    weights.length === 5 && printed.length === 5
+      && weights.every((w, i) => w === printed[i]),
+    { inPerfScore: weights, printed: printed, said: said.trim() });
+  check('and it no longer calls breaks a part of the score',
+    !/ranked by score:[^<]*break/i.test(src), said.trim());
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

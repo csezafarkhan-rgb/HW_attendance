@@ -1491,8 +1491,13 @@ td.dur-col.out-over{ color:#B42318; font-weight:700; background:#FDECEA; }
 .att-meter{ display:block; height:7px; margin:9px 0 6px; border-radius:4px;
   background:rgba(255,255,255,.18); overflow:hidden; box-shadow:inset 0 1px 2px rgba(0,0,0,.22); }
 .mtr-card{ width:262px; padding:12px 14px; }
+/* Everybody fits in a card this tall; beyond that it scrolls rather than
+   running off the bottom of the window. */
+.mtr-card .mtr-box{ max-height:46vh; overflow-y:auto; }
 /* A figure that can say which days it is made of. */
 td.dd-cell{ cursor:help; }
+#dashWrap .dash-table th[title]{ cursor:help; }
+#dashWrap .dash-table th[title]:hover{ color:var(--ink); text-decoration:underline dotted; text-underline-offset:3px; }
 td.dd-cell:hover{ background:#EEF4FF; }
 /* The switch that folds away people working wholly from home. */
 .dash-hidewfh{ float:right; display:inline-flex; align-items:center; gap:6px; cursor:pointer;
@@ -2703,7 +2708,7 @@ table.att .save-note, table.att .ov-reason{ font-size:10px !important; }
 #dashWrap .kpi-on{ border-color:var(--kc) !important; box-shadow:0 0 0 2px color-mix(in srgb, var(--kc) 30%, transparent) !important; }
 #dashWrap .kpi-c-attend{ --kc:#16A34A; }   #dashWrap .kpi-c-ontime{ --kc:#0D9488; }
 #dashWrap .kpi-c-worked{ --kc:#2563EB; }   #dashWrap .kpi-c-late{ --kc:#D97706; }
-#dashWrap .kpi-c-early{ --kc:#EA580C; }    #dashWrap .kpi-c-partday{ --kc:#7C3AED; }
+#dashWrap .kpi-c-early{ --kc:#EA580C; }    #dashWrap .kpi-c-leave{ --kc:#7C3AED; }
 #dashWrap .kpi-c-absent{ --kc:#DC2626; }   #dashWrap .kpi-c-wfh{ --kc:#0284C7; }
 #dashWrap .kpi-c-excused{ --kc:#4F46E5; }  #dashWrap .kpi-c-avgin{ --kc:#059669; }
 #dashWrap .kpi-c-avgout{ --kc:#E11D48; }   #dashWrap .kpi-c-breakover{ --kc:#C026D3; }
@@ -9651,7 +9656,10 @@ function buildExcelBackup(){
          + monthLabelShort(d.slice(0, 7)).split(' ')[0];
   }
   function dashCellDays(empName, kind, dates){
-    var out = [], push = function(d, t){ out.push({ d:d, t:t }); };
+    /* `q` is what the day cost, where that is not simply one: a half day of
+       leave is half a day, and a card that counted entries would call two whole
+       days and a half day "three days". */
+    var out = [], push = function(d, t, q){ out.push({ d:d, t:t, q:(q == null ? 1 : q) }); };
     (dates || []).forEach(function(ds){
       var hol = getOfficialLeave(ds);
       /* Time given on a day that asked for none. A holiday counts: coming in on
@@ -9703,7 +9711,7 @@ function buildExcelBackup(){
         else if(rec.st === 'HD') push(ds, 'half day');
       } else if(kind === 'leave'){
         if(hd) push(ds, hdLabel(hd.kind) + ' \u00b7 ' + hdQty(hd.kind) + ' day'
-                      + (hd.note ? (' \u00b7 ' + hd.note) : ''));
+                      + (hd.note ? (' \u00b7 ' + hd.note) : ''), hdQty(hd.kind));
       }
     });
     return out;
@@ -13590,7 +13598,7 @@ function buildExcelBackup(){
     worked:  {t:'Total Worked Hrs',  unit:'hrs', better:'high', get:function(x){ return x.workedMin; },     fmt:function(v){ return fmtMin(Math.round(v)); }},
     late:    {t:'Late Arrivals',     unit:'days',better:'low',  get:function(x){ return x.lateDays; },      fmt:function(v){ return Math.round(v); }},
     early:   {t:'Early Departures',  unit:'days',better:'low',  get:function(x){ return x.earlyDays||0; },  fmt:function(v){ return Math.round(v); }},
-    partday: {t:'Part-day Leave',    unit:'days',better:'low',  get:function(x){ return (x.halfDays||0)+(x.shortLeaveDays||0); }, fmt:function(v){ return Math.round(v*100)/100; }},
+    leave:   {t:'Leave',             unit:'days',better:'low',  get:function(x){ return x.leaveDays||0; },   fmt:function(v){ return Math.round(v*100)/100; }},
     wfh:     {t:'WFH Days',          unit:'days',better:'high', get:function(x){ return x.wfhDays; },       fmt:function(v){ return Math.round(v); }},
     excused: {t:'Excused Time',      unit:'hrs', better:'low',  get:function(x){ return x.excusedMin||0; },  fmt:function(v){ return fmtMin(Math.round(v)); }},
     /* No punch days (all WFH, say) means no figure - not 0:00, which ranked
@@ -13635,7 +13643,13 @@ function buildExcelBackup(){
       if(key === 'wfh'     && ((ov && ov.cat === 'WFH') ||
            (new Date(ds+'T00:00:00').getDay() === 6 && getSatPolicy(empName).mode === 'WFH' && rec && rec.st === 'PR')))
         add(ov && ov.reason ? ov.reason : 'from home');
-      if(key === 'partday' && hd) add(hdLabel(hd.kind) + (hd.note ? (' \u00b7 '+hd.note) : ''));
+      /* Leave of every size: a whole day marked on the grid, and a part of a
+         day approved, each saying what it cost. */
+      if(key === 'leave'){
+        if(ov && ov.cat === 'LEAVE') add((ov.detail || 'leave') + ' \u00b7 1 day');
+        else if(hd) add(hdLabel(hd.kind) + ' \u00b7 ' + hdQty(hd.kind) + ' day'
+                        + (hd.note ? (' \u00b7 '+hd.note) : ''));
+      }
       if(key === 'worked'  && workedMinutes(empName, ds) > 0)
         add(fmtMin(workedMinutes(empName, ds)) + (ov ? (' \u00b7 '+(OV_CATS[ov.cat] ? OV_CATS[ov.cat].label : ov.cat)) : ''));
       if((key === 'avgin' || key === 'avgout' || key === 'breakover') && rec && rec['in'] && rec.out
@@ -13645,8 +13659,22 @@ function buildExcelBackup(){
           add('total '+fmtMin(du.totalMin)+' · in '+fmtMin(du.inMin)+' · out '+fmtMin(du.outMin)
               + (du.outMin > BREAK_ALLOW_MIN ? (' · '+fmtMin(du.outMin - BREAK_ALLOW_MIN)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' allowance') : ''));
       }
-      if(key === 'attend'  && rec && rec.st === 'AB') add('missed');
-      if(key === 'ontime'  && rec && isLate(empName, rec)) add('not on time');
+      /* Attendance counts the days they were due and not there. A day on
+         leave is one of those - saying only "missed" left the reader to guess
+         whether somebody was off sick or simply absent. */
+      if(key === 'attend'){
+        if(ov && ov.cat === 'LEAVE') add('on leave' + (ov.detail ? (' \u00b7 ' + ov.detail) : ''));
+        else if(hd) add(hdLabel(hd.kind) + ' \u00b7 ' + hdQty(hd.kind) + ' day of leave'
+                        + (hd.note ? (' \u00b7 ' + hd.note) : ''));
+        else if(rec && rec.st === 'AB') add('absent, no leave marked');
+      }
+      /* "not on time" said that something happened and nothing about what. It
+         is the hour they came and how far past their shift that was. */
+      if(key === 'ontime'  && rec && isLate(empName, rec)){
+        add('in ' + fmtTime(rec['in']) + ' \u00b7 ' + minsSaid(le && le.late)
+            + ' past ' + shiftStartSaid(empName, ds)
+            + (lx ? (' \u00b7 excused: ' + (lx.note || '')) : ''));
+      }
     });
     if(!hit.length) return '<div class="kd-none">Nothing on the individual days for this one.</div>';
     var cap = 40;
@@ -13656,6 +13684,14 @@ function buildExcelBackup(){
         }).join('')
       + '</tbody></table>'
       + (hit.length > cap ? ('<div class="kd-none">+'+(hit.length-cap)+' more</div>') : '');
+  }
+  /* A shift's start as a clock time, for saying what a lateness was measured
+     against: "31 min past 9:30" answers a question that "31 min late" leaves
+     open, now that not everybody is on the same slot. */
+  function shiftStartSaid(empName, ds){
+    var sh = parseShift(getShift(empName, ds));
+    var h = Math.floor(sh.startMin / 60), m = sh.startMin % 60;
+    return h + ':' + pad2(m);
   }
   function fmtDayLong(ds){
     try{
@@ -13683,6 +13719,26 @@ function buildExcelBackup(){
                stays visible against a big one, and it gave every zero a green
                stub that read as a little of something. */
             var pct = r.v > 0 ? Math.max(2, Math.round(r.v / max * 100)) : 0;
+            /* And a colour saying how the figure reads, rather than green for
+               everybody - eight late arrivals drawn in the same green as none
+               says only that there is a bar.
+
+               What counts as good depends on the metric, and on what sort of
+               figure it is. A percentage has a meaning of its own, so it is
+               judged against itself: ninety is good whoever else is in the
+               room. A count or a span has none - there is no right number of
+               hours worked - so it is judged against the worst in the team. */
+            var tone = (function(){
+              var GOOD = '#4CAF7D', FAIR = '#E6B450', POOR = '#E06B5E';
+              if(d.unit === '%'){
+                var p = d.better === 'high' ? r.v : (100 - r.v);
+                return p >= 90 ? GOOD : (p >= 75 ? FAIR : POOR);
+              }
+              if(!max) return GOOD;
+              var share = r.v / max * 100;
+              var g = d.better === 'high' ? share : (100 - share);
+              return g >= 66 ? GOOD : (g >= 33 ? FAIR : POOR);
+            })();
             var chg = (r.was == null) ? '' : delta(r.v, r.was, d.better === 'high');
             /* A row opens to show where its figure came from - the days behind
                it - so the number can be checked rather than taken on trust. */
@@ -13691,7 +13747,7 @@ function buildExcelBackup(){
               + '<div class="kd-row" data-kd-emp="'+shotEsc(r.name)+'">'
               +   '<span class="kd-x">'+(open?'\u2212':'+')+'</span>'
               +   '<span class="kd-n">'+shotEsc(dispName(r.name))+'</span>'
-              +   '<span class="kd-bar"><i style="width:'+pct+'%"></i></span>'
+              +   '<span class="kd-bar"><i style="width:'+pct+'%;background:'+tone+';"></i></span>'
               +   '<span class="kd-v">'+d.fmt(r.v)+'</span>'
               +   '<span class="kd-c">'+chg+'</span>'
               + '</div>'
@@ -13846,8 +13902,9 @@ function buildExcelBackup(){
       });
     }
     var sumPresent=0,sumLate=0,sumOnTime=0,sumWorked=0,sumWfh=0,sumAttend=0;
-    var sumEarly=0, sumHalf=0, sumShort=0, sumExcused=0;
+    var sumEarly=0, sumHalf=0, sumShort=0, sumExcused=0, sumLeave=0;
     stats.forEach(function(s){ sumEarly+=s.earlyDays||0; sumHalf+=s.halfDays||0; sumShort+=s.shortLeaveDays||0;
+      sumLeave+=s.leaveDays||0;
                                sumExcused+=s.excusedMin||0; });
     var pExcused = 0, hasExcPrev = false;
     Object.keys(prevBy).forEach(function(n){ var q=prevBy[n]; if(q){ hasExcPrev = true; pExcused += q.excusedMin||0; } });
@@ -14010,7 +14067,7 @@ function buildExcelBackup(){
     }
 
     // team figures for the previous month, for the KPI comparisons
-    var pAttend=0, pOnTime=0, pPresent=0, pWorked=0, pLate=0, pEarly=0, pWfh=0, pPart=0, pN=0;
+    var pAttend=0, pOnTime=0, pPresent=0, pWorked=0, pLate=0, pEarly=0, pWfh=0, pLeave=0, pN=0;
     // durations, team-wide: per punch day, so the averages weigh every day equally
     var dDays=0, dIn=0, dOut=0, dOver=0, qDays=0, qIn=0, qOut=0, qOver=0;
     stats.forEach(function(s){ dDays += s.durDays||0; dIn += s.inDurMin||0; dOut += s.outDurMin||0; dOver += s.breakOverDays||0; });
@@ -14020,13 +14077,13 @@ function buildExcelBackup(){
       qDays += q.durDays||0; qIn += q.inDurMin||0; qOut += q.outDurMin||0; qOver += q.breakOverDays||0;
       pN++; pAttend += q.attendancePct; pOnTime += q.onTimeDays; pPresent += q.presentDays;
       pWorked += q.workedMin; pLate += q.lateDays; pEarly += (q.earlyDays||0);
-      pWfh += q.wfhDays; pPart += (q.halfDays||0)+(q.shortLeaveDays||0);
+      pWfh += q.wfhDays; pLeave += q.leaveDays||0;
     });
     var hasPrev = pN > 0;
     var pAvgAttend  = hasPrev ? Math.round(pAttend/pN) : null;
     var pTeamOnTime = hasPrev ? (pPresent>0 ? Math.round(pOnTime/pPresent*100) : 100) : null;
     var KPI_ICON = { attend:'✅', ontime:'⏰', worked:'⏱️', late:'🐢', early:'🏃',
-                     partday:'🌓', absent:'🚫', wfh:'🏠', excused:'🤝',
+                     leave:'🌴', wfh:'🏠', excused:'🤝',
                      avgin:'💼', avgout:'☕', breakover:'⚠️' };
     var K = function(val, label, cmp, key){
       return '<div class="kpi'+(key?' kpi-live kpi-c-'+key:'')+(DASH_KPI===key?' kpi-on':'')+'"'
@@ -14046,7 +14103,7 @@ function buildExcelBackup(){
       + K(fmtMin(sumWorked), 'Total Worked Hrs', delta(sumWorked, hasPrev?pWorked:null, true, function(v){ return fmtMin(Math.round(v)); }), 'worked')
       + K(sumLate, 'Late Arrivals', delta(sumLate, hasPrev?pLate:null, false), 'late')
       + K(sumEarly, 'Early Departures', delta(sumEarly, hasPrev?pEarly:null, false), 'early')
-      + K(sumHalf+sumShort, 'Part-day Leave', delta(sumHalf+sumShort, hasPrev?pPart:null, false), 'partday')
+      + K(Math.round(sumLeave*100)/100, 'Leave', delta(sumLeave, hasPrev?pLeave:null, false), 'leave')
       + K(sumWfh, 'WFH Days', delta(sumWfh, hasPrev?pWfh:null, true), 'wfh')
       + K(fmtMin(sumExcused), 'Excused Time',
           delta(sumExcused, hasExcPrev?pExcused:null, false, function(v){ return fmtMin(Math.round(v)); }), 'excused')
@@ -14123,13 +14180,18 @@ function buildExcelBackup(){
         })()+
         cellDays(s, 'late', s.lateDays>0?s.lateDays+' ('+fmtMin(s.totalLateMin)+')':'\u2014')+
         cellDays(s, 'early', s.earlyDays>0?s.earlyDays+' ('+fmtMin(s.totalEarlyMin)+')':'\u2014')+
-        cellDays(s, 'leave', s.leaveDays ? (Math.round(s.leaveDays*100)/100) : '\u2014')+
+        /* Whole days and parts of days together. The parts are named
+           underneath, since "2.5" does not say which half-day it was. */
+        cellDays(s, 'leave', (s.leaveDays
+          ? ((Math.round(s.leaveDays*100)/100)
+             + ((s.halfDays||s.threeQDays||s.shortLeaveDays)
+                ? ('<div class="dash-sub">'
+                   + [ s.halfDays?(s.halfDays+'\u00d7\u00bd'):'',
+                       s.threeQDays?(s.threeQDays+'\u00d7\u00be'):'',
+                       s.shortLeaveDays?(s.shortLeaveDays+'\u00d7\u00bc'):'' ].filter(Boolean).join(' ')
+                   + '</div>') : ''))
+          : '\u2014'), 'Whole days and parts of days, in days')+
         // half, three-quarter and short leave, each named so the figure is readable
-        cellDays(s, 'part', ((s.halfDays||s.threeQDays||s.shortLeaveDays)
-          ? [ s.halfDays?(s.halfDays+'\u00d7\u00bd'):'',
-              s.threeQDays?(s.threeQDays+'\u00d7\u00be'):'',
-              s.shortLeaveDays?(s.shortLeaveDays+'\u00d7\u00bc'):'' ].filter(Boolean).join(' ')
-          : '\u2014'), 'Half \u00b7 three-quarter \u00b7 short')+
         cellDays(s, 'wfh', s.wfhDays||'\u2014')+
         cellDays(s, 'visit', s.visitDays||'\u2014')+
         // excused lateness and early finishes - marked, but forgiven
@@ -14151,7 +14213,14 @@ function buildExcelBackup(){
                    : (DASH_KPI ? renderKpiDetail(DASH_KPI, stats, prevBy, prevLabel) : '');
     wrap.innerHTML = kpi + insights() + detailHtml +
       '<div class="dash-title">Employee Comparison '
-      +   '<span style="font-weight:500;font-size:11px;color:var(--ink-soft);">\u2014 ranked by performance score (35% attendance, 25% punctuality, 15% hours met, 15% breaks within 45 + 15 min, 10% in-office time)</span>'
+      /* Read off perfScore rather than written out by hand. It said 35 / 25 /
+         15 / 15 / 10 and named breaks as a part of the score, which they are
+         not, while leaving out the time given, which is. A page that explains
+         itself wrongly is worse than one that does not explain itself. */
+      +   '<span style="font-weight:500;font-size:11px;color:var(--ink-soft);" '
+      +     'title="Hover any heading to see what that column means and how it is worked out.">'
+      +     '\u2014 ranked by score: 30% attendance, 25% punctuality, 25% hours met, '
+      +     '15% at the desk, 5% time given</span>'
       +   (atHome.length
             ? ('<label class="dash-hidewfh" title="' + atHome.map(function(x){ return shotEsc(dispName(x.name)); }).join(', ')
                + ' worked every day from home this month, so there are no punches behind their figures">'
@@ -14163,28 +14232,75 @@ function buildExcelBackup(){
         (function(){
           // Sortable, because "who has the most absences" is a different question
           // from "who scores best", and both get asked.
+          /* Every heading says what it is and how it is reckoned. A column of
+             figures with a one-word name gets read as whatever the reader takes
+             it to mean, and "On-time" against "Hrs met" against "Net Hrs" is
+             not something anybody should have to guess at.
+
+             The wording is read off the code below it rather than written from
+             memory - which is how the line above this table came to describe a
+             score the page had not used for months. */
           var cols = [
-            {t:'#', k:null, c:'text-align:center;'},
-            {t:'Employee', k:'name'}, {t:'6-mo trend', k:null},
-            {t:'Score', k:'score'}, {t:'Attendance', k:'attendancePct'},
-            {t:'On-time', k:'onTimePct'}, {t:'Worked Hrs', k:'workedMin'},
-            {t:'Avg/Day', k:'avgDayMin'},
-            {t:'Total Dur', k:'totalDurMin'}, {t:'In Dur', k:'inDurMin'}, {t:'Out Dur', k:'outDurMin'},
-            {t:'Breaks ≤ '+fmtMin(BREAK_ALLOW_MIN), k:'breakOkPct'}, {t:'In-office', k:'inOfficePct'},
-            {t:'Late (min)', k:'totalLateMin'},
+            {t:'#', k:null, c:'text-align:center;',
+             h:'Where they come in the ranking. Highest score first, until you sort by another column.'},
+            {t:'Employee', k:'name', h:'Click a name to open their whole month.'},
+            {t:'6-mo trend', k:null,
+             h:'Score over the last six months, oldest on the left. The shape says more than the height.'},
+            {t:'Score', k:'score',
+             h:'30% attendance + 25% punctuality + 25% hours met + 15% at the desk + 5% time given. '
+             + 'Punctuality counts days neither late nor leaving early; hours met counts excused time as '
+             + 'worked here; time given is the weeks\u2019 surplus against a twentieth of the target.'},
+            {t:'Attendance', k:'attendancePct',
+             h:'Days present out of the days expected \u2014 present plus leave. A day on leave counts against it.'},
+            {t:'On-time', k:'onTimePct',
+             h:'Days arriving within the late threshold, out of days present. An excused lateness is not held against it.'},
+            {t:'Worked Hrs', k:'workedMin',
+             h:'Hours worked over the month, breaks included. A day from home or at a customer counts what was arranged.'},
+            {t:'Avg/Day', k:'avgDayMin', h:'Worked hours divided by days present.'},
+            {t:'Total Dur', k:'totalDurMin',
+             h:'First punch in to last punch out. Only days with two real punches \u2014 not a hand-typed day, '
+             + 'not a mispunch, not today.'},
+            {t:'In Dur', k:'inDurMin', h:'Time at the desk, as the reader recorded it.'},
+            {t:'Out Dur', k:'outDurMin',
+             h:'Total less in: time away from the desk. Red where the daily average is over the allowance.'},
+            {t:'Breaks \u2264 '+fmtMin(BREAK_ALLOW_MIN), k:'breakOkPct',
+             h:'Share of punch days where time away stayed within '+fmtMin(BREAK_ALLOW_MIN)+' ('+breakAllowWords()
+             + '), set under Options. Underneath: days over, and by how much.'},
+            {t:'In-office', k:'inOfficePct',
+             h:'Time at the desk against the day less the break allowance. Taking exactly the allowance is 100%.'},
+            {t:'Late (min)', k:'totalLateMin',
+             h:'Days arriving more than the threshold past the shift start, and the minutes in total. '
+             + 'An excused lateness is in neither.'},
             /* Absent is gone: a day missed is recorded as leave, so the column
                stood at nought against every name and said nothing Leave did not. */
-            {t:'Early (min)', k:'totalEarlyMin'},
-            {t:'Leave', k:'leaveDays'}, {t:'Part-day', k:'halfDays'},
-            {t:'WFH', k:'wfhDays'}, {t:'Visits', k:'visitDays'},
-            {t:'Excused', k:'excusedTotal'}, {t:'Extra', k:'extraMin'},
-            {t:'Hrs met', k:'hoursMetPct'}, {t:'Mispunch', k:'mispunches'},
-            {t:'Net Hrs', k:'netMin'}
+            {t:'Early (min)', k:'totalEarlyMin',
+             h:'Days leaving more than the threshold before the shift ends, and the minutes in total. '
+             + 'An excused early finish is in neither.'},
+            /* Part-day is gone: a half day is half a day of leave and is
+               already counted as such here, so the two columns said the same
+               thing twice - one in days, one in marks. */
+            {t:'Leave', k:'leaveDays',
+             h:'Leave taken, in days. A part day counts as the part it is \u2014 a half day 0.5, a short '
+             + 'leave 0.25 \u2014 and the parts are named underneath the figure.'},
+            {t:'WFH', k:'wfhDays', h:'Days marked as worked from home.'},
+            {t:'Visits', k:'visitDays', h:'Days marked as spent at a customer.'},
+            {t:'Excused', k:'excusedTotal',
+             h:'Late arrivals and early finishes you have forgiven. Noted, but not counted against them.'},
+            {t:'Extra', k:'extraMin',
+             h:'Time given on a day that owed nothing \u2014 a Sunday, a Saturday that is theirs, or a holiday worked.'},
+            {t:'Hrs met', k:'hoursMetPct',
+             h:'Hours worked against hours owed. Excused time is not added here, which is why this can read '
+             + 'lower than the hours-met part of the score.'},
+            {t:'Mispunch', k:'mispunches',
+             h:'Days flagged where the time on file is not when they came or left. Such a day is credited to the shift.'},
+            {t:'Net Hrs', k:'netMin',
+             h:'Hours worked less hours owed, added up across the weeks. Ahead is green, behind is red.'}
           ];
           return cols.map(function(c){
-            if(!c.k) return '<th'+(c.c?' style="'+c.c+'"':'')+'>'+c.t+'</th>';
+            var tip = c.h ? (' title="'+String(c.h).replace(/"/g, '&quot;')+'"') : '';
+            if(!c.k) return '<th'+(c.c?' style="'+c.c+'"':'')+tip+'>'+c.t+'</th>';
             var on = DASH_SORT.k === c.k;
-            return '<th class="sortable" data-sk="'+c.k+'">'+c.t
+            return '<th class="sortable" data-sk="'+c.k+'"'+tip+'>'+c.t
               + (on ? '<span class="sarrow">'+(DASH_SORT.dir>0?'\u25b2':'\u25bc')+'</span>' : '')+'</th>';
           }).join('');
         })()+
@@ -14217,12 +14333,14 @@ function buildExcelBackup(){
         card.innerHTML = '<div class="lv-card-h">'+d.t+'</div>'
           + '<div class="lv-card-s">'+(d.better==='high'?'Highest':'Lowest')+' first</div>'
           + '<div class="mtr-box">'
-          +   rows.slice(0,5).map(function(r){
-                return '<div class="mtr-r"><span>'+shotEsc(r.name)+'</span><i>'+d.fmt(r.v)+'</i></div>';
+          /* Everybody, not the first five. Nine or thirteen names is a list
+             somebody can read at a glance; cutting it off at five meant the
+             person being asked about was as likely as not the one left out. */
+          +   rows.map(function(r){
+                return '<div class="mtr-r"><span>'+shotEsc(dispName(r.name))+'</span><i>'+d.fmt(r.v)+'</i></div>';
               }).join('')
           + '</div>'
-          + (rows.length > 5 ? '<div class="lv-card-m">+'+(rows.length-5)+' more \u2014 click to see all</div>'
-                             : '<div class="lv-card-m">click to pin below</div>');
+          + '<div class="lv-card-m">click to open the days behind it</div>';
         card.style.display = 'block';
         var r0 = c.getBoundingClientRect();
         card.style.top  = (r0.bottom + window.scrollY + 6)+'px';
@@ -14259,9 +14377,12 @@ function buildExcelBackup(){
         try{ days = dashCellDays(emp, kind, wrap.__ddDates); }
         catch(e){ console.error('the days behind that figure', e); return; }
         if(!days.length){ card.style.display = 'none'; return; }
+        /* What the days came to, not how many lines there are: two whole days
+           and a half day is two and a half. */
+        var came = Math.round(days.reduce(function(a, r){ return a + (r.q == null ? 1 : r.q); }, 0) * 100) / 100;
         card.innerHTML = '<div class="lv-card-h">' + shotEsc(dispName(emp)) + ' \u00b7 '
             + (SAID[kind] || kind) + '</div>'
-          + '<div class="lv-card-s">' + days.length + ' day' + (days.length === 1 ? '' : 's') + '</div>'
+          + '<div class="lv-card-s">' + came + ' day' + (came === 1 ? '' : 's') + '</div>'
           + '<div class="mtr-box">'
           +   days.slice(0, 12).map(function(r){
                 return '<div class="mtr-r"><span>' + shotEsc(dashDayLabel(r.d)) + '</span>'
