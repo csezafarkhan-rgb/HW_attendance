@@ -325,6 +325,25 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     });
   }
 
+  /* ---- a rule for one table must not reach every table ----
+     The week bands down the sides of the grid were written as
+     `tr:not(...) td:first-child { border-left: 3px }`, with nothing saying
+     which table. That was harmless while the grid was the only table on the
+     page. The salary slip is a table too, and is now rendered inside the
+     dashboard rather than in a document of its own - so the grid's week bands
+     were drawn down both sides of somebody's payslip.
+
+     Any rule reaching a bare first or last cell has to name its table. */
+  {
+    const styles = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
+    const loose = styles.split('\n')
+      .map((l, i) => ({ n: i + 1, l: l.trim() }))
+      .filter(x => /td:(first|last)-child\s*\{/.test(x.l) && /border/.test(x.l))
+      .filter(x => !/^(table\.|\.|#)/.test(x.l));       // a selector that names something
+    check('a border on the first or last cell says which table it belongs to',
+      loose.length === 0, loose.map(x => x.l.slice(0, 90)));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

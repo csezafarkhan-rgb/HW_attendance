@@ -2001,9 +2001,13 @@ tr.week-start td:last-child{
   border-top-right-radius:8px;
 }
 td.week-summary-cell{text-align:center;}
-/* Add left/right borders only to cells between first and last row of week */
-tr:not(.week-spacer):not(.week-start):not(.week-summary-row) td:first-child{border-left:3px solid var(--ink-soft);}
-tr:not(.week-spacer):not(.week-start):not(.week-summary-row) td:last-child{border-right:3px solid var(--ink-soft);}
+/* Add left/right borders only to cells between first and last row of week.
+   Scoped to the grid: unscoped, these matched the first and last cell of every
+   table on the page, and drew the grid's week bands down both sides of the
+   salary slip - which is a table too, and now rendered inside the dashboard
+   rather than in a document of its own. */
+table.att tr:not(.week-spacer):not(.week-start):not(.week-summary-row) td:first-child{border-left:3px solid var(--ink-soft);}
+table.att tr:not(.week-spacer):not(.week-start):not(.week-summary-row) td:last-child{border-right:3px solid var(--ink-soft);}
 td.week-summary-cell.ok{background:var(--ok-soft);color:#1B4B31;}
 td.week-summary-cell.leverage{background:var(--late);color:#5B4200;}
 td.week-summary-cell.over{background:var(--alert);color:#fff;}
