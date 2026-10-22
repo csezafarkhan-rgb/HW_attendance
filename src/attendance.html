@@ -1498,6 +1498,8 @@ td.dur-col.out-over{ color:#B42318; font-weight:700; background:#FDECEA; }
 /* A figure that can say which days it is made of. */
 td.dd-cell{ cursor:help; }
 #dashWrap .dash-table th[title]{ cursor:help; }
+.pay-table th[title]{ cursor:help; }
+.pay-table th[title]:hover{ text-decoration:underline dotted; text-underline-offset:3px; }
 #dashWrap .dash-table th[title]:hover{ color:var(--ink); text-decoration:underline dotted; text-underline-offset:3px; }
 td.dd-cell:hover{ background:#EEF4FF; }
 /* The switch that folds away people working wholly from home. */
@@ -12254,12 +12256,31 @@ function buildExcelBackup(){
 
     /* One row per employee, so the whole team reads down a single column of
        figures - the way a payroll sheet is checked before it is paid. */
+    /* Every heading says what it is and how it is reckoned, and the ones that
+       are often empty say what would put something in them. Three columns here
+       read as a row of dashes most months - Extra, OT pay and Deduction - and a
+       dash meaning "nothing happened" is indistinguishable from one meaning
+       "this is broken" unless the column says so itself. */
+    var payHead = function(label, help){
+      return '<th title="' + String(help).replace(/"/g, '&quot;') + '">' + label + '</th>';
+    };
     var table = '<table class="dash-table pay-table"><thead><tr>'
-      + '<th>Employee</th><th>Monthly gross</th>'
-      + '<th title="Working days so far this month, out of the month\u2019s total">Work days</th><th>Present</th>'
-      + '<th>Leave</th><th>WFH</th><th title="Days worked on a holiday, Sunday, or a Saturday that is off for this person">Extra</th><th title="Overtime paid for those days">OT pay</th><th>CL used / left</th><th>SL used / left</th>'
-      + '<th title="Remaining leave after salary deductions — the same figure the Leave Record shows">Leave left</th><th>Unpaid</th><th>Per day</th><th>Deduction</th>'
-      + '<th>Net pay</th><th></th></tr></thead><tbody>'
+      + payHead('Employee', 'Click the slip at the end of the row for this person’s own breakdown.')
+      + payHead('Monthly gross', 'What they are paid a month, before anything is added or taken off. Type in the box to change it.')
+      + payHead('Work days', 'Working days gone by so far this month, out of the month’s total. Sundays, holidays and a Saturday that is theirs are not counted.')
+      + payHead('Present', 'Days they were at work, counting a part day as the part it is.')
+      + payHead('Leave', 'Days of leave this month, whole and part.')
+      + payHead('WFH', 'Days worked from home. Paid as a day at work.')
+      + payHead('Extra', 'Days worked when nothing was owed — a Sunday, a Saturday that is theirs, or a holiday. Empty unless somebody actually came in on one.')
+      + payHead('OT pay', 'Overtime for those days, at the multiple set under Pay rules. Empty whenever Extra is empty — there is nothing to pay overtime on.')
+      + payHead('CL used / left', 'Casual leave taken this year, and what is left of the entitlement. A negative figure is leave taken beyond it.')
+      + payHead('SL used / left', 'Sick leave taken this year, and what is left of the entitlement.')
+      + payHead('Leave left', 'Remaining leave after salary deductions — the same figure the Leave Record shows.')
+      + payHead('Unpaid', 'Days taken beyond the entitlement. “charged earlier” means they were already docked in an earlier month and are not docked again here.')
+      + payHead('Per day', 'Monthly gross divided by the days in the month. What one unpaid day costs.')
+      + payHead('Deduction', 'Pay taken off this month: unpaid days, and anything set under Pay rules. Empty when nothing new was charged — leave charged in an earlier month shows under Unpaid, not here.')
+      + payHead('Net pay', 'Monthly gross less the deduction, plus any overtime.')
+      + '<th></th></tr></thead><tbody>'
       + rows.map(function(r){
           var e = shotEsc(r.emp);
           return '<tr'+(r.gross?'':' class="no-gross"')+'>'
