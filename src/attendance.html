@@ -10329,7 +10329,7 @@ function buildExcelBackup(){
         if(step === 0){ TASK_DAY = null; renderEmpTasks(); return; }
         var d = new Date(day + 'T00:00:00');
         d.setDate(d.getDate() + step);
-        var next = d.toISOString().slice(0, 10);
+        var next = isoOf(d);                      // local parts: see renderWorkLogPage
         if(next > todayISO_full) return;          // tomorrow has not happened
         TASK_DAY = next === todayISO_full ? null : next;
         renderEmpTasks();
@@ -12118,7 +12118,9 @@ function buildExcelBackup(){
       if(currentPage === 'holidays') renderHolidaysPage();
     if(currentPage === 'salary') renderSalaryPage();
       if(currentPage === 'dashboard') renderDashboardPage();
-      if(currentPage === 'worklog') renderWorkLogPage();
+      /* Opening the tab shows today. It is a record of what is happening now,
+         not of wherever somebody left it yesterday. */
+      if(currentPage === 'worklog'){ WLOG_DAY = null; renderWorkLogPage(); }
       if(currentPage === 'backup') renderBackupPage();
     });
   });
@@ -13110,7 +13112,11 @@ function buildExcelBackup(){
       b.addEventListener('click', function(){
         var d = new Date(day + 'T00:00:00');
         d.setDate(d.getDate() + (+b.getAttribute('data-wlog')));
-        var next = d.toISOString().slice(0, 10);
+        /* isoOf, not toISOString: the date is local midnight, and converting it
+           to UTC moves it back a day anywhere east of Greenwich. Here that made
+           "day after" land on the day it started from, so the button looked
+           dead, and "day before" skip two. */
+        var next = isoOf(d);
         if(next > todayISO_full) return;
         WLOG_DAY = next === todayISO_full ? null : next;
         renderWorkLogPage();

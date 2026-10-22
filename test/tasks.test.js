@@ -161,5 +161,71 @@ const check = (name, ok, got) => {
       && /tasks: \{[\s\S]{0,80}emWkOn/.test(app));
 }
 
+/* ---- stepping a day ----
+   The day buttons were walking with `new Date(day + 'T00:00:00')` and then
+   `toISOString().slice(0,10)`. That date is local midnight, and converting it
+   to UTC moves it back a day anywhere east of Greenwich. In Gurugram, +05:30,
+   "day after" landed on the day it started from - so the button looked dead -
+   and "day before" skipped two.
+
+   Run in the office's own timezone, which is the only place it shows. */
+{
+  const vm = require('vm'), fs = require('fs');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const ctx = { Date, String, Number };
+  vm.createContext(ctx);
+  vm.runInContext(/ {2}function isoOf\(d\)\{[\s\S]*?\n  \}/.exec(app)[0], ctx);
+  vm.runInContext(`
+    function step(day, n){
+      var d = new Date(day + 'T00:00:00');
+      d.setDate(d.getDate() + n);
+      return isoOf(d);
+    }
+    function stepTheOldWay(day, n){
+      var d = new Date(day + 'T00:00:00');
+      d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+  `, ctx);
+
+  /* The office is at +05:30. The arithmetic below is checked wherever this
+     runs; the fault it fixes can only be shown east of Greenwich, so that part
+     stands aside elsewhere rather than failing for the wrong reason. */
+  const eastOfGreenwich = new Date('2026-10-21T00:00:00').getTimezoneOffset() < 0;
+
+  check('a day forward is one day forward',
+    ctx.step('2026-10-21', 1) === '2026-10-22', ctx.step('2026-10-21', 1));
+  check('and a day back is one day back',
+    ctx.step('2026-10-21', -1) === '2026-10-20', ctx.step('2026-10-21', -1));
+  check('across the end of a month, and a year',
+    ctx.step('2026-10-31', 1) === '2026-11-01'
+      && ctx.step('2026-12-31', 1) === '2027-01-01'
+      && ctx.step('2026-03-01', -1) === '2026-02-28',
+    [ctx.step('2026-10-31', 1), ctx.step('2026-12-31', 1), ctx.step('2026-03-01', -1)]);
+
+  /* The way it was done before, which is what made the button look dead. Run
+     this with TZ=Asia/Kolkata to see it the way the office does. */
+  if (eastOfGreenwich) {
+    check('the way it was done before stood still going forward',
+      ctx.stepTheOldWay('2026-10-21', 1) === '2026-10-21', ctx.stepTheOldWay('2026-10-21', 1));
+    check('and skipped two going back',
+      ctx.stepTheOldWay('2026-10-21', -1) === '2026-10-19', ctx.stepTheOldWay('2026-10-21', -1));
+  } else {
+    console.log('SKIP the old way only misbehaves east of Greenwich; this ran at UTC'
+      + (-new Date().getTimezoneOffset() / 60) + '. TZ=Asia/Kolkata shows it.');
+  }
+
+  /* And neither page walks a day that way any more. */
+  const pages = ['renderWorkLogPage', 'renderEmpTasks'].map(n =>
+    new RegExp('function ' + n + '\\(\\)[\\s\\S]*?\\n  \\}').exec(app)[0]);
+  check('neither page turns a local date into UTC to walk it',
+    pages.every(p => p.indexOf('toISOString().slice(0, 10)') === -1),
+    pages.map(p => (p.match(/toISOString\(\)[^;]*/g) || [])).flat());
+
+  /* Opening the tab shows today rather than wherever it was left. */
+  check('opening the work log shows today',
+    /currentPage === 'worklog'\)\{ WLOG_DAY = null; renderWorkLogPage\(\); \}/.test(app));
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;
