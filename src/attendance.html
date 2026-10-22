@@ -3037,6 +3037,12 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 .dof-sheet .dof-eg{ color:#777 !important; }
 .dof-sheet .dof-sigln{ font-family:Arial,Helvetica,sans-serif !important; }
 /* The answers: name, dates, reason, approver. */
+/* The employee's particulars on the slip, in two rows of pairs - the same
+   fields the printed one carries, so the two read alike. */
+.slip-meta{ display:flex; flex-wrap:wrap; gap:4px 22px; margin-top:7px; }
+.slip-m{ display:flex; gap:6px; align-items:baseline; font-size:11.5px; }
+.slip-m > span{ color:var(--ink-soft); }
+.slip-m > b{ color:var(--ink); font-weight:700; }
 .dof-sheet .dof-fill{ font-family:'Courier New',Courier,monospace !important; }
 
 </style>
@@ -12367,6 +12373,15 @@ function buildExcelBackup(){
     var line = function(l, v, cls){
       return '<div class="slip-r'+(cls?' '+cls:'')+'"><span>'+l+'</span><i>'+v+'</i></div>';
     };
+    /* The same details the printed slip carries, so what is checked on screen
+       and what is handed over are the same document. Paid on the last day of
+       the month it is for. */
+    var slipLast = new Date(+ym.slice(0,4), +ym.slice(5,7), 0);
+    var slipPayDay = ym + '-' + pad2(slipLast.getDate());
+    var slipJoined = normJoin(getJoinDate(r.emp));
+    var meta = function(l, v){
+      return '<span class="slip-m"><span>'+l+'</span><b>'+(v ? shotEsc(v) : '—')+'</b></span>';
+    };
     box.innerHTML =
       '<div class="slip" id="slipCard">'
       + '<div class="slip-top">'
@@ -12375,7 +12390,14 @@ function buildExcelBackup(){
       +     '<div><b>'+shotEsc(coName)+'</b><span>'+shotEsc(coAddr)+'</span></div>'
       +   '</div>'
       +   '<div class="slip-ttl">Salary Slip<span>'+monthLabel(ym)+'</span></div></div>'
-      + '<div class="slip-who"><b>'+shotEsc(dispName(r.emp))+'</b></div>'
+      + '<div class="slip-who"><b>'+shotEsc(dispName(r.emp))+'</b>'
+      +   '<div class="slip-meta">'
+      +     meta('Employee ID', getEmpCode(r.emp))
+      +     meta('Joined', slipJoined ? longDate(slipJoined) : '')
+      +     meta('Shift', getShift(r.emp, slipPayDay))
+      +     meta('Pay period', monthLabel(ym))
+      +     meta('Pay date', longDate(slipPayDay))
+      +   '</div></div>'
       + '<div class="slip-grid">'
       +   '<div class="slip-col">'
       +     '<div class="slip-h">Attendance</div>'
