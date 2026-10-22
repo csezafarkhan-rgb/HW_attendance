@@ -4347,17 +4347,45 @@ function showUploadStatus(msg, isError){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min',
+    'lunchBreakMin','break1Min','break2Min','mailSettings',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
+  /* Kept per person rather than for the office: what this account has already
+     seen. They go into the backup like everything else, but have to be written
+     back as personal or they land in the shared store, where nothing reads
+     them and everyone would inherit one person's dismissed alerts. */
+  var BACKUP_PERSONAL_KEYS = ['notifSeenAt','perfAlertsSeen','alertsCleared'];
+  /* The list above is what this build knows to look for. It is not what the
+     office has: every feature added since - the mail settings, the work log,
+     whatever comes next - lives in the same store under a name nobody thought
+     to add here, and was quietly left out of every backup taken.
+
+     So the list is a floor, not the whole of it. What actually goes into a
+     backup is every key the store holds, which cannot fall behind the app. */
+  function backupKeyList(){
+    var out = BACKUP_KEYS.slice();
+    var add = function(k){
+      if(!k || out.indexOf(k) > -1) return;
+      if(BACKUP_SKIP_KEYS.indexOf(k) > -1) return;    // restore points and the import log
+      out.push(k);
+    };
+    BACKUP_PERSONAL_KEYS.forEach(add);
+    try{
+      var held = (window.HWSync && window.HWSync.cached) ? window.HWSync.cached() : null;
+      if(held) Object.keys(held).forEach(add);
+    }catch(_){}
+    return out;
+  }
   /* Settings kept in localStorage rather than the shared store - they belong in
      the backup too, or a restore comes back subtly different. */
   var BACKUP_LOCAL_KEYS = ['hw_leave_hidden','hw_nm_cols','hw_nm_w','hw_trk_tpl',
     'hw_req_compact','hw_myreq_compact','hw_emp_cal_compact','hw_side_w','hw_side_collapsed',
     'attDashboard_autoBackupShot'];
   function buildFullBackup(){
-    return Promise.all(BACKUP_KEYS.map(function(k){
-      return storage.get(k, true)
+    var keys = backupKeyList();
+    return Promise.all(keys.map(function(k){
+      var mine = BACKUP_PERSONAL_KEYS.indexOf(k) > -1;
+      return storage.get(k, !mine)
         .then(function(res){ return {k:k, v:(res && res.value!=null) ? res.value : null}; })
         .catch(function(){ return {k:k, v:null}; });
     }).concat([
@@ -4389,7 +4417,12 @@ function showUploadStatus(msg, isError){
         }
       }catch(_){}
       if(!n) return null;
-      var out={ _type:'ally-attendance-full-backup', _version:1, exportedAt:new Date().toISOString(), keys:n, data:data };
+      /* Which of them belong to this account rather than to the office, so a
+         restore puts them back where they came from without having to carry
+         this build's idea of which is which. */
+      var mine = BACKUP_PERSONAL_KEYS.filter(function(k){ return data['attDashboard_' + k] != null; });
+      var out={ _type:'ally-attendance-full-backup', _version:2, exportedAt:new Date().toISOString(),
+                keys:n, personal:mine, data:data };
       return { json:JSON.stringify(out,null,2), fname:'attendance_FULL_backup_'+new Date().toISOString().slice(0,10)+'.json', n:n };
     });
   }
@@ -5411,6 +5444,9 @@ function ensureDirPerm(dir, byClick, mode){
   function restoreFullBackup(data){
     var jobs=[], n=0, dataset=null, lockedText=null;
     data = unwrapLegacySnapshot(data);
+    /* What the file says belongs to one account rather than to the office.
+       Older files do not say, so this build's own list stands in for them. */
+    var personal = Array.isArray(data && data.personal) ? data.personal : BACKUP_PERSONAL_KEYS;
     /* Two shapes reach here. The older export prefixes every key with
        "attDashboard_"; the daily snapshot writes the plain key names. Only the
        prefixed form was accepted, so a snapshot imported as "no data to
@@ -5444,7 +5480,7 @@ function ensureDirPerm(dir, byClick, mode){
         return;
       }
       try{ localStorage.setItem('attDashboard_' + key, text); }catch(_){}   // keep the fallback in step
-      jobs.push(storage.set(key, text, true));
+      jobs.push(storage.set(key, text, personal.indexOf(key) === -1));
     });
     if(!n){ bkStatus('This backup file has no data to restore.', true); return Promise.resolve(false); }
     if(dataset && dataset.records && dataset.records.length && window.HWSync && window.HWSync.replaceDataset){
@@ -6740,7 +6776,7 @@ function backupSettingsSheet(){
      marks, requests and salaries into the Excel backup. */
   var srv = null;
   try{ srv = (window.HWSync && window.HWSync.cached) ? window.HWSync.cached() : null; }catch(e){}
-  BACKUP_KEYS.forEach(function(k){
+  backupKeyList().forEach(function(k){
     if(k === 'customDataset') return;        // the punches have their own sheets
     var raw = null;
     if(srv && srv[k] != null) raw = String(srv[k]);
@@ -7936,9 +7972,10 @@ function buildExcelBackup(){
       if(res && res.value){ try{ dailyTasks = JSON.parse(res.value); }catch(e){ dailyTasks = {}; } }
     }).catch(function(){ dailyTasks = {}; });
   }
+  /* A refusal used to be swallowed here, so a line that never reached the
+     server still looked saved. It is passed on now, and the page says so. */
   function saveDailyTasks(){
-    return storage.set('dailyTasks', JSON.stringify(dailyTasks), true)
-      .catch(function(e){ console.error(e); });
+    return storage.set('dailyTasks', JSON.stringify(dailyTasks), true);
   }
   function getTasks(emp, d){
     var v = dailyTasks[emp+'|'+d];
@@ -10297,23 +10334,58 @@ function buildExcelBackup(){
           }).join('')
       + '</div>'
       + '<div class="wl-foot">' + (mine.length
-          ? (mine.length + (mine.length === 1 ? ' line' : ' lines') + ' \u00b7 saved as you type')
-          : 'One line a job. It saves itself.') + '</div>';
+          ? (mine.length + (mine.length === 1 ? ' line' : ' lines') + ' \u00b7 saved')
+          : 'One line a job. It saves itself as you type.') + '</div>';
 
     var read = function(){
       return Array.prototype.map.call(box.querySelectorAll('.wl-in'), function(el){ return el.value; });
     };
-    var keep = function(items){
-      setTasks(TASK_WHO, day, items).then(function(){ renderEmpTasks(); });
+    var foot = box.querySelector('.wl-foot');
+    var says = function(text){ if(foot) foot.textContent = text; };
+    var written = function(items){
+      var k = items.filter(Boolean).length;
+      return k ? (k + (k === 1 ? ' line' : ' lines')) : 'Nothing written yet';
     };
+    /* What the office keeps is what reached the server, so the page says so
+       only once the server has it - and says it plainly if it did not.
+
+       It used to save on leaving a box, and the line under the card claimed it
+       saved as you type while doing nothing of the sort: a line typed and the
+       tab closed was simply gone. */
+    var landed = function(items, andRender){
+      return setTasks(TASK_WHO, day, items).then(function(){
+        says(written(items) + ' \u00b7 saved');
+        showUploadStatus(written(items) + ' saved to your work log for '
+          + fmtDayLong(day) + '.', false);
+        if(andRender) renderEmpTasks();
+        return true;
+      }).catch(function(e){
+        says('Not saved \u2014 still only on this page.');
+        showUploadStatus('That line did not reach the server ('
+          + ((e && e.message) || 'no answer') + '). It is still on the page \u2014 '
+          + 'do not close the tab until it saves.', true);
+        return false;
+      });
+    };
+    var saveTimer = null;
+    var soon = function(){
+      clearTimeout(saveTimer);
+      says('Saving\u2026');
+      saveTimer = setTimeout(function(){ landed(read(), false); }, 700);
+    };
+    var keep = function(items){ clearTimeout(saveTimer); landed(items, true); };
     Array.prototype.forEach.call(box.querySelectorAll('.wl-in'), function(el){
+      /* As it is typed, not only when the box is left. The page is not
+         redrawn here: that would take the cursor out from under the hand. */
+      el.addEventListener('input', soon);
       el.addEventListener('change', function(){ keep(read()); });
       /* Enter moves on to the next line rather than submitting anything. */
       el.addEventListener('keydown', function(ev){
         if(ev.key !== 'Enter') return;
         ev.preventDefault();
+        clearTimeout(saveTimer);
         var items = read();
-        setTasks(TASK_WHO, day, items).then(function(){
+        landed(items, false).then(function(){
           renderEmpTasks();
           var ins = document.querySelectorAll('#empTasksCard .wl-in');
           var last = ins[ins.length - 1];

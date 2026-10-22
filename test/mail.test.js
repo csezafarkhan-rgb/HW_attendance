@@ -1235,6 +1235,85 @@ process.env.SESSION_SECRET = SECRET;
   }
 
 
+  /* --- a tab's own address list is the whole of it ---
+     The Work tab named one address and the message still carried the people on
+     the attendance Cc, because an empty Cc box fell back to the attendance
+     settings whatever else the tab said. A tab that names its own TO is
+     addressed; nothing is added to it. */
+  {
+    /* The day the server will ask for: today at +05:30, where the office is. */
+    const istDay = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+    const written = {};
+    written['Asha Test|' + istDay] = { items: ['Closed the October queries'] };
+    kvSet(1, 'dailyTasks', JSON.stringify(written));
+    kvSet(1, 'mailSettings', JSON.stringify({
+      to: ['shivani@x.com', 'nitish@x.com', 'documents@x.com', 'dutt@x.com'],
+      cc: ['watch@x.com'], daily: false,
+      tasks: { on: false, to: ['support@x.com'], cc: [] }
+    }));
+    const before = sent.length;
+    const built = await asAdmin('POST', '/api/mail/tasks', {});
+    check('asking for the work log builds it and sends nothing',
+      built.status === 200 && !!built.body.preview && sent.length === before,
+      { status: built.status, sent: sent.length - before });
+    check('and it says who it would go to, before it goes',
+      JSON.stringify(built.body.to) === JSON.stringify(['support@x.com']), built.body.to);
+
+    const went = await asAdmin('POST', '/api/mail/tasks', { send: 'preview' });
+    const work = sent[sent.length - 1];
+    check('pressing send sends the one that was shown',
+      went.status === 200 && sent.length === before + 1, went.status);
+    check('the work log goes only to the address saved on the Work tab',
+      JSON.stringify(work.to) === JSON.stringify(['support@x.com']),
+      work && { to: work.to, cc: work.cc });
+    check('and carries nobody from the attendance tab, on the line or behind it',
+      !(work.to || []).concat(work.cc || []).some(a => /shivani|nitish|documents|dutt|watch/.test(a))
+        && (work.cc || []).length === 0,
+      work && { to: work.to, cc: work.cc });
+
+    /* An expired or already-used preview sends nothing: the word that sends is
+       spent once, so a second press cannot send the message twice. */
+    const twice = await asAdmin('POST', '/api/mail/tasks', { send: 'preview' });
+    check('the same preview cannot be sent twice',
+      twice.status === 410 && sent.length === before + 1, twice.status);
+
+    /* Who the message names. The employees table carries whatever the punch
+       machine has ever written down - a card called "500", somebody who has
+       since resigned - and the work log was naming all of them and then
+       reporting them for writing nothing. It lists the people the portal
+       lists, which is what the attendance message has always done. */
+    {
+      db.employees.push({ name: '500' }, { name: 'Gone Person' });
+      kvSet(1, 'mailSettings', JSON.stringify({
+        to: ['boss@x.com'], cc: [], daily: false, tasks: { on: false, to: ['support@x.com'], cc: [] }
+      }));
+      const built = await asAdmin('POST', '/api/mail/tasks', {});
+      const html = built.body && built.body.preview && built.body.preview.html;
+      check('a card-punch entry is not reported for writing nothing',
+        !!html && !/>500</.test(html) && !/ 500,/.test(html), (/Nothing written[^<]*/.exec(html || '') || [])[0]);
+      check('nor is somebody the portal no longer shows',
+        !!html && !/Gone Person/.test(html), (/Nothing written[^<]*/.exec(html || '') || [])[0]);
+      check('and the people the portal does show are still named',
+        !!html && /Ravi Test/.test(html), (/Nothing written[^<]*/.exec(html || '') || [])[0]);
+      db.employees = db.employees.filter(e => e.name !== '500' && e.name !== 'Gone Person');
+    }
+
+    /* A tab that names nobody is the attendance message's audience - that is
+       what the box says, and it is how the work log reached four people. */
+    kvSet(1, 'mailSettings', JSON.stringify({
+      to: ['shivani@x.com', 'nitish@x.com'], cc: ['watch@x.com'], daily: false,
+      tasks: { on: false, to: [], cc: [] }
+    }));
+    await asAdmin('POST', '/api/mail/tasks', {});
+    const fellBack = await asAdmin('POST', '/api/mail/tasks', { send: 'preview' });
+    const inherited = sent[sent.length - 1];
+    check('a Work tab naming nobody falls back to the attendance list, as the box says',
+      fellBack.status === 200
+        && JSON.stringify(inherited.to) === JSON.stringify(['shivani@x.com', 'nitish@x.com'])
+        && JSON.stringify(inherited.cc) === JSON.stringify(['watch@x.com']),
+      inherited && { to: inherited.to, cc: inherited.cc });
+  }
+
   global.fetch = realFetch;
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 

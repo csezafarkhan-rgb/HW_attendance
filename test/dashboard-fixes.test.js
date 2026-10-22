@@ -79,11 +79,12 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
 
   // ---------------- restore ----------------
   async function restoreCtx(opts) {
-    const ls = {}, sets = [], statuses = [], reloads = [], replaced = [];
+    const ls = {}, sets = [], statuses = [], reloads = [], replaced = [], wrote = {};
     const ctx = {
       console, JSON, Promise,
       localStorage: { setItem: (k, v) => { ls[k] = v; }, getItem: k => ls[k] || null, removeItem: k => { delete ls[k]; } },
-      storage: { set: (k, v) => { sets.push(k); return opts.failKey === k ? Promise.reject(new Error('payload_too_large')) : Promise.resolve(); } },
+      storage: { set: (k, v, shared) => { sets.push(k); wrote[k] = { shared: shared !== false };
+        return opts.failKey === k ? Promise.reject(new Error('payload_too_large')) : Promise.resolve(); } },
       idbData: () => Promise.resolve(),
       bkStatus: (m, err) => statuses.push((err ? 'ERR ' : '') + m),
       showUploadStatus: (m, err) => statuses.push((err ? 'ERR ' : '') + m),
@@ -92,10 +93,17 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       window: { HWSync: { replaceDataset: d => { replaced.push(d); return Promise.resolve(); } } }
     };
     vm.createContext(ctx);
-    vm.runInContext("var BACKUP_SKIP_KEYS = ['preImportRestore', 'importLog', 'hasBackupDir', 'json', 'fname', 'n'];", ctx);
+    /* The two lists the restore reads, taken from the page rather than typed
+       out here: a copy kept by hand goes stale the moment either one changes,
+       and the restore then behaves differently under test than in the app. */
+    ['BACKUP_SKIP_KEYS', 'BACKUP_PERSONAL_KEYS'].forEach(name => {
+      const decl = new RegExp('var ' + name + ' = \\[[^\\]]*\\];').exec(src);
+      if (!decl) throw new Error('not found in the page: ' + name);
+      vm.runInContext(decl[0], ctx);
+    });
     vm.runInContext(grab('unwrapLegacySnapshot'), ctx);
     vm.runInContext(grab('restoreFullBackup'), ctx);
-    return { ctx, ls, sets, statuses, reloads, replaced };
+    return { ctx, ls, sets, statuses, reloads, replaced, wrote };
   }
   {
     const r = await restoreCtx({});

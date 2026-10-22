@@ -1490,6 +1490,22 @@ async function mailSettings(orgId) {
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
 }
+/* What else sees it. A tab's own Cc box, and nothing else once that tab names
+   its own TO: a message addressed to the one address typed on the Work tab was
+   still carrying whoever sits on the attendance Cc, because an empty Cc box
+   fell back to the attendance settings whatever else the tab said.
+
+   The fallback is still there for a tab that names nobody at all - that tab is
+   the attendance message's audience, Cc and all. */
+function mailCc(settings, which) {
+  const tab = (which && settings[which]) || {};
+  const own = Array.isArray(tab.cc) ? tab.cc : [];
+  if (own.length) return own;
+  const to = Array.isArray(tab.to) ? tab.to : [];
+  const first = Array.isArray(tab.firstTo) ? tab.firstTo : [];
+  if (to.length || first.length) return [];
+  return settings.cc || [];
+}
 /* Every active super admin, plus anyone named in the settings. A view admin is
    left out: they cannot act on the buttons anyway. */
 async function mailRecipients(orgId, settings, which) {
@@ -1969,7 +1985,7 @@ async function sendMonthEmail(orgId, opts) {
     sentAt: mailer.clock(Math.floor(istParts().min / 60) + ':'
                          + String(istParts().min % 60).padStart(2, '0'))
   });
-  const cc = (settings.month.cc.length ? settings.month.cc : settings.cc) || [];
+  const cc = mailCc(settings, 'month');
   const msg = { to, cc, subject: mail.subject, html: mail.html, attachments };
   if (opts.preview) return { ok: true, mail: msg, attachedFile: !!fileSent };
   const r = await mailer.send(msg);
@@ -2023,7 +2039,7 @@ async function sendHolidayEmail(orgId, opts) {
   if (!mail) return { ok: true, nothing: true };
   const to = await mailRecipients(orgId, settings, 'holiday');
   if (!to.length) return { ok: false, error: NO_ADDRESS };
-  const cc = (settings.holiday.cc.length ? settings.holiday.cc : settings.cc) || [];
+  const cc = mailCc(settings, 'holiday');
   /* The preview carries which holiday it is for, so that pressing Send on it -
      which is how the word normally goes out - marks that holiday as spoken for
      the same as any other route. */
@@ -2057,35 +2073,46 @@ async function sendTasksEmail(orgId, day, opts) {
   const emps = await pool.query(
     'SELECT name FROM employees WHERE org_id = $1 AND is_active ORDER BY lower(name)', [orgId]);
   if (!emps.rows.length) return { ok: true, nothing: true };
+  /* The people the portal is showing, which is what the attendance message has
+     always gone by. Without it the work log named everybody in the employees
+     table - a card-punch entry called "500" and somebody who had resigned among
+     them - and then reported them for writing nothing. Hiding somebody on the
+     portal now takes them out of this message too. */
+  let people = emps.rows.map(e => e.name);
+  const shown = await shownEmployees(orgId);
+  if (shown) {
+    const kept = people.filter(n => shown[n] === true);
+    if (kept.length) people = kept;                 // nothing selected: the lot, as elsewhere
+  }
   const kv = await sharedKeys(orgId, ['dailyTasks', 'empNames', 'companyInfo', 'overrides']);
   const tasks = parseJson(kv.dailyTasks) || {};
   const shownNames = parseJson(kv.empNames) || {};
   const overrides = parseJson(kv.overrides) || {};
-  const people = [], silent = [];
-  emps.rows.forEach(e => {
-    const shown = shownNames[e.name] || e.name;
-    const v = tasks[e.name + '|' + day];
+  const wrote = [], silent = [];
+  people.forEach(name => {
+    const label = shownNames[name] || name;
+    const v = tasks[name + '|' + day];
     const items = (v && Array.isArray(v.items)) ? v.items.filter(Boolean) : [];
-    if (items.length) { people.push({ name: shown, count: items.length, items }); return; }
+    if (items.length) { wrote.push({ name: label, count: items.length, items }); return; }
     /* Somebody on leave has not failed to write anything - they were not here.
        Naming them among the silent would read as a reproach. */
-    const ov = overrides[e.name + '|' + day];
+    const ov = overrides[name + '|' + day];
     if (ov && ov.cat === 'LEAVE') return;
-    silent.push(shown);
+    silent.push(label);
   });
   const mail = mailer.tasksEmail({
     orgName: orgNameOf(kv.companyInfo), dateLabel: mailer.fmtDay(day, true),
-    people, silent, subject: settings.tasks.subject,
+    people: wrote, silent, subject: settings.tasks.subject,
     intro: settings.tasks.intro, footer: settings.tasks.footer, siteUrl: mailer.baseUrl()
   });
   if (!mail) return { ok: true, nothing: true };        // nobody wrote anything
   const to = await mailRecipients(orgId, settings, 'tasks');
   if (!to.length) return { ok: false, error: NO_ADDRESS };
-  const cc = (settings.tasks.cc.length ? settings.tasks.cc : settings.cc) || [];
+  const cc = mailCc(settings, 'tasks');
   if (opts.preview) return { ok: true, mail: { to, cc, subject: mail.subject, html: mail.html, attachments: [] } };
   const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
   await logMail(orgId, 'tasks', { to, cc, subject: mail.subject, html: mail.html }, r);
-  return Object.assign({ to: to.length, cc: cc.length, people: people.length }, r);
+  return Object.assign({ to: to.length, cc: cc.length, people: wrote.length }, r);
 }
 
 async function sendLeaveEmail(orgId) {
@@ -2101,10 +2128,10 @@ async function sendLeaveEmail(orgId) {
     legs.push({ stage: 1, to: ft,
                 cc: (settings.leave.firstCc || []).filter(a => ft.indexOf(a) === -1) });
     legs.push({ stage: 2, to: await mailRecipients(orgId, settings, 'leave'),
-                cc: (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [] });
+                cc: mailCc(settings, 'leave') });
   } else {
     legs.push({ stage: 0, to: await mailRecipients(orgId, settings, 'leave'),
-                cc: (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [] });
+                cc: mailCc(settings, 'leave') });
   }
   let addressed = 0, sent = 0, toN = 0, ccN = 0, failed = null;
   for (const leg of legs) {
@@ -2142,7 +2169,7 @@ async function notifyNewRequests(orgId, added) {
       cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
     } else {
       to = await mailRecipients(orgId, settings, 'leave');
-      cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+      cc = mailCc(settings, 'leave');
     }
     if (!to.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
@@ -2218,7 +2245,7 @@ async function notifyDecision(orgId, req) {
     const mail = mailer.decisionEmail({
       orgName: orgNameOf(kv.companyInfo), req, decision: req.status, siteUrl: mailer.baseUrl()
     });
-    const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    const cc = mailCc(settings, 'leave');
     const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
     await logMail(orgId, 'decision', { to: [to], cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {
@@ -2247,7 +2274,7 @@ async function notifyRecommended(orgId, req) {
       heading: 'Approved by ' + (req.recommendedBy || 'the first approver') + ', waiting on you',
       intro: settings.leave.intro, footer: settings.leave.footer
     });
-    const cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+    const cc = mailCc(settings, 'leave');
     const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
     await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {
@@ -2355,7 +2382,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
       cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
     } else {
       to = await mailRecipients(orgId, settings, 'leave');
-      cc = (settings.leave.cc.length ? settings.leave.cc : settings.cc) || [];
+      cc = mailCc(settings, 'leave');
     }
     if (!to.length) return;
     const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
