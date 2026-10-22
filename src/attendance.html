@@ -2222,9 +2222,12 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   @page{ size:A4; margin:0; }
   html, body{ margin:0 !important; padding:0 !important; height:auto !important; }
   body > *{ display:none !important; }
-  #dofOverlay{ display:block !important; position:static; background:#fff; padding:0;
+  #dofOverlay, #slipOverlay{ display:block !important; position:static; background:#fff; padding:0;
     overflow:visible; height:auto !important; }
-  #dofOverlay .dof-bar{ display:none !important; }
+  #dofOverlay .dof-bar, #slipOverlay .dof-bar{ display:none !important; }
+  .slipsheet{ margin:0; box-shadow:none;
+    page-break-inside:avoid; page-break-after:avoid; break-inside:avoid;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   /* The sheet is already exactly one A4 page, so printing only removes the
      screen chrome. Nothing is rescaled - and it says so in full, because a
      sheet of A4 is 794px wide to a media query, which is inside the
@@ -3043,6 +3046,45 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
 .slip-m{ display:flex; gap:6px; align-items:baseline; font-size:11.5px; }
 .slip-m > span{ color:var(--ink-soft); }
 .slip-m > b{ color:var(--ink); font-weight:700; }
+/* ---- the salary slip, on the same A4 sheet as the day-off form ----
+   Written here rather than inside the print document, because the sheet is now
+   shown on screen before it is printed and the two must be the same thing. */
+#slipOverlay{ display:none; position:fixed; inset:0; z-index:99999; overflow:auto;
+  background:rgba(12,18,28,.72); padding:0 0 28px; }
+#slipOverlay .dof-bar{ position:sticky; top:0; z-index:2; display:flex; align-items:center;
+  gap:10px; padding:10px 16px; background:#101722; color:#fff; font-size:13px; }
+#slipOverlay .dof-bar span{ margin-right:auto; font-weight:500; opacity:.85; }
+#slipOverlay .dof-bar .btn{ width:auto; padding:7px 16px; font-size:12.5px; }
+.slipsheet{ position:relative; width:594.96pt; height:840.96pt; margin:22px auto; overflow:hidden;
+  background:#fff; color:#000; font:11pt/1.35 'Times New Roman',Times,serif;
+  box-shadow:0 18px 50px rgba(0,0,0,.35); }
+.slipsheet .bg{ position:absolute; left:-0.6pt; top:7.5pt; width:594.5pt; height:833.3pt; }
+/* A column, so the signature is pushed to the foot by what is above it rather
+   than pinned there. Pinned, it sat under the deductions as soon as a slip had
+   deductions to show. */
+.slipsheet .body{ position:absolute; left:64pt; right:64pt; top:126pt; bottom:72pt;
+  display:flex; flex-direction:column; }
+.slipsheet .ttl{ text-align:center; font-size:15pt; font-weight:700; letter-spacing:.4pt; }
+.slipsheet .ttl span{ display:block; font-size:11pt; font-weight:400; margin-top:2pt; }
+.slipsheet .h{ margin:9pt 0 4pt; font-size:9pt; font-weight:700; letter-spacing:.09em;
+  text-transform:uppercase; border-bottom:.8pt solid #000; padding-bottom:2pt; }
+.slipsheet .who{ display:flex; flex-wrap:wrap; }
+.slipsheet .f{ flex:0 0 50%; display:flex; gap:5pt; padding:1.6pt 0; font-size:10.5pt; }
+.slipsheet .fl{ color:#333; }
+.slipsheet .fv{ font-weight:700; }
+.slipsheet table{ width:100%; border-collapse:collapse; font-size:10.5pt; }
+.slipsheet td{ padding:2.3pt 0; border-bottom:.5pt solid #D8D8D8; }
+.slipsheet td.n{ text-align:right; white-space:nowrap; }
+.slipsheet tr.tot td{ border-top:1pt solid #000; border-bottom:none; font-weight:700;
+  font-size:12pt; padding-top:6pt; }
+.slipsheet tr.sub td{ border-bottom:none; padding-top:6pt; font-weight:700; }
+.slipsheet .sign{ margin-top:auto; padding-top:10pt; display:flex;
+  justify-content:space-between; gap:40pt; }
+.slipsheet .sign > div{ flex:1 1 0; text-align:center; }
+.slipsheet .sign .ln{ border-top:.8pt solid #000; margin-bottom:3pt; height:28pt; }
+.slipsheet .sign .cap{ font-size:9.5pt; }
+.slipsheet .sign .cap b{ display:block; font-size:10pt; }
+.slipsheet .note{ margin-top:9pt; font-size:8.5pt; color:#555; text-align:center; }
 .dof-sheet .dof-fill{ font-family:'Courier New',Courier,monospace !important; }
 
 </style>
@@ -12354,96 +12396,19 @@ function buildExcelBackup(){
     if(SLIP_FOR) renderSlip(ym);
   }
 
-  /* A slip that can be printed or saved as a PDF through the browser. */
+  /* A slip, shown as it will print. It used to draw a summary card in the
+     page whose Print button built a second, different document - so what was
+     checked on screen and what came out of the printer were never quite the
+     same thing. The button opens the sheet itself now. */
   function renderSlip(ym){
     var box = document.getElementById('slipBox');
-    if(!box) return;
-    if(!SLIP_FOR){ box.innerHTML = ''; return; }
+    if(box) box.innerHTML = '';
+    if(!SLIP_FOR) return;
     var r = computePay(SLIP_FOR, ym);
     var coName = (coNameEl && coNameEl.textContent) ? coNameEl.textContent.trim() : 'Attendance Record';
-    var coAddr = (coAddrEl && coAddrEl.textContent) ? coAddrEl.textContent.trim() : '';
-    // The logo is stored on the letterhead element as a background image, so
-    // read it back from there rather than keeping a second copy.
-    var coLogo = '';
-    try{
-      var bg = logoEl ? logoEl.style.backgroundImage : '';
-      var mm = /url\(["']?(.*?)["']?\)/.exec(bg || '');
-      if(mm) coLogo = mm[1];
-    }catch(e){}
-    var line = function(l, v, cls){
-      return '<div class="slip-r'+(cls?' '+cls:'')+'"><span>'+l+'</span><i>'+v+'</i></div>';
-    };
-    /* The same details the printed slip carries, so what is checked on screen
-       and what is handed over are the same document. Paid on the last day of
-       the month it is for. */
-    var slipLast = new Date(+ym.slice(0,4), +ym.slice(5,7), 0);
-    var slipPayDay = ym + '-' + pad2(slipLast.getDate());
-    var slipJoined = normJoin(getJoinDate(r.emp));
-    var meta = function(l, v){
-      return '<span class="slip-m"><span>'+l+'</span><b>'+(v ? shotEsc(v) : '—')+'</b></span>';
-    };
-    box.innerHTML =
-      '<div class="slip" id="slipCard">'
-      + '<div class="slip-top">'
-      +   '<div class="slip-brand">'
-      +     (coLogo ? ('<span class="slip-logo" style="background-image:url(\''+coLogo+'\')"></span>') : '')
-      +     '<div><b>'+shotEsc(coName)+'</b><span>'+shotEsc(coAddr)+'</span></div>'
-      +   '</div>'
-      +   '<div class="slip-ttl">Salary Slip<span>'+monthLabel(ym)+'</span></div></div>'
-      + '<div class="slip-who"><b>'+shotEsc(dispName(r.emp))+'</b>'
-      +   '<div class="slip-meta">'
-      +     meta('Employee ID', getEmpCode(r.emp))
-      +     meta('Joined', slipJoined ? longDate(slipJoined) : '')
-      +     meta('Shift', getShift(r.emp, slipPayDay))
-      +     meta('Pay period', monthLabel(ym))
-      +     meta('Pay date', longDate(slipPayDay))
-      +   '</div></div>'
-      + '<div class="slip-grid">'
-      +   '<div class="slip-col">'
-      +     '<div class="slip-h">Attendance</div>'
-      +     line('Working days', r.workDays)
-      +     line('Present', r.presentDays)
-      +     line('Work from home', r.wfhDays)
-      +     line('Leave taken', r.leaveDays)
-      +     line('Unpaid days', r.lop || 0)
-      +     (r.extraDays ? line('Worked on days off', r.extraDays+' \u00b7 '+fmtMin(r.extraMin), 'extra') : '')
-      +   '</div>'
-      +   '<div class="slip-col">'
-      +     '<div class="slip-h">Leave balance</div>'
-      +     line('Casual \u2014 used / left', r.clUsed+' / '+r.clLeft)
-      +     line('Sick \u2014 used / left', r.slUsed+' / '+r.slLeft)
-      +     line('Total accrued', r.totAssign)
-      +     line('Charged to salary', r.totalDed || 0, (r.totalDed>0?'neg':''))
-      +     line('Leave left after deductions', r.afterDed, r.afterDed<0?'neg':'')
-      +   '</div>'
-      +   '<div class="slip-col">'
-      +     '<div class="slip-h">Pay</div>'
-      +     line('Monthly gross', '\u20b9'+money(r.gross))
-      +     line('Per day \u00b7 '+r.calDays+' days in the month', '\u20b9'+money(r.perDay))
-      +     (r.otAmt>0 ? line('Overtime \u00b7 '+fmtMin(r.extraMin)+' at '+(payRules.otMult||1)+'\u00d7',
-                              '+\u20b9'+money(r.otAmt), 'extra') : '')
-      +     (r.preJoinAmt>0 ? line('Before joining ('+r.preJoinDays+' day'+(r.preJoinDays===1?'':'s')+')',
-                              '\u2212\u20b9'+money(r.preJoinAmt), 'neg') : '')
-      +     (r.lopAmt>0 ? line((payRules.allLeaveUnpaid ? 'Leave, unpaid (' : 'Leave overdrawn (')
-                              + (r.lop||0) + ' days)', '\u2212\u20b9'+money(r.lopAmt), 'neg') : '')
-      +     (r.stat.pf>0 ? line('Provident fund ('+payRules.pfPct+'%)', '\u2212\u20b9'+money(r.stat.pf), 'neg') : '')
-      +     (r.stat.esi>0 ? line('ESI ('+payRules.esiPct+'%)', '\u2212\u20b9'+money(r.stat.esi), 'neg') : '')
-      +     (r.stat.other>0 ? line(shotEsc(payRules.otherLabel||'Other'), '\u2212\u20b9'+money(r.stat.other), 'neg') : '')
-      +     (r.deduct>0 ? line('Total deductions', '\u2212\u20b9'+money(r.deduct), 'neg') : '')
-      +     line('Net payable', '\u20b9'+money(r.net), 'tot')
-      +   '</div>'
-      + '</div>'
-      + '<div class="slip-foot">Worked out from the attendance record for '+monthLabel(ym)
-      +   '. Unpaid days are leave taken beyond the accrued balance, as shown on the Leave Record.</div>'
-      + '<div class="slip-acts"><button type="button" id="slipPrint">Print / save as PDF</button>'
-      +   '<button type="button" id="slipClose">Close</button></div>'
-      + '</div>';
-    var pb = document.getElementById('slipPrint');
-    if(pb) pb.addEventListener('click', function(){ printSlip(r, ym, coName, coAddr, coLogo); });
-    var cb = document.getElementById('slipClose');
-    if(cb) cb.addEventListener('click', function(){ SLIP_FOR = null; renderSlip(ym); });
-    try{ document.getElementById('slipCard').scrollIntoView({behavior:'smooth', block:'nearest'}); }catch(e){}
+    openSlip(r, ym, coName, function(){ SLIP_FOR = null; });
   }
+
   /* ------------------------------------------------------------------
      Day Off / Vacation Request form.
 
@@ -12734,20 +12699,21 @@ function buildExcelBackup(){
       setTimeout(function(){ if(f.parentNode) f.parentNode.removeChild(f); }, 60000);
     }, 350);
   }
-  /* The slip, on the same A4 letterhead the day-off form prints on - the same
-     watermark, the same logo, the same coloured foot. It used to be a web page
-     with the logo pasted at the top, which looked like a screenshot of the
-     dashboard rather than a document from the company.
+  /* ---- the salary slip ----
+     On the same A4 letterhead the day-off form prints on: the same watermark,
+     the same logo, the same coloured foot. It was a web page with the logo
+     pasted at the top, which looked like a screenshot of the dashboard rather
+     than a document from the company.
 
-     Laid out in the order somebody checks a slip: who it is for, what they are
-     paid, what was taken off and why, and somewhere to sign it. Written as a
-     document of its own rather than borrowing the app's stylesheet, because it
-     is printed on its own. */
-  function printSlip(r, ym, coName, coAddr, coLogo){
+     Laid out in the order somebody checks a slip - who it is for, what they are
+     paid, what was taken off and why, and somewhere to sign it.
+
+     Built once and shown before it is printed. It used to be built twice: a
+     summary card on the page, and a different document that nobody saw until it
+     came out of the printer. */
+  function slipSheetHtml(r, ym, coName){
     var rawName = r.emp;
-    r = Object.assign({}, r, { emp: escapeHtml(r.emp) });
-    coName = escapeHtml(coName); coAddr = escapeHtml(coAddr);
-
+    var emp = shotEsc(dispName(rawName));
     /* Paid on the last day of the month it is for. */
     var last = new Date(+ym.slice(0,4), +ym.slice(5,7), 0);
     var payDay = ym + '-' + pad2(last.getDate());
@@ -12764,55 +12730,14 @@ function buildExcelBackup(){
     var rupee = function(v){ return '₹' + money(v); };
     var minus = function(v){ return '−₹' + money(v); };
 
-    var html = '<!doctype html><html><head><meta charset="utf-8">'
-      + '<title>Salary Slip — ' + r.emp + ' — ' + monthLabel(ym) + '</title><style>'
-      + '@page{ size:A4; margin:0; }'
-      + 'html,body{ margin:0; padding:0; background:#fff; }'
-      + '.sheet{ position:relative; width:594.96pt; height:840.96pt; margin:0 auto; overflow:hidden;'
-      +   ' background:#fff; color:#000; font:11pt/1.35 "Times New Roman",Times,serif; }'
-      /* Header, watermark and coloured foot are one image, exactly as the
-         day-off form uses them. Rebuilt from parts they never lined up. */
-      + '.bg{ position:absolute; left:-0.6pt; top:7.5pt; width:594.5pt; height:833.3pt; }'
-      /* Everything sits between the letterhead's head and its foot. */
-      /* A column, so the signature is pushed to the foot by what is above it
-         rather than pinned there. Pinned, it sat under the deductions table as
-         soon as a slip had deductions on it to show. */
-      + '.body{ position:absolute; left:64pt; right:64pt; top:126pt; bottom:72pt;'
-      +   ' display:flex; flex-direction:column; }'
-      + '.ttl{ text-align:center; font-size:15pt; font-weight:700; letter-spacing:.4pt; }'
-      + '.ttl span{ display:block; font-size:11pt; font-weight:400; margin-top:2pt; }'
-      + '.h{ margin:9pt 0 4pt; font-size:9pt; font-weight:700; letter-spacing:.09em;'
-      +   ' text-transform:uppercase; border-bottom:.8pt solid #000; padding-bottom:2pt; }'
-      /* Two columns of label/value, as the sample slip sets them out. */
-      + '.who{ display:flex; flex-wrap:wrap; }'
-      + '.f{ flex:0 0 50%; display:flex; gap:5pt; padding:1.6pt 0; font-size:10.5pt; }'
-      + '.fl{ color:#333; }'
-      + '.fv{ font-weight:700; }'
-      + 'table{ width:100%; border-collapse:collapse; font-size:10.5pt; }'
-      + 'td{ padding:2.3pt 0; border-bottom:.5pt solid #D8D8D8; }'
-      + 'td.n{ text-align:right; white-space:nowrap; }'
-      + 'tr.tot td{ border-top:1pt solid #000; border-bottom:none; font-weight:700;'
-      +   ' font-size:12pt; padding-top:6pt; }'
-      + 'tr.sub td{ border-bottom:none; padding-top:6pt; font-weight:700; }'
-      /* Two signature lines at the foot: theirs, and the company's. The margin
-         above takes up whatever room the tables leave. */
-      + '.sign{ margin-top:auto; padding-top:10pt; display:flex;'
-      +   ' justify-content:space-between; gap:40pt; }'
-      + '.sign div{ flex:1 1 0; text-align:center; }'
-      + '.sign .ln{ border-top:.8pt solid #000; margin-bottom:3pt; height:28pt; }'
-      + '.sign .cap{ font-size:9.5pt; }'
-      + '.sign .cap b{ display:block; font-size:10pt; }'
-      + '.note{ margin-top:9pt; font-size:8.5pt; color:#555; text-align:center; }'
-      + '@media print{ .sheet{ page-break-after:avoid; break-inside:avoid; }'
-      +   ' body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } }'
-      + '</style></head><body><div class="sheet">'
+    return '<div class="slipsheet" id="slipSheet">'
       + '<img class="bg" src="' + DOF_LETTERHEAD + '" alt="">'
       + '<div class="body">'
       + '<div class="ttl">Salary Slip<span>' + monthLabel(ym) + '</span></div>'
 
-      /* 2 - who it is for */
+      /* who it is for */
       + '<div class="h">Employee</div><div class="who">'
-      +   L('Name', '<b>' + r.emp + '</b>')
+      +   L('Name', '<b>' + emp + '</b>')
       +   L('Employee ID', shotEsc(getEmpCode(rawName)))
       +   L('Joined', joined ? longDate(joined) : '')
       +   L('Shift', shotEsc(getShift(rawName, payDay)))
@@ -12820,17 +12745,7 @@ function buildExcelBackup(){
       +   L('Pay date', longDate(payDay))
       + '</div>'
 
-      /* 3 - what they are paid */
-      + '<div class="h">Salary</div><table>'
-      +   R('Monthly gross', rupee(r.gross))
-      +   R('Per day (' + r.calDays + ' days in the month)', rupee(r.perDay))
-      +   (r.otAmt > 0 ? R('Overtime (' + fmtMin(r.extraMin) + ' at ' + (payRules.otMult || 1) + '×)',
-                           '+' + rupee(r.otAmt)) : '')
-      +   (r.deduct > 0 ? R('Less deductions', minus(r.deduct)) : '')
-      +   R('Net payable', rupee(r.net), 'tot')
-      + '</table>'
-
-      /* 4 - what was taken off, and the leave behind it */
+      /* what it was worked out from, and what came off */
       + '<div class="h">Attendance, leave and deductions</div><table>'
       +   R('Working days', r.workDays)
       +   R('Present', r.presentDays)
@@ -12849,21 +12764,72 @@ function buildExcelBackup(){
                             + (r.lop || 0) + ' days)', minus(r.lopAmt)) : '')
       +   (r.stat.pf > 0 ? R('Provident fund (' + payRules.pfPct + '%)', minus(r.stat.pf)) : '')
       +   (r.stat.esi > 0 ? R('ESI (' + payRules.esiPct + '%)', minus(r.stat.esi)) : '')
-      +   (r.stat.other > 0 ? R(escapeHtml(payRules.otherLabel || 'Other'), minus(r.stat.other)) : '')
+      +   (r.stat.other > 0 ? R(shotEsc(payRules.otherLabel || 'Other'), minus(r.stat.other)) : '')
       +   (r.deduct > 0 ? R('Total deductions', minus(r.deduct), 'tot') : '')
       + '</table>'
 
-      /* 5 - somewhere to sign it */
+      /* what they are paid */
+      + '<div class="h">Salary</div><table>'
+      +   R('Monthly gross', rupee(r.gross))
+      +   R('Per day (' + r.calDays + ' days in the month)', rupee(r.perDay))
+      +   (r.otAmt > 0 ? R('Overtime (' + fmtMin(r.extraMin) + ' at ' + (payRules.otMult || 1) + '×)',
+                           '+' + rupee(r.otAmt)) : '')
+      +   (r.deduct > 0 ? R('Less deductions', minus(r.deduct)) : '')
+      +   R('Net payable', rupee(r.net), 'tot')
+      + '</table>'
+
+      /* somewhere to sign it */
       + '<div class="sign">'
-      +   '<div><div class="ln"></div><div class="cap"><b>' + r.emp + '</b>Employee</div></div>'
-      +   '<div><div class="ln"></div><div class="cap"><b>For ' + coName + '</b>Authorised signatory</div></div>'
+      +   '<div><div class="ln"></div><div class="cap"><b>' + emp + '</b>Employee</div></div>'
+      +   '<div><div class="ln"></div><div class="cap"><b>For ' + shotEsc(coName || '')
+      +     '</b>Authorised signatory</div></div>'
       + '</div>'
       + '<div class="note">Worked out from the attendance record. '
       + 'Unpaid days are leave taken beyond the accrued balance.</div>'
-      + '</div>'
-      + '</div></body></html>';
+      + '</div></div>';
+  }
 
-    printHtmlInPage(html);
+  /* The slip, shown as it will print, with the buttons that print it. The same
+     overlay the day-off form uses - in the page rather than a new window,
+     because window.open returns null inside the workspace frame and the button
+     then appears to do nothing at all. */
+  function openSlip(r, ym, coName, onShut){
+    var ov = document.getElementById('slipOverlay');
+    if(!ov){
+      ov = document.createElement('div');
+      ov.id = 'slipOverlay';
+      document.body.appendChild(ov);
+    }
+    ov.innerHTML =
+        '<div class="dof-bar">'
+      + '<span>' + shotEsc(dispName(r.emp)) + ' · ' + monthLabel(ym)
+      +   ' — check it, then print or save it.</span>'
+      + '<button class="btn primary" id="slipPrintBtn">🖨️ Print</button>'
+      + '<button class="btn" id="slipPdfBtn">📄 Save PDF</button>'
+      + '<button class="btn" id="slipCloseBtn">Close</button>'
+      + '</div>' + slipSheetHtml(r, ym, coName);
+    ov.style.display = 'block';
+    var shut = function(){ ov.style.display = 'none'; if(onShut) onShut(); };
+    document.getElementById('slipCloseBtn').onclick = shut;
+    /* Printing the frame prints only this overlay - the print stylesheet hides
+       everything else on the page. */
+    document.getElementById('slipPrintBtn').onclick = function(){ window.print(); };
+    /* Save PDF goes through the same dialog, because that is what makes a real
+       PDF: the text stays selectable and the page stays vector at any zoom.
+       Only the reminder about the destination differs. */
+    document.getElementById('slipPdfBtn').onclick = function(){
+      var note = document.querySelector('#slipOverlay .dof-bar span');
+      var was = note ? note.textContent : '';
+      if(note) note.textContent = 'In the dialog, set Destination to “Save as PDF”.';
+      window.print();
+      setTimeout(function(){ if(note) note.textContent = was; }, 1200);
+    };
+    /* Escape closes it, as it closes everything else here. */
+    ov.onkeydown = null;
+    document.addEventListener('keydown', function esc(e){
+      if(e.key !== 'Escape') return;
+      shut(); document.removeEventListener('keydown', esc);
+    });
   }
 
   function renderHolidaysPage(){
