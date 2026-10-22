@@ -397,6 +397,31 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       bbg + ' / ' + bink + ' = ' + (bbg && bink ? ratio(bink, bbg).toFixed(2) : '?') + ':1');
   }
 
+  /* ---- the panel tells the truth about the plan ----
+     It was written when the database was free and the allowance was 5GB, and
+     it said so whatever plan was actually being paid for: a paid database was
+     still given thirty days to live and a countdown to its deletion. */
+  {
+    const server = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+    check('a database can be told it does not expire',
+      /DB_NEVER_EXPIRES/.test(server)
+        && /function dbExpiry\(firstSeen\) \{\s*\n\s*if \(DB_NEVER_EXPIRES\) return null;/.test(server));
+    check('and the month\u2019s allowance follows the plan being paid for',
+      /process\.env\.PLAN_GB/.test(server));
+    check('the running cost is told to the service, never invented',
+      /function monthlyCost\(\)/.test(server) && /COST_PLANS/.test(server)
+        && /if \(!raw\) return null;/.test(server));
+    check('and it is handed to the panel with the rest of the status',
+      /cost: monthlyCost\(\)/.test(server));
+
+    check('the panel measures against the plan, not against 5GB',
+      /the plan allows ' \+ fmtBytes\(plan\.bytes/.test(src)
+        && !/the free plan stops at 5GB/.test(src),
+      (/free plan stops[^']*/.exec(src) || [])[0]);
+    check('and shows the cost only when it has been told one',
+      /if\(cost && cost\.monthly != null\)/.test(src) && /Running cost/.test(src));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

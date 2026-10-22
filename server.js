@@ -2912,7 +2912,10 @@ async function dailyEmailTick() {
    UPDATE rather than one per request, and a restart loses at most that minute.
    ------------------------------------------------------------------ */
 const STARTED_AT = new Date();
-const FREE_BYTES = 5 * 1024 * 1024 * 1024;      // the plan's monthly responses
+/* The free plan stops at 5GB of responses a month; a paid one is far higher.
+   PLAN_GB says which, so the meter measures against the plan being paid for
+   rather than against the one the service started life on. */
+const FREE_BYTES = Math.round(Number(process.env.PLAN_GB || 5) * 1024 * 1024 * 1024);
 const FREE_DB_BYTES = 1024 * 1024 * 1024;       // and its database
 let usage = { month: '', bytes: 0, requests: 0 };
 let usageDirty = false;
@@ -2967,6 +2970,11 @@ async function flushUsage() {
    down; the expiry is thirty days on from there, or whatever DB_EXPIRES_AT
    says if the real date is known. */
 const FREE_DB_DAYS = Number(process.env.DB_FREE_DAYS || 30);
+/* A paid database is not deleted on a thirtieth day, so counting towards one
+   and warning about it is simply wrong. DB_EXPIRES_AT=never says so, and the
+   panel then says nothing about expiry at all rather than inventing a date. */
+const DB_NEVER_EXPIRES = /^(never|none|paid|no)$/i.test(String(process.env.DB_EXPIRES_AT || '').trim())
+  || Number(process.env.DB_FREE_DAYS) === 0;
 let firstSeenCache = null;
 async function dbFirstSeen() {
   if (firstSeenCache) return firstSeenCache;
@@ -2982,6 +2990,7 @@ async function dbFirstSeen() {
   return firstSeenCache;
 }
 function dbExpiry(firstSeen) {
+  if (DB_NEVER_EXPIRES) return null;
   const set = String(process.env.DB_EXPIRES_AT || '').trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(set)) return new Date(set).toISOString();
   if (!firstSeen) return null;
@@ -2991,12 +3000,32 @@ function dbExpiry(firstSeen) {
   return d.toISOString();
 }
 
+/* What this costs to run, a month, in the currency Render bills in.
+
+   The service cannot read Render's billing - that would mean carrying an API
+   key able to do far more than read a number - so the figures are told to it.
+   Change a plan, change COST_PLANS, and the panel is right again; left unset,
+   it says nothing rather than guessing. Each item is `label:amount`. */
+function monthlyCost() {
+  const raw = String(process.env.COST_PLANS || '').trim();
+  if (!raw) return null;
+  const items = [];
+  raw.split(/\s*[,;]\s*/).forEach(part => {
+    const m = /^(.+?):\s*\$?\s*([0-9]+(?:\.[0-9]+)?)$/.exec(part.trim());
+    if (m) items.push({ what: m[1].trim().slice(0, 40), usd: Number(m[2]) });
+  });
+  if (!items.length) return null;
+  const total = items.reduce((a, b) => a + b.usd, 0);
+  return { currency: 'USD', monthly: Math.round(total * 100) / 100, items };
+}
+
 /* What the dashboard's indicator shows. Cheap enough to ask for every minute:
    one size query, one count, one row. */
 app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const out = { at: new Date().toISOString(), startedAt: STARTED_AT.toISOString(),
-                db: { ok: false }, plan: { bytes: FREE_BYTES, dbBytes: FREE_DB_BYTES } };
+                db: { ok: false }, plan: { bytes: FREE_BYTES, dbBytes: FREE_DB_BYTES },
+                cost: monthlyCost() };
   const t0 = Date.now();
   try {
     /* Render's storage figure is the whole disk, not this one database: every
