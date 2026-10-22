@@ -171,7 +171,7 @@ function canWrite(role) { return role === 'admin'; }
    view-only admin allowed through here could set status:'approved' and approve
    leave. They have no reason to touch it - they raise nothing from the admin
    view - so the exception is theirs alone. */
-const EMPLOYEE_WRITABLE = ['leaveRequests'];
+const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks'];
 function mayWriteSharedKey(role, key) {
   if (canWrite(role)) return true;
   return role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) > -1;
@@ -182,7 +182,8 @@ function mayWriteSharedKey(role, key) {
    account every shared key - salaries, pay rules, signatures, everyone's marks
    and requests. Anything not named here is hidden from employees. */
 const EMP_KEYED_BY_DAY = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags', 'manualRecords',
-                          'lateExcuses', 'earlyExcuses', 'manualLeave', 'leaveDeductions'];  // "Name|date"
+                          'lateExcuses', 'earlyExcuses', 'manualLeave', 'leaveDeductions',
+                          'dailyTasks'];  // "Name|date"
 const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames'];         // "Name"
 const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
                       'weeklyLeverageMin', 'companyInfo', 'customShifts'];
@@ -229,6 +230,40 @@ function clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
    Their save is now merged into the stored array. They may add a new request of
    their own, always as pending, and answer a query on one of their own; every
    other entry stays exactly as stored. */
+/* What one person says they did, folded into what everybody has said.
+
+   The map is sent whole, so an employee saving their Tuesday would otherwise
+   be saving everybody's everything - their copy of the other names, as their
+   page last read them. Only the days under their own name are taken; every
+   other key is left exactly as it was stored. The same guard leave requests
+   have, for the same reason.
+
+   A day is a list of lines. Empty lines are dropped, the list is capped, and a
+   day with nothing left in it is removed rather than stored as an empty one. */
+const TASK_MAX_LINES = 30;
+const TASK_MAX_LEN = 300;
+function mergeEmployeeTasks(storedValue, incomingValue, name) {
+  const incoming = parseJson(incomingValue);
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
+  const parsed = parseJson(storedValue);
+  const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  const mine = k => String(k).slice(0, String(k).lastIndexOf('|')) === name;
+  /* Their own days, as they stand now - so a day they have deleted goes. */
+  Object.keys(out).forEach(k => { if (mine(k)) delete out[k]; });
+  Object.keys(incoming).forEach(k => {
+    if (!mine(k)) return;                                  // not theirs to write
+    const day = String(k).slice(String(k).lastIndexOf('|') + 1);
+    if (!DAY_RE.test(day)) return;
+    const v = incoming[k];
+    const raw = Array.isArray(v) ? v : (v && Array.isArray(v.items) ? v.items : null);
+    if (!raw) return;
+    const items = raw.map(x => String(x == null ? '' : x).trim().slice(0, TASK_MAX_LEN))
+      .filter(Boolean).slice(0, TASK_MAX_LINES);
+    if (!items.length) return;                             // nothing said: nothing stored
+    out[k] = { items, at: new Date().toISOString() };
+  });
+  return JSON.stringify(out);
+}
 function mergeEmployeeRequests(storedValue, incomingValue, name) {
   const incoming = parseJson(incomingValue);
   if (!Array.isArray(incoming)) return null;
@@ -917,7 +952,11 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         'SELECT value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE',
         [req.session.orgId, key]);
       const row = cur.rows[0];
-      if (key === 'leaveRequests') {
+      if (key === 'dailyTasks' && req.session.role === 'employee') {
+        const merged = mergeEmployeeTasks(row ? row.value : '{}', value, (req.user && req.user.name) || '');
+        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_tasks' }); }
+        value = merged;
+      } else if (key === 'leaveRequests') {
         requestsBefore = row ? row.value : '[]';
         // Merged on the server rather than refused - see mergeEmployeeRequests.
         const stored = row ? row.value : '[]';
@@ -1374,7 +1413,11 @@ const MAIL_DEFAULTS = {
   month: { to: [], cc: [], subject: '', intro: '', footer: '' },
   /* A word before a holiday, so nobody turns up to a closed building. `days`
      is how far ahead it goes out; `at` is the hour of that day, India time. */
-  holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' }
+  holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' },
+  /* What everybody worked on, written by them and gathered into one message.
+     It rides out with the attendance record rather than keeping an hour of its
+     own - the two are the same day's news. */
+  tasks: { on: false, to: [], cc: [], subject: '', intro: '', footer: '' }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1407,6 +1450,15 @@ async function mailSettings(orgId) {
     subject: String(mo.subject || '').slice(0, 200),
     intro: String(mo.intro || '').slice(0, 2000),
     footer: String(mo.footer || '').slice(0, 2000)
+  };
+  const tk = isPlainObject(s.tasks) ? s.tasks : {};
+  s.tasks = {
+    on: tk.on === true,
+    to: (Array.isArray(tk.to) ? tk.to : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    cc: (Array.isArray(tk.cc) ? tk.cc : []).map(x => String(x).trim()).filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    subject: String(tk.subject || '').slice(0, 200),
+    intro: String(tk.intro || '').slice(0, 2000),
+    footer: String(tk.footer || '').slice(0, 2000)
   };
   const lv = isPlainObject(s.leave) ? s.leave : {};
   s.leave = {
@@ -1442,6 +1494,7 @@ async function mailRecipients(orgId, settings, which) {
      are the fallback now, not a standing audience: if no box names anybody,
      the message goes to the admins rather than to nobody at all. */
   const own = (which === 'leave' && settings.leave && settings.leave.to.length) ? settings.leave.to
+            : (which === 'tasks' && settings.tasks && settings.tasks.to.length) ? settings.tasks.to
             : (which === 'holiday' && settings.holiday && settings.holiday.to.length) ? settings.holiday.to
             : (which === 'month' && settings.month && settings.month.to.length) ? settings.month.to
             : (settings.to || []);
@@ -1983,6 +2036,49 @@ async function markHolidaySaid(orgId, day) {
     await pool.query('INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING',
                      ['holiday-email:' + orgId + ':' + day]);
   } catch (e) { console.error('the holiday word went out but was not marked:', e && e.message); }
+}
+
+/* What everybody worked on, in one message. Gathered from what they wrote on
+   their own pages - this adds nothing and judges nothing, it only collects.
+
+   The order is the office's own employee order, so the message reads down the
+   same list as every other page. */
+async function sendTasksEmail(orgId, day, opts) {
+  opts = opts || {};
+  if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
+  const settings = opts.settings || await mailSettings(orgId);
+  const emps = await pool.query(
+    'SELECT name FROM employees WHERE org_id = $1 AND is_active ORDER BY lower(name)', [orgId]);
+  if (!emps.rows.length) return { ok: true, nothing: true };
+  const kv = await sharedKeys(orgId, ['dailyTasks', 'empNames', 'companyInfo', 'overrides']);
+  const tasks = parseJson(kv.dailyTasks) || {};
+  const shownNames = parseJson(kv.empNames) || {};
+  const overrides = parseJson(kv.overrides) || {};
+  const people = [], silent = [];
+  emps.rows.forEach(e => {
+    const shown = shownNames[e.name] || e.name;
+    const v = tasks[e.name + '|' + day];
+    const items = (v && Array.isArray(v.items)) ? v.items.filter(Boolean) : [];
+    if (items.length) { people.push({ name: shown, count: items.length, items }); return; }
+    /* Somebody on leave has not failed to write anything - they were not here.
+       Naming them among the silent would read as a reproach. */
+    const ov = overrides[e.name + '|' + day];
+    if (ov && ov.cat === 'LEAVE') return;
+    silent.push(shown);
+  });
+  const mail = mailer.tasksEmail({
+    orgName: orgNameOf(kv.companyInfo), dateLabel: mailer.fmtDay(day, true),
+    people, silent, subject: settings.tasks.subject,
+    intro: settings.tasks.intro, footer: settings.tasks.footer, siteUrl: mailer.baseUrl()
+  });
+  if (!mail) return { ok: true, nothing: true };        // nobody wrote anything
+  const to = await mailRecipients(orgId, settings, 'tasks');
+  if (!to.length) return { ok: false, error: NO_ADDRESS };
+  const cc = (settings.tasks.cc.length ? settings.tasks.cc : settings.cc) || [];
+  if (opts.preview) return { ok: true, mail: { to, cc, subject: mail.subject, html: mail.html, attachments: [] } };
+  const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+  await logMail(orgId, 'tasks', { to, cc, subject: mail.subject, html: mail.html }, r);
+  return Object.assign({ to: to.length, cc: cc.length, people: people.length }, r);
 }
 
 async function sendLeaveEmail(orgId) {
@@ -2654,6 +2750,16 @@ app.post('/api/mail/month', requireRole('admin'), bigJson, async (req, res) => {
   }
   res.status(out.ok ? 200 : 502).json(out);
 });
+app.post('/api/mail/tasks', requireRole('admin'), async (req, res) => {
+  const body = req.body || {};
+  const day = DAY_RE.test(String(body.day || '')) ? String(body.day) : istParts().day;
+  const out = await sendTasksEmail(req.session.orgId, day, { preview: !!body.preview });
+  if (body.preview && out.ok && out.mail) {
+    return res.json({ ok: true, preview: { subject: out.mail.subject, html: out.mail.html },
+                      to: out.mail.to });
+  }
+  res.status(out.ok ? 200 : 502).json(out);
+});
 app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {
   const r = await sendLeaveEmail(req.session.orgId);
   res.status(r.ok ? 200 : 502).json(r);
@@ -2703,6 +2809,13 @@ async function dailyEmailTick() {
       const r = await sendDailyEmail(org.id, day);
       // The leave message goes out beside it, and only when something is waiting.
       if (r.ok) { try { await sendLeaveEmail(org.id); } catch (e) { console.error('leave email:', e && e.message); } }
+      /* And what everybody worked on, where the office has asked for it. Same
+         day, same send - two messages rather than one, because they go to
+         different people and answer different questions. */
+      if (r.ok && s.tasks.on) {
+        try { await sendTasksEmail(org.id, day, { settings: s }); }
+        catch (e) { console.error('work email:', e && e.message); }
+      }
       if (!r.ok) {
         // Let tomorrow's run try again rather than leave the day marked as done.
         await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);

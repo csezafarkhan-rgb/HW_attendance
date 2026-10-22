@@ -471,6 +471,50 @@ function dailyEmail(o) {
   return { subject: subject, html: layout(o.orgName || 'Attendance', stamp, body) };
 }
 
+/* What everybody did today, one card a person, in the order the office reads
+   its names. Written by them on their own page; this only gathers it up.
+
+   Returns null when nobody has written anything, so a quiet day sends nothing
+   rather than a message saying nothing. */
+function tasksEmail(o) {
+  const people = (o.people || []).filter(function (p) { return p.items && p.items.length; });
+  if (!people.length) return null;
+  const words = { intro: 'Hello,\n\nHere is what the team worked on today.' };
+  const say = { n: people.length, org: o.orgName || 'Attendance', date: o.dateLabel || '' };
+  const body = [];
+  const intro = fillText(o.intro || words.intro, say);
+  if (intro) {
+    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+      + esc(intro) + '</div>');
+  }
+  people.forEach(function (p) {
+    body.push('<div style="margin:0 0 12px;border:1px solid ' + LINE + ';border-radius:10px;overflow:hidden;">'
+      + '<div style="padding:7px 12px;background:#F4F7FC;border-bottom:1px solid ' + LINE + ';'
+      +   'font-size:13px;font-weight:700;color:' + INK + ';">' + esc(p.name)
+      +   (p.count ? ('<span style="float:right;font-weight:600;color:' + SOFT + ';font-size:11.5px;">'
+                      + p.count + (p.count === 1 ? ' item' : ' items') + '</span>') : '')
+      + '</div>'
+      + '<ul style="margin:0;padding:9px 12px 10px 28px;font-size:13px;line-height:1.55;color:' + INK + ';">'
+      +   p.items.map(function (t) { return '<li style="margin:0 0 3px;">' + esc(t) + '</li>'; }).join('')
+      + '</ul></div>');
+  });
+  /* Who wrote nothing is worth saying: an empty card would read as a quiet day
+     rather than as a page nobody filled in. */
+  if ((o.silent || []).length) {
+    body.push('<div style="margin:14px 0 0;padding-top:10px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';">Nothing written today by '
+      + o.silent.map(esc).join(', ') + '.</div>');
+  }
+  const footer = fillText(o.footer || '', say);
+  if (footer) {
+    body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+  }
+  return {
+    subject: fillText(o.subject || 'Work done \u00b7 {date}', say),
+    html: layout(o.orgName || 'Attendance', o.dateLabel || 'Work done', body)
+  };
+}
 function leaveEmail(o) {
   const pending = o.pending || [], unreq = o.unrequested || [];
   if (!pending.length && !unreq.length) return null;   // nothing to say: no message
@@ -741,7 +785,7 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
+  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };
