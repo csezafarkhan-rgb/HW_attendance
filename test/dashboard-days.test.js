@@ -156,6 +156,12 @@ check('a day on leave is not a part day',
 const page = /function renderDashboardPage\(\)[\s\S]*?\n  \}/.exec(src)[0];
 check('the Absent column is gone, Leave having said it',
   page.indexOf("{t:'Absent'") === -1 && page.indexOf("{t:'Leave'") > -1);
+/* And the card above it, for the same reason: nobody here is marked absent, so
+   it read nought every month and the drill behind it listed nothing. */
+check('the Absences card is gone too, along with the drill behind it',
+  src.indexOf("'Absences'") === -1 && src.indexOf("absent:  {t:") === -1
+    && src.indexOf('sumAbsent') === -1,
+  [src.indexOf("'Absences'"), src.indexOf('sumAbsent')]);
 check('the ranking is drawn from its own list, not from everybody',
   /var tableStats = DASH_HIDE_WFH/.test(page) && /var rows = tableStats\.map/.test(page),
   (/var rows = \w+\.map/.exec(page) || [])[0]);

@@ -13591,7 +13591,6 @@ function buildExcelBackup(){
     late:    {t:'Late Arrivals',     unit:'days',better:'low',  get:function(x){ return x.lateDays; },      fmt:function(v){ return Math.round(v); }},
     early:   {t:'Early Departures',  unit:'days',better:'low',  get:function(x){ return x.earlyDays||0; },  fmt:function(v){ return Math.round(v); }},
     partday: {t:'Part-day Leave',    unit:'days',better:'low',  get:function(x){ return (x.halfDays||0)+(x.shortLeaveDays||0); }, fmt:function(v){ return Math.round(v*100)/100; }},
-    absent:  {t:'Absences',          unit:'days',better:'low',  get:function(x){ return x.absentDays; },    fmt:function(v){ return Math.round(v); }},
     wfh:     {t:'WFH Days',          unit:'days',better:'high', get:function(x){ return x.wfhDays; },       fmt:function(v){ return Math.round(v); }},
     excused: {t:'Excused Time',      unit:'hrs', better:'low',  get:function(x){ return x.excusedMin||0; },  fmt:function(v){ return fmtMin(Math.round(v)); }},
     /* No punch days (all WFH, say) means no figure - not 0:00, which ranked
@@ -13633,7 +13632,6 @@ function buildExcelBackup(){
         if(lx) add('late by '+minsSaid((le && le.late) || 0)+' \u00b7 '+(lx.note || 'excused'));
         if(ex) add('left '+minsSaid((le && le.early) || 0)+' early \u00b7 '+(ex.note || 'excused'));
       }
-      if(key === 'absent'  && rec && rec.st === 'AB' && !(ov && ov.cat === 'LEAVE')) add('absent');
       if(key === 'wfh'     && ((ov && ov.cat === 'WFH') ||
            (new Date(ds+'T00:00:00').getDay() === 6 && getSatPolicy(empName).mode === 'WFH' && rec && rec.st === 'PR')))
         add(ov && ov.reason ? ov.reason : 'from home');
@@ -13809,7 +13807,10 @@ function buildExcelBackup(){
               + cmp('Attendance', s.attendancePct, q.attendancePct, function(v){ return Math.round(v)+'%'; }, true)
               + cmp('Late days', s.lateDays, q.lateDays, function(v){ return Math.round(v*10)/10; }, false)
               + cmp('Early leaves', (s.earlyDays||0), (q.earlyDays||0), function(v){ return Math.round(v); }, false)
-              + cmp('Absences', s.absentDays, q.absentDays, function(v){ return Math.round(v); }, false)
+              /* Leave, not absences: nobody here is marked absent - a day
+                 missed is recorded as leave - so the old row read 0 against 0
+                 every month while the figure that moved went unmentioned. */
+              + cmp('Leave days', s.leaveDays||0, q.leaveDays||0, function(v){ return Math.round(v*100)/100; }, false)
               + cmp('Worked hrs', s.workedMin, q.workedMin, function(v){ return fmtMin(Math.round(v)); }, true)
               + cmp('Avg out / day', s.avgOutDurMin||0, q.avgOutDurMin||0, function(v){ return fmtMin(Math.round(v)); }, false)
               + cmp('Breaks over '+fmtMin(BREAK_ALLOW_MIN), s.breakOverDays||0, q.breakOverDays||0, function(v){ return Math.round(v); }, false)
@@ -13844,13 +13845,13 @@ function buildExcelBackup(){
         try{ prevBy[e.name] = computeEmployeeStats(e.name, prevDates); }catch(err){ prevBy[e.name] = null; }
       });
     }
-    var sumPresent=0,sumAbsent=0,sumLate=0,sumOnTime=0,sumWorked=0,sumWfh=0,sumAttend=0;
+    var sumPresent=0,sumLate=0,sumOnTime=0,sumWorked=0,sumWfh=0,sumAttend=0;
     var sumEarly=0, sumHalf=0, sumShort=0, sumExcused=0;
     stats.forEach(function(s){ sumEarly+=s.earlyDays||0; sumHalf+=s.halfDays||0; sumShort+=s.shortLeaveDays||0;
                                sumExcused+=s.excusedMin||0; });
     var pExcused = 0, hasExcPrev = false;
     Object.keys(prevBy).forEach(function(n){ var q=prevBy[n]; if(q){ hasExcPrev = true; pExcused += q.excusedMin||0; } });
-    stats.forEach(function(s){ sumPresent+=s.presentDays; sumAbsent+=s.absentDays; sumLate+=s.lateDays; sumOnTime+=s.onTimeDays; sumWorked+=s.workedMin; sumWfh+=s.wfhDays; sumAttend+=s.attendancePct; });
+    stats.forEach(function(s){ sumPresent+=s.presentDays; sumLate+=s.lateDays; sumOnTime+=s.onTimeDays; sumWorked+=s.workedMin; sumWfh+=s.wfhDays; sumAttend+=s.attendancePct; });
     var avgAttend = Math.round(sumAttend/stats.length);
     var teamOnTime = sumPresent>0?Math.round(sumOnTime/sumPresent*100):100;
     var maxWorked = Math.max.apply(null, stats.map(function(s){return s.workedMin;})) || 1;
@@ -14009,7 +14010,7 @@ function buildExcelBackup(){
     }
 
     // team figures for the previous month, for the KPI comparisons
-    var pAttend=0, pOnTime=0, pPresent=0, pWorked=0, pLate=0, pEarly=0, pAbsent=0, pWfh=0, pPart=0, pN=0;
+    var pAttend=0, pOnTime=0, pPresent=0, pWorked=0, pLate=0, pEarly=0, pWfh=0, pPart=0, pN=0;
     // durations, team-wide: per punch day, so the averages weigh every day equally
     var dDays=0, dIn=0, dOut=0, dOver=0, qDays=0, qIn=0, qOut=0, qOver=0;
     stats.forEach(function(s){ dDays += s.durDays||0; dIn += s.inDurMin||0; dOut += s.outDurMin||0; dOver += s.breakOverDays||0; });
@@ -14019,7 +14020,7 @@ function buildExcelBackup(){
       qDays += q.durDays||0; qIn += q.inDurMin||0; qOut += q.outDurMin||0; qOver += q.breakOverDays||0;
       pN++; pAttend += q.attendancePct; pOnTime += q.onTimeDays; pPresent += q.presentDays;
       pWorked += q.workedMin; pLate += q.lateDays; pEarly += (q.earlyDays||0);
-      pAbsent += q.absentDays; pWfh += q.wfhDays; pPart += (q.halfDays||0)+(q.shortLeaveDays||0);
+      pWfh += q.wfhDays; pPart += (q.halfDays||0)+(q.shortLeaveDays||0);
     });
     var hasPrev = pN > 0;
     var pAvgAttend  = hasPrev ? Math.round(pAttend/pN) : null;
@@ -14046,7 +14047,6 @@ function buildExcelBackup(){
       + K(sumLate, 'Late Arrivals', delta(sumLate, hasPrev?pLate:null, false), 'late')
       + K(sumEarly, 'Early Departures', delta(sumEarly, hasPrev?pEarly:null, false), 'early')
       + K(sumHalf+sumShort, 'Part-day Leave', delta(sumHalf+sumShort, hasPrev?pPart:null, false), 'partday')
-      + K(sumAbsent, 'Absences', delta(sumAbsent, hasPrev?pAbsent:null, false), 'absent')
       + K(sumWfh, 'WFH Days', delta(sumWfh, hasPrev?pWfh:null, true), 'wfh')
       + K(fmtMin(sumExcused), 'Excused Time',
           delta(sumExcused, hasExcPrev?pExcused:null, false, function(v){ return fmtMin(Math.round(v)); }), 'excused')
