@@ -484,6 +484,14 @@ function dailyEmail(o) {
 
    Returns null when nobody has written anything, so a quiet day sends nothing
    rather than a message saying nothing. */
+/* A line written under another one carries its mark inside itself - see the
+   dashboard, which writes them. Nothing here needs to know more than that. */
+const TASK_SUB = '↳ ';
+function taskLevel(t) { return String(t == null ? '' : t).indexOf(TASK_SUB) === 0 ? 1 : 0; }
+function taskText(t) {
+  const v = String(t == null ? '' : t);
+  return taskLevel(v) ? v.slice(TASK_SUB.length) : v;
+}
 function tasksEmail(o) {
   /* A card a person, in the order they were handed over - whoever wrote
      something and whoever did not. The ones who wrote nothing used to be a
@@ -502,6 +510,8 @@ function tasksEmail(o) {
     if (!named[name]) { given.push({ name: name, items: [] }); named[name] = true; }
   });
   const wrote = given.filter(function (p) { return p.items.length; });
+  /* An empty card is drawn by the length of its list, so a card holding only
+     sub-points still draws as written. */
   if (!wrote.length) return null;              // a day nobody wrote on sends nothing
   const words = DEFAULT_TEXT.tasks;
   const say = { n: wrote.length, org: o.orgName || 'Attendance', date: o.dateLabel || '' };
@@ -512,7 +522,9 @@ function tasksEmail(o) {
       + esc(intro) + '</div>');
   }
   given.forEach(function (p) {
-    const n = p.items.length;
+    /* What is counted is tasks, not lines: a sub-point is more about the task
+       above it, not another one. */
+    const n = p.items.filter(function (t) { return !taskLevel(t); }).length;
     body.push('<div style="margin:0 0 12px;border:1px solid ' + LINE + ';border-radius:10px;overflow:hidden;">'
       + '<div style="padding:7px 12px;background:#F4F7FC;border-bottom:1px solid ' + LINE + ';'
       +   'font-size:13px;font-weight:700;color:' + INK + ';">' + esc(p.name)
@@ -521,7 +533,18 @@ function tasksEmail(o) {
       + '</div>'
       + (n
           ? ('<ul style="margin:0;padding:9px 12px 10px 28px;font-size:13px;line-height:1.55;color:' + INK + ';">'
-             + p.items.map(function (t) { return '<li style="margin:0 0 3px;">' + esc(t) + '</li>'; }).join('')
+             + p.items.map(function (t, i) {
+                 /* A line written under another one is drawn under it, not
+                    beside it: the message keeps the shape it was written in. */
+                 const lvl = taskLevel(t), txt = esc(taskText(t));
+                 const prev = i ? taskLevel(p.items[i - 1]) : 0;
+                 const next = (i + 1 < p.items.length) ? taskLevel(p.items[i + 1]) : 0;
+                 if (!lvl) return '<li style="margin:0 0 3px;">' + txt + '</li>';
+                 return ((lvl && !prev) ? ('<ul style="margin:3px 0 5px;padding-left:18px;'
+                           + 'list-style:circle;font-size:12.5px;color:' + SOFT + ';">') : '')
+                   + '<li style="margin:0 0 2px;">' + txt + '</li>'
+                   + ((lvl && !next) ? '</ul>' : '');
+               }).join('')
              + '</ul>')
           : ('<div style="padding:9px 12px 10px;font-size:13px;line-height:1.55;color:' + SOFT + ';">'
              + 'Nothing written today</div>'))

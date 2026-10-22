@@ -2629,6 +2629,8 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wlog-card.quiet .wlog-n{ border-bottom:none; padding-bottom:0; color:var(--ink-soft); }
 .wlog-card ul{ margin:8px 0 0; padding-left:18px; font-size:12.5px; line-height:1.5; }
 .wlog-card li{ margin:0 0 3px; }
+.wlog-sub{ margin:3px 0 4px !important; padding-left:16px !important; list-style:circle; }
+.wlog-sub li{ color:var(--ink-soft); font-size:12px; }
 
 /* ---- the work log ----
    Where somebody writes down what they did, one line a job. Plain boxes rather
@@ -2640,7 +2642,9 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-head span{ display:block; font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
 .wl-nav{ display:flex; gap:6px; }
 .wl-nav .month-btn{ padding:4px 10px; font-size:12px; }
-.wl-nav .month-btn[disabled]{ opacity:.4; cursor:default; }
+.wl-nav .month-btn[disabled]{ opacity:.3; cursor:not-allowed; background:transparent;
+  border-color:transparent; color:var(--ink-soft); box-shadow:none; }
+.wl-nav .month-btn[disabled]:hover{ background:transparent; border-color:transparent; }
 .wl-row{ display:flex; align-items:center; gap:8px; padding:1px 0; }
 .wl-dot{ color:var(--ink-soft); font-size:15px; line-height:1; flex:none; }
 .wl-in{ flex:1; border:1px solid transparent; border-radius:7px; padding:6px 8px;
@@ -2652,6 +2656,15 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-row:hover .wl-x{ opacity:.8; }
 .wl-x:hover{ background:#FDE7E4; color:#C0392B; opacity:1; }
 .wl-foot{ font-size:11px; color:var(--ink-soft); margin-top:7px; }
+/* A line tucked under the one above it: stepped in, with a turned arrow for a
+   bullet, so the shape of the day reads off the card at a glance. */
+.wl-sub{ padding-left:26px; }
+.wl-sub .wl-dot{ font-size:12px; opacity:.75; }
+.wl-sub .wl-in{ font-size:12.5px; }
+.wl-sub-btn{ flex:none; border:none; background:transparent; color:var(--ink-soft);
+  opacity:.25; font-size:12px; cursor:pointer; border-radius:6px; padding:2px 5px; }
+.wl-row:hover .wl-sub-btn{ opacity:.7; }
+.wl-sub-btn:hover{ background:#EEF3FA; color:var(--ink); opacity:1; }
 /* Dark green, with the words in white over it. The pale version read as part
    of the page and was missed; this one is plainly a notice, and every piece of
    text on it clears 7:1 against the background. */
@@ -7966,6 +7979,35 @@ function buildExcelBackup(){
      into one message. The server takes only the days under the name that is
      signed in, so a page carrying a stale copy of everybody else cannot write
      over them. */
+  /* A line that belongs under the one above it. The mark is kept inside the
+     line rather than nesting the data, so everything that already reads a
+     day's work - the server's merge, the office's page, the message, the
+     workbook, every backup already taken - goes on reading a plain list of
+     strings and needs to know nothing about it. */
+  var TASK_SUB = '\u21B3 ';
+  function taskLevel(t){ return String(t == null ? '' : t).indexOf(TASK_SUB) === 0 ? 1 : 0; }
+  function taskText(t){
+    var v = String(t == null ? '' : t);
+    return taskLevel(v) ? v.slice(TASK_SUB.length) : v;
+  }
+  function taskLine(text, level){
+    text = String(text == null ? '' : text).trim();
+    return (level && text) ? (TASK_SUB + text) : text;
+  }
+  /* A sub-point with nothing above it is not one: it is a line of its own.
+     Deleting the line it hung off would otherwise leave it dangling. */
+  function tidyTasks(items){
+    var out = [], under = false;
+    (items || []).forEach(function(t){
+      var lvl = taskLevel(t), txt = taskText(t).trim();
+      if(!txt) return;
+      if(lvl && !under) lvl = 0;
+      if(!lvl) under = true;
+      out.push(taskLine(txt, lvl));
+    });
+    return out;
+  }
+  var TASK_NEXT_LVL = 0;         // the level a line started by Enter carries on at
   var dailyTasks = {};
   function loadDailyTasks(){
     return storage.get('dailyTasks', true).then(function(res){
@@ -7983,8 +8025,7 @@ function buildExcelBackup(){
   }
   function setTasks(emp, d, items){
     var key = emp+'|'+d;
-    items = (items || []).map(function(x){ return String(x == null ? '' : x).trim(); })
-                         .filter(Boolean).slice(0, 30);
+    items = tidyTasks(items).map(function(x){ return String(x).slice(0, 300); }).slice(0, 30);
     if(items.length) dailyTasks[key] = { items: items, at: new Date().toISOString() };
     else delete dailyTasks[key];
     return saveDailyTasks();
@@ -10319,26 +10360,68 @@ function buildExcelBackup(){
       +   '<div class="wl-nav">'
       +     '<button type="button" class="month-btn" data-wl-day="-1" title="The day before">\u2039</button>'
       +     (isToday ? '' : '<button type="button" class="month-btn" data-wl-day="0">Today</button>')
-      +     '<button type="button" class="month-btn" data-wl-day="1" title="The day after"'
+      /* On today this cannot go anywhere - tomorrow has not happened - and a
+         dead arrow with no reason on it reads as a broken button. It says so
+         now, and looks plainly out of use rather than faintly so. */
+      +     '<button type="button" class="month-btn" data-wl-day="1" title="'
+      +       (day >= todayISO_full ? 'Tomorrow has not happened yet' : 'The day after') + '"'
       +       (day >= todayISO_full ? ' disabled' : '') + '>\u203a</button>'
       +   '</div>'
       + '</div>'
       + '<div class="wl-list">'
       +   lines.map(function(t, i){
-            return '<div class="wl-row"><span class="wl-dot">\u2022</span>'
-              + '<input class="wl-in" data-wl-i="' + i + '" value="' + shotEsc(t).replace(/"/g, '&quot;') + '"'
-              + ' placeholder="' + (i === 0 ? 'What did you work on?' : 'Another one\u2026') + '"'
+            var lvl = taskLevel(t), txt = taskText(t);
+            /* The first line has nothing to sit under, so it is never offered
+               the chance to become a sub-point of nothing. */
+            var canIndent = i > 0;
+            return '<div class="wl-row' + (lvl ? ' wl-sub' : '') + '" data-wl-lvl="' + lvl + '">'
+              + '<span class="wl-dot">' + (lvl ? '\u21B3' : '\u2022') + '</span>'
+              + '<input class="wl-in" data-wl-i="' + i + '" value="' + shotEsc(txt).replace(/"/g, '&quot;') + '"'
+              + ' placeholder="' + (i === 0 ? 'What did you work on?'
+                                    : (lvl ? 'More on the line above\u2026' : 'Another one\u2026')) + '"'
               + ' maxlength="300">'
-              + (t ? '<button type="button" class="wl-x" data-wl-del="' + i + '" title="Take this line out">\u00d7</button>' : '')
+              + (canIndent
+                  ? ('<button type="button" class="wl-sub-btn" data-wl-sub="' + i + '" title="'
+                     + (lvl ? 'Make this a line of its own' : 'Tuck this under the line above')
+                     + '">' + (lvl ? '\u2191' : '\u21B3') + '</button>')
+                  : '')
+              + (txt ? '<button type="button" class="wl-x" data-wl-del="' + i + '" title="Take this line out">\u00d7</button>' : '')
               + '</div>';
           }).join('')
       + '</div>'
       + '<div class="wl-foot">' + (mine.length
-          ? (mine.length + (mine.length === 1 ? ' line' : ' lines') + ' \u00b7 saved')
-          : 'One line a job. It saves itself as you type.') + '</div>';
+          ? (mine.length + (mine.length === 1 ? ' line' : ' lines')
+             + ' \u00b7 saved \u00b7 Tab tucks a line under the one above')
+          : 'One line a job \u2014 Tab tucks a line under the one above. It saves itself as you type.')
+      + '</div>';
 
+    var rowOf = function(el){
+      var r = el.parentNode;
+      while(r && !(r.className && String(r.className).indexOf('wl-row') > -1)) r = r.parentNode;
+      return r;
+    };
+    var levelOf = function(el){
+      var r = rowOf(el);
+      return (r && r.getAttribute('data-wl-lvl') === '1') ? 1 : 0;
+    };
     var read = function(){
-      return Array.prototype.map.call(box.querySelectorAll('.wl-in'), function(el){ return el.value; });
+      return Array.prototype.map.call(box.querySelectorAll('.wl-in'), function(el){
+        return taskLine(el.value, levelOf(el));
+      });
+    };
+    /* Moved in or out where it stands, without redrawing the card: a redraw
+       here would take the cursor out from under the hand mid-sentence. */
+    var setLevel = function(el, lvl){
+      var r = rowOf(el); if(!r) return;
+      r.setAttribute('data-wl-lvl', lvl ? '1' : '0');
+      if(lvl) r.className = 'wl-row wl-sub'; else r.className = 'wl-row';
+      var dot = r.querySelector('.wl-dot');
+      if(dot) dot.textContent = lvl ? '\u21B3' : '\u2022';
+      var b = r.querySelector('[data-wl-sub]');
+      if(b){
+        b.textContent = lvl ? '\u2191' : '\u21B3';
+        b.title = lvl ? 'Make this a line of its own' : 'Tuck this under the line above';
+      }
     };
     var foot = box.querySelector('.wl-foot');
     var says = function(text){ if(foot) foot.textContent = text; };
@@ -10381,16 +10464,49 @@ function buildExcelBackup(){
       el.addEventListener('change', function(){ keep(read()); });
       /* Enter moves on to the next line rather than submitting anything. */
       el.addEventListener('keydown', function(ev){
+        /* Tab moves the line in or out, the way it does in any list of notes.
+           It is the only key here that would otherwise leave the card. */
+        if(ev.key === 'Tab'){
+          var all = Array.prototype.slice.call(box.querySelectorAll('.wl-in'));
+          if(all.indexOf(el) === 0) return;      // nothing above to sit under
+          ev.preventDefault();
+          setLevel(el, ev.shiftKey ? 0 : 1);
+          soon();
+          return;
+        }
         if(ev.key !== 'Enter') return;
         ev.preventDefault();
         clearTimeout(saveTimer);
-        var items = read();
-        landed(items, false).then(function(){
+        /* The next line carries on at the level of the one just finished, so a
+           run of sub-points does not need Tab on every one. */
+        TASK_NEXT_LVL = levelOf(el);
+        landed(read(), false).then(function(){
           renderEmpTasks();
           var ins = document.querySelectorAll('#empTasksCard .wl-in');
           var last = ins[ins.length - 1];
-          if(last) last.focus();
+          if(last){
+            if(TASK_NEXT_LVL && ins.length > 1){
+              var r = last.parentNode;
+              r.setAttribute('data-wl-lvl', '1');
+              r.className = 'wl-row wl-sub';
+              var dot = r.querySelector('.wl-dot');
+              if(dot) dot.textContent = '\u21B3';
+            }
+            last.focus();
+          }
+          TASK_NEXT_LVL = 0;
         });
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-wl-sub]'), function(b){
+      b.addEventListener('click', function(){
+        var i = +b.getAttribute('data-wl-sub');
+        var el = box.querySelectorAll('.wl-in')[i];
+        if(!el) return;
+        setLevel(el, levelOf(el) ? 0 : 1);
+        el.focus();
+        clearTimeout(saveTimer);
+        landed(read(), false);
       });
     });
     Array.prototype.forEach.call(box.querySelectorAll('[data-wl-del]'), function(b){
@@ -13177,9 +13293,17 @@ function buildExcelBackup(){
               ? ('<i>' + items.length + (items.length === 1 ? ' line' : ' lines') + '</i>')
               : ('<i>' + (onLeave ? 'on leave' : 'nothing written') + '</i>'))
         + '</div>'
-        + (items.length
-            ? ('<ul>' + items.map(function(t){ return '<li>' + shotEsc(t) + '</li>'; }).join('') + '</ul>')
-            : '')
+        /* A sub-point is drawn under the line it belongs to, not as another
+           line of its own: the office reads the same shape the person wrote. */
+        + (items.length ? ('<ul>' + items.map(function(t, i){
+              var lvl = taskLevel(t), txt = shotEsc(taskText(t));
+              var prev = i ? taskLevel(items[i - 1]) : 0;
+              var next = (i + 1 < items.length) ? taskLevel(items[i + 1]) : 0;
+              var open = (lvl && !prev) ? '<ul class="wlog-sub">' : '';
+              var shut = (lvl && !next) ? '</ul>' : '';
+              return (lvl ? (open + '<li>' + txt + '</li>' + shut)
+                          : ('<li>' + txt + '</li>'));
+            }).join('') + '</ul>') : '')
         + '</div>';
     }).join('');
 

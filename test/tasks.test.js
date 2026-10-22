@@ -373,5 +373,88 @@ const check = (name, ok, got) => {
     shared.every(w => labels(att).indexOf(w) > -1), labels(att));
 }
 
+/* ---- a line written under another one ----
+   A sub-point carries its mark inside the line rather than nesting the data,
+   so the server's merge, every backup already taken and everything else that
+   reads a day's work goes on reading a plain list of strings. These checks are
+   that the mark survives the round trip and is drawn as nesting at each end. */
+{
+  const vm = require('vm'), fs = require('fs');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const ctx = { String, Array };
+  vm.createContext(ctx);
+  ['var TASK_SUB = \'\\u21B3 \';',
+   /function taskLevel\(t\)\{[^}]*\}/.exec(app)[0],
+   / {2}function taskText\(t\)\{[\s\S]*?\n  \}/.exec(app)[0],
+   / {2}function taskLine\(text, level\)\{[\s\S]*?\n  \}/.exec(app)[0],
+   / {2}function tidyTasks\(items\)\{[\s\S]*?\n  \}/.exec(app)[0]].forEach(src => vm.runInContext(src, ctx));
+
+  const SUB = '↳ ';
+  check('a line marked as a sub-point reads back as one',
+    ctx.taskLevel(SUB + 'the detail') === 1 && ctx.taskText(SUB + 'the detail') === 'the detail',
+    ctx.taskText(SUB + 'the detail'));
+  check('and an ordinary line is untouched',
+    ctx.taskLevel('the task') === 0 && ctx.taskText('the task') === 'the task');
+  check('writing one puts the mark back on',
+    ctx.taskLine('the detail', 1) === SUB + 'the detail' && ctx.taskLine('the task', 0) === 'the task');
+  check('an empty line is never marked, so it cannot be stored as a bare mark',
+    ctx.taskLine('   ', 1) === '', JSON.stringify(ctx.taskLine('   ', 1)));
+
+  /* A sub-point with nothing above it is not one. Deleting the line it hung
+     off would otherwise leave it dangling under the card's edge. */
+  check('a sub-point with nothing above it becomes a line of its own',
+    JSON.stringify(ctx.tidyTasks([SUB + 'orphan', 'a task'])) === JSON.stringify(['orphan', 'a task']),
+    ctx.tidyTasks([SUB + 'orphan', 'a task']));
+  check('one that does have a line above it keeps its place',
+    JSON.stringify(ctx.tidyTasks(['a task', SUB + 'the detail']))
+      === JSON.stringify(['a task', SUB + 'the detail']));
+  check('and blank lines are dropped on the way in',
+    JSON.stringify(ctx.tidyTasks(['a task', '  ', SUB + ' ', SUB + 'kept']))
+      === JSON.stringify(['a task', SUB + 'kept']),
+    ctx.tidyTasks(['a task', '  ', SUB + ' ', SUB + 'kept']));
+
+  /* The card: Tab moves a line in and out where it stands, and the page is not
+     redrawn to do it - that would take the cursor from under the hand. */
+  const card = app.slice(app.indexOf('function renderEmpTasks()'),
+                         app.indexOf('The two folded notes on the Leave Record'));
+  check('Tab tucks a line under the one above', /ev\.key === 'Tab'/.test(card)
+    && /setLevel\(el, ev\.shiftKey \? 0 : 1\)/.test(card));
+  check('the first line is never offered a line to sit under',
+    /all\.indexOf\(el\) === 0\) return;/.test(card));
+  check('a run of sub-points carries on without Tab on every one',
+    /TASK_NEXT_LVL = levelOf\(el\)/.test(card));
+  check('and the card is read back with the marks on',
+    /return taskLine\(el\.value, levelOf\(el\)\);/.test(card));
+  check('there is a button for it too, for whoever reaches for the mouse',
+    /data-wl-sub/.test(card));
+
+  /* The arrow that cannot move says why, rather than looking broken. */
+  check('the forward arrow says tomorrow has not happened',
+    /Tomorrow has not happened yet/.test(card));
+}
+
+/* ---- and it is drawn as nesting at both ends ---- */
+{
+  const SUB = '↳ ';
+  const m = mailer.tasksEmail({
+    orgName: 'Co', dateLabel: 'Thu',
+    people: [{ name: 'Zafar Khan', items: ['Wayfair - check the ads', SUB + 'all promos scheduled',
+                                           SUB + 'two left for Friday', 'Packing slips'] }]
+  });
+  check('the message draws a sub-point under the line it belongs to',
+    /list-style:circle/.test(m.html)
+      && /all promos scheduled[\s\S]{0,200}two left for Friday/.test(m.html),
+    (/<ul[^>]*list-style:circle[\s\S]{0,160}/.exec(m.html) || [])[0]);
+  check('and the mark itself never reaches the reader',
+    m.html.indexOf('↳') === -1, (/.{0,40}↳.{0,40}/.exec(m.html) || [])[0]);
+  check('a card counts tasks, not the lines under them',
+    /2 tasks</.test(m.html), (/\d+ tasks?</.exec(m.html) || [])[0]);
+
+  const app = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const office = app.slice(app.indexOf('function renderWorkLogPage()'), app.indexOf('function renderHolidaysPage'));
+  check('the office’s page nests them the same way',
+    /wlog-sub/.test(office) && /taskText\(t\)/.test(office), office.slice(0, 60));
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;
