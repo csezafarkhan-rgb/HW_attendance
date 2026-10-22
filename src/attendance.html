@@ -2613,19 +2613,19 @@ table.dash-table tr:hover td{background:#F7F9FC;}
    the way of the record, and keeps its Undo where it can still be reached. */
 .undo-import{position:fixed;right:16px;bottom:16px;z-index:60;max-width:330px;
   display:flex;align-items:flex-start;flex-wrap:wrap;gap:8px;padding:11px 13px;
-  border:1px solid #BBD8F5;background:#EFF6FF;color:#1B4C86;border-radius:12px;
-  font-size:12.5px;line-height:1.45;box-shadow:0 8px 26px rgba(27,76,134,.18)}
+  border:1px solid #A8D8BC;background:#ECF8F0;color:#14532D;border-radius:12px;
+  font-size:12.5px;line-height:1.45;box-shadow:0 8px 26px rgba(20,83,45,.18)}
 @media (max-width:820px){ .undo-import{left:16px;right:16px;max-width:none} }
 .undo-import .ui-i{font-size:15px;line-height:1}
-.ui-btn{margin-left:auto;border:1px solid #7FB0E8;background:#fff;color:#1B4C86;border-radius:8px;
+.ui-btn{margin-left:auto;border:1px solid #7FC79A;background:#fff;color:#14532D;border-radius:8px;
   padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .undo-import .ui-i{flex:none}
 .undo-import > span:nth-of-type(2){flex:1 1 100%;order:2}
 .undo-import .ui-btn{order:3;margin-left:0}
 .undo-import .ui-x{order:1;margin-left:auto}
-.ui-btn:hover{border-color:#2F6FE8;color:#123C6B}
-.ui-x{border:none;background:transparent;color:#7A93B5;font-size:14px;cursor:pointer;padding:2px 4px}
-.ui-x:hover{color:#1B4C86}
+.ui-btn:hover{border-color:#2F8F5B;color:#0E3F22}
+.ui-x{border:none;background:transparent;color:#6E9C83;font-size:14px;cursor:pointer;padding:2px 4px}
+.ui-x:hover{color:#14532D}
 .emprow{display:flex;align-items:center;gap:6px}
 .emprow .empname{flex:1;display:flex;align-items:center;gap:7px;cursor:pointer;min-width:0}
 .empdel{border:1px solid transparent;background:transparent;color:#B08;opacity:.45;
@@ -7209,12 +7209,22 @@ function buildExcelBackup(){
     try{ var s = localStorage.getItem(PRE_IMPORT_KEY); if(s) return JSON.parse(s); }catch(e){}
     return window.__attPreImport || null;
   }
+  /* Which restore point has already had its ten seconds. The notice is drawn
+     again on several occasions, and without this it would pop back up each
+     time and hide itself again. */
+  var UNDO_SAID = null;
+  var UNDO_TIMER = null;
   function renderUndoImport(){
     var box = document.getElementById('undoImportBox');
     if(!box) return;
     var p = getPreImportPoint();
     if(!p){ box.style.display = 'none'; box.innerHTML = ''; return; }
     var info = p._preImport || {};
+    /* Said once. The way back is not lost with it: every import keeps its
+       restore point under Backup & Restore, with a Restore button beside it. */
+    if(UNDO_SAID && UNDO_SAID === info.at){
+      box.style.display = 'none'; box.innerHTML = ''; return;
+    }
     var c = p._counts || {};
     var when = '';
     try{ when = new Date(info.at).toLocaleString(); }catch(e){ when = info.at || ''; }
@@ -7246,11 +7256,27 @@ function buildExcelBackup(){
       });
     };
     var d = document.getElementById('undoImportDismiss');
+    /* Closing it keeps the import and hides the notice. The restore point
+       stays where it is - under Backup & Restore - rather than being thrown
+       away, which is what this used to do. */
     if(d) d.onclick = function(){
-      try{ localStorage.removeItem(PRE_IMPORT_KEY); }catch(e){}
-      window.__attPreImport = null;
+      UNDO_SAID = info.at;
       renderUndoImport();
     };
+    /* Ten seconds, then it takes itself away. Long enough to read and press
+       Undo on; short enough not to sit over the record all afternoon. */
+    var away = function(){
+      UNDO_TIMER = null;
+      /* Not while the pointer is on it - somebody reading the file name, or
+         about to press Undo, should not have it taken away mid-reach. It goes
+         ten seconds after they move off instead. */
+      if(box.matches(':hover')){ UNDO_TIMER = setTimeout(away, 10000); return; }
+      UNDO_SAID = info.at;
+      box.style.display = 'none';
+      box.innerHTML = '';
+    };
+    if(UNDO_TIMER) clearTimeout(UNDO_TIMER);
+    UNDO_TIMER = setTimeout(away, 10000);
   }
   /* The banner is the quick undo straight after an import. This is the longer
      memory behind it: every recent import, with the way back to each. */
