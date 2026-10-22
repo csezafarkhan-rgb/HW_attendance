@@ -12712,50 +12712,136 @@ function buildExcelBackup(){
       setTimeout(function(){ if(f.parentNode) f.parentNode.removeChild(f); }, 60000);
     }, 350);
   }
+  /* The slip, on the same A4 letterhead the day-off form prints on - the same
+     watermark, the same logo, the same coloured foot. It used to be a web page
+     with the logo pasted at the top, which looked like a screenshot of the
+     dashboard rather than a document from the company.
+
+     Laid out in the order somebody checks a slip: who it is for, what they are
+     paid, what was taken off and why, and somewhere to sign it. Written as a
+     document of its own rather than borrowing the app's stylesheet, because it
+     is printed on its own. */
   function printSlip(r, ym, coName, coAddr, coLogo){
-    // Names and the address go into markup, so they are escaped.
+    var rawName = r.emp;
     r = Object.assign({}, r, { emp: escapeHtml(r.emp) });
     coName = escapeHtml(coName); coAddr = escapeHtml(coAddr);
-    var w = { document: { parts: [], write: function(s){ this.parts.push(s); }, close: function(){} } };
-    var row = function(l,v,b){ return '<tr><td>'+l+'</td><td style="text-align:right'+(b?';font-weight:700':'')+'">'+v+'</td></tr>'; };
-    w.document.write('<!doctype html><html><head><title>Salary Slip \u2014 '+r.emp+' \u2014 '+monthLabel(ym)+'</title>'
-      + '<style>body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);margin:32px;}'
-      + 'h1{font-size:16px;margin:0} .sub{color:var(--ink-soft);font-size:12px;margin:2px 0 18px}'
-      + 'h2{font-size:13px;margin:18px 0 6px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft)}'
-      + 'table{width:100%;border-collapse:collapse;font-size:13px}'
-      + 'td{padding:6px 4px;border-bottom:1px solid #E7EAEF}'
-      + '.net td{border-top:2px solid #172029;border-bottom:none;font-size:15px;padding-top:10px}'
-      + '.foot{margin-top:22px;font-size:11px;color:var(--ink-dim)}</style></head><body>'
-      + (coLogo ? ('<img src="'+coLogo+'" alt="" style="max-height:56px;max-width:200px;display:block;margin-bottom:10px">') : '')
-      + '<h1>'+coName+'</h1><div class="sub">'+coAddr+'</div>'
-      + '<h1>Salary Slip \u2014 '+monthLabel(ym)+'</h1><div class="sub">'+r.emp+'</div>'
-      + '<h2>Attendance</h2><table>'
-      + row('Working days', r.workDays) + row('Present', r.presentDays)
-      + row('Work from home', r.wfhDays) + row('Leave taken', r.leaveDays)
-      + row('Unpaid days', r.lop||0)
-      + (r.extraDays ? row('Worked on days off', r.extraDays+' days \u00b7 '+fmtMin(r.extraMin)) : '')
-      + '</table><h2>Leave balance</h2><table>'
-      + row('Casual \u2014 used / left', r.clUsed+' / '+r.clLeft)
-      + row('Sick \u2014 used / left', r.slUsed+' / '+r.slLeft)
-      + row('Total accrued', r.totAssign)
-      + row('Charged to salary', r.totalDed || 0)
-      + row('Leave left after deductions', r.afterDed)
-      + '</table><h2>Pay</h2><table>'
-      + row('Monthly gross', '\u20b9'+money(r.gross))
-      + row('Per day ('+r.calDays+' days in the month)', '\u20b9'+money(r.perDay))
-      + (r.otAmt>0 ? row('Overtime ('+fmtMin(r.extraMin)+' at '+(payRules.otMult||1)+'\u00d7)', '+\u20b9'+money(r.otAmt)) : '')
-      + (r.preJoinAmt>0 ? row('Before joining ('+r.preJoinDays+' day'+(r.preJoinDays===1?'':'s')+')', '\u2212\u20b9'+money(r.preJoinAmt)) : '')
-      + (r.lopAmt>0 ? row((payRules.allLeaveUnpaid ? 'Leave, unpaid (' : 'Leave overdrawn (')
-                          +(r.lop||0)+' days)', '\u2212\u20b9'+money(r.lopAmt)) : '')
-      + (r.stat.pf>0 ? row('Provident fund ('+payRules.pfPct+'%)', '\u2212\u20b9'+money(r.stat.pf)) : '')
-      + (r.stat.esi>0 ? row('ESI ('+payRules.esiPct+'%)', '\u2212\u20b9'+money(r.stat.esi)) : '')
-      + (r.stat.other>0 ? row(payRules.otherLabel||'Other', '\u2212\u20b9'+money(r.stat.other)) : '')
-      + (r.deduct>0 ? row('Total deductions', '\u2212\u20b9'+money(r.deduct)) : '')
-      + '<tr class="net">'+row('Net payable', '\u20b9'+money(r.net), true).replace('<tr>','').replace('</tr>','')+'</tr>'
+
+    /* Paid on the last day of the month it is for. */
+    var last = new Date(+ym.slice(0,4), +ym.slice(5,7), 0);
+    var payDay = ym + '-' + pad2(last.getDate());
+    var joined = normJoin(getJoinDate(rawName));
+
+    var L = function(label, value){
+      return '<div class="f"><span class="fl">' + label + '</span>'
+           + '<span class="fv">' + (value === '' || value == null ? '—' : value) + '</span></div>';
+    };
+    var R = function(label, value, cls){
+      return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + label
+           + '</td><td class="n">' + value + '</td></tr>';
+    };
+    var rupee = function(v){ return '₹' + money(v); };
+    var minus = function(v){ return '−₹' + money(v); };
+
+    var html = '<!doctype html><html><head><meta charset="utf-8">'
+      + '<title>Salary Slip — ' + r.emp + ' — ' + monthLabel(ym) + '</title><style>'
+      + '@page{ size:A4; margin:0; }'
+      + 'html,body{ margin:0; padding:0; background:#fff; }'
+      + '.sheet{ position:relative; width:594.96pt; height:840.96pt; margin:0 auto; overflow:hidden;'
+      +   ' background:#fff; color:#000; font:11pt/1.35 "Times New Roman",Times,serif; }'
+      /* Header, watermark and coloured foot are one image, exactly as the
+         day-off form uses them. Rebuilt from parts they never lined up. */
+      + '.bg{ position:absolute; left:-0.6pt; top:7.5pt; width:594.5pt; height:833.3pt; }'
+      /* Everything sits between the letterhead's head and its foot. */
+      /* A column, so the signature is pushed to the foot by what is above it
+         rather than pinned there. Pinned, it sat under the deductions table as
+         soon as a slip had deductions on it to show. */
+      + '.body{ position:absolute; left:64pt; right:64pt; top:126pt; bottom:72pt;'
+      +   ' display:flex; flex-direction:column; }'
+      + '.ttl{ text-align:center; font-size:15pt; font-weight:700; letter-spacing:.4pt; }'
+      + '.ttl span{ display:block; font-size:11pt; font-weight:400; margin-top:2pt; }'
+      + '.h{ margin:9pt 0 4pt; font-size:9pt; font-weight:700; letter-spacing:.09em;'
+      +   ' text-transform:uppercase; border-bottom:.8pt solid #000; padding-bottom:2pt; }'
+      /* Two columns of label/value, as the sample slip sets them out. */
+      + '.who{ display:flex; flex-wrap:wrap; }'
+      + '.f{ flex:0 0 50%; display:flex; gap:5pt; padding:1.6pt 0; font-size:10.5pt; }'
+      + '.fl{ color:#333; }'
+      + '.fv{ font-weight:700; }'
+      + 'table{ width:100%; border-collapse:collapse; font-size:10.5pt; }'
+      + 'td{ padding:2.3pt 0; border-bottom:.5pt solid #D8D8D8; }'
+      + 'td.n{ text-align:right; white-space:nowrap; }'
+      + 'tr.tot td{ border-top:1pt solid #000; border-bottom:none; font-weight:700;'
+      +   ' font-size:12pt; padding-top:6pt; }'
+      + 'tr.sub td{ border-bottom:none; padding-top:6pt; font-weight:700; }'
+      /* Two signature lines at the foot: theirs, and the company's. The margin
+         above takes up whatever room the tables leave. */
+      + '.sign{ margin-top:auto; padding-top:10pt; display:flex;'
+      +   ' justify-content:space-between; gap:40pt; }'
+      + '.sign div{ flex:1 1 0; text-align:center; }'
+      + '.sign .ln{ border-top:.8pt solid #000; margin-bottom:3pt; height:28pt; }'
+      + '.sign .cap{ font-size:9.5pt; }'
+      + '.sign .cap b{ display:block; font-size:10pt; }'
+      + '.note{ margin-top:9pt; font-size:8.5pt; color:#555; text-align:center; }'
+      + '@media print{ .sheet{ page-break-after:avoid; break-inside:avoid; }'
+      +   ' body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } }'
+      + '</style></head><body><div class="sheet">'
+      + '<img class="bg" src="' + DOF_LETTERHEAD + '" alt="">'
+      + '<div class="body">'
+      + '<div class="ttl">Salary Slip<span>' + monthLabel(ym) + '</span></div>'
+
+      /* 2 - who it is for */
+      + '<div class="h">Employee</div><div class="who">'
+      +   L('Name', '<b>' + r.emp + '</b>')
+      +   L('Employee ID', shotEsc(getEmpCode(rawName)))
+      +   L('Joined', joined ? longDate(joined) : '')
+      +   L('Shift', shotEsc(getShift(rawName, payDay)))
+      +   L('Pay period', monthLabel(ym))
+      +   L('Pay date', longDate(payDay))
+      + '</div>'
+
+      /* 3 - what they are paid */
+      + '<div class="h">Salary</div><table>'
+      +   R('Monthly gross', rupee(r.gross))
+      +   R('Per day (' + r.calDays + ' days in the month)', rupee(r.perDay))
+      +   (r.otAmt > 0 ? R('Overtime (' + fmtMin(r.extraMin) + ' at ' + (payRules.otMult || 1) + '×)',
+                           '+' + rupee(r.otAmt)) : '')
+      +   (r.deduct > 0 ? R('Less deductions', minus(r.deduct)) : '')
+      +   R('Net payable', rupee(r.net), 'tot')
       + '</table>'
-      + '<div class="foot">Worked out from the attendance record. Unpaid days are leave taken beyond the accrued balance.</div>'
-      + '</body></html>');
-    printHtmlInPage(w.document.parts.join(''));
+
+      /* 4 - what was taken off, and the leave behind it */
+      + '<div class="h">Attendance, leave and deductions</div><table>'
+      +   R('Working days', r.workDays)
+      +   R('Present', r.presentDays)
+      +   R('Work from home', r.wfhDays)
+      +   R('Leave taken', r.leaveDays)
+      +   (r.extraDays ? R('Worked on days off', r.extraDays + ' days · ' + fmtMin(r.extraMin)) : '')
+      +   R('Casual leave — used / left', r.clUsed + ' / ' + r.clLeft)
+      +   R('Sick leave — used / left', r.slUsed + ' / ' + r.slLeft)
+      +   R('Leave accrued so far', r.totAssign)
+      +   R('Charged to salary', r.totalDed || 0)
+      +   R('Leave left after deductions', r.afterDed)
+      +   (r.deduct > 0 ? R('Taken off the pay', '', 'sub') : '')
+      +   (r.preJoinAmt > 0 ? R('Before joining (' + r.preJoinDays + ' day'
+                                + (r.preJoinDays === 1 ? '' : 's') + ')', minus(r.preJoinAmt)) : '')
+      +   (r.lopAmt > 0 ? R((payRules.allLeaveUnpaid ? 'Leave, unpaid (' : 'Leave overdrawn (')
+                            + (r.lop || 0) + ' days)', minus(r.lopAmt)) : '')
+      +   (r.stat.pf > 0 ? R('Provident fund (' + payRules.pfPct + '%)', minus(r.stat.pf)) : '')
+      +   (r.stat.esi > 0 ? R('ESI (' + payRules.esiPct + '%)', minus(r.stat.esi)) : '')
+      +   (r.stat.other > 0 ? R(escapeHtml(payRules.otherLabel || 'Other'), minus(r.stat.other)) : '')
+      +   (r.deduct > 0 ? R('Total deductions', minus(r.deduct), 'tot') : '')
+      + '</table>'
+
+      /* 5 - somewhere to sign it */
+      + '<div class="sign">'
+      +   '<div><div class="ln"></div><div class="cap"><b>' + r.emp + '</b>Employee</div></div>'
+      +   '<div><div class="ln"></div><div class="cap"><b>For ' + coName + '</b>Authorised signatory</div></div>'
+      + '</div>'
+      + '<div class="note">Worked out from the attendance record. '
+      + 'Unpaid days are leave taken beyond the accrued balance.</div>'
+      + '</div>'
+      + '</div></body></html>';
+
+    printHtmlInPage(html);
   }
 
   function renderHolidaysPage(){
