@@ -3016,7 +3016,13 @@ function monthlyCost() {
   });
   if (!items.length) return null;
   const total = items.reduce((a, b) => a + b.usd, 0);
-  return { currency: 'USD', monthly: Math.round(total * 100) / 100, items };
+  /* What is not in the figure. Storage, bandwidth past the plan and anything
+     else Render adds are billed separately and are not known here, so the
+     panel says so rather than letting the total read as the whole bill.
+     COST_NOTE replaces the wording where something else needs saying. */
+  const note = String(process.env.COST_NOTE || '').trim()
+    || 'Storage and anything else Render bills is charged on top. Billing has the full figure.';
+  return { currency: 'USD', monthly: Math.round(total * 100) / 100, items, note };
 }
 
 /* What the dashboard's indicator shows. Cheap enough to ask for every minute:

@@ -860,8 +860,15 @@ body{
 .st-note{ font-size:10.5px; color:var(--ink-soft); margin-top:4px; line-height:1.4; }
 .st-cost{ margin:10px 0 0; padding:9px 11px; border-radius:9px; background:#F1F5FB;
   border:1px solid var(--line); font-size:12px; color:var(--ink); }
-.st-cost b{ display:block; font-size:12.5px; }
-.st-cost span{ display:block; margin-top:2px; font-size:11px; color:var(--ink-soft); }
+.st-cost b{ display:block; font-size:12.5px; margin-bottom:5px; }
+/* A line an item, the amount held to the right so the figures line up under
+   one another rather than wherever the label happens to end. */
+.st-cost i{ display:flex; gap:10px; font-style:normal; font-size:11.5px;
+  color:var(--ink-soft); padding:1px 0; }
+.st-cost i span{ flex:1; min-width:0; }
+.st-cost i em{ font-style:normal; font-variant-numeric:tabular-nums; color:var(--ink); }
+.st-cost u{ display:block; margin-top:6px; padding-top:6px; border-top:1px solid var(--line);
+  text-decoration:none; font-size:10.5px; line-height:1.4; color:var(--ink-soft); }
 .st-facts{ display:flex; gap:6px; margin:7px 1px 3px; }
 .st-facts > div{ flex:1 1 0; text-align:center; padding:5px 3px; border:1px solid #E6EBF4; border-radius:8px; background:#FBFCFE; }
 .st-facts b{ display:block; font-size:12.5px; font-weight:800; }
@@ -11566,10 +11573,14 @@ function buildExcelBackup(){
          unset it says nothing at all, which is better than a wrong figure. */
       var cost = STATUS.cost;
       if(cost && cost.monthly != null){
+        /* A line each. Run together they read as one long string and the
+           figures stop lining up with what they are for. */
         html += '<div class="st-cost"><b>Running cost · $' + cost.monthly.toFixed(2) + ' a month</b>'
-          + '<span>' + (cost.items || []).map(function(it){
-              return escapeHtml(it.what) + ' $' + it.usd.toFixed(2);
-            }).join(' · ') + '</span></div>';
+          + (cost.items || []).map(function(it){
+              return '<i><span>' + escapeHtml(it.what) + '</span><em>$' + it.usd.toFixed(2) + '</em></i>';
+            }).join('')
+          + (cost.note ? ('<u>' + escapeHtml(cost.note) + '</u>') : '')
+          + '</div>';
       }
       html += '<div class="st-facts">'
         + '<div><b>' + ((c.records || 0).toLocaleString()) + '</b><span>attendance rows</span></div>'

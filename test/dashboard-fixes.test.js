@@ -423,6 +423,18 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       (/free plan stops[^']*/.exec(src) || [])[0]);
     check('and shows the cost only when it has been told one',
       /if\(cost && cost\.monthly != null\)/.test(src) && /Running cost/.test(src));
+    /* Run together on one line the figures stop lining up with what they are
+       for, which is the whole use of itemising them. */
+    check('each charge is on a line of its own',
+      /\.map\(function\(it\)\{[\s\S]*?return '<i><span>'/.test(src)
+        && !/\}\)\.join\(' \\u00b7 '\)/.test(src),
+      (/cost\.items[\s\S]{0,160}/.exec(src) || [])[0]);
+    check('and the amounts line up under one another',
+      /\.st-cost i em\{[^}]*tabular-nums/.test((src.match(/<style[^>]*>[\s\S]*?<\/style>/g)||[]).join('')));
+    /* The total is not the whole bill, and saying so is the honest part. */
+    check('it says what the total leaves out',
+      /cost\.note \? \('<u>'/.test(src) && /COST_NOTE/.test(server)
+        && /Storage and anything else Render bills/.test(server));
   }
 
   /* ---- the notice leaves on a fade, not a blink ----
