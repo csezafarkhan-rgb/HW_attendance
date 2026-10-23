@@ -50,12 +50,20 @@ let OUT_FILE = (function () {
   } catch (e) { return ''; }
 })();
 
-// Only the dashboard, and a local copy of it for testing.
+/* Only the dashboard, and a local copy of it for testing.
+
+   The dashboard moved host, and this list did not: the helper went on running
+   and went on refusing, so the page reported it as "not answering" when it was
+   answering 403 to every request from the new address. A move should not need
+   a code change to be survived, so SYNC_ORIGINS can name more without one. */
 const ALLOWED = [
-  'https://hw-attendance-6qwd.onrender.com',
+  'https://attendance.homeweavers.net',          // where it lives now
+  'https://hw-attendance-av4h.onrender.com',     // and the host underneath it
+  'https://hw-attendance-6qwd.onrender.com',     // the old address, until it is retired
   'http://localhost:3000',
   'http://127.0.0.1:3000'
-];
+].concat(String(process.env.SYNC_ORIGINS || '')
+  .split(',').map(function (s) { return s.trim(); }).filter(Boolean));
 
 let running = null;          // the in-flight rebuild, if any
 

@@ -2672,6 +2672,15 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 /* Dark green, with the words in white over it. The pale version read as part
    of the page and was missed; this one is plainly a notice, and every piece of
    text on it clears 7:1 against the background. */
+/* The fade it leaves on. Opacity and a small settle downwards, slow enough to
+   read as the notice finishing rather than as the page losing it. A pointer on
+   it cancels nothing - the timer already waits for the pointer to leave. */
+.undo-import{transition:opacity 1.1s ease, transform 1.1s ease;}
+.undo-import.going{opacity:0;transform:translateY(8px);pointer-events:none;}
+@media (prefers-reduced-motion: reduce){
+  .undo-import{transition:opacity .2s linear;}
+  .undo-import.going{transform:none;}
+}
 .undo-import{position:fixed;right:16px;bottom:16px;z-index:60;max-width:330px;
   display:flex;align-items:flex-start;flex-wrap:wrap;gap:8px;padding:11px 13px;
   border:1px solid #0E3F22;background:#14532D;color:#FFFFFF;border-radius:12px;
@@ -7373,20 +7382,30 @@ function buildExcelBackup(){
       UNDO_SAID = info.at;
       renderUndoImport();
     };
-    /* Ten seconds, then it takes itself away. Long enough to read and press
-       Undo on; short enough not to sit over the record all afternoon. */
+    /* Seven seconds, then it fades rather than blinking out: something that
+       vanishes between glances reads as a fault, where a fade reads as the
+       notice finishing. Long enough to take in and press Undo on; short
+       enough not to sit over the record all afternoon. */
     var away = function(){
       UNDO_TIMER = null;
       /* Not while the pointer is on it - somebody reading the file name, or
          about to press Undo, should not have it taken away mid-reach. It goes
-         ten seconds after they move off instead. */
-      if(box.matches(':hover')){ UNDO_TIMER = setTimeout(away, 10000); return; }
+         seven seconds after they move off instead. */
+      if(box.matches(':hover')){ UNDO_TIMER = setTimeout(away, 7000); return; }
       UNDO_SAID = info.at;
-      box.style.display = 'none';
-      box.innerHTML = '';
+      box.classList.add('going');
+      /* Cleared only once the fade has run. Hiding it now would cut the fade
+         off at its first frame, which is the blink this is here to avoid. */
+      UNDO_TIMER = setTimeout(function(){
+        UNDO_TIMER = null;
+        box.classList.remove('going');
+        box.style.display = 'none';
+        box.innerHTML = '';
+      }, 1200);
     };
     if(UNDO_TIMER) clearTimeout(UNDO_TIMER);
-    UNDO_TIMER = setTimeout(away, 10000);
+    box.classList.remove('going');     // a fresh notice starts fully present
+    UNDO_TIMER = setTimeout(away, 7000);
   }
   /* The banner is the quick undo straight after an import. This is the longer
      memory behind it: every recent import, with the way back to each. */

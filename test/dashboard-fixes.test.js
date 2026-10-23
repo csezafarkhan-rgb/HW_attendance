@@ -361,7 +361,10 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     const styles = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
     /* Anchored to the start of a line, so asking for `.ui-x` does not land on
        `.undo-import .ui-x{...}`, which only moves the thing about. */
-    const rule = n => (new RegExp('^\\' + '.' + n + '\\{[^}]*\\}', 'm').exec(styles) || [''])[0];
+    /* Every rule written for that exact selector, joined. A selector may be
+       split across several rules - the fade lives in one of its own - and
+       taking only the first would miss colours declared in another. */
+    const rule = n => (styles.match(new RegExp('^\\' + '.' + n + '\\{[^}]*\\}', 'gm')) || []).join(' ');
     const prop = (css, p) => (new RegExp('(?:^|[;{])\\s*' + p + '\\s*:\\s*(#[0-9A-Fa-f]{6})').exec(css) || [])[1];
 
     const lum = hex => {
@@ -420,6 +423,32 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       (/free plan stops[^']*/.exec(src) || [])[0]);
     check('and shows the cost only when it has been told one',
       /if\(cost && cost\.monthly != null\)/.test(src) && /Running cost/.test(src));
+  }
+
+  /* ---- the notice leaves on a fade, not a blink ----
+     It used to sit for ten seconds and then be hidden outright. Something that
+     vanishes between glances reads as a fault; a fade reads as the notice
+     finishing. The clear has to wait for the fade, or it cuts it off at the
+     first frame and the blink is back. */
+  {
+    const fn = /var away = function\(\)\{[\s\S]*?\n    \};/.exec(src);
+    check('the notice is given seven seconds', !!fn && /setTimeout\(away, 7000\)/.test(src),
+      (/setTimeout\(away, \d+\)/.exec(src) || [])[0]);
+    check('it fades rather than being hidden outright',
+      !!fn && /classList\.add\('going'\)/.test(fn[0]));
+    check('and is only cleared once the fade has run',
+      !!fn && /going'\);[\s\S]*?setTimeout\(function\(\)\{[\s\S]*?display = 'none'/.test(fn[0]),
+      fn && fn[0].slice(-220));
+    check('a pointer resting on it still holds it there',
+      !!fn && /matches\(':hover'\)\)\{ UNDO_TIMER = setTimeout\(away, 7000\)/.test(fn[0]));
+
+    const styles = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
+    check('the fade is a transition, long enough to see',
+      /\.undo-import\{transition:opacity 1\.1s/.test(styles)
+        && /\.undo-import\.going\{opacity:0/.test(styles));
+    /* Somebody who has asked for less movement gets less of it. */
+    check('and it is cut short for anyone who asked for less motion',
+      /prefers-reduced-motion[\s\S]{0,200}\.undo-import\.going\{transform:none/.test(styles));
   }
 
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

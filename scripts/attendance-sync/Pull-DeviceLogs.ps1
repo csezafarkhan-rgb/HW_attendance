@@ -103,14 +103,31 @@ foreach ($ip in $Devices) {
         Start-Sleep -Seconds 8
         if (-not $zk.Connect_Net($ip, $Port)) { break }
     }
+    <#  Ask for the days wanted rather than for the whole log.
+
+        ReadGeneralLogData hands over everything the reader has ever recorded -
+        26,875 punches on one of these, ten thousand on the other - and the
+        wanted fortnight is then picked out of it here. That transfer is where
+        the wait went: 33 seconds for one reader and 14 for the other, every
+        time, to end up with a few hundred rows.
+
+        ReadTimeGLogData asks the reader to do the filtering, and it hands back
+        the same punches in about two seconds. Measured on both readers on
+        23 October: 287 and 349 rows either way, identical, 47 seconds down to
+        four.
+
+        It is not trusted blindly. Firmware that does not honour it can say yes
+        and give nothing back, which is the shape of the fault that lost a day
+        in September - so an empty answer is never believed. Nothing back, a
+        refusal, or an error, and the whole log is read the old way. #>
     try {
-        if ($zk.ReadGeneralLogData(1)) {
-            $id = ''; $vfy = 0; $inout = 0
-            $y = 0; $mo = 0; $d = 0; $h = 0; $mi = 0; $s = 0; $wc = 0
+        $id = ''; $vfy = 0; $inout = 0
+        $y = 0; $mo = 0; $d = 0; $h = 0; $mi = 0; $s = 0; $wc = 0
+        $take = {
             while ($zk.SSR_GetGeneralLogData(1, [ref] $id, [ref] $vfy, [ref] $inout,
                                              [ref] $y, [ref] $mo, [ref] $d,
                                              [ref] $h, [ref] $mi, [ref] $s, [ref] $wc)) {
-                $seen++
+                $script:seen++
                 $when = $null
                 try { $when = Get-Date -Year $y -Month $mo -Day $d -Hour $h -Minute $mi -Second $s } catch { }
                 if (-not $when -or $when -lt $since) { continue }
@@ -123,9 +140,27 @@ foreach ($ip in $Devices) {
                     # is mounted as IN and the other as OUT.
                     InOut   = $inout
                 })
-                $kept++
+                $script:kept++
             }
         }
+
+        $script:seen = 0; $script:kept = 0
+        $windowed = $false
+        try {
+            $from = $since.ToString('yyyy-MM-dd HH:mm:ss')
+            $to   = (Get-Date).AddDays(1).ToString('yyyy-MM-dd HH:mm:ss')
+            if ($zk.ReadTimeGLogData(1, $from, $to)) { & $take; $windowed = $script:seen -gt 0 }
+        } catch {
+            Write-Output ('{0}: asking for a date range did not work ({1}); reading the whole log' -f $ip, $_.Exception.Message)
+        }
+
+        if (-not $windowed) {
+            # Nothing came of the windowed read. Do it the long way rather than
+            # report a reader as empty on the strength of it.
+            $script:seen = 0; $script:kept = 0
+            if ($zk.ReadGeneralLogData(1)) { & $take }
+        }
+        $seen = $script:seen; $kept = $script:kept
     } catch {
         Write-Output ('{0}: {1}' -f $ip, $_.Exception.Message)
     }
