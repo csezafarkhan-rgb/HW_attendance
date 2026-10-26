@@ -276,10 +276,17 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 
   const styles = (APP.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
   check('only one of the two time lines is ever shown',
-    /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell \.t\{ display:none; \}/.test(styles)
+    /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell\.has-det \.t\{ display:none; \}/.test(styles)
       && /\.emp-cal-grid\.compact \.emp-cal-cell \.ec-det/.test(styles));
-  check('the roomy cell is given the room for it, and may grow rather than crop',
-    /\.emp-cal-grid \.emp-cal-cell\{ min-height:148px; overflow:visible/.test(styles));
+  /* A WFH day's hours and a holiday's name live in the packed line and nowhere
+     else; hiding it for every day took them off the calendar. */
+  check('a day with no in and out keeps the one line it has',
+    /if\(detail\) cls \+= ' has-det';/.test(APP));
+  check('the cell grows to what it carries rather than cropping it',
+    /\.emp-cal-grid \.emp-cal-cell\{ min-height:\d+px; overflow:visible/.test(styles));
+  /* A fixed height left a band of nothing between the word and the times. */
+  check('and nothing is pushed to a floor it does not reach',
+    !/\.ec-det\{[^}]*margin-top:auto/.test(styles), (/\.ec-det\{[^}]*/.exec(styles)||[])[0]);
   check('and the compact one keeps its old height',
     /\.emp-cal-grid\.compact \.emp-cal-cell,[\s\S]{0,60}height:96px/.test(styles));
 }

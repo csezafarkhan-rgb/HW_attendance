@@ -2312,12 +2312,12 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* A fixed row height rather than a square: the cell is as wide as the column
    allows, so forcing it square made every day a huge near-empty box on a wide
    screen. Height is what keeps the month tidy; width can look after itself. */
-/* Tall enough for a date, the word for the day with its note beside it, two
-   times and what they come to - with room for the note to run to two lines on
-   a narrow column rather than being cut off. */
-.emp-cal-grid .emp-cal-cell{ min-height:148px; overflow:visible;
+/* As tall as what the day carries, and no taller. A fixed height left a band
+   of nothing between the word for the day and its times; the row still lines
+   up because the grid stretches every cell in it to the tallest. */
+.emp-cal-grid .emp-cal-cell{ min-height:104px; overflow:visible;
   box-sizing:border-box; }
-.emp-cal-grid .emp-cal-cell.empty{ min-height:148px; }
+.emp-cal-grid .emp-cal-cell.empty{ min-height:104px; }
 /* Compact goes back to the shorter cell: it carries one line, not four. */
 .emp-cal-grid.compact .emp-cal-cell,
 .emp-cal-grid.compact .emp-cal-cell.empty{ height:96px; }
@@ -2491,13 +2491,13 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
    now instead of being pushed to the floor: the times go to the floor. */
 .emp-cal-cell .s{font-size:13px;font-weight:800;line-height:1.2;margin-top:3px;}
 .emp-cal-cell .t{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:var(--ink-soft);line-height:1.3;}
-/* A holiday or a WFH day has no in and out, so its one line takes the floor
-   the times would have had - otherwise the cell reads top-heavy. */
-.emp-cal-grid:not(.compact) .emp-cal-cell .t{ margin-top:auto; }
+/* A holiday or a WFH day has no in and out: its one line follows the label
+   like everything else, rather than being dropped to the floor. */
+.emp-cal-grid:not(.compact) .emp-cal-cell .t{ margin-top:4px; }
 /* In, out and what the day came to, one to a line, with the figures lined up
    under each other. The single packed time line is kept for the compact view
    and for a narrow screen; only one of the two is ever shown. */
-.emp-cal-cell .ec-det{ display:flex; align-items:center; gap:4px; margin-top:auto;
+.emp-cal-cell .ec-det{ display:flex; align-items:center; gap:4px; margin-top:5px;
   flex-wrap:wrap; }
 .emp-cal-cell .ecd-times{ display:flex; flex-direction:column; flex:none; }
 .emp-cal-cell .ecd{ display:flex; gap:5px; align-items:baseline; line-height:1.3; }
@@ -2532,8 +2532,9 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell .ecn.late, .emp-cal-cell .ecn.early{ color:#9A6B10; }
 .emp-cal-cell .ecn.wait{ color:#2E5A86; }
 .emp-cal-cell .ecn.ok{ color:#2F6F52; }
-/* The roomy view shows the three lines; the compact one shows the packed one. */
-.emp-cal-grid:not(.compact) .emp-cal-cell .t{ display:none; }
+/* The roomy view shows the stacked lines instead of the packed one - but only
+   where there are stacked lines to show. */
+.emp-cal-grid:not(.compact) .emp-cal-cell.has-det .t{ display:none; }
 .emp-cal-grid.compact .emp-cal-cell .ec-det,
 .emp-cal-grid.compact .emp-cal-cell .ec-notes{ display:none; }
 .emp-cal-cell.st-PR{background:#CDEBD6;color:#14522E;}
@@ -18086,6 +18087,10 @@ function buildExcelBackup(){
             + escapeHtml(minsSaid(leN.early||0)) + ' early' + (exN ? ' · excused' : '') + '</span>';
         }
       }
+      /* Only a day that carries the stacked times hides the packed line. A WFH
+         day's "5:31 logged" and a holiday's name live in that line and nowhere
+         else - hiding it for every day took them off the calendar. */
+      if(detail) cls += ' has-det';
       html += '<div class="'+cls+'" data-date="'+dateStr+'"'
         + (tips.length ? (' title="'+tips.join(' · ').replace(/"/g,'&quot;')+'"') : '')+'>'+
         '<span class="d">'+day+'</span>'+
