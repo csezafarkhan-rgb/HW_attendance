@@ -261,21 +261,25 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   const APP = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
   const cal = APP.slice(APP.indexOf('function renderEmployeeCalendar()'),
                         APP.indexOf('grid.className = '));
-  check('a day shows its in, its out and the total',
-    /<i>In<\/i>/.test(cal) && /<i>Out<\/i>/.test(cal) && /<i>Total<\/i>/.test(cal));
+  check('a day shows its in, its out and what they come to',
+    /<i>In<\/i>/.test(cal) && /<i>Out<\/i>/.test(cal) && /ecd-dur/.test(cal));
   check('the total is worked out from the two times, not stored twice',
     /var dur = rec\.out \? \(toMin\(rec\.out\) - toMin\(rec\['in'\]\)\) : 0;/.test(cal));
   check('and the corner letter is spelled out beneath it',
     /minsSaid\(leN\.late\|\|0\)\) \+ ' late'/.test(cal));
   check('an excused one says so, and one still waiting says that instead',
-    /lxN \? ' \u00b7 excused' : \(plN \? ' \u00b7 reason sent' : ''\)/.test(cal));
+    /lxN \? ' \u00b7 excused' : \(plN \? ' \u00b7 sent' : ''\)/.test(cal));
+  /* The words sit beside the letter they explain, not somewhere else. */
+  check('and the note rides in the badge row, left of the letter',
+    /ec-marks[\s\S]{0,140}ec-notes[\s\S]{0,120}\+ marks/.test(cal),
+    cal.slice(cal.indexOf('ec-marks'), cal.indexOf('ec-marks') + 160));
 
   const styles = (APP.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
   check('only one of the two time lines is ever shown',
     /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell \.t\{ display:none; \}/.test(styles)
       && /\.emp-cal-grid\.compact \.emp-cal-cell \.ec-det/.test(styles));
-  check('the roomy cell is given the room for it',
-    /\.emp-cal-grid \.emp-cal-cell\{ height:132px/.test(styles));
+  check('the roomy cell is given the room for it, and may grow rather than crop',
+    /\.emp-cal-grid \.emp-cal-cell\{ min-height:148px; overflow:visible/.test(styles));
   check('and the compact one keeps its old height',
     /\.emp-cal-grid\.compact \.emp-cal-cell,[\s\S]{0,60}height:96px/.test(styles));
 }

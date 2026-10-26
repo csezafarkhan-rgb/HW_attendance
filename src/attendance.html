@@ -2312,9 +2312,12 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* A fixed row height rather than a square: the cell is as wide as the column
    allows, so forcing it square made every day a huge near-empty box on a wide
    screen. Height is what keeps the month tidy; width can look after itself. */
-.emp-cal-grid .emp-cal-cell{ height:132px; min-height:0; overflow:hidden;
+/* Tall enough for a date, the word for the day with its note beside it, two
+   times and what they come to - with room for the note to run to two lines on
+   a narrow column rather than being cut off. */
+.emp-cal-grid .emp-cal-cell{ min-height:148px; overflow:visible;
   box-sizing:border-box; }
-.emp-cal-grid .emp-cal-cell.empty{ height:132px; }
+.emp-cal-grid .emp-cal-cell.empty{ min-height:148px; }
 /* Compact goes back to the shorter cell: it carries one line, not four. */
 .emp-cal-grid.compact .emp-cal-cell,
 .emp-cal-grid.compact .emp-cal-cell.empty{ height:96px; }
@@ -2372,7 +2375,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
      cells shrink rather than the grid reflowing */
   .emp-cal-grid{ gap:3px; }
   .emp-cal-cell{ min-height:56px; padding:4px 5px; }
-  .emp-cal-cell .d{ font-size:11.5px; }
+  .emp-cal-cell .d{ font-size:16px; line-height:1; }
   .emp-cal-cell .s{ font-size:10px; line-height:1.2; }
   .emp-cal-cell .t{ display:none; }          /* punch times live in the day drill */
   /* No room for three lines and a note on a phone either - the day drill has
@@ -2438,9 +2441,9 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-grid.compact .emp-cal-cell,
 .emp-cal-grid.compact .emp-cal-cell.empty{ height:56px; }
 .emp-cal-grid.compact .emp-cal-cell .t{ display:none; }
-.emp-cal-grid.compact .emp-cal-cell .s{ font-size:10px; line-height:1.2;
+.emp-cal-grid.compact .emp-cal-cell .s{ margin-top:auto; font-size:10px; line-height:1.2;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.emp-cal-grid.compact .emp-cal-cell .d{ font-size:11.5px; }
+.emp-cal-grid.compact .emp-cal-cell .d{ font-size:17px; line-height:1; }
 .emp-cal-grid.compact .ec-marks{ top:2px; right:3px; gap:2px; }
 .emp-cal-grid.compact .ec-m{ min-width:16px; height:16px; line-height:16px;
   font-size:11px; padding:0 3px; }
@@ -2481,20 +2484,51 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 }
 .emp-cal-cell:hover{box-shadow:0 3px 10px rgba(0,0,0,0.12);}
 .emp-cal-cell.empty{visibility:hidden;cursor:default;}
-.emp-cal-cell .d{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:800;}
-.emp-cal-cell .s{margin-top:auto;font-size:11.5px;font-weight:700;line-height:1.25;}
+.emp-cal-cell .d{font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:800;
+  line-height:1;letter-spacing:-.01em;}
+/* "Present", "Half day", "WFH" - the first thing anybody reads off a cell, so
+   it is set at reading size rather than as a caption. It sits under the date
+   now instead of being pushed to the floor: the times go to the floor. */
+.emp-cal-cell .s{font-size:13px;font-weight:800;line-height:1.2;margin-top:3px;}
 .emp-cal-cell .t{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:var(--ink-soft);line-height:1.3;}
+/* A holiday or a WFH day has no in and out, so its one line takes the floor
+   the times would have had - otherwise the cell reads top-heavy. */
+.emp-cal-grid:not(.compact) .emp-cal-cell .t{ margin-top:auto; }
 /* In, out and what the day came to, one to a line, with the figures lined up
    under each other. The single packed time line is kept for the compact view
    and for a narrow screen; only one of the two is ever shown. */
-.emp-cal-cell .ec-det{ display:block; margin-top:2px; }
-.emp-cal-cell .ecd{ display:flex; gap:6px; align-items:baseline; line-height:1.35; }
-.emp-cal-cell .ecd i{ flex:none; width:28px; font-style:normal; font-size:9px;
-  font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--ink-soft); opacity:.85; }
-.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:700; }
+.emp-cal-cell .ec-det{ display:flex; align-items:center; gap:4px; margin-top:auto;
+  flex-wrap:wrap; }
+.emp-cal-cell .ecd-times{ display:flex; flex-direction:column; flex:none; }
+.emp-cal-cell .ecd{ display:flex; gap:5px; align-items:baseline; line-height:1.3; }
+.emp-cal-cell .ecd i{ flex:none; width:18px; font-style:normal; font-size:8px;
+  font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--ink-soft); opacity:.8; }
+.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:700;
+  white-space:nowrap; }
+/* The brace gathers the two times into the figure beside them. Stretched
+   rather than drawn: one glyph, and it keeps the typeface's own shape. */
+/* The brace and the figure travel together: on a narrow column the pair wraps
+   to its own line, rather than the brace being left pointing at nothing. */
+.emp-cal-cell .ecd-sum{ display:flex; align-items:center; gap:3px; flex:0 1 auto; min-width:0; }
+.emp-cal-cell .ecd-brace{ flex:none; font-size:19px; font-weight:300; line-height:0.9;
+  color:var(--ink-soft); opacity:.75; transform:scaleY(1.3); transform-origin:center; }
+.emp-cal-cell .ecd-dur{ flex:1 1 auto; min-width:46px; font-size:8.5px; font-weight:700;
+  letter-spacing:.03em; text-transform:uppercase; color:var(--ink-soft); line-height:1.25;
+  white-space:nowrap; }
+/* On a narrower column the caption is the first thing to go - the brace
+   already says what the figure is. */
+@media (max-width: 1500px){
+  .emp-cal-cell .ecd-dur .lbl{ display:none; }
+}
+.emp-cal-cell .ecd-dur b{ display:block; font-family:'IBM Plex Mono',monospace;
+  font-size:11px; letter-spacing:0; text-transform:none; color:var(--ink); white-space:nowrap; }
 /* What the corner letter means, in words. */
-.emp-cal-cell .ec-notes{ display:block; margin-top:2px; }
-.emp-cal-cell .ecn{ display:block; font-size:9.5px; font-weight:700; line-height:1.3; }
+/* What the corner letter means sits to its left, in the same row - the two
+   are one statement, and reading "L" and then hunting for the minutes is the
+   thing this is here to stop. The row keeps clear of the date. */
+.emp-cal-cell .ec-notes{ flex:1; min-width:0; text-align:right; }
+.emp-cal-cell .ecn{ display:block; font-size:9.5px; font-weight:700; line-height:1.2;
+  white-space:normal; overflow-wrap:anywhere; }
 .emp-cal-cell .ecn.late, .emp-cal-cell .ecn.early{ color:#9A6B10; }
 .emp-cal-cell .ecn.wait{ color:#2E5A86; }
 .emp-cal-cell .ecn.ok{ color:#2F6F52; }
@@ -2516,7 +2550,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell.st-OV-OTHER{background:#D8DEE7 !important;color:#1C232C;}
 .emp-cal-cell{position:relative;}
 .emp-cal-cell.is-late{box-shadow:inset 3px 0 0 #C9A227;}
-.ec-marks{display:flex;gap:3px;position:absolute;top:4px;right:5px;}
+.ec-marks{display:flex;gap:4px;align-items:center;justify-content:flex-end;
+  position:absolute;top:4px;right:5px;max-width:calc(100% - 42px);}
 .ec-m{display:inline-block;min-width:19px;height:19px;line-height:19px;text-align:center;
   border-radius:4px;font-size:12px;font-weight:800;padding:0 4px;}
 /* Amber where it still counts against the person, green once an admin has
@@ -18022,9 +18057,18 @@ function buildExcelBackup(){
       var detail = '';
       if(rec && rec['in']){
         var dur = rec.out ? (toMin(rec.out) - toMin(rec['in'])) : 0;
-        detail = '<span class="ecd"><i>In</i><b>'+escapeHtml(fmtTime(rec['in']))+'</b></span>'
-          + (rec.out ? ('<span class="ecd"><i>Out</i><b>'+escapeHtml(fmtTime(rec.out))+'</b></span>') : '')
-          + (dur > 0 ? ('<span class="ecd"><i>Total</i><b>'+escapeHtml(fmtMin(dur))+'</b></span>') : '');
+        /* The two times stacked, and a brace gathering them into the figure
+           they add up to - which is the one most people are actually after. */
+        detail = '<span class="ecd-times">'
+            + '<span class="ecd"><i>In</i><b>'+escapeHtml(fmtTime(rec['in']))+'</b></span>'
+            + (rec.out ? ('<span class="ecd"><i>Out</i><b>'+escapeHtml(fmtTime(rec.out))+'</b></span>') : '')
+          + '</span>'
+          + (dur > 0
+              ? ('<span class="ecd-sum">'
+                 + '<span class="ecd-brace" aria-hidden="true">}</span>'
+                 + '<span class="ecd-dur"><span class="lbl">Duration</span><b>'+escapeHtml(fmtMin(dur))+' hr</b></span>'
+                 + '</span>')
+              : '');
       }
       /* And what the corner letter stands for, in words. */
       var notes = '';
@@ -18035,7 +18079,7 @@ function buildExcelBackup(){
         if(isLate(name, rec)){
           notes += '<span class="ecn '+(lxN ? 'ok' : (plN ? 'wait' : 'late'))+'">'
             + escapeHtml(minsSaid(leN.late||0)) + ' late'
-            + (lxN ? ' · excused' : (plN ? ' · reason sent' : '')) + '</span>';
+            + (lxN ? ' · excused' : (plN ? ' · sent' : '')) + '</span>';
         }
         if(isEarly(name, rec)){
           notes += '<span class="ecn '+(exN ? 'ok' : 'early')+'">left '
@@ -18045,11 +18089,15 @@ function buildExcelBackup(){
       html += '<div class="'+cls+'" data-date="'+dateStr+'"'
         + (tips.length ? (' title="'+tips.join(' · ').replace(/"/g,'&quot;')+'"') : '')+'>'+
         '<span class="d">'+day+'</span>'+
-        (marks ? '<span class="ec-marks">'+marks+'</span>' : '')+
+        ((marks || notes)
+          ? ('<span class="ec-marks">'
+             + (notes ? '<span class="ec-notes">'+notes+'</span>' : '')
+             + marks
+             + '</span>')
+          : '')+
         (label ? '<span class="s">'+escapeHtml(label)+'</span>' : '')+
         (timeStr ? '<span class="t">'+escapeHtml(timeStr)+'</span>' : '')+
         (detail ? '<span class="ec-det">'+detail+'</span>' : '')+
-        (notes ? '<span class="ec-notes">'+notes+'</span>' : '')+
         '</div>';
     });
     grid.className = 'emp-cal-grid' + (EMP_CAL_COMPACT ? ' compact' : '');
