@@ -2515,11 +2515,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell .ecd-dur{ flex:1 1 auto; min-width:46px; font-size:8.5px; font-weight:700;
   letter-spacing:.03em; text-transform:uppercase; color:var(--ink-soft); line-height:1.25;
   white-space:nowrap; }
-/* On a narrower column the caption is the first thing to go - the brace
-   already says what the figure is. */
-@media (max-width: 1500px){
-  .emp-cal-cell .ecd-dur .lbl{ display:none; }
-}
+
 .emp-cal-cell .ecd-dur b{ display:block; font-family:'IBM Plex Mono',monospace;
   font-size:11px; letter-spacing:0; text-transform:none; color:var(--ink); white-space:nowrap; }
 /* What the corner letter means, in words. */
@@ -2534,7 +2530,14 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell .ecn.ok{ color:#2F6F52; }
 /* The roomy view shows the stacked lines instead of the packed one - but only
    where there are stacked lines to show. */
-.emp-cal-grid:not(.compact) .emp-cal-cell.has-det .t{ display:none; }
+.emp-cal-grid:not(.compact) .emp-cal-cell.has-det .t,
+.emp-cal-grid:not(.compact) .emp-cal-cell.has-hol .t{ display:none; }
+/* The name reads first; what it closes sits under it, quieter. */
+.emp-cal-cell .ec-hol{ display:block; margin-top:10px; line-height:1.3; }
+.emp-cal-cell .ec-hol b{ display:block; font-size:12px; font-weight:800; }
+.emp-cal-cell .ec-hol span{ display:block; margin-top:1px; font-size:9.5px;
+  font-weight:600; opacity:.8; }
+.emp-cal-grid.compact .emp-cal-cell .ec-hol{ display:none; }
 .emp-cal-grid.compact .emp-cal-cell .ec-det,
 .emp-cal-grid.compact .emp-cal-cell .ec-notes{ display:none; }
 .emp-cal-cell.st-PR{background:#CDEBD6;color:#14522E;}
@@ -18067,7 +18070,7 @@ function buildExcelBackup(){
           + (dur > 0
               ? ('<span class="ecd-sum">'
                  + '<span class="ecd-brace" aria-hidden="true">}</span>'
-                 + '<span class="ecd-dur"><span class="lbl">Duration</span><b>'+escapeHtml(fmtMin(dur))+' hr</b></span>'
+                 + '<span class="ecd-dur"><b>'+escapeHtml(fmtMin(dur))+' hr</b></span>'
                  + '</span>')
               : '');
       }
@@ -18090,6 +18093,15 @@ function buildExcelBackup(){
       /* Only a day that carries the stacked times hides the packed line. A WFH
          day's "5:31 logged" and a holiday's name live in that line and nowhere
          else - hiding it for every day took them off the calendar. */
+      /* A holiday is a name and, under it, what that means for the office -
+         run together on one line they read as a single long label. */
+      var holBlock = '';
+      if(holiday){
+        holBlock = '<span class="ec-hol"><b>'+escapeHtml(holiday.name)+'</b>'
+          + (holiday.note ? ('<span>'+escapeHtml(holiday.note)+'</span>') : '')
+          + '</span>';
+        cls += ' has-hol';
+      }
       if(detail) cls += ' has-det';
       html += '<div class="'+cls+'" data-date="'+dateStr+'"'
         + (tips.length ? (' title="'+tips.join(' · ').replace(/"/g,'&quot;')+'"') : '')+'>'+
@@ -18102,6 +18114,7 @@ function buildExcelBackup(){
           : '')+
         (label ? '<span class="s">'+escapeHtml(label)+'</span>' : '')+
         (timeStr ? '<span class="t">'+escapeHtml(timeStr)+'</span>' : '')+
+        (holBlock ? holBlock : '')+
         (detail ? '<span class="ec-det">'+detail+'</span>' : '')+
         '</div>';
     });

@@ -276,7 +276,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 
   const styles = (APP.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
   check('only one of the two time lines is ever shown',
-    /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell\.has-det \.t\{ display:none; \}/.test(styles)
+    /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell\.has-det \.t,/.test(styles)
       && /\.emp-cal-grid\.compact \.emp-cal-cell \.ec-det/.test(styles));
   /* A WFH day's hours and a holiday's name live in the packed line and nowhere
      else; hiding it for every day took them off the calendar. */
