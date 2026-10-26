@@ -9936,7 +9936,13 @@ function buildExcelBackup(){
         req.employeeReply = val;
         req.status = 'pending';
         req.updatedAt = new Date().toISOString();
-        saveLeaveRequests().then(function(){ renderMyRequests(); });
+        saveLeaveRequests().then(function(){
+          renderMyRequests();
+          showUploadStatus('Your reply has gone to the office.', false);
+        }).catch(function(e){
+          showUploadStatus('That reply did not send ('
+            + ((e && e.message) || 'no answer') + ').', true);
+        });
       });
     });
   }
@@ -10026,10 +10032,21 @@ function buildExcelBackup(){
     saveLeaveRequests().then(function(){
       requestModalOverlay.classList.remove('open');
       renderMyRequests();
+      /* Say it has gone. The modal closing is not an answer: it closes whether
+         the save landed or not, and the one thing somebody wants to know after
+         pressing Send is whether the office has it. */
+      showUploadStatus((isPunch ? 'Punch correction' : 'Request')
+        + ' sent for ' + fmtDateRange(req.dateFrom, req.dateTo)
+        + ' \u2014 waiting on the office.', false);
       /* The paper form is submitted with the request, not after it comes back
          approved - so offer to print it straight away, with the approval line
          left for whoever signs it. A punch correction is not a day off. */
       if(!isPunch) printDayOffForm(req);
+    }).catch(function(e){
+      /* It is still in the list on this page, so say plainly that it did not
+         reach the office rather than leaving it looking sent. */
+      showUploadStatus('That request did not reach the office ('
+        + ((e && e.message) || 'no answer') + '). Nothing has been sent.', true);
     });
   });
 

@@ -306,6 +306,21 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
                          APP.indexOf('The two folded notes on the Leave Record'));
   check('writing a line says so, where the notices are',
     /showUploadStatus\([^;]*saved to your work log/.test(card));
+
+  /* The other things an employee does from their own page say so too. The
+     modal closing is not an answer - it closes whether the save landed or
+     not, and what somebody wants to know after pressing Send is whether the
+     office has it. */
+  check('sending a leave request says it has gone',
+    /showUploadStatus\(\(isPunch \? 'Punch correction' : 'Request'\)/.test(APP)
+      && /waiting on the office/.test(APP));
+  check('and says plainly when it did not',
+    /That request did not reach the office/.test(APP));
+  check('a reply to the office says it has gone too',
+    /Your reply has gone to the office/.test(APP));
+  check('their own in and out says so, and their reason for being late',
+    /Saved\. The office sees it on the record/.test(APP)
+      && /Sent to the office\. The minutes count until they accept it/.test(APP));
 }
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
