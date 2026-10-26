@@ -3021,8 +3021,24 @@ function monthlyCost() {
      panel says so rather than letting the total read as the whole bill.
      COST_NOTE replaces the wording where something else needs saying. */
   const note = String(process.env.COST_NOTE || '').trim()
-    || 'Storage and anything else Render bills is charged on top. Billing has the full figure.';
-  return { currency: 'USD', monthly: Math.round(total * 100) / 100, items, note };
+    || 'Only this project’s own services. Storage, anything over the plan and the '
+       + 'workspace’s own seats are billed on top — Billing has the whole figure.';
+  /* How much of the month has been used. Render charges by the second, so what
+     has been run up by now is the month's figure times the part of the month
+     that has gone - which is an estimate, and is called one on screen. The
+     office works at +05:30, so the day is counted there rather than at UTC. */
+  const now = new Date(Date.now() + 5.5 * 3600000);
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+  const daysIn = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const elapsed = (now.getUTCDate() - 1) + (now.getUTCHours() * 60 + now.getUTCMinutes()) / 1440;
+  const monthly = Math.round(total * 100) / 100;
+  return {
+    currency: 'USD', monthly, items, note,
+    soFar: Math.round(monthly * (elapsed / daysIn) * 100) / 100,
+    day: now.getUTCDate(), daysIn,
+    month: ['January','February','March','April','May','June','July',
+            'August','September','October','November','December'][m]
+  };
 }
 
 /* What the dashboard's indicator shows. Cheap enough to ask for every minute:

@@ -434,7 +434,13 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     /* The total is not the whole bill, and saying so is the honest part. */
     check('it says what the total leaves out',
       /cost\.note \? \('<u>'/.test(src) && /COST_NOTE/.test(server)
-        && /Storage and anything else Render bills/.test(server));
+        && /billed on top/.test(server));
+    /* The month is charged by the second, so what has been run up by now is
+       worth saying beside what the month will come to. */
+    check('it says what has been run up so far, and calls it an estimate',
+      /soFar: Math\.round\(monthly \* \(elapsed \/ daysIn\)/.test(server)
+        && /So far this month/.test(src) && /\u2248 \$/.test(src),
+      (/soFar[^,]{0,60}/.exec(server) || [])[0]);
   }
 
   /* ---- the notice leaves on a fade, not a blink ----
@@ -461,6 +467,47 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     /* Somebody who has asked for less movement gets less of it. */
     check('and it is cut short for anyone who asked for less motion',
       /prefers-reduced-motion[\s\S]{0,200}\.undo-import\.going\{transform:none/.test(styles));
+  }
+
+  /* ---- notices go where the eye already looks ----
+     They were a strip across the top of the page. On a long record that is off
+     screen by the time anyone has scrolled, and "copied to clipboard" said
+     where nobody is looking is the same as not saying it. */
+  {
+    check('a notice is drawn in the corner, not across the top',
+      /function hwToast\(msg, bad\)\{/.test(src) && /getElementById\('hwToasts'\)/.test(src));
+    check('and the one way the page speaks still works, so every caller follows',
+      /function showUploadStatus\(msg, isError\)\{\s*\n[\s\S]{0,220}?hwToast\(msg, isError\);/.test(src),
+      (/function showUploadStatus[\s\S]{0,200}/.exec(src) || [])[0]);
+    check('good news fades, bad news waits to be read',
+      /if\(!bad\)\{[\s\S]{0,200}setTimeout\(go, 7000\)/.test(src));
+    check('a pointer resting on one holds it there',
+      /if\(t\.matches\(':hover'\)\)\{ timer = setTimeout\(go, 7000\); return; \}/.test(src));
+    check('they stack with the import notice rather than over it',
+      /<div id="hwToasts"[\s\S]{0,200}id="undoImportBox"/.test(src)
+        && !/\.undo-import\{position:fixed/.test(src),
+      (/\.undo-import\{[^}]{0,60}/.exec(src) || [])[0]);
+    check('and a wall of them is trimmed',
+      /all\.length - 4/.test(src));
+  }
+
+  /* ---- a copy of the day, taken on its own ----
+     The backup went with a press - a screenshot, an email, an export. The days
+     nobody pressed anything were the days with no backup, which are exactly
+     the days nobody was watching. */
+  {
+    check('the day is backed up without a press',
+      /function dailyBackupWatch\(\)\{/.test(src) && /setInterval\(dailyBackupWatch/.test(src));
+    check('only where a folder was chosen, so nothing lands in Downloads unasked',
+      /idbDir\('get'\)\.then\(function\(dir\)\{\s*\n\s*if\(dir\)\{ keepACopy\(\); return; \}/.test(src));
+    check('and it says so once when there is no folder',
+      /DAILY_BACKUP_SAID = true;/.test(src) && /No backup saved for today yet/.test(src));
+    check('it does not write an empty backup over a good one',
+      /!RECORDS\.length\) return;/.test(src));
+    check('a day already backed up by hand is left alone',
+      /getItem\('hw_att_snap_day'\) === today\) return;/.test(src));
+    check('and the office\u2019s own account is the one that takes it',
+      /viewRole\.role !== 'admin'\) return;/.test(src));
   }
 
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
