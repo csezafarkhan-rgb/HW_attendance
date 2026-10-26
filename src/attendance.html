@@ -2745,8 +2745,14 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-row{ display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:8px; }
 .ed-row label{ display:flex; flex-direction:column; gap:3px; font-size:11px;
   font-weight:700; color:var(--ink-soft); }
+.ed-row .ed-f{ display:flex; align-items:center; gap:5px; }
 .ed-row input[type=time]{ border:1px solid var(--line); border-radius:8px; padding:6px 8px;
   font:inherit; font-size:13px; background:#fff; color:var(--ink); }
+/* Quiet until wanted: it sits beside the box rather than competing with Save. */
+.ed-now{ border:1px solid var(--line); background:#fff; color:var(--ink-soft);
+  border-radius:7px; padding:5px 9px; font:inherit; font-size:11px; font-weight:700;
+  cursor:pointer; line-height:1.2; }
+.ed-now:hover{ background:#EEF3FA; color:var(--ink); border-color:#B9CBE4; }
 .ed-row input[type=text]{ flex:1; min-width:180px; border:1px solid var(--line); border-radius:8px;
   padding:7px 9px; font:inherit; font-size:12.5px; background:#fff; color:var(--ink); }
 .ed-sum{ margin-top:7px; font-size:12px; font-weight:700; color:var(--ink); }
@@ -17837,9 +17843,19 @@ function buildExcelBackup(){
          the server refuses it too, whatever the box allows. */
       var ceiling = (day === todayISO_full) ? nowHHMM() : '';
       var capAttr = ceiling ? (' max="' + ceiling + '"') : '';
+      /* "Now" beside each box. Picking 2:49 PM out of a spinner is a dozen
+         taps for a time the machine already knows, and punching in is the
+         moment somebody is most likely to be in a hurry. Only on today -
+         "now" is not a time that happened yesterday. */
+      var nowBtn = function(id){
+        return ceiling
+          ? ('<button type="button" class="ed-now" data-now="' + id + '"'
+             + ' title="Use the time now">Now</button>')
+          : '';
+      };
       html += '<div class="ed-row">'
-        + '<label>In<input type="time" id="edIn"' + capAttr + ' value="' + shotEsc(tidyTime(shown['in'])) + '"></label>'
-        + '<label>Out<input type="time" id="edOut"' + capAttr + ' value="' + shotEsc(tidyTime(shown.out)) + '"></label>'
+        + '<label>In<span class="ed-f"><input type="time" id="edIn"' + capAttr + ' value="' + shotEsc(tidyTime(shown['in'])) + '">' + nowBtn('edIn') + '</span></label>'
+        + '<label>Out<span class="ed-f"><input type="time" id="edOut"' + capAttr + ' value="' + shotEsc(tidyTime(shown.out)) + '">' + nowBtn('edOut') + '</span></label>'
         + '<button type="button" class="bk-btn primary" id="edSave">Save</button>'
         + (man ? '<button type="button" class="month-btn" id="edClear">Clear</button>' : '')
         + '</div>'
@@ -17918,6 +17934,18 @@ function buildExcelBackup(){
     ['edIn', 'edOut'].forEach(function(id){
       var el = document.getElementById(id);
       if(el) el.addEventListener('input', tell);
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-now]'), function(b){
+      b.addEventListener('click', function(){
+        var el = document.getElementById(b.getAttribute('data-now'));
+        if(!el) return;
+        el.value = nowHHMM();
+        tell();
+        /* Straight to Save: filling a time is almost always the last thing
+           somebody wanted to do before pressing it. */
+        var sv = document.getElementById('edSave');
+        if(sv) sv.focus();
+      });
     });
 
     var save = document.getElementById('edSave');

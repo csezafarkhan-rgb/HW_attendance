@@ -237,6 +237,14 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /fmtMin\(mins\) \+ ' on the day/.test(card) && /addEventListener\('input', tell\)/.test(card));
   check('and an out before an in is said so, not saved',
     /Out is before in\./.test(card) && /wrong === 'backwards'/.test(card));
+  /* Picking 2:49 PM out of a spinner is a dozen taps for a time the machine
+     already knows, and punching in is when somebody is most in a hurry. */
+  check('each box can take the time now in one press',
+    /nowBtn\('edIn'\)/.test(card) && /nowBtn\('edOut'\)/.test(card)
+      && /el\.value = nowHHMM\(\);/.test(card));
+  check('and it is offered only on today, "now" being no time yesterday',
+    /var nowBtn = function\(id\)\{[\s\S]{0,200}return ceiling/.test(card),
+    (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);
   check('today\u2019s boxes stop at the clock',
     /var ceiling = \(day === todayISO_full\) \? nowHHMM\(\) : '';/.test(card)
       && /max="' \+ ceiling/.test(card));
