@@ -32,8 +32,17 @@ function conf() {
 function ready() { const c = conf(); return !!(c.key && c.from); }
 
 /* Where the site is, for the links in an email. Render sets the first one. */
+/* Where a link in a message points.
+
+   APP_URL comes first, and that order matters. Render sets
+   RENDER_EXTERNAL_URL itself, to the onrender.com address it gave the service
+   - so while that was read first, a site with a domain of its own could never
+   use it: every Approve button and every "open the dashboard" went to the
+   hosting address instead, and after a move to a new host, to the wrong one.
+
+   An address somebody has set on purpose beats one the platform filled in. */
 function baseUrl() {
-  return String(process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || '').replace(/\/+$/, '');
+  return String(process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
 }
 
 /* Resend's API. Returns {ok, id} or {ok:false, error} - a failed email must

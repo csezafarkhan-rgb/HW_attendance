@@ -17,7 +17,9 @@ const path = require('path');
 const { load } = require('./dashboard-parser');
 
 const DATA_DIR = process.env.HW_DATA_DIR || 'E:\\Drive H- Desktop\\ZAFAR LISTING\\AI Projects\\Attendance backup';
-const SITE = process.env.HW_SITE || 'https://hw-attendance-6qwd.onrender.com';
+/* The office's own address, so a change of host does not need this file
+   edited. HW_SITE still overrides it. */
+const SITE = process.env.HW_SITE || 'https://attendance.homeweavers.net';
 const CSV = process.env.HW_CSV || path.join(DATA_DIR, '1_Daily Attendace file', 'DailyAttendanceLogsDetails.csv');
 const TOKEN_FILE = process.env.HW_TOKEN_FILE || path.join(DATA_DIR, 'sync-token.txt');
 const LOG = path.join(DATA_DIR, 'push-log.txt');

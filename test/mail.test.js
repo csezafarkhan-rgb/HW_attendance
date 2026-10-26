@@ -24,6 +24,30 @@ const SECRET = 'test-secret-for-signing-links';
   check('an expired link is refused', mailer.verifyAction(stale, SECRET) === null);
 }
 
+/* ---------------- where a link points ---------------- */
+{
+  const keep = { r: process.env.RENDER_EXTERNAL_URL, a: process.env.APP_URL };
+  const reread = () => { delete require.cache[require.resolve(path.join(REPO, 'mailer.js'))];
+                         return require(path.join(REPO, 'mailer.js')).baseUrl(); };
+  /* Render fills RENDER_EXTERNAL_URL in itself, with the onrender.com address
+     it handed out. While that was read first, a site with a domain of its own
+     could never use it: every Approve button and every "open the dashboard"
+     went to the hosting address, and after a move, to the old host's. */
+  process.env.RENDER_EXTERNAL_URL = 'https://hw-attendance-av4h.onrender.com';
+  process.env.APP_URL = 'https://attendance.homeweavers.net';
+  check('an address set on purpose beats the one the platform filled in',
+    reread() === 'https://attendance.homeweavers.net', reread());
+  delete process.env.APP_URL;
+  check('and the platform’s own is still used when nothing was set',
+    reread() === 'https://hw-attendance-av4h.onrender.com', reread());
+  process.env.APP_URL = 'https://attendance.homeweavers.net/';
+  check('a trailing slash does not become a double one in a link',
+    reread() === 'https://attendance.homeweavers.net', reread());
+  if (keep.r == null) delete process.env.RENDER_EXTERNAL_URL; else process.env.RENDER_EXTERNAL_URL = keep.r;
+  if (keep.a == null) delete process.env.APP_URL; else process.env.APP_URL = keep.a;
+  delete require.cache[require.resolve(path.join(REPO, 'mailer.js'))];
+}
+
 /* ---------------- what the messages say ---------------- */
 {
   check('times carry am and pm', mailer.clock('9:33') === '9:33 AM' && mailer.clock('16:17') === '4:17 PM'
