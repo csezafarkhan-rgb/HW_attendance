@@ -171,7 +171,12 @@ function canWrite(role) { return role === 'admin'; }
    view-only admin allowed through here could set status:'approved' and approve
    leave. They have no reason to touch it - they raise nothing from the admin
    view - so the exception is theirs alone. */
-const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks'];
+/* Three of the office work away from the card readers, so their day was typed
+   in for them every morning. They type it themselves now - but only their own
+   day, only while it is today or yesterday, and only if the office has marked
+   them as marking their own. Each of those is checked here rather than in the
+   page, because the page is theirs to edit and this is not. */
+const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses'];
 function mayWriteSharedKey(role, key) {
   if (canWrite(role)) return true;
   return role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) > -1;
@@ -184,7 +189,8 @@ function mayWriteSharedKey(role, key) {
 const EMP_KEYED_BY_DAY = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags', 'manualRecords',
                           'lateExcuses', 'earlyExcuses', 'manualLeave', 'leaveDeductions',
                           'dailyTasks'];  // "Name|date"
-const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames'];         // "Name"
+const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames',
+                          'selfMark'];                                       // "Name"
 const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
                       'weeklyLeverageMin', 'companyInfo', 'customShifts'];
 const EMP_VISIBLE_KEYS = EMP_KEYED_BY_DAY.concat(EMP_KEYED_BY_NAME, EMP_READABLE, ['leaveRequests', 'signatures']);
@@ -264,6 +270,82 @@ function mergeEmployeeTasks(storedValue, incomingValue, name) {
   });
   return JSON.stringify(out);
 }
+/* The day somebody may still be writing: today, or yesterday until they have
+   had a morning to remember it. Counted at +05:30, where the office is. */
+function ownDays() {
+  const now = new Date(Date.now() + IST_MS);
+  const today = now.toISOString().slice(0, 10);
+  const back = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+  return [today, back];
+}
+const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+/* Their own in and out, for their own day.
+
+   Everything else in the map is left exactly as it was: this replaces only the
+   keys under their name within the window, so a save from their page can
+   neither reach another person's day nor an older one of their own. The office
+   can still type over any of it afterwards - an entry says it came from the
+   person, and that is all it claims. */
+function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
+  const incoming = parseJson(incomingValue);
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
+  const marked = parseJson(selfMarkValue);
+  if (!marked || marked[name] !== true) return false;      // not one of theirs to mark
+  const parsed = parseJson(storedValue);
+  const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  const days = ownDays();
+  const mine = k => {
+    const i = String(k).lastIndexOf('|');
+    return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
+  };
+  /* Their own days as they now stand, so clearing one clears it. */
+  Object.keys(out).forEach(k => { if (mine(k)) delete out[k]; });
+  Object.keys(incoming).forEach(k => {
+    if (!mine(k)) return;
+    const v = incoming[k];
+    if (!v || typeof v !== 'object') return;
+    const tin = String(v['in'] == null ? '' : v['in']).trim();
+    const tout = String(v.out == null ? '' : v.out).trim();
+    if (tin && !TIME_RE.test(tin)) return;
+    if (tout && !TIME_RE.test(tout)) return;
+    if (!tin && !tout) return;                             // nothing said is a deletion
+    out[k] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB',
+               by: 'self', at: new Date().toISOString() };
+  });
+  return JSON.stringify(out);
+}
+
+/* Why they were late, for the office to accept or not.
+
+   An excuse cancels the lateness, so one written by the person it is about
+   cannot simply take effect: it is stored waiting (`pending`), the minutes go
+   on counting, and an admin clearing that flag is what excuses the day. An
+   entry the office has already accepted is left untouched - otherwise writing
+   a new reason over it would quietly un-accept it. */
+const EXCUSE_MAX = 300;
+function mergeEmployeeExcuses(storedValue, incomingValue, name) {
+  const incoming = parseJson(incomingValue);
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
+  const parsed = parseJson(storedValue);
+  const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  const days = ownDays();
+  const mine = k => {
+    const i = String(k).lastIndexOf('|');
+    return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
+  };
+  const settled = k => { const v = out[k]; return v && typeof v === 'object' && v.pending !== true; };
+  Object.keys(out).forEach(k => { if (mine(k) && !settled(k)) delete out[k]; });
+  Object.keys(incoming).forEach(k => {
+    if (!mine(k) || settled(k)) return;
+    const v = incoming[k];
+    const note = String((v && v.note) || '').trim().slice(0, EXCUSE_MAX);
+    if (!note) return;
+    out[k] = { note, at: new Date().toISOString(), by: 'self', pending: true };
+  });
+  return JSON.stringify(out);
+}
+
 function mergeEmployeeRequests(storedValue, incomingValue, name) {
   const incoming = parseJson(incomingValue);
   if (!Array.isArray(incoming)) return null;
@@ -955,6 +1037,21 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
       if (key === 'dailyTasks' && req.session.role === 'employee') {
         const merged = mergeEmployeeTasks(row ? row.value : '{}', value, (req.user && req.user.name) || '');
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_tasks' }); }
+        value = merged;
+      } else if (key === 'manualRecords' && req.session.role === 'employee') {
+        const mark = await client.query(
+          "SELECT value FROM kv WHERE org_id = $1 AND key = 'selfMark' AND user_id IS NULL",
+          [req.session.orgId]);
+        const merged = mergeEmployeeManual(row ? row.value : '{}', value,
+                                           (req.user && req.user.name) || '',
+                                           mark.rows[0] ? mark.rows[0].value : '{}');
+        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_times' }); }
+        if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
+        value = merged;
+      } else if (key === 'lateExcuses' && req.session.role === 'employee') {
+        const merged = mergeEmployeeExcuses(row ? row.value : '{}', value,
+                                            (req.user && req.user.name) || '');
+        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_excuse' }); }
         value = merged;
       } else if (key === 'leaveRequests') {
         requestsBefore = row ? row.value : '[]';
@@ -1722,7 +1819,15 @@ async function buildDailyEmail(orgId, day, opts) {
      here so the message says the same as the screen. */
   const dayShifts = parseJson(kv.dayShifts) || {};
   const assigned = parseJson(kv.shiftAssignments) || {};
-  const excuses = parseJson(kv.lateExcuses) || {};
+  /* An excuse still waiting on the office does not cancel anything yet, so the
+     message counts that arrival as late exactly as the screen does. */
+  const allExcuses = parseJson(kv.lateExcuses) || {};
+  const excuses = {};
+  Object.keys(allExcuses).forEach(k => {
+    const v = allExcuses[k];
+    if (v && typeof v === 'object' && v.pending === true) return;
+    excuses[k] = v;
+  });
   const threshold = Number(parseJson(kv.lateThresholdMin)) || Number(kv.lateThresholdMin) || 10;
   const late = [], shifts = [], wfh = [], visits = [];
   names.forEach((empName, i) => {
