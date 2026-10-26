@@ -310,6 +310,15 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
     if (tin && !TIME_RE.test(tin)) return;
     if (tout && !TIME_RE.test(tout)) return;
     if (!tin && !tout) return;                             // nothing said is a deletion
+    /* Nothing later than now, on today. The page caps its own boxes, but the
+       page is theirs to edit, so the clock is checked again here. A couple of
+       minutes of slack: their machine's clock is not ours. */
+    if (String(k).slice(String(k).lastIndexOf('|') + 1) === days[0]) {
+      const now = new Date(Date.now() + IST_MS);
+      const cap = now.getUTCHours() * 60 + now.getUTCMinutes() + 2;
+      const asMin = t => { const p = t.split(':'); return (+p[0]) * 60 + (+p[1]); };
+      if ((tin && asMin(tin) > cap) || (tout && asMin(tout) > cap)) return;
+    }
     out[k] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB',
                by: 'self', at: new Date().toISOString() };
   });

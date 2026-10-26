@@ -25,13 +25,21 @@ const lift = re => { const m = re.exec(SRC); if (!m) throw new Error('not found:
 ].forEach(re => vm.runInContext(lift(re), ctx));
 
 const [TODAY, YESTERDAY] = ctx.ownDays();
+/* Two times that have already gone today, whenever the suite happens to run -
+   a fixed evening time is refused by the clock check as the day wears on. */
+const IST_NOW = new Date(Date.now() + 5.5 * 3600000);
+const NOW_MIN = IST_NOW.getUTCHours() * 60 + IST_NOW.getUTCMinutes();
+const hhmm = m => String(Math.floor(Math.max(0, m) / 60)).padStart(2, '0')
+                + ':' + String(Math.max(0, m) % 60).padStart(2, '0');
+const GONE_IN = hhmm(Math.max(0, NOW_MIN - 120));
+const GONE_OUT = hhmm(Math.max(1, NOW_MIN - 10));
 const OLD = '2026-01-05';
 const MARKED = JSON.stringify({ 'Shyam Lal ESS': true, 'Aman Gupta': true });
 const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 
 /* ---- their own day, and only theirs ---- */
 {
-  const mine = {}; mine['Shyam Lal ESS|' + TODAY] = { 'in': '09:40', out: '18:20' };
+  const mine = {}; mine['Shyam Lal ESS|' + TODAY] = { 'in': GONE_IN, out: GONE_OUT };
   const out = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(mine), 'Shyam Lal ESS', MARKED));
   check('somebody marked as marking their own can write their day',
     !!out && !!out['Shyam Lal ESS|' + TODAY], out);
@@ -42,7 +50,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     out['Shyam Lal ESS|' + TODAY].st === 'PR');
 
   /* The page is theirs to edit, so the name in the key proves nothing. */
-  const theirs = {}; theirs['Rahul Mishra|' + TODAY] = { 'in': '09:00', out: '18:00' };
+  const theirs = {}; theirs['Rahul Mishra|' + TODAY] = { 'in': GONE_IN, out: GONE_OUT };
   const out2 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(theirs), 'Shyam Lal ESS', MARKED));
   check('but not somebody else’s day, whatever the page sends',
     Object.keys(out2).length === 0, out2);
@@ -59,7 +67,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 
 /* ---- only those the office has marked ---- */
 {
-  const mine = {}; mine['Rahul Mishra|' + TODAY] = { 'in': '09:40', out: '18:20' };
+  const mine = {}; mine['Rahul Mishra|' + TODAY] = { 'in': GONE_IN, out: GONE_OUT };
   const out = ctx.mergeEmployeeManual('{}', JSON.stringify(mine), 'Rahul Mishra', MARKED);
   check('somebody who punches a card cannot type their day instead',
     out === false, out);
@@ -72,14 +80,14 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   const stored = {};
   stored['Aman Gupta|' + OLD] = { 'in': '09:00', out: '18:00' };     // an older day of theirs
   stored['Rahul Mishra|' + TODAY] = { 'in': '09:28', out: '18:31' }; // somebody else's today
-  const mine = {}; mine['Aman Gupta|' + TODAY] = { 'in': '10:00', out: '19:00' };
+  const mine = {}; mine['Aman Gupta|' + TODAY] = { 'in': GONE_IN, out: GONE_OUT };
   const out = parse(ctx.mergeEmployeeManual(JSON.stringify(stored), JSON.stringify(mine), 'Aman Gupta', MARKED));
   check('a save leaves every other day of the record alone',
     out['Aman Gupta|' + OLD]['in'] === '09:00'
       && out['Rahul Mishra|' + TODAY]['in'] === '09:28', out);
 
   /* Sending nothing for a day they had filled in clears it. */
-  const had = {}; had['Aman Gupta|' + TODAY] = { 'in': '10:00', out: '19:00' };
+  const had = {}; had['Aman Gupta|' + TODAY] = { 'in': GONE_IN, out: GONE_OUT };
   const cleared = parse(ctx.mergeEmployeeManual(JSON.stringify(had), '{}', 'Aman Gupta', MARKED));
   check('clearing their own day clears it', !cleared['Aman Gupta|' + TODAY], cleared);
 }
@@ -87,14 +95,41 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 /* ---- a time has to be a time ---- */
 {
   ['25:00', '9.30', 'half nine', '09:70', '<script>'].forEach(bad => {
-    const o = {}; o['Aman Gupta|' + TODAY] = { 'in': bad, out: '18:00' };
+    const o = {}; o['Aman Gupta|' + TODAY] = { 'in': bad, out: GONE_OUT };
     const got = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(o), 'Aman Gupta', MARKED));
     check('"' + bad + '" is not a time and is refused', Object.keys(got).length === 0, got);
   });
-  const ok = {}; ok['Aman Gupta|' + TODAY] = { 'in': '9:05', out: '' };
+  const ok = {}; ok['Aman Gupta|' + TODAY] = { 'in': GONE_IN, out: '' };
   const got = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(ok), 'Aman Gupta', MARKED));
   check('an in with no out yet is kept, and is not called present',
-    got['Aman Gupta|' + TODAY].st === 'AB' && got['Aman Gupta|' + TODAY]['in'] === '9:05', got);
+    got['Aman Gupta|' + TODAY].st === 'AB' && got['Aman Gupta|' + TODAY]['in'] === GONE_IN, got);
+}
+
+/* ---- a time that has not come round yet ----
+   A day is marked as it happens, so an hour still ahead is a slip or a guess.
+   The page caps its own boxes; the page is theirs to edit, so it is checked
+   here as well. */
+{
+  const now = new Date(Date.now() + 5.5 * 3600000);
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+  if (mins < 23 * 60) {                      // not in the last hour of the day
+    const ahead = {}; ahead['Aman Gupta|' + TODAY] = { 'in': '09:00', out: hhmm(mins + 45) };
+    const got = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(ahead), 'Aman Gupta', MARKED));
+    check('an out time still ahead of the clock is refused',
+      Object.keys(got).length === 0, got);
+  }
+  if (mins > 90) {
+    const past = {}; past['Aman Gupta|' + TODAY] = { 'in': hhmm(mins - 60), out: hhmm(mins - 5) };
+    const got2 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(past), 'Aman Gupta', MARKED));
+    check('a time already gone is taken', !!got2['Aman Gupta|' + TODAY], got2);
+  }
+  /* Yesterday is a whole day in the past: any hour of it is fair. */
+  const last = {}; last['Aman Gupta|' + YESTERDAY] = { 'in': '09:30', out: '23:30' };
+  const got3 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(last), 'Aman Gupta', MARKED));
+  check('and yesterday evening is fine, the day having finished',
+    !!got3['Aman Gupta|' + YESTERDAY], got3);
 }
 
 /* ---- why they were late ----
@@ -191,6 +226,58 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /the minutes count until they accept it/.test(card));
   check('and anybody late may give one, marked or not',
     /} else if\(rec\['in'\]\)\{/.test(card) && /if\(isLate\)\{/.test(card));
+}
+
+/* ---- what the card adds up, and where it sits ---- */
+{
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const card = APP.slice(APP.indexOf('function renderEmpDayCard()'),
+                         APP.indexOf('function renderEmployeeCalendar()'));
+  check('the two boxes add themselves up as they are typed',
+    /fmtMin\(mins\) \+ ' on the day/.test(card) && /addEventListener\('input', tell\)/.test(card));
+  check('and an out before an in is said so, not saved',
+    /Out is before in\./.test(card) && /wrong === 'backwards'/.test(card));
+  check('today\u2019s boxes stop at the clock',
+    /var ceiling = \(day === todayISO_full\) \? nowHHMM\(\) : '';/.test(card)
+      && /max="' \+ ceiling/.test(card));
+  check('and a time still ahead is refused on the way out too',
+    /wrong === 'future'/.test(card));
+  /* The page caps its own boxes; the page is theirs to edit. */
+  check('the server checks the clock as well, with a little slack for theirs',
+    /const cap = now\.getUTCHours\(\) \* 60 \+ now\.getUTCMinutes\(\) \+ 2;/.test(SRC));
+
+  /* Both cards fill the space the month leaves, rather than the dead band
+     under the whole page. */
+  check('their day and their work log sit under the calendar',
+    /<div class="emp-split-main">[\s\S]{0,400}id="empCalGrid"[\s\S]{0,400}id="empDayCard"[\s\S]{0,200}id="empTasksCard"/.test(APP),
+    (/<div class="emp-split-main">[\s\S]{0,200}/.exec(APP) || [])[0]);
+}
+
+/* ---- what a day cell says ----
+   In, out and what the day came to were only on hover, which is no use on a
+   phone and easy to miss anywhere else. The corner letter said "L" and left
+   you to guess by how much. */
+{
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const cal = APP.slice(APP.indexOf('function renderEmployeeCalendar()'),
+                        APP.indexOf('grid.className = '));
+  check('a day shows its in, its out and the total',
+    /<i>In<\/i>/.test(cal) && /<i>Out<\/i>/.test(cal) && /<i>Total<\/i>/.test(cal));
+  check('the total is worked out from the two times, not stored twice',
+    /var dur = rec\.out \? \(toMin\(rec\.out\) - toMin\(rec\['in'\]\)\) : 0;/.test(cal));
+  check('and the corner letter is spelled out beneath it',
+    /minsSaid\(leN\.late\|\|0\)\) \+ ' late'/.test(cal));
+  check('an excused one says so, and one still waiting says that instead',
+    /lxN \? ' \u00b7 excused' : \(plN \? ' \u00b7 reason sent' : ''\)/.test(cal));
+
+  const styles = (APP.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
+  check('only one of the two time lines is ever shown',
+    /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell \.t\{ display:none; \}/.test(styles)
+      && /\.emp-cal-grid\.compact \.emp-cal-cell \.ec-det/.test(styles));
+  check('the roomy cell is given the room for it',
+    /\.emp-cal-grid \.emp-cal-cell\{ height:132px/.test(styles));
+  check('and the compact one keeps its old height',
+    /\.emp-cal-grid\.compact \.emp-cal-cell,[\s\S]{0,60}height:96px/.test(styles));
 }
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

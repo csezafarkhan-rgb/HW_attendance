@@ -2305,14 +2305,19 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* The calendar takes the whole column. Capping its width instead left a dead
    band down the right of the page while the sections below ran full width. */
 .emp-split-main{ order:2; min-width:0; }
+/* Their own day and their work log, filling the space the month leaves. */
+.emp-under{ margin-top:14px; }
 .emp-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:0;}
 /* Square day cells: a month reads as a grid, not as a stack of wide bars. */
 /* A fixed row height rather than a square: the cell is as wide as the column
    allows, so forcing it square made every day a huge near-empty box on a wide
    screen. Height is what keeps the month tidy; width can look after itself. */
-.emp-cal-grid .emp-cal-cell{ height:112px; min-height:0; overflow:hidden;
+.emp-cal-grid .emp-cal-cell{ height:132px; min-height:0; overflow:hidden;
   box-sizing:border-box; }
-.emp-cal-grid .emp-cal-cell.empty{ height:112px; }
+.emp-cal-grid .emp-cal-cell.empty{ height:132px; }
+/* Compact goes back to the shorter cell: it carries one line, not four. */
+.emp-cal-grid.compact .emp-cal-cell,
+.emp-cal-grid.compact .emp-cal-cell.empty{ height:96px; }
 
 /* The summary is reference material here, so it is set a step down from the
    calendar rather than competing with it. */
@@ -2370,6 +2375,10 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   .emp-cal-cell .d{ font-size:11.5px; }
   .emp-cal-cell .s{ font-size:10px; line-height:1.2; }
   .emp-cal-cell .t{ display:none; }          /* punch times live in the day drill */
+  /* No room for three lines and a note on a phone either - the day drill has
+     them, and the cell keeps its shape. */
+  .emp-cal-cell .ec-det, .emp-cal-cell .ec-notes{ display:none; }
+  .emp-cal-grid .emp-cal-cell, .emp-cal-grid .emp-cal-cell.empty{ height:auto; }
   .ec-marks{ top:2px; right:3px; gap:2px; }
   .ec-m{ min-width:16px; height:16px; line-height:16px; font-size:11px; padding:0 3px; }
   .emp-view-header{ flex-wrap:wrap; gap:8px; }
@@ -2475,6 +2484,24 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell .d{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:800;}
 .emp-cal-cell .s{margin-top:auto;font-size:11.5px;font-weight:700;line-height:1.25;}
 .emp-cal-cell .t{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:var(--ink-soft);line-height:1.3;}
+/* In, out and what the day came to, one to a line, with the figures lined up
+   under each other. The single packed time line is kept for the compact view
+   and for a narrow screen; only one of the two is ever shown. */
+.emp-cal-cell .ec-det{ display:block; margin-top:2px; }
+.emp-cal-cell .ecd{ display:flex; gap:6px; align-items:baseline; line-height:1.35; }
+.emp-cal-cell .ecd i{ flex:none; width:28px; font-style:normal; font-size:9px;
+  font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--ink-soft); opacity:.85; }
+.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:700; }
+/* What the corner letter means, in words. */
+.emp-cal-cell .ec-notes{ display:block; margin-top:2px; }
+.emp-cal-cell .ecn{ display:block; font-size:9.5px; font-weight:700; line-height:1.3; }
+.emp-cal-cell .ecn.late, .emp-cal-cell .ecn.early{ color:#9A6B10; }
+.emp-cal-cell .ecn.wait{ color:#2E5A86; }
+.emp-cal-cell .ecn.ok{ color:#2F6F52; }
+/* The roomy view shows the three lines; the compact one shows the packed one. */
+.emp-cal-grid:not(.compact) .emp-cal-cell .t{ display:none; }
+.emp-cal-grid.compact .emp-cal-cell .ec-det,
+.emp-cal-grid.compact .emp-cal-cell .ec-notes{ display:none; }
 .emp-cal-cell.st-PR{background:#CDEBD6;color:#14522E;}
 .emp-cal-cell.st-AB{background:var(--alert);color:#fff;}
 .emp-cal-cell.st-HD{background:var(--late);}
@@ -2683,6 +2710,10 @@ table.dash-table tr:hover td{background:#F7F9FC;}
   font:inherit; font-size:13px; background:#fff; color:var(--ink); }
 .ed-row input[type=text]{ flex:1; min-width:180px; border:1px solid var(--line); border-radius:8px;
   padding:7px 9px; font:inherit; font-size:12.5px; background:#fff; color:var(--ink); }
+.ed-sum{ margin-top:7px; font-size:12px; font-weight:700; color:var(--ink); }
+.ed-sum.quiet{ font-weight:600; color:var(--ink-soft); }
+.ed-sum.bad{ color:#B23A34; }
+.ed-sum:empty{ display:none; }
 .ed-late{ margin-top:10px; padding:9px 11px; border-radius:9px; font-size:12px;
   background:#FFF7E8; border:1px solid #F0DCB4; color:#6B4E12; }
 .ed-late.wait{ background:#EEF3FB; border-color:#CBD9EC; color:#24405F; }
@@ -3640,7 +3671,14 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div class="view-switch" id="viewSwitchBtnEmp">⇄ Log out</div>
   </div>
   <div class="emp-split">
-    <div class="emp-split-main"><div class="emp-cal-grid" id="empCalGrid"></div></div>
+    <div class="emp-split-main">
+      <div class="emp-cal-grid" id="empCalGrid"></div>
+      <!-- Under the calendar rather than below the whole page: the month ends
+           well short of the figures beside it, and these two were left sitting
+           in the dead band below everything while that space stayed empty. -->
+      <div class="wl-card emp-under" id="empDayCard" style="display:none"></div>
+      <div class="wl-card emp-under" id="empTasksCard"></div>
+    </div>
     <aside class="emp-split-side">
       <!-- This month against last on every measure: what went down, and what went up. -->
       <div class="emp-perf" id="empPerf" style="display:none;"></div>
@@ -3650,17 +3688,6 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
            well short of the calendar beside it. -->
       <div class="ews" id="empWeekStatus"></div>
     </aside>
-  </div>
-  <!-- Their own in and out, for the people who work away from the readers,
-       and a reason when they were late. Above the work log because a day is
-       marked before it is described. -->
-  <div style="padding:6px 20px 0;">
-    <div class="wl-card" id="empDayCard" style="display:none"></div>
-  </div>
-  <!-- What they did today, in their own words. Above the leave requests
-       because it is the thing they come here to write most days. -->
-  <div style="padding:6px 20px 0;">
-    <div class="wl-card" id="empTasksCard"></div>
   </div>
   <div class="ews" id="empHolidays"></div>
   <div style="padding:6px 20px 30px;">
@@ -17756,16 +17783,23 @@ function buildExcelBackup(){
       + '<div class="wl-nav">' + dayBtns + '</div></div>';
 
     if(mine){
+      /* Nothing later than now, on today. A day is marked as it happens, so a
+         time that has not come round yet is a slip or a guess either way - and
+         the server refuses it too, whatever the box allows. */
+      var ceiling = (day === todayISO_full) ? nowHHMM() : '';
+      var capAttr = ceiling ? (' max="' + ceiling + '"') : '';
       html += '<div class="ed-row">'
-        + '<label>In<input type="time" id="edIn" value="' + shotEsc(tidyTime(shown['in'])) + '"></label>'
-        + '<label>Out<input type="time" id="edOut" value="' + shotEsc(tidyTime(shown.out)) + '"></label>'
+        + '<label>In<input type="time" id="edIn"' + capAttr + ' value="' + shotEsc(tidyTime(shown['in'])) + '"></label>'
+        + '<label>Out<input type="time" id="edOut"' + capAttr + ' value="' + shotEsc(tidyTime(shown.out)) + '"></label>'
         + '<button type="button" class="bk-btn primary" id="edSave">Save</button>'
         + (man ? '<button type="button" class="month-btn" id="edClear">Clear</button>' : '')
         + '</div>'
+        + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
                   + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : ''))
                : 'Nothing marked for this day yet.')
+        + (ceiling ? (' Nothing later than ' + shotEsc(fmtTime(ceiling)) + ' — the day is still going.') : '')
         + '</div>';
     } else if(rec['in']){
       html += '<div class="wl-foot">In at <b>' + shotEsc(clockOf(rec['in']))
@@ -17799,11 +17833,51 @@ function buildExcelBackup(){
       });
     });
     var said = function(t, bad){ var e=box.querySelector('#edSaid'); if(e) e.textContent = t; showUploadStatus(t, !!bad); };
+    /* What the two boxes come to, kept under them as they are typed. A figure
+       that only appears after saving is a figure nobody checks. */
+    var sumBox = box.querySelector('#edSum');
+    var readPair = function(){
+      return [ (document.getElementById('edIn')||{}).value || '',
+               (document.getElementById('edOut')||{}).value || '' ];
+    };
+    var tell = function(){
+      if(!sumBox) return null;
+      var p = readPair(), tin = p[0], tout = p[1];
+      var now = (day === todayISO_full) ? nowHHMM() : '';
+      if(now && [tin, tout].filter(Boolean).some(function(t){ return t > now; })){
+        sumBox.className = 'ed-sum bad';
+        sumBox.textContent = 'That has not happened yet — it is ' + fmtTime(now) + ' now.';
+        return 'future';
+      }
+      if(tin && tout){
+        var mins = toMin(tout) - toMin(tin);
+        if(mins <= 0){
+          sumBox.className = 'ed-sum bad';
+          sumBox.textContent = 'Out is before in.';
+          return 'backwards';
+        }
+        sumBox.className = 'ed-sum';
+        sumBox.textContent = fmtMin(mins) + ' on the day · ' + fmtTime(tin) + ' to ' + fmtTime(tout);
+        return null;
+      }
+      sumBox.className = 'ed-sum quiet';
+      sumBox.textContent = tin ? ('In at ' + fmtTime(tin) + ' — no out time yet.')
+                               : (tout ? ('Out at ' + fmtTime(tout) + ' — no in time yet.') : '');
+      return null;
+    };
+    tell();
+    ['edIn', 'edOut'].forEach(function(id){
+      var el = document.getElementById(id);
+      if(el) el.addEventListener('input', tell);
+    });
+
     var save = document.getElementById('edSave');
     if(save) save.addEventListener('click', function(){
-      var tin = (document.getElementById('edIn')||{}).value || '';
-      var tout = (document.getElementById('edOut')||{}).value || '';
+      var pair = readPair(), tin = pair[0], tout = pair[1];
       if(!tin && !tout){ said('Put in a time first.', true); return; }
+      var wrong = tell();
+      if(wrong === 'future'){ said('That time has not happened yet.', true); return; }
+      if(wrong === 'backwards'){ said('The out time is before the in time.', true); return; }
       manualRecords[name + '|' + day] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB' };
       save.disabled = true;
       saveManualRecords().then(function(){
@@ -17839,6 +17913,10 @@ function buildExcelBackup(){
       delete lateExcuses[name + '|' + day];
       saveLateExcuses().then(function(){ renderEmpDayCard(); });
     });
+  }
+  function nowHHMM(){
+    var d = new Date();
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   /* A time input wants HH:MM; the record holds 9:05 as readily as 09:05. */
   function tidyTime(t){
@@ -17936,12 +18014,42 @@ function buildExcelBackup(){
            present day. A tint per size, deepening with how much was taken. */
         cls += ' is-part is-part-' + (hdC.kind || 'HALF');
       }
+      /* The same figures the tooltip carried, written on the cell. A day's in,
+         out and what it came to are the three things anybody opens this
+         calendar to read, and they were only there on hover - which is no use
+         on a phone and easy to miss anywhere else. The compact view keeps the
+         old single line; the roomy one has space for all three. */
+      var detail = '';
+      if(rec && rec['in']){
+        var dur = rec.out ? (toMin(rec.out) - toMin(rec['in'])) : 0;
+        detail = '<span class="ecd"><i>In</i><b>'+escapeHtml(fmtTime(rec['in']))+'</b></span>'
+          + (rec.out ? ('<span class="ecd"><i>Out</i><b>'+escapeHtml(fmtTime(rec.out))+'</b></span>') : '')
+          + (dur > 0 ? ('<span class="ecd"><i>Total</i><b>'+escapeHtml(fmtMin(dur))+'</b></span>') : '');
+      }
+      /* And what the corner letter stands for, in words. */
+      var notes = '';
+      if(rec){
+        var leN = getLateEarly(name, rec);
+        var lxN = getLateExcuse(name, dateStr), exN = getEarlyExcuse(name, dateStr);
+        var plN = getLatePlea(name, dateStr);
+        if(isLate(name, rec)){
+          notes += '<span class="ecn '+(lxN ? 'ok' : (plN ? 'wait' : 'late'))+'">'
+            + escapeHtml(minsSaid(leN.late||0)) + ' late'
+            + (lxN ? ' · excused' : (plN ? ' · reason sent' : '')) + '</span>';
+        }
+        if(isEarly(name, rec)){
+          notes += '<span class="ecn '+(exN ? 'ok' : 'early')+'">left '
+            + escapeHtml(minsSaid(leN.early||0)) + ' early' + (exN ? ' · excused' : '') + '</span>';
+        }
+      }
       html += '<div class="'+cls+'" data-date="'+dateStr+'"'
         + (tips.length ? (' title="'+tips.join(' · ').replace(/"/g,'&quot;')+'"') : '')+'>'+
         '<span class="d">'+day+'</span>'+
         (marks ? '<span class="ec-marks">'+marks+'</span>' : '')+
         (label ? '<span class="s">'+escapeHtml(label)+'</span>' : '')+
         (timeStr ? '<span class="t">'+escapeHtml(timeStr)+'</span>' : '')+
+        (detail ? '<span class="ec-det">'+detail+'</span>' : '')+
+        (notes ? '<span class="ec-notes">'+notes+'</span>' : '')+
         '</div>';
     });
     grid.className = 'emp-cal-grid' + (EMP_CAL_COMPACT ? ' compact' : '');
