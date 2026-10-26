@@ -291,5 +291,22 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /\.emp-cal-grid\.compact \.emp-cal-cell,[\s\S]{0,60}height:96px/.test(styles));
 }
 
+/* ---- a notice belongs to the page, not to one view ----
+   The corner the notices stack in sat inside the office's own view, which is
+   hidden while an employee is signed in - so every "saved" an employee earned
+   was drawn into a container nobody could see. */
+{
+  const APP = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const at = t => APP.indexOf(t);
+  check('the notice corner sits outside both views',
+    at('id="hwToasts"') > at('id="employeeView"') && at('id="hwToasts"') > at('id="adminView"'),
+    { toasts: at('id="hwToasts"'), employee: at('id="employeeView"'), admin: at('id="adminView"') });
+  /* And the employee's own cards do say something when they save. */
+  const card = APP.slice(APP.indexOf('function renderEmpTasks()'),
+                         APP.indexOf('The two folded notes on the Leave Record'));
+  check('writing a line says so, where the notices are',
+    /showUploadStatus\([^;]*saved to your work log/.test(card));
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;
