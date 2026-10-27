@@ -15,7 +15,10 @@ const recs = {
 const ctx = {
   console, mispunchFlags: {}, lateExcuses: {}, todayISO_full: '2026-09-20', earlyThresholdMin: 10, lateThresholdMin: 10,
   getShift: () => '8:30-5:30',
-  parseShift: () => ({ startMin: 8 * 60 + 30, endMin: 17 * 60 + 30 }),
+  parseShift: () => ({ startMin: 8 * 60 + 30, endMin: 17 * 60 + 30, overnight: false }),
+  /* A day shift, so this hands the clock straight back - but getLateEarly
+     goes through it now, because a night shift's clock needs reading. */
+  shiftMin: (sh, t) => { const m = /^(\d+):(\d+)/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : 0; },
   toMin: t => { const m = /^(\d+):(\d+)/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : 0; },
   getOfficialLeave: () => null, getOverride: () => null, getHalfDay: () => null, getEarlyExcuse: () => null,
   getRecord: (e, d) => recs[e + '|' + d] || null

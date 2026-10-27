@@ -8380,14 +8380,42 @@ function buildExcelBackup(){
     }
     if(el){ el.textContent=msg; setTimeout(function(){ if(el) el.textContent=''; }, 4000); }
   }
+  /* A shift is written the way it is spoken: "9:30-6:30" is half past nine in
+     the morning to half past six in the evening, so an end hour before twelve
+     means the afternoon. That reading is right for every day shift and wrong
+     for every night one, where an end hour before twelve is tomorrow morning -
+     "22:00-6:00" read that way becomes 10pm to 6pm, a day of minus four hours,
+     which is why a night shift could not be typed in at all: the 3-to-12-hour
+     check refused it.
+
+     So the daytime reading is tried first and kept only if it makes a forward
+     day of a sensible length. Otherwise the end is taken as tomorrow's, and
+     the shift is marked as one that crosses midnight - which the times on it
+     then have to be read against, see shiftMin. */
   function parseShift(s){
     var parts = (s||'9:00-6:00').split('-');
-    var sp = parts[0].split(':').map(Number);
+    var sp = (parts[0]||'').split(':').map(Number);
     var ep = (parts[1]||'6:00').split(':').map(Number);
-    var startH = sp[0]||9, startM = sp[1]||0;
-    var endH = ep[0]||6, endM = ep[1]||0;
-    var endH24 = endH < 12 ? endH + 12 : endH;
-    return {startMin: startH*60+startM, endMin: endH24*60+endM};
+    var num = function(v, dflt){ return isFinite(v) ? v : dflt; };
+    var startH = num(sp[0], 9), startM = num(sp[1], 0);
+    var endH = num(ep[0], 6), endM = num(ep[1], 0);
+    var startMin = startH * 60 + startM;
+    var asDay = (endH < 12 ? endH + 12 : endH) * 60 + endM;
+    if(asDay > startMin && (asDay - startMin) <= 12 * 60){
+      return {startMin: startMin, endMin: asDay, overnight: false};
+    }
+    var night = endH * 60 + endM;
+    while(night <= startMin) night += 24 * 60;
+    return {startMin: startMin, endMin: night, overnight: true};
+  }
+  /* A punch read against the shift it belongs to. On a shift that crosses
+     midnight the clock goes back to zero partway through, so a finish at six in
+     the morning is a smaller number than a start at ten at night - and read
+     plainly it looks like somebody left sixteen hours early. */
+  function shiftMin(sh, t){
+    var m = toMin(t);
+    if(sh && sh.overnight && !isNaN(m) && m < sh.startMin) m += 24 * 60;
+    return m;
   }
 
   // Which employees are shown (personal preference, not shared)
@@ -8534,8 +8562,8 @@ function buildExcelBackup(){
       var owed = owedMinutes(emp, dateStr);
       if(rec.st === 'HD') return Math.round(owed / 2);
       var msh = parseShift(getShift(emp, dateStr));
-      var inM = rec['in'] ? toMin(rec['in']) : NaN;
-      var outM = rec.out ? toMin(rec.out) : NaN;
+      var inM = rec['in'] ? shiftMin(msh, rec['in']) : NaN;
+      var outM = rec.out ? shiftMin(msh, rec.out) : NaN;
       var got = !isNaN(inM) ? (msh.endMin - inM)
               : (!isNaN(outM) ? (outM - msh.startMin) : owed);
       if(isNaN(got) || got > owed) got = owed;
@@ -10236,12 +10264,12 @@ function buildExcelBackup(){
     var sh = parseShift(getShift(empName, rec.d));
     // Late only needs an in-punch — don't wait on an out-punch that may not
     // exist yet (e.g. the employee is still at work today).
-    var late = rec['in'] ? Math.max(0, toMin(rec['in']) - sh.startMin) : toMin(rec.late);
+    var late = rec['in'] ? Math.max(0, shiftMin(sh, rec['in']) - sh.startMin) : toMin(rec.late);
     // Early-departure genuinely can't be known without an out-punch. On a day
     // flagged as a mispunch the out time on file is not when they left, so the
     // day is taken to end at the shift's out time: never early.
     var early = (rec.out && !getMispunch(empName, rec.d))
-      ? Math.max(0, sh.endMin - toMin(rec.out)) : 0;
+      ? Math.max(0, sh.endMin - shiftMin(sh, rec.out)) : 0;
     return {late: late, early: early};
   }
   function isShortLeave(empName, rec){

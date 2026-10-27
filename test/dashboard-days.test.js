@@ -80,7 +80,7 @@ const ctx = {
   fmtMin: m => Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0')
 };
 vm.createContext(ctx);
-['parseShift', 'getLateEarly', 'owedMinutes', 'workedMinutes', 'hdQty', 'hdLabel',
+['parseShift', 'shiftMin', 'getLateEarly', 'owedMinutes', 'workedMinutes', 'hdQty', 'hdLabel',
  'minsSaid', 'dashDayLabel', 'dashCellDays', 'computeEmployeeStats'
 ].forEach(n => vm.runInContext(lift(src, n), ctx));
 

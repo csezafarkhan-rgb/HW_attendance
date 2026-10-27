@@ -10,7 +10,8 @@ const results = [];
 function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(detail))); }
 
 const toMin = t => { const m = /^(\d+):(\d+)/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : NaN; };
-const parseShift = () => ({ startMin: 570, endMin: 1110 });          // 9:30 - 6:30, 540 minutes
+const parseShift = () => ({ startMin: 570, endMin: 1110, overnight: false }); // 9:30 - 6:30, 540 minutes
+const shiftMin = (sh, t) => toMin(t);        // a day shift reads straight off the clock
 
 /* ---------- a flagged mispunch: hours run to the shift's edge ---------- */
 {
@@ -21,7 +22,7 @@ const parseShift = () => ({ startMin: 570, endMin: 1110 });          // 9:30 - 6
     'A|2026-09-10': { e: 'A', d: '2026-09-10', in: '9:30', out: '18:30', dur: '8:00', st: 'PR' }   // an ordinary day
   };
   const ctx = {
-    console, toMin, parseShift, OV_CATS: { WFH: { countsAsWorked: true }, VISIT: { countsAsWorked: true }, LEAVE: {} },
+    console, toMin, parseShift, shiftMin, OV_CATS: { WFH: { countsAsWorked: true }, VISIT: { countsAsWorked: true }, LEAVE: {} },
     mispunchFlags: { 'A|2026-09-07': { n: 1 }, 'A|2026-09-08': { n: 1 }, 'A|2026-09-09': { n: 1 } },
     getOverride: () => null, getShift: () => '9:30-6:30',
     getRecord: (e, d) => recs[e + '|' + d] || null,
@@ -68,7 +69,7 @@ const parseShift = () => ({ startMin: 570, endMin: 1110 });          // 9:30 - 6
     'A|2026-06-07': { cat: 'LEAVE', detail: 'CL' }         // Sunday
   };
   const ctx = {
-    console, toMin, parseShift, todayISO_full: '2026-07-01',
+    console, toMin, parseShift, shiftMin, todayISO_full: '2026-07-01',
     payRules: { allLeaveUnpaid: true, pf: false, esi: false, other: 0, ot: false },
     getSalary: () => 30000, getShift: () => '9:30-6:30',
     getOverride: (e, d) => overrides[e + '|' + d] || null,
