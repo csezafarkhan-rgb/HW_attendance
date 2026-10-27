@@ -8428,11 +8428,20 @@ function buildExcelBackup(){
   /* A punch read against the shift it belongs to. On a shift that crosses
      midnight the clock goes back to zero partway through, so a finish at six in
      the morning is a smaller number than a start at ten at night - and read
-     plainly it looks like somebody left sixteen hours early. */
+     plainly it looks like somebody left sixteen hours early.
+
+     Which side of midnight a time falls on is decided by which reading sits
+     nearer the shift itself, not by whether it comes before the start. Before
+     the start was close enough for a finish, and wrong for an arrival: turning
+     up five minutes early for a six o'clock shift was pushed to the next day
+     and came out as twenty-four hours late, enough to mark the day late and
+     the week short. Nearest-to-the-shift gets both ends right - an early
+     arrival stays early, a finish past the end stays past the end. */
   function shiftMin(sh, t){
     var m = toMin(t);
-    if(sh && sh.overnight && !isNaN(m) && m < sh.startMin) m += 24 * 60;
-    return m;
+    if(!sh || !sh.overnight || isNaN(m)) return m;
+    var mid = (sh.startMin + sh.endMin) / 2, day = 24 * 60;
+    return Math.abs(m + day - mid) < Math.abs(m - mid) ? m + day : m;
   }
 
   // Which employees are shown (personal preference, not shared)

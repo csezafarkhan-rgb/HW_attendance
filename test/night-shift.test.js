@@ -27,7 +27,7 @@ function grab(name) {
   return APP.slice(i, k + 1);
 }
 
-const ctx = { isFinite, isNaN, Number, String };
+const ctx = { isFinite, isNaN, Number, String, Math };
 vm.createContext(ctx);
 vm.runInContext('function toMin(t){ var p = String(t).split(":"); return (+p[0]) * 60 + (+p[1]); }', ctx);
 [grab('parseShift'), grab('shiftMin'), grab('validShift')].forEach(fn => vm.runInContext(fn, ctx));
@@ -75,6 +75,22 @@ const ok = s => { vm.runInContext('__v = validShift(' + JSON.stringify(s) + ')',
       vm.runInContext('__m = shiftMin(' + JSON.stringify(d) + ', "18:30")', ctx);
       return ctx.__m === 1110;
     })());
+
+  /* Turning up early is not turning up a day late. Anything before the start
+     used to be pushed over midnight, which is right for a finish and wrong
+     for an arrival: five minutes early came out as twenty-four hours late,
+     enough to mark the day late and the week short. */
+  const e = parse('18:00-3:00');
+  const eat = t => { vm.runInContext('__m = shiftMin(' + JSON.stringify(e) + ', ' + JSON.stringify(t) + ')', ctx); return ctx.__m; };
+  check('five minutes early is five minutes early, not a day late',
+    eat('17:55') - e.startMin === -5, eat('17:55'));
+  check('half an hour early likewise', eat('17:30') - e.startMin === -30, eat('17:30'));
+  check('and twenty past six is still twenty minutes late',
+    eat('18:20') - e.startMin === 20, eat('18:20'));
+  check('half past two in the morning is still inside the night',
+    e.endMin - eat('02:30') === 30, eat('02:30'));
+  check('and five, two hours past the end, is two hours past it',
+    eat('05:00') - e.endMin === 120, eat('05:00'));
 }
 
 /* ---- rubbish is still rubbish ---- */
