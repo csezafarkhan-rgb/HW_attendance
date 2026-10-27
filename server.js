@@ -299,8 +299,11 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
     const i = String(k).lastIndexOf('|');
     return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
   };
-  /* Their own days as they now stand, so clearing one clears it. */
-  Object.keys(out).forEach(k => { if (mine(k)) delete out[k]; });
+  /* Their own days as they now stand, so clearing one clears it - but keep a
+     copy first, because each time carries the moment it was written and that
+     has to survive the day being written again. */
+  const before = {};
+  Object.keys(out).forEach(k => { if (mine(k)) { before[k] = out[k]; delete out[k]; } });
   Object.keys(incoming).forEach(k => {
     if (!mine(k)) return;
     const v = incoming[k];
@@ -319,8 +322,17 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
       const asMin = t => { const p = t.split(':'); return (+p[0]) * 60 + (+p[1]); };
       if ((tin && asMin(tin) > cap) || (tout && asMin(tout) > cap)) return;
     }
+    /* When each time was written, kept per time rather than per record. A
+       record has one "last touched" moment, and using it would make a morning
+       in time look nine hours backdated the moment they typed their out time
+       in the evening. A time that has not changed keeps the stamp it had. */
+    const nowIso = new Date().toISOString();
+    const was = (before[k] && typeof before[k] === 'object') ? before[k] : null;
+    const stamp = (t, had, hadAt) => (t && had === t && hadAt) ? hadAt : (t ? nowIso : '');
     out[k] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB',
-               by: 'self', at: new Date().toISOString() };
+               by: 'self', at: nowIso,
+               inAt: stamp(tin, was && was['in'], was && was.inAt),
+               outAt: stamp(tout, was && was.out, was && was.outAt) };
   });
   return JSON.stringify(out);
 }

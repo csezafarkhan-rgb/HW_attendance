@@ -2744,6 +2744,21 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-x:hover{ background:#FDE7E4; color:#C0392B; opacity:1; }
 .wl-foot{ font-size:11px; color:var(--ink-soft); margin-top:7px; }
 /* Who types their own day, on the row that sets everything else about them. */
+/* The one setting in Shifts that is about the whole office rather than one
+   person, so it sits above the list and reads as a sentence. */
+.shf-flag{ display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin:10px 0 4px;
+  padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#F7F9FD;
+  font-size:12px; font-weight:600; color:var(--ink); }
+.shf-flag input{ width:62px; padding:4px 7px; border:1px solid var(--line-dk);
+  border-radius:7px; font-size:12px; font-weight:700; text-align:center; }
+.shf-flag i{ flex:1 1 100%; font-style:normal; font-size:11px; font-weight:500;
+  color:var(--ink-soft); line-height:1.45; }
+/* A warning in the cell, not a verdict: small, amber, next to the time. */
+.self-late-flag{ color:#B26B00; font-size:11px; }
+.self-said{ margin-bottom:10px; padding:9px 11px; border-radius:9px;
+  border:1px solid #CFE0F3; background:#F2F7FD; font-size:12px; line-height:1.5; }
+.self-said.warn{ border-color:#F0DCB8; background:var(--lv-amber-bg); color:#7A4A00; }
+.self-said span{ display:block; margin-top:4px; font-size:11px; opacity:.85; }
 .shf-self{ display:inline-flex; align-items:center; gap:5px; font-size:11px;
   color:var(--ink-soft); white-space:nowrap; cursor:pointer; }
 .shf-self input{ margin:0; }
@@ -8653,6 +8668,44 @@ function buildExcelBackup(){
     return storage.set('selfMark', JSON.stringify(selfMark), true);
   }
   function marksOwn(name){ return selfMark[name] === true; }
+  /* How long after the time itself somebody typed it.
+
+     A self-marked in time is the one entry worth falsifying - it is what
+     decides whether the day is late - and no clock check can catch it, because
+     a backdated time is in the past and every rule it meets says it is fine.
+     So it is not blocked, it is shown: the claim beside the moment it was
+     made. Arriving and marking yourself takes a minute or two and raises
+     nothing; typing 9:30 at a quarter to eleven says so in the cell.
+
+     The stamp is written by the server, not by the page, so it is not theirs
+     to set. */
+  function selfFlagMin(){
+    var v = selfMark.__flagMin;
+    if(v === undefined || v === null || v === '') return 5;
+    v = parseInt(v, 10);
+    return (isFinite(v) && v >= 0) ? v : 5;
+  }
+  function selfEntryGap(emp, d){
+    var man = manualRecords[emp + '|' + d];
+    if(!man || man.by !== 'self' || !man['in'] || !man.inAt) return null;
+    var t = new Date(man.inAt);
+    if(isNaN(t.getTime())) return null;
+    var ist = new Date(t.getTime() + 5.5 * 3600 * 1000);
+    var onDay = ist.toISOString().slice(0, 10);
+    var typedMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    /* Typed on a later day than the one it is about: the whole of that day
+       stands between the claim and the typing, so take it from midnight. */
+    var gap = (onDay === d) ? (typedMin - toMin(man['in']))
+                            : ((24 * 60 - toMin(man['in'])) + typedMin + (onDay > d ? 0 : 0));
+    if(onDay < d) gap = 0;                    // a clock out of step, not a backdate
+    if(gap < 0) gap = 0;
+    return { gap: gap, at: man.inAt, sameDay: onDay === d,
+             typed: pad2(Math.floor(typedMin / 60)) + ':' + pad2(typedMin % 60) };
+  }
+  function selfEntryFlagged(emp, d){
+    var g = selfEntryGap(emp, d);
+    return (g && g.gap > selfFlagMin()) ? g : null;
+  }
   function loadEarlyExcuses(){
     return storage.get('earlyExcuses', true).then(function(res){
       if(res && res.value){ try{ earlyExcuses = JSON.parse(res.value); }catch(e){ earlyExcuses = {}; } }
@@ -13987,6 +14040,14 @@ function buildExcelBackup(){
       '<select id="shfAllSel">'+allShifts().map(function(p){ return '<option value="'+p+'">'+p+'</option>'; }).join('')+'</select>'+
       '<button type="button" id="shfAllBtn">Apply to all</button>'+
       '</div>';
+    /* Sits with the people who mark their own day, because it is about them. */
+    html += '<div class="shf-flag">'+
+      '<span>Flag a self-marked <b>in</b> time typed more than</span>'+
+      '<input type="number" id="shfFlagMin" min="0" max="240" step="1" value="'+selfFlagMin()+'">'+
+      '<span>min after the time itself.</span>'+
+      '<i>Marking yourself as you arrive takes a minute. Typing 9:30 at '+
+      '10:47 is what this catches — it warns the office, it blocks nobody.</i>'+
+      '</div>';
     html += '<div class="shf-list">';
     EMPLOYEES.forEach(function(e){
       var cur = shiftWorking[e.name] || shiftBaseDefault(e.name);
@@ -14092,6 +14153,25 @@ function buildExcelBackup(){
     /* Who types their own day. Saved on the tick, like the shift beside it -
        there is no Save button on this panel and a setting that waits for one
        reads as not having registered. */
+    var flagBox = shiftDropdown.querySelector('#shfFlagMin');
+    if(flagBox){
+      flagBox.addEventListener('change', function(){
+        var v = parseInt(flagBox.value, 10);
+        if(!isFinite(v) || v < 0){ v = 5; }
+        if(v > 240){ v = 240; }
+        flagBox.value = v;
+        selfMark.__flagMin = v;
+        flagBox.disabled = true;
+        saveSelfMark().then(function(){
+          flagBox.disabled = false;
+          refreshActivePage();
+          showUploadStatus('A self-marked in time now gets flagged past ' + v + ' min.', false);
+        }).catch(function(e){
+          flagBox.disabled = false;
+          showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        });
+      });
+    }
     Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-self-emp]'), function(cb){
       cb.addEventListener('change', function(){
         var name = cb.getAttribute('data-self-emp');
@@ -15790,11 +15870,17 @@ function buildExcelBackup(){
           var durs = computeDurations(rec);
           var hdFlag = getHalfDay(emp.name, dateStr);
           var durCls = 'dur-cell' + (hdFlag ? ' ' + hdCls(hdFlag.kind) : (rec.st==='HD' ? ' half' : '')) + (isShortLeave(emp.name, rec) ? ' short' : '');
+          var selfGap = selfEntryFlagged(emp.name, dateStr);
           var inTitle = rec.manual ? 'Manually entered attendance' : (lx ? 'Late — excused: '+(lx.note||'') : '');
+          if(selfGap){
+            inTitle = (inTitle?inTitle+' · ':'') + 'Typed by ' + dispName(emp.name) + ' at '
+              + fmtTime(selfGap.typed) + ', ' + minsSaid(selfGap.gap) + ' after the time claimed';
+          }
           var dsOv = getDayShift(emp.name, dateStr);
           if(dsOv) inTitle = (inTitle?inTitle+' · ':'')+'Shift changed for this day: '+dsOv;
           if(hdFlag) inTitle = (inTitle?inTitle+' · ':'')+hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note):'');
-          html += '<td class="att-cell '+inCls+' emp-block-start" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')+'</td>';
+          html += '<td class="att-cell '+inCls+' emp-block-start" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')
+            +(selfGap?' <span class="self-late-flag">⚠</span>':'')+'</td>';
           var outTitle = mp&&mp.note ? ('Mispunch: '+mp.note)
             : (dayStillOpen ? 'Last punch so far today — not necessarily the time they left'
               : (wasEarly ? (ex ? ('Left early — excused: '+(ex.note||'')) : ('Left early by '+minsSaid(getLateEarly(emp.name,rec).early))) : ''));
@@ -16884,8 +16970,26 @@ function buildExcelBackup(){
     var lx = getLateExcuse(emp, dateStr);
     var man = getManualRecord(emp, dateStr);
 
+    /* What they claimed, and when they said it. Shown whenever the entry came
+       from the person rather than the office - quietly when it was marked on
+       arrival, in amber when it was not. The office is deciding either way. */
+    var selfSaid = '';
+    if(man && man.by === 'self'){
+      var g = selfEntryGap(emp, dateStr);
+      var over = g && g.gap > selfFlagMin();
+      selfSaid = '<div class="self-said'+(over?' warn':'')+'">'+
+        '<b>'+shotEsc(dispName(emp))+' marked this day.</b> '+
+        (g ? ('In time '+shotEsc(fmtTime(man['in']))+', typed at '+shotEsc(fmtTime(g.typed))+
+              (g.sameDay ? '' : ' the next day')+
+              ' — '+shotEsc(minsSaid(g.gap))+' after the time claimed.')
+           : ('Saved '+shotEsc(whenShort(man.at))+'.'))+
+        (over ? '<span>Longer than the '+selfFlagMin()+' min set in Shifts. '+
+                'Nothing is wrong with a late entry — it is the gap you are being shown, not a verdict.</span>' : '')+
+      '</div>';
+    }
     var manualHtml = '<div class="override-section" style="border-top:1px dashed var(--line-dk);margin-top:16px;padding-top:14px;">'+
       '<label class="lbl">Manual attendance entry (for staff with no punch machine, e.g. based at another office)</label>'+
+      selfSaid+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">'+
         '<div><label style="font-size:10.5px;color:var(--ink-soft);display:block;margin-bottom:3px;">In time (24h, e.g. 9:30)</label><input class="ov-detail" id="manIn" placeholder="9:30" value="'+(man&&man['in']?man['in']:'').replace(/"/g,'&quot;')+'" style="margin-bottom:0;"/></div>'+
         '<div><label style="font-size:10.5px;color:var(--ink-soft);display:block;margin-bottom:3px;">Out time (24h, e.g. 18:30)</label><input class="ov-detail" id="manOut" placeholder="18:30" value="'+(man&&man.out?man.out:'').replace(/"/g,'&quot;')+'" style="margin-bottom:0;"/></div>'+
