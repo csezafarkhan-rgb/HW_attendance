@@ -4086,7 +4086,12 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       defaultMonth = ALL_MONTHS.indexOf(thisYm) > -1 ? thisYm : ALL_MONTHS[ALL_MONTHS.length-1];
       state.selectedMonths = defaultMonth ? [defaultMonth] : [];
     }
-    if(ALL_MONTHS.indexOf(empCalMonth) === -1) empCalMonth = defaultMonth;
+    /* The employee calendar was opened on a month chosen before this data
+       existed. If nobody has used the arrows it is still only a default, so
+       move it to the month we are in - it stayed on September all through
+       October otherwise, September being a real month in the list and so
+       never replaced. */
+    if(ALL_MONTHS.indexOf(empCalMonth) === -1 || !empCalPicked) empCalMonth = empMonthNow();
     // People who arrived with this data start visible, as they do at load and after an import.
     if(!visibleEmpSet) visibleEmpSet = {};
     EMPLOYEES.forEach(function(e){ if(!(e.name in visibleEmpSet)) visibleEmpSet[e.name] = true; });
@@ -17593,7 +17598,7 @@ function buildExcelBackup(){
     document.getElementById('employeeView').style.display = 'block';
     document.getElementById('empViewName').textContent = name;
     try{ hideOwnAuthUI(); }catch(e){ console.error('hide own auth', e); }
-    empCalMonth = defaultMonth;
+    empCalMonth = empMonthNow(); empCalPicked = false;
     renderEmployeeCalendar();
   }
 
@@ -17738,6 +17743,22 @@ function buildExcelBackup(){
 
   // ---------- employee calendar (read-only personal view) ----------
   var empCalMonth = null;
+  /* Set the moment somebody presses the arrows. Until then the calendar is
+     only showing a default, and a default is free to be corrected. */
+  var empCalPicked = false;
+  /* The month we are actually in, as long as there is data for it; otherwise
+     the last month there is data for.
+
+     Worked out afresh every time rather than read off defaultMonth, because
+     defaultMonth is settled early - from the months baked into the page, which
+     stop wherever the build did - and the real data arrives later. */
+  function empMonthNow(){
+    var d = new Date();
+    var ym = d.getFullYear() + '-' + (d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1);
+    if(ALL_MONTHS.indexOf(ym) > -1) return ym;
+    if(ALL_MONTHS.indexOf(defaultMonth) > -1) return defaultMonth;
+    return ALL_MONTHS[ALL_MONTHS.length - 1] || defaultMonth;
+  }
 
   /* Blank cells before the 1st, counted from Monday: getDay() calls Sunday 0,
      so Sunday needs six blanks ahead of it, not none. */
@@ -18354,7 +18375,7 @@ function buildExcelBackup(){
   function renderEmployeeCalendar(){
     var name = viewRole && viewRole.name;
     if(!name) return;
-    if(!empCalMonth) empCalMonth = defaultMonth;
+    if(!empCalMonth) empCalMonth = empMonthNow();
     document.getElementById('empCalMonthLbl').textContent = monthLabel(empCalMonth);
     try{ renderEmpPerf(name); renderEmpAlerts(); }catch(e){ console.error('performance panel', e); }
     renderEmployeeLeaveStrip(name);
@@ -18546,11 +18567,11 @@ function buildExcelBackup(){
 
   document.getElementById('empCalPrev').addEventListener('click', function(){
     var idx = ALL_MONTHS.indexOf(empCalMonth);
-    if(idx > 0){ empCalMonth = ALL_MONTHS[idx-1]; renderEmployeeCalendar(); renderMyRequests(); }
+    if(idx > 0){ empCalPicked = true; empCalMonth = ALL_MONTHS[idx-1]; renderEmployeeCalendar(); renderMyRequests(); }
   });
   document.getElementById('empCalNext').addEventListener('click', function(){
     var idx = ALL_MONTHS.indexOf(empCalMonth);
-    if(idx > -1 && idx < ALL_MONTHS.length-1){ empCalMonth = ALL_MONTHS[idx+1]; renderEmployeeCalendar(); renderMyRequests(); }
+    if(idx > -1 && idx < ALL_MONTHS.length-1){ empCalPicked = true; empCalMonth = ALL_MONTHS[idx+1]; renderEmployeeCalendar(); renderMyRequests(); }
   });
 
   // ---------- admin init (runs once admin view is entered) ----------
@@ -18641,7 +18662,7 @@ function buildExcelBackup(){
       hideGate();
       document.getElementById('employeeView').style.display = 'block';
       document.getElementById('empViewName').textContent = viewRole.name;
-      empCalMonth = defaultMonth;
+      empCalMonth = empMonthNow(); empCalPicked = false;
       renderEmployeeCalendar();
       DATA_READY = true;
     } else if(IN_WORKSPACE){

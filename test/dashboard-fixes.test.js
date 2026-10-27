@@ -523,6 +523,37 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       /viewRole\.role !== 'admin'\) return;/.test(src));
   }
 
+  /* ---- the employee calendar opens on the month we are in ----
+     It opened on a month picked from the data baked into the page, which stops
+     wherever the build did. The real data arrives afterwards and the admin
+     grid re-picks; the employee calendar only re-picked when its month was
+     missing from the new list. September is not missing from October's list,
+     so Shyam Lal spent the whole of October looking at September. */
+  {
+    const fn = grab('empMonthNow');
+    const run = (months, dflt) => {
+      const c = { ALL_MONTHS: months, defaultMonth: dflt, Date };
+      vm.createContext(c);
+      vm.runInContext(fn + '; __r = empMonthNow();', c);
+      return c.__r;
+    };
+    const d = new Date();
+    const THIS = d.getFullYear() + '-' + (d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1);
+    check('it opens on the month we are in when there is data for it',
+      run(['2026-08', '2026-09', THIS], '2026-09') === THIS, run(['2026-08', '2026-09', THIS], '2026-09'));
+    check('and on the last month there is data for when there is not',
+      run(['2026-08', '2026-09'], '2026-09') === '2026-09');
+    check('a default nobody chose is corrected once the real data lands',
+      /if\(ALL_MONTHS\.indexOf\(empCalMonth\) === -1 \|\| !empCalPicked\) empCalMonth = empMonthNow\(\);/.test(src));
+    /* But a month somebody went looking for is theirs, and stays put. */
+    check('a month reached with the arrows is left alone',
+      /empCalPicked = true; empCalMonth = ALL_MONTHS\[idx-1\]/.test(src)
+        && /empCalPicked = true; empCalMonth = ALL_MONTHS\[idx\+1\]/.test(src));
+    check('and signing in starts from the month we are in, not a stale default',
+      /empCalMonth = empMonthNow\(\); empCalPicked = false;/.test(src)
+        && !/empCalMonth = defaultMonth;/.test(src));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();
