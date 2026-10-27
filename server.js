@@ -2039,14 +2039,13 @@ async function buildLeaveEmail(orgId, stage) {
   const requests = parseJson(kv.leaveRequests) || [];
   const first = await firstApproverOf(orgId);
   const st = (first && first.email) ? (stage === 2 ? 2 : 1) : 0;
+  const route = await approvalRouteOf(orgId);
   /* An archived request is out of the way by definition - the dashboard keeps
      it off the Requests page, and the message said seven were waiting when the
      portal said none. */
   const live = r => r && !r.archived
     && (r.status === 'pending' || r.status === 'query' || r.status === 'recommended');
-  /* Whose decision it is. At one stage, everybody's. */
-  const mine = r => st === 0 ? true
-    : (st === 2 ? r.status === 'recommended' : r.status !== 'recommended');
+  const mine = r => stageOwns(st, route, r);
   const pending = requests.filter(r => live(r) && mine(r))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
@@ -2063,10 +2062,14 @@ async function buildLeaveEmail(orgId, stage) {
                    ? { k: 'req', org: orgId, id: r.id, s: 1, by: first.name }
                    : { k: 'req', org: orgId, id: r.id, s: 2 }) }));
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
-  /* A day marked with no request behind it has been through no stage at all, so
-     it belongs to the first approver where there is one, and to nobody else. */
-  const unreq = (settings.unrequested && st !== 2)
+  /* A day marked with no request behind it has been through no stage at all,
+     so it belongs to the first approver - for the people who have one. For
+     anybody set to skip that stage it goes to the final word instead, which is
+     the only place it would otherwise be seen at all. */
+  const unreqMine = u => stageOwnsUnreq(st, route, u);
+  const unreq = settings.unrequested
     ? unrequestedFrom(parseJson(kv.overrides) || {}, parseJson(kv.halfDays) || {}, requests, since)
+        .filter(unreqMine)
         .slice(0, 15).map(u => ({
           req: u,
           heading: st === 1 ? 'For you to look at first' : 'No request on file',
@@ -2415,31 +2418,38 @@ async function notifyNewRequests(orgId, added) {
     if (!settings.requests) return;
     /* Where somebody is marked to look at requests first, the request goes to
        them and to nobody else: asking both at once would have the office
-       granting leave the first approver had not seen. */
+       granting leave the first approver had not seen.
+
+       Whether this particular request goes through them is set against the
+       person who raised it, so the two sets of addresses are worked out once
+       and each request is sent down its own road. */
     const first = await firstApproverOf(orgId, settings);
-    let to, cc;
-    if (first && first.email) {
-      /* Everybody named on the first-approval line, and nobody else. */
-      to = (settings.leave.firstTo || []).slice();
-      cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
-    } else {
-      to = await mailRecipients(orgId, settings, 'leave');
-      cc = mailCc(settings, 'leave');
-    }
-    if (!to.length) return;
+    const route = await approvalRouteOf(orgId);
+    const firstLeg = (first && first.email)
+      ? (function () {
+          const to = (settings.leave.firstTo || []).slice();
+          return { to, cc: (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1) };
+        })()
+      : null;
+    const finalLeg = { to: await mailRecipients(orgId, settings, 'leave'),
+                       cc: mailCc(settings, 'leave') };
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
+      const viaFirst = !!firstLeg && needsFirstApproval(route, r.empName);
+      const leg = viaFirst ? firstLeg : finalLeg;
+      if (!leg.to.length) continue;
       const mail = mailer.requestEmail({
         orgName: orgNameOf(kv.companyInfo), req: r,
-        links: await requestLinks(orgId, r.id, first ? 1 : 0),
+        links: await requestLinks(orgId, r.id, viaFirst ? 1 : 0),
         siteUrl: mailer.baseUrl(),
-        heading: first ? 'A request for you to look at first'
-                       : 'A request is waiting for a decision',
-        intro: (first && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        heading: viaFirst ? 'A request for you to look at first'
+                          : 'A request is waiting for a decision',
+        intro: (viaFirst && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
         footer: settings.leave.footer
       });
-      const sentOne = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
-      await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, sentOne);
+      const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
+      const sentOne = await mailer.send(msg);
+      await logMail(orgId, 'request', msg, sentOne);
     }
   } catch (e) {
     console.error('request email failed (request itself was saved):', e && e.message);
@@ -2467,6 +2477,43 @@ async function firstApproverOf(orgId, settings) {
     if (r.rows[0] && String(r.rows[0].name || '').trim()) name = String(r.rows[0].name).trim();
   } catch (e) { /* the address stands in for the name */ }
   return { email, name };
+}
+/* Whose leave goes through that first approver. Naming one used to send every
+   request in the company through them; it is set against the name now, in the
+   shifts panel beside the shift itself.
+
+   Only the people who skip the first stage are stored, so an empty map - a
+   company that has never opened the panel - is everybody going through both,
+   exactly what naming a first approver meant before this existed. */
+async function approvalRouteOf(orgId) {
+  const kv = await sharedKeys(orgId, ['approvalRoute']);
+  const map = parseJson(kv.approvalRoute);
+  return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+}
+function needsFirstApproval(route, name) {
+  return (route || {})[name] !== 'final';
+}
+/* Whose decision a waiting request is, at the stage the message is being built
+   for. At one stage (st 0) everybody's.
+
+   Stage 1 is the first approver's: what they have not passed on yet, and only
+   for the people whose leave goes through them at all. Stage 2 is the final
+   word's: what has been passed on, plus - from the moment it is raised -
+   anything from somebody set to skip the first stage, since no one else is
+   ever going to look at it. */
+function stageOwns(st, route, r) {
+  if (st === 0) return true;
+  const two = needsFirstApproval(route, r && r.empName);
+  if (st === 2) return r.status === 'recommended' || !two;
+  return two && r.status !== 'recommended';
+}
+/* The same, for a day marked on the record with no request behind it. It has
+   been through no stage at all, so it simply belongs to whoever holds the
+   first stage for that person - or to the final word where nobody does. */
+function stageOwnsUnreq(st, route, u) {
+  if (st === 0) return true;
+  return st === 1 ? needsFirstApproval(route, u && u.empName)
+                  : !needsFirstApproval(route, u && u.empName);
 }
 
 /* The person the leave belongs to, by their own account. Accounts are made
@@ -2611,37 +2658,50 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
        door, so where somebody is named to look at leave first it goes to them
        and to nobody else, and their yes passes it on rather than granting it.
        The stage is sealed into the buttons, so a link cannot be made to grant
-       by stripping it. */
+       by stripping it.
+
+       A batch of marks can hold both kinds of people, so it is split by whose
+       stage each one is and sent as two messages rather than one addressed to
+       whoever happened to come first. */
     const first = await firstApproverOf(orgId, settings);
-    const stage = (first && first.email) ? 1 : 0;
-    const mail = mailer.leaveEmail({
-      orgName: orgNameOf(kv.companyInfo), pending: [],
-      unrequested: worth.slice(0, 15).map(m => ({
-        req: m,
-        heading: stage ? 'Marked on the record, for you to look at first'
-                       : 'Marked on the record, no request',
-        links: linksFor(stage
-          ? { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
-              t: m.leaveType, h: m.half || '', s: 1, by: first.name }
-          : { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
-              t: m.leaveType, h: m.half || '' })
-      })),
-      subject: settings.leave.subject,
-      intro: (stage && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
-      footer: settings.leave.footer, siteUrl: mailer.baseUrl()
-    });
-    if (!mail) return;
-    let to, cc;
-    if (stage) {
-      to = (settings.leave.firstTo || []).slice();
-      cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
-    } else {
-      to = await mailRecipients(orgId, settings, 'leave');
-      cc = mailCc(settings, 'leave');
+    const route = await approvalRouteOf(orgId);
+    const twoStage = !!(first && first.email);
+    const groups = [
+      { stage: 1, items: worth.filter(m => twoStage && needsFirstApproval(route, m.empName)) },
+      { stage: 0, items: worth.filter(m => !twoStage || !needsFirstApproval(route, m.empName)) }
+    ];
+    for (const g of groups) {
+      if (!g.items.length) continue;
+      const stage = g.stage;
+      const mail = mailer.leaveEmail({
+        orgName: orgNameOf(kv.companyInfo), pending: [],
+        unrequested: g.items.slice(0, 15).map(m => ({
+          req: m,
+          heading: stage ? 'Marked on the record, for you to look at first'
+                         : 'Marked on the record, no request',
+          links: linksFor(stage
+            ? { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
+                t: m.leaveType, h: m.half || '', s: 1, by: first.name }
+            : { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
+                t: m.leaveType, h: m.half || '' })
+        })),
+        subject: settings.leave.subject,
+        intro: (stage && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        footer: settings.leave.footer, siteUrl: mailer.baseUrl()
+      });
+      if (!mail) continue;
+      let to, cc;
+      if (stage) {
+        to = (settings.leave.firstTo || []).slice();
+        cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
+      } else {
+        to = await mailRecipients(orgId, settings, 'leave');
+        cc = mailCc(settings, 'leave');
+      }
+      if (!to.length) continue;
+      const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
+      await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
     }
-    if (!to.length) return;
-    const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
-    await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {
     console.error('leave-without-a-request email failed (the mark itself was saved):', e && e.message);
   }

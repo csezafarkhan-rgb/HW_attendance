@@ -4661,7 +4661,7 @@ function attachDismiss(el){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark',
+    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
   /* Kept per person rather than for the office: what this account has already
@@ -8763,6 +8763,26 @@ function buildExcelBackup(){
     return storage.set('selfMark', JSON.stringify(selfMark), true);
   }
   function marksOwn(name){ return selfMark[name] === true; }
+  /* Whose leave goes through the first approver before a super admin grants it.
+
+     Two stages were all-or-nothing: name a first approver and every request in
+     the company went through them. Some people are meant to, and some are
+     meant to go straight to the final word, so it is set against the name like
+     the shift beside it.
+
+     Only the exceptions are stored. Everybody else goes through both stages,
+     which is what naming a first approver already meant - so a company that
+     never opens this panel keeps exactly the arrangement it had. */
+  var approvalRoute = {};
+  function loadApprovalRoute(){
+    return storage.get('approvalRoute', true).then(function(res){
+      if(res && res.value){ try{ approvalRoute = JSON.parse(res.value) || {}; }catch(e){ approvalRoute = {}; } }
+    }).catch(function(){ approvalRoute = {}; });
+  }
+  function saveApprovalRoute(){
+    return storage.set('approvalRoute', JSON.stringify(approvalRoute), true);
+  }
+  function needsFirstApproval(name){ return approvalRoute[name] !== 'final'; }
   /* How long after the time itself somebody typed it.
 
      A self-marked in time is the one entry worth falsifying - it is what
@@ -14147,6 +14167,16 @@ function buildExcelBackup(){
       '<i>Marking yourself as you arrive takes a minute. Typing 9:30 at '+
       '10:47 is what this catches — it warns the office, it blocks nobody.</i>'+
       '</div>';
+    /* The tick on each row is the rule; whether there are two stages at all is
+       a question of somebody being named to hold the first one. Said here
+       because a tick that quietly does nothing is worse than no tick. */
+    html += '<div class="shf-flag">'+
+      '<span><b>First approval</b> on a row means that person’s leave goes to the '+
+      'first approver before a super admin grants it. Unticked, it goes straight '+
+      'for the final word.</span>'+
+      '<i>This only comes into play where a first approver is named, under '+
+      'Email → Leave. With nobody there, all leave is granted in one stage.</i>'+
+      '</div>';
     html += '<div class="shf-list">';
     EMPLOYEES.forEach(function(e){
       var cur = shiftWorking[e.name] || shiftBaseDefault(e.name);
@@ -14182,6 +14212,13 @@ function buildExcelBackup(){
             '<input type="checkbox" data-self-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
               (marksOwn(e.name) ? ' checked' : '')+'>'+
             '<span>Marks own</span>'+
+          '</label>'+
+          /* Whether their leave goes through the first approver, or straight to
+             whoever gives the final word. */
+          '<label class="shf-self" title="Their leave goes to the first approver before a super admin grants it. Unticked, it goes straight for the final word.">'+
+            '<input type="checkbox" data-first-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
+              (needsFirstApproval(e.name) ? ' checked' : '')+'>'+
+            '<span>First approval</span>'+
           '</label>';
         })()+
         '</div>'+
@@ -14281,6 +14318,25 @@ function buildExcelBackup(){
           showUploadStatus(dispName(name) + (cb.checked
             ? ' can now mark their own in and out.'
             : ' no longer marks their own attendance.'), false);
+        }).catch(function(e){
+          cb.disabled = false; cb.checked = !cb.checked;
+          showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        });
+      });
+    });
+    /* Saved on the tick, like the one beside it. Only the people who skip the
+       first stage are written down; everybody else is the arrangement naming a
+       first approver already meant. */
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-first-emp]'), function(cb){
+      cb.addEventListener('change', function(){
+        var name = cb.getAttribute('data-first-emp');
+        if(cb.checked) delete approvalRoute[name]; else approvalRoute[name] = 'final';
+        cb.disabled = true;
+        saveApprovalRoute().then(function(){
+          cb.disabled = false;
+          showUploadStatus(dispName(name) + (cb.checked
+            ? '’s leave now goes to the first approver before it is granted.'
+            : '’s leave now goes straight for the final word.'), false);
         }).catch(function(e){
           cb.disabled = false; cb.checked = !cb.checked;
           showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
@@ -18966,7 +19022,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){
