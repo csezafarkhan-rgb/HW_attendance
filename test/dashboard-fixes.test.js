@@ -9,7 +9,11 @@ function grab(name) {
     const c = src[k];
     if (c === '/' && src[k + 1] === '/') { k = src.indexOf('\n', k); continue; }
     if (c === '/' && src[k + 1] === '*') { k = src.indexOf('*/', k) + 1; continue; }
-    if (c === '"' || c === "'") { const q = c; k++; while (src[k] !== q) { if (src[k] === '\\') k++; k++; } continue; }
+    /* Stop at the end of the file. This slicer overruns the function it was
+       asked for by a long way, so it ends up walking the page markup - and one
+       apostrophe down there ("the button's label") used to send it off the end
+       and spin for ever, which reads as a hung suite rather than as a typo. */
+    if (c === '"' || c === "'") { const q = c; k++; while (k < src.length && src[k] !== q) { if (src[k] === '\\') k++; k++; } continue; }
     if (c === '/' && /[=(,:!&|?{};\s]/.test(src[k - 1] || '') && src[k + 1] !== '/' && src[k + 1] !== '*') {
       // a regex literal: skip to its closing slash
       k++; let inClass = false;
@@ -484,9 +488,18 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     check('a pointer resting on one holds it there',
       /if\(t\.matches\(':hover'\)\)\{ timer = setTimeout\(go, 7000\); return; \}/.test(src));
     check('they stack with the import notice rather than over it',
-      /<div id="hwToasts"[\s\S]{0,200}id="undoImportBox"/.test(src)
+      /<div id="hwToasts"[\s\S]{0,1400}id="undoImportBox"/.test(src)
         && !/\.undo-import\{position:fixed/.test(src),
       (/\.undo-import\{[^}]{0,60}/.exec(src) || [])[0]);
+    /* The Live Sync bar was a band across the whole page while the readers were
+       read - the one notice that did not go where the others go. */
+    check('and the sync bar is one of them, nearest the corner',
+      /<div id="hwToasts"[\s\S]{0,600}id="syncProgress" class="sync-toast"/.test(src)
+        && !/#syncProgress\{padding/.test(src),
+      (/<div id="hwToasts"[\s\S]{0,120}/.exec(src) || [])[0]);
+    check('and it fades away finished, rather than blinking out',
+      /box\.classList\.add\('going'\);/.test(src)
+        && /\.sync-toast\.going\{opacity:0/.test(src));
     check('and a wall of them is trimmed',
       /all\.length - 4/.test(src));
   }

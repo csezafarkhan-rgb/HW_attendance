@@ -1607,53 +1607,58 @@ tr.emp-header-row th{ cursor:default; }
     reports no progress of its own, so the fill is driven by elapsed time against
     that expectation - and deliberately stops short of the end, because claiming
     to be finished before the answer arrives is worse than saying nothing. */
-#syncProgress{padding:10px 18px 12px;background:linear-gradient(180deg,#F5F9FF,#EDF3FE);
-  border-bottom:1px solid #D6E4FA;}
-#syncProgress .sync-card{padding:11px 14px 13px;border-radius:14px;background:#fff;border:1px solid #D9E6FB;
-  box-shadow:0 1px 2px rgba(20,40,90,.05),0 8px 20px -10px rgba(59,125,245,.45);}
-#syncProgress .sync-line{display:flex;align-items:center;gap:10px;margin-bottom:10px;
-  font-size:12.5px;font-weight:600;color:#1B3A66;}
-#syncProgress #syncStage{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* It wears the same dark card as every other notice, two lines deep: what is
+   happening, then the two steps with the count and the clock, then the fill. */
+.sync-toast{display:block;width:min(340px,100%);padding:11px 13px 12px;border-radius:12px;
+  border:1px solid #0E3F22;background:#14532D;color:#fff;
+  box-shadow:0 8px 26px rgba(20,83,45,.35);
+  transition:opacity 1.1s ease, transform 1.1s ease;}
+.sync-toast.going{opacity:0;transform:translateY(8px);pointer-events:none;}
+.sync-toast .sync-line{display:flex;align-items:center;gap:9px;
+  font-size:12.5px;font-weight:700;line-height:1.45;}
+.sync-toast #syncStage{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sync-toast .sync-line2{display:flex;align-items:center;justify-content:space-between;
+  gap:8px;margin-top:8px;}
 /* A beacon, so the card reads as live even in the seconds the fill barely moves. */
-#syncProgress .sync-pulse{position:relative;flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:#3B7DF5;}
-#syncProgress .sync-pulse::after{content:'';position:absolute;inset:-4px;border-radius:50%;
-  border:2px solid #3B7DF5;animation:syncPing 1.4s cubic-bezier(0,0,.2,1) infinite;}
-#syncProgress .sync-steps{display:flex;gap:4px;flex:0 0 auto;}
-#syncProgress .sync-step{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;
-  background:#EEF2F8;color:#8A94A6;transition:background .3s,color .3s;}
-#syncProgress .sync-step.on{background:#3B7DF5;color:#fff;}
-#syncProgress .sync-step.past{background:#DCE9FF;color:#2F64C9;}
-#syncProgress .sync-meta{display:flex;align-items:center;gap:6px;flex:0 0 auto;
-  font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;}
-#syncProgress #syncPct{color:#1E5BD8;min-width:3.4em;text-align:right;}
-#syncProgress #syncClock{color:#5B7AA6;padding:2px 8px;border-radius:999px;background:#F1F5FC;}
-#syncProgress .sync-track{height:10px;border-radius:999px;background:#E6EEFA;overflow:hidden;
-  box-shadow:inset 0 1px 2px rgba(20,40,90,.14);}
-#syncProgress .sync-fill{position:relative;height:100%;width:0;border-radius:999px;overflow:hidden;
-  background:linear-gradient(90deg,#6FA8FF 0%,#3B7DF5 55%,#5B5CF0 100%);
-  box-shadow:0 0 10px rgba(59,125,245,.55);transition:width .35s ease-out;}
+.sync-toast .sync-pulse{position:relative;flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#86EFAC;}
+.sync-toast .sync-pulse::after{content:'';position:absolute;inset:-4px;border-radius:50%;
+  border:2px solid #86EFAC;animation:syncPing 1.4s cubic-bezier(0,0,.2,1) infinite;}
+.sync-toast .sync-steps{display:flex;gap:4px;flex:0 0 auto;}
+.sync-toast .sync-step{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;
+  background:rgba(255,255,255,.12);color:#AFD8C1;transition:background .3s,color .3s;}
+.sync-toast .sync-step.on{background:#86EFAC;color:#0E3F22;}
+.sync-toast .sync-step.past{background:rgba(255,255,255,.22);color:#DFF5E7;}
+.sync-toast .sync-meta{display:flex;align-items:center;gap:6px;flex:0 0 auto;
+  font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;}
+.sync-toast #syncPct{color:#fff;min-width:3.2em;text-align:right;}
+.sync-toast #syncClock{color:#BFE6CE;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.1);}
+.sync-toast .sync-track{height:8px;margin-top:9px;border-radius:999px;background:rgba(255,255,255,.16);
+  overflow:hidden;}
+.sync-toast .sync-fill{position:relative;height:100%;width:0;border-radius:999px;overflow:hidden;
+  background:linear-gradient(90deg,#6EE7B7 0%,#34D399 60%,#22C55E 100%);
+  box-shadow:0 0 10px rgba(52,211,153,.5);transition:width .35s ease-out;}
 /* Moving stripes and a passing sheen: motion that says "working" without
    pretending to know how far along the request is. */
-#syncProgress .sync-fill::before{content:'';position:absolute;inset:0;background-size:16px 16px;
-  background-image:linear-gradient(45deg,rgba(255,255,255,.2) 25%,transparent 25%,transparent 50%,
-    rgba(255,255,255,.2) 50%,rgba(255,255,255,.2) 75%,transparent 75%,transparent);
+.sync-toast .sync-fill::before{content:'';position:absolute;inset:0;background-size:16px 16px;
+  background-image:linear-gradient(45deg,rgba(255,255,255,.25) 25%,transparent 25%,transparent 50%,
+    rgba(255,255,255,.25) 50%,rgba(255,255,255,.25) 75%,transparent 75%,transparent);
   animation:syncStripes .8s linear infinite;}
-#syncProgress .sync-fill::after{content:'';position:absolute;top:0;bottom:0;left:-40%;width:40%;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);
+.sync-toast .sync-fill::after{content:'';position:absolute;top:0;bottom:0;left:-40%;width:40%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);
   animation:syncShine 1.8s ease-in-out infinite;}
 @keyframes syncPing{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.7);opacity:0}}
 @keyframes syncStripes{from{background-position:16px 0}to{background-position:0 0}}
 @keyframes syncShine{from{left:-40%}to{left:100%}}
-/* Green only when the readers were really read - a finish that fetched nothing
-   stays blue, and the message underneath says why. */
-#syncProgress.is-done .sync-fill{background:linear-gradient(90deg,#3DD68C,#16A34A);box-shadow:0 0 10px rgba(22,163,74,.5);}
-#syncProgress.is-done .sync-pulse{background:#16A34A;}
-#syncProgress.is-done .sync-step{background:#DCF5E6;color:#15803D;}
-#syncProgress.is-done #syncPct{color:#15803D;}
-#syncProgress.is-done .sync-fill::before,#syncProgress.is-done .sync-fill::after,
-#syncProgress.is-done .sync-pulse::after{animation:none;opacity:0;}
+/* Still when it is finished - a card that keeps marching after the answer is in
+   says the opposite of what it means. */
+.sync-toast.is-done .sync-fill{background:#22C55E;box-shadow:0 0 10px rgba(34,197,94,.55);}
+.sync-toast.is-done .sync-step{background:rgba(255,255,255,.22);color:#DFF5E7;}
+.sync-toast.is-done .sync-fill::before,.sync-toast.is-done .sync-fill::after,
+.sync-toast.is-done .sync-pulse::after{animation:none;opacity:0;}
 @media (prefers-reduced-motion:reduce){
-  #syncProgress .sync-fill::before,#syncProgress .sync-fill::after,#syncProgress .sync-pulse::after{animation:none;}
+  .sync-toast .sync-fill::before,.sync-toast .sync-fill::after,.sync-toast .sync-pulse::after{animation:none;}
+  .sync-toast{transition:opacity .2s linear;}
+  .sync-toast.going{transform:none;}
 }
 #leaveHint{
   background:var(--lv-amber-bg) !important; border:1px solid #F0DCB8 !important;
@@ -2490,20 +2495,20 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
    it is set at reading size rather than as a caption. It sits under the date
    now instead of being pushed to the floor: the times go to the floor. */
 .emp-cal-cell .s{font-size:13px;font-weight:800;line-height:1.2;margin-top:3px;}
-.emp-cal-cell .t{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:var(--ink-soft);line-height:1.3;}
+.emp-cal-cell .t{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;color:var(--ink-soft);line-height:1.3;}
 /* A holiday or a WFH day has no in and out: its one line follows the label
    like everything else, rather than being dropped to the floor. */
-.emp-cal-grid:not(.compact) .emp-cal-cell .t{ margin-top:10px; }
+.emp-cal-grid:not(.compact) .emp-cal-cell .t{ margin-top:auto; padding-top:9px; }
 /* In, out and what the day came to, one to a line, with the figures lined up
    under each other. The single packed time line is kept for the compact view
    and for a narrow screen; only one of the two is ever shown. */
-.emp-cal-cell .ec-det{ display:flex; align-items:center; gap:4px; margin-top:11px;
-  flex-wrap:wrap; }
+.emp-cal-cell .ec-det{ display:flex; align-items:center; gap:4px; margin-top:auto;
+  padding-top:9px; flex-wrap:wrap; }
 .emp-cal-cell .ecd-times{ display:flex; flex-direction:column; flex:none; }
 .emp-cal-cell .ecd{ display:flex; gap:5px; align-items:baseline; line-height:1.3; }
 .emp-cal-cell .ecd i{ flex:none; width:18px; font-style:normal; font-size:8px;
   font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--ink-soft); opacity:.8; }
-.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:700;
+.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:500;
   white-space:nowrap; }
 /* The brace gathers the two times into the figure beside them. Stretched
    rather than drawn: one glyph, and it keeps the typeface's own shape. */
@@ -2517,7 +2522,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   white-space:nowrap; }
 
 .emp-cal-cell .ecd-dur b{ display:block; font-family:'IBM Plex Mono',monospace;
-  font-size:11px; letter-spacing:0; text-transform:none; color:var(--ink); white-space:nowrap; }
+  font-size:11px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--ink);
+  white-space:nowrap; }
 /* What the corner letter means, in words. */
 /* What the corner letter means sits to its left, in the same row - the two
    are one statement, and reading "L" and then hunting for the minutes is the
@@ -2743,6 +2749,53 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .shf-self input{ margin:0; }
 /* Their own in and out, and the reason when they were late. */
 .ed-row{ display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap; margin-top:8px; }
+/* ---- the time field ----
+   The digits in one box with the half of the day joined to its right edge, so
+   the half is picked rather than typed - which is the part people get wrong.
+   Roughly twice the old height: this is filled standing at a desk, in a hurry,
+   often on a phone. */
+.ed-pair{ display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; }
+.ed-pair2{ margin-top:16px; }
+.fieldwrap{ flex:0 0 auto; min-width:0; }
+.ed-pair{ justify-content:flex-start; }
+.fieldwrap .lab{ font-size:10.5px; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
+.tf{ display:inline-flex; align-items:stretch; border:1.5px solid var(--line);
+  border-radius:12px; background:#fff; height:62px; overflow:hidden; }
+.tf.focus{ border-color:#2E6BE6; box-shadow:0 0 0 3px rgba(46,107,230,.14); }
+.tf .ico{ display:flex; align-items:center; padding:0 2px 0 13px;
+  color:var(--ink-soft); font-size:17px; }
+.tf input{ border:0; outline:0; background:transparent; width:104px; padding:0 12px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:28px; font-weight:700;
+  letter-spacing:-.5px; color:var(--ink); }
+.tf .ampm{ display:flex; flex-direction:column; border-left:1.5px solid var(--line);
+  width:58px; flex:none; }
+.tf .ampm button{ flex:1; border:0; background:transparent; cursor:pointer;
+  font-size:12px; font-weight:700; letter-spacing:.07em; color:var(--ink-soft);
+  transition:background .12s, color .12s; }
+.tf .ampm button + button{ border-top:1px solid var(--line); }
+.tf .ampm button:hover{ background:#F6F8FD; color:#2E6BE6; }
+.tf .ampm button.on{ background:#2E6BE6; color:#fff; }
+/* The box that is wrong says so, rather than leaving the sentence to do it. */
+.fieldwrap.bad .lab{ color:#C0392B; }
+.fieldwrap.bad .tf{ border-color:#C0392B; box-shadow:0 0 0 3px rgba(192,57,43,.1); }
+.fieldwrap.bad .tf .ico{ color:#C0392B; }
+.fieldwrap.bad .tf .ampm button.on{ background:#C0392B; }
+/* The times this person actually uses, the commonest starred. */
+.chips{ display:flex; gap:7px; margin-top:9px; flex-wrap:wrap; }
+.chips .chip{ border:1px solid #D4DCE8; background:#fff; border-radius:20px;
+  padding:5px 12px; font-size:12px; font-weight:600; color:var(--ink-soft); cursor:pointer; }
+.chips .chip:hover{ border-color:#2E6BE6; color:#2E6BE6; background:#F6F9FF; }
+.chips .chip.sug{ border-color:#BBE3C9; background:#F1FBF5; color:#157347; }
+.chips .chip.sug:hover{ border-color:#157347; }
+.ed-pair .ed-now{ height:62px; padding:0 16px; border-radius:12px; font-size:13px; }
+.ed-pair .ed-save{ height:62px; padding:0 28px; font-size:15px; }
+.ed-pair .ed-clear{ height:62px; padding:0 18px; }
+@media (max-width:680px){
+  .tf input{ width:88px; font-size:24px; }
+  .ed-pair .ed-save, .ed-pair .ed-now, .ed-pair .ed-clear{ height:54px; }
+  .tf{ height:54px; }
+}
 .ed-row label{ display:flex; flex-direction:column; gap:3px; font-size:11px;
   font-weight:700; color:var(--ink-soft); }
 .ed-row .ed-f{ display:flex; align-items:center; gap:5px; }
@@ -3418,20 +3471,6 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div class="month-dropdown st-dropdown" id="statusDropdown"></div>
   </div>
   <div class="view-switch" id="viewSwitchBtnAdmin">⇄ Log out</div>
-</div>
-<!-- Live Sync closes the menu it was clicked in, so the button's own label was
-     hidden for the whole minute the readers take. This says what is happening
-     where it can actually be seen. -->
-<div id="syncProgress" style="display:none;" role="status" aria-live="polite">
-  <div class="sync-card">
-    <div class="sync-line">
-      <span class="sync-pulse" aria-hidden="true"></span>
-      <span id="syncStage">Reading the punch readers…</span>
-      <span class="sync-steps" aria-hidden="true"><span class="sync-step">1 · Readers</span><span class="sync-step">2 · Import</span></span>
-      <span class="sync-meta"><span id="syncPct">0%</span><span id="syncClock">0s</span></span>
-    </div>
-    <div class="sync-track"><div class="sync-fill" id="syncFill"></div></div>
-  </div>
 </div>
 <div id="impFound" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 18px;background:#EAF3FF;border-bottom:1px solid #B9D4F5;font-size:12.5px;"></div>
 <div id="uploadStatus" style="display:none;padding:8px 18px;font-size:12px;font-weight:600;"></div>
@@ -4957,6 +4996,7 @@ function offerImportFile(file, stamp){
     };
     var started = Date.now();
     box.classList.remove('is-done');
+    box.classList.remove('going');
     box.style.display = '';
     if(lbl) lbl.textContent = stage;
     setStep(1);
@@ -4976,11 +5016,16 @@ function offerImportFile(file, stamp){
         show(100);
         setStep(steps.length + 1);
         if(ok){ box.classList.add('is-done'); if(lbl) lbl.textContent = 'Done'; }
-        // Long enough to register as finished, not long enough to be in the way.
+        /* Long enough to register as finished, then away the same slow way the
+           other notices go, rather than blinking out of the corner. */
         setTimeout(function(){
-          box.style.display = 'none'; box.classList.remove('is-done');
-          if(fill) fill.style.width = '0';
-        }, ok ? 1100 : 600);
+          box.classList.add('going');
+          setTimeout(function(){
+            box.style.display = 'none';
+            box.classList.remove('is-done'); box.classList.remove('going');
+            if(fill) fill.style.width = '0';
+          }, 1150);
+        }, ok ? 900 : 500);
       }
     };
   }
@@ -17842,22 +17887,42 @@ function buildExcelBackup(){
          time that has not come round yet is a slip or a guess either way - and
          the server refuses it too, whatever the box allows. */
       var ceiling = (day === todayISO_full) ? nowHHMM() : '';
-      var capAttr = ceiling ? (' max="' + ceiling + '"') : '';
-      /* "Now" beside each box. Picking 2:49 PM out of a spinner is a dozen
-         taps for a time the machine already knows, and punching in is the
-         moment somebody is most likely to be in a hurry. Only on today -
-         "now" is not a time that happened yesterday. */
-      var nowBtn = function(id){
+      /* One field a time: the digits, and the half of the day as two buttons
+         joined to the same border so it reads as one control. */
+      var field = function(which, lbl, val){
+        var cur = to12(val);
+        var chips = usualTimes(name, which).map(function(t, i){
+          var c = to12(t);
+          return '<button type="button" class="chip' + (i === 0 ? ' sug' : '') + '"'
+            + ' data-chip="' + which + '" data-t="' + t + '">'
+            + (i === 0 ? '★ ' : '') + shotEsc(fmtTime(t))
+            + (i === 0 ? ' · usual' : '') + '</button>';
+        }).join('');
+        return '<div class="fieldwrap" data-tf="' + which + '">'
+          + '<div class="lab">' + lbl + '</div>'
+          + '<div class="tf">'
+          +   '<span class="ico" aria-hidden="true">◷</span>'
+          +   '<input id="ed' + (which === 'in' ? 'In' : 'Out') + '" inputmode="numeric"'
+          +     ' maxlength="5" autocomplete="off" spellcheck="false"'
+          +     ' aria-label="' + lbl + ' time" value="' + shotEsc(cur.t) + '">'
+          +   '<div class="ampm" role="group" aria-label="' + lbl + ' morning or afternoon">'
+          +     '<button type="button" data-ap="AM"' + (cur.mer === 'AM' ? ' class="on"' : '') + '>AM</button>'
+          +     '<button type="button" data-ap="PM"' + (cur.mer === 'PM' ? ' class="on"' : '') + '>PM</button>'
+          +   '</div>'
+          + '</div>'
+          + (chips ? ('<div class="chips">' + chips + '</div>') : '')
+          + '</div>';
+      };
+      var nowBtn = function(which){
         return ceiling
-          ? ('<button type="button" class="ed-now" data-now="' + id + '"'
-             + ' title="Use the time now">Now</button>')
+          ? ('<button type="button" class="ed-now" data-now="' + which + '"'
+             + ' title="Use the time now">↻ Now</button>')
           : '';
       };
-      html += '<div class="ed-row">'
-        + '<label>In<span class="ed-f"><input type="time" id="edIn"' + capAttr + ' value="' + shotEsc(tidyTime(shown['in'])) + '">' + nowBtn('edIn') + '</span></label>'
-        + '<label>Out<span class="ed-f"><input type="time" id="edOut"' + capAttr + ' value="' + shotEsc(tidyTime(shown.out)) + '">' + nowBtn('edOut') + '</span></label>'
-        + '<button type="button" class="bk-btn primary" id="edSave">Save</button>'
-        + (man ? '<button type="button" class="month-btn" id="edClear">Clear</button>' : '')
+      html += '<div class="ed-pair">' + field('in', 'In', shown['in']) + nowBtn('in') + '</div>'
+        + '<div class="ed-pair ed-pair2">' + field('out', 'Out', shown.out) + nowBtn('out')
+        +   '<button type="button" class="bk-btn primary ed-save" id="edSave">Save</button>'
+        +   (man ? '<button type="button" class="month-btn ed-clear" id="edClear">Clear</button>' : '')
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="wl-foot" id="edSaid">'
@@ -17901,24 +17966,67 @@ function buildExcelBackup(){
     /* What the two boxes come to, kept under them as they are typed. A figure
        that only appears after saving is a figure nobody checks. */
     var sumBox = box.querySelector('#edSum');
-    var readPair = function(){
-      return [ (document.getElementById('edIn')||{}).value || '',
-               (document.getElementById('edOut')||{}).value || '' ];
+    /* The two fields, each a box of digits and a pair of buttons. Read back as
+       a 24-hour time, which is what the record keeps. */
+    var fieldOf = function(which){
+      var wrap = box.querySelector('[data-tf="' + which + '"]');
+      if(!wrap) return null;
+      return {
+        wrap: wrap,
+        input: wrap.querySelector('input'),
+        mer: function(){
+          var on = wrap.querySelector('.ampm button.on');
+          return on ? on.getAttribute('data-ap') : 'AM';
+        },
+        setMer: function(m){
+          Array.prototype.forEach.call(wrap.querySelectorAll('.ampm button'), function(b){
+            b.classList.toggle('on', b.getAttribute('data-ap') === m);
+          });
+        },
+        get: function(){ return from12(this.input.value, this.mer()); },
+        set: function(t24){
+          var c = to12(t24);
+          this.input.value = c.t;
+          if(c.t) this.setMer(c.mer);
+        },
+        mark: function(bad){ wrap.classList.toggle('bad', !!bad); }
+      };
     };
+    var F = { 'in': fieldOf('in'), out: fieldOf('out') };
+    var readPair = function(){
+      return [ F['in'] ? F['in'].get() : '', F.out ? F.out.get() : '' ];
+    };
+
+    /* What the two come to, and which box is wrong when one of them is. The
+       sentence alone was not enough: both boxes looked perfectly fine. */
     var tell = function(){
+      if(F['in']) F['in'].mark(false);
+      if(F.out) F.out.mark(false);
       if(!sumBox) return null;
       var p = readPair(), tin = p[0], tout = p[1];
       var now = (day === todayISO_full) ? nowHHMM() : '';
-      if(now && [tin, tout].filter(Boolean).some(function(t){ return t > now; })){
-        sumBox.className = 'ed-sum bad';
-        sumBox.textContent = 'That has not happened yet — it is ' + fmtTime(now) + ' now.';
-        return 'future';
+      if(now){
+        var ahead = (tin && tin > now) ? 'in' : ((tout && tout > now) ? 'out' : '');
+        if(ahead){
+          if(F[ahead]) F[ahead].mark(true);
+          sumBox.className = 'ed-sum bad';
+          sumBox.textContent = (ahead === 'in' ? 'That arrival' : 'That finish')
+            + ' has not happened yet — it is ' + fmtTime(now) + ' now.';
+          return 'future';
+        }
       }
       if(tin && tout){
         var mins = toMin(tout) - toMin(tin);
         if(mins <= 0){
+          if(F.out) F.out.mark(true);
           sumBox.className = 'ed-sum bad';
-          sumBox.textContent = 'Out is before in.';
+          /* With the half of the day a button, this is nearly always the
+             mistake - so name it rather than leaving them to find it. */
+          var wouldFix = (F.out && F.out.mer() === 'AM'
+                          && toMin(from12(F.out.input.value, 'PM')) > toMin(tin));
+          sumBox.textContent = 'Out is before in — ' + fmtTime(tout)
+            + ' is earlier than ' + fmtTime(tin) + '.'
+            + (wouldFix ? ' Did you mean PM?' : '');
           return 'backwards';
         }
         sumBox.className = 'ed-sum';
@@ -17930,16 +18038,64 @@ function buildExcelBackup(){
                                : (tout ? ('Out at ' + fmtTime(tout) + ' — no in time yet.') : '');
       return null;
     };
-    tell();
-    ['edIn', 'edOut'].forEach(function(id){
-      var el = document.getElementById(id);
-      if(el) el.addEventListener('input', tell);
+
+    /* Typing. Read when they leave the box rather than on every keystroke, so
+       "9" on the way to "930" is not rewritten under their fingers. */
+    ['in', 'out'].forEach(function(which){
+      var f = F[which]; if(!f) return;
+      var tf = f.wrap.querySelector('.tf');
+      var settle = function(){
+        var got = parseEntry(f.input.value, f.mer());
+        if(got){ f.input.value = got.t; f.setMer(got.mer); }
+        else if(f.input.value.trim() === ''){ f.input.value = ''; }
+        tell();
+      };
+      f.input.addEventListener('focus', function(){ if(tf) tf.classList.add('focus'); });
+      f.input.addEventListener('blur', function(){ if(tf) tf.classList.remove('focus'); settle(); });
+      f.input.addEventListener('change', settle);
+      f.input.addEventListener('input', tell);
+      f.input.addEventListener('keydown', function(ev){
+        /* A and P pick the half of the day, so a hand need not leave the keys. */
+        if(/^[apAP]$/.test(ev.key) && !ev.ctrlKey && !ev.metaKey){
+          ev.preventDefault();
+          f.setMer(ev.key.toLowerCase() === 'p' ? 'PM' : 'AM');
+          tell();
+          return;
+        }
+        if(ev.key === 'Enter'){ ev.preventDefault(); settle(); return; }
+        if(ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+        ev.preventDefault();
+        var step = (ev.shiftKey ? 60 : 5) * (ev.key === 'ArrowUp' ? 1 : -1);
+        var base = f.get() || (day === todayISO_full ? nowHHMM() : '09:00');
+        var mins = ((toMin(base) + step) % 1440 + 1440) % 1440;
+        f.set(pad2(Math.floor(mins / 60)) + ':' + pad2(mins % 60));
+        tell();
+      });
+      Array.prototype.forEach.call(f.wrap.querySelectorAll('.ampm button'), function(b){
+        b.addEventListener('click', function(){
+          f.setMer(b.getAttribute('data-ap'));
+          tell();
+        });
+      });
     });
+
+    /* The times this person actually uses: one tap fills the box and the half
+       of the day with it. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-chip]'), function(b){
+      b.addEventListener('click', function(){
+        var f = F[b.getAttribute('data-chip')];
+        if(!f) return;
+        f.set(b.getAttribute('data-t'));
+        tell();
+      });
+    });
+
+    tell();
     Array.prototype.forEach.call(box.querySelectorAll('[data-now]'), function(b){
       b.addEventListener('click', function(){
-        var el = document.getElementById(b.getAttribute('data-now'));
-        if(!el) return;
-        el.value = nowHHMM();
+        var f = F[b.getAttribute('data-now')];
+        if(!f) return;
+        f.set(nowHHMM());
         tell();
         /* Straight to Save: filling a time is almost always the last thing
            somebody wanted to do before pressing it. */
@@ -17947,7 +18103,6 @@ function buildExcelBackup(){
         if(sv) sv.focus();
       });
     });
-
     var save = document.getElementById('edSave');
     if(save) save.addEventListener('click', function(){
       var pair = readPair(), tin = pair[0], tout = pair[1];
@@ -17990,6 +18145,77 @@ function buildExcelBackup(){
       delete lateExcuses[name + '|' + day];
       saveLateExcuses().then(function(){ renderEmpDayCard(); });
     });
+  }
+  /* ---- reading and writing a time somebody typed ----
+
+     The record keeps 24-hour times. The field shows twelve of them with the
+     half of the day as a pair of buttons, because the half is the thing people
+     get wrong and a button cannot be mistyped. These two convert between the
+     two, and parseEntry takes whatever was typed. */
+  function to12(t){
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim());
+    if(!m) return { t:'', mer:'AM' };
+    var h = +m[1], mer = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12; if(h12 === 0) h12 = 12;
+    return { t: pad2(h12) + ':' + m[2], mer: mer };
+  }
+  function from12(t, mer){
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim());
+    if(!m) return '';
+    var h = +m[1] % 12;
+    if(mer === 'PM') h += 12;
+    return pad2(h) + ':' + m[2];
+  }
+  /* Whatever was typed, read generously: 930, 1812, 6:12p, 9. A four-digit
+     time past noon says which half of the day it is without being asked. */
+  function parseEntry(raw, mer){
+    var txt = String(raw == null ? '' : raw).trim().toLowerCase();
+    if(!txt) return null;
+    var said = /([ap])m?\s*$/.exec(txt);
+    if(said) mer = said[1] === 'p' ? 'PM' : 'AM';
+    var d = txt.replace(/[^0-9]/g, '');
+    if(!d) return null;
+    var h, mm;
+    if(d.length <= 2){ h = +d; mm = 0; }
+    else if(d.length === 3){ h = +d.slice(0,1); mm = +d.slice(1); }
+    else { h = +d.slice(0,2); mm = +d.slice(2,4); }
+    if(mm > 59) return null;
+    /* A time written the 24-hour way decides the half of the day itself. */
+    if(h > 12 && h <= 23 && !said){ mer = 'PM'; h -= 12; }
+    else if(h === 0){ h = 12; if(!said) mer = 'AM'; }
+    else if(h === 12 && d.length >= 3 && !said){ /* 12:xx stands as given */ }
+    if(h < 1 || h > 12) return null;
+    return { t: pad2(h) + ':' + pad2(mm), mer: mer };
+  }
+  /* The times this person actually uses for that end of the day, newest months
+     first and rounded to five minutes - a chip for each, the commonest starred.
+     Offering "9:30, because that is when you always arrive" beats offering a
+     tidy round number nobody uses. */
+  function usualTimes(name, which){
+    var seen = {}, total = 0;
+    var take = function(t){
+      var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
+      if(!m) return;
+      var mins = (+m[1]) * 60 + (+m[2]);
+      mins = Math.round(mins / 5) * 5;
+      var key = pad2(Math.floor(mins / 60) % 24) + ':' + pad2(mins % 60);
+      seen[key] = (seen[key] || 0) + 1; total++;
+    };
+    try{
+      RECORDS.forEach(function(r){
+        if(r.e !== name) return;
+        take(which === 'in' ? r['in'] : r.out);
+      });
+      Object.keys(manualRecords).forEach(function(k){
+        if(k.slice(0, k.lastIndexOf('|')) !== name) return;
+        var v = manualRecords[k] || {};
+        take(which === 'in' ? v['in'] : v.out);
+      });
+    }catch(e){}
+    if(!total) return [];
+    return Object.keys(seen)
+      .sort(function(a, b){ return seen[b] - seen[a] || (a < b ? -1 : 1); })
+      .slice(0, 3);
   }
   function nowHHMM(){
     var d = new Date();
@@ -18672,6 +18898,28 @@ table.att .week-summary-cell{
    elements - cell content can no longer influence any column, so switching
    months cannot resize anything. */
 table.att.hw-fixed-cols{ table-layout:fixed !important; }
+
+/* ---- The time field keeps its own look ----
+   The house styles further up set a 13px font, a frosted background and a
+   round border on every input, and a glass border on every chip - all with
+   !important. The one place that must not obey is the time box, whose whole
+   point is big plain digits, so it says so here, last and just as loudly. */
+.tf input{
+  font-size:28px !important; font-family:'IBM Plex Mono',ui-monospace,monospace !important;
+  background:transparent !important; border:0 !important; border-radius:0 !important;
+  -webkit-backdrop-filter:none !important; backdrop-filter:none !important;
+  box-shadow:none !important; height:auto !important; padding:0 12px !important;
+}
+.chips .chip{
+  font-size:12px !important; border:1px solid #D4DCE8 !important;
+  border-radius:20px !important; background:#fff !important;
+  -webkit-backdrop-filter:none !important; backdrop-filter:none !important;
+}
+.chips .chip.sug{ border-color:#BBE3C9 !important; background:#F1FBF5 !important; }
+/* Now and Save stand beside the box, not beside the box and its chips. */
+.ed-pair{ align-items:flex-start; }
+.ed-pair > .ed-now, .ed-pair > .ed-save, .ed-pair > .ed-clear{ margin-top:22px; }
+@media (max-width:680px){ .tf input{ font-size:24px !important; } }
 </style>
 
 <script>
@@ -18735,6 +18983,22 @@ table.att.hw-fixed-cols{ table-layout:fixed !important; }
      after an import lives in here too, so the two can never sit on top of one
      another the way two fixed corners would. -->
 <div id="hwToasts" class="hw-toasts" aria-live="polite">
+<!-- Live Sync closes the menu it was clicked in, so the label on the button was
+     hidden for the whole minute the readers take. This says what is happening
+     where every other notice says it: the bottom right corner. It is the first
+     child, so the column-reverse stack puts it nearest the corner and later
+     notices pile up above it rather than shoving it about. -->
+<div id="syncProgress" class="sync-toast" style="display:none;" role="status" aria-live="polite">
+  <div class="sync-line">
+    <span class="sync-pulse" aria-hidden="true"></span>
+    <span id="syncStage">Reading the punch readers…</span>
+  </div>
+  <div class="sync-line2">
+    <span class="sync-steps" aria-hidden="true"><span class="sync-step">1 · Readers</span><span class="sync-step">2 · Import</span></span>
+    <span class="sync-meta"><span id="syncPct">0%</span><span id="syncClock">0s</span></span>
+  </div>
+  <div class="sync-track"><div class="sync-fill" id="syncFill"></div></div>
+</div>
   <!-- Offers a way back after an import. Shown only when a restore point exists. -->
   <div id="undoImportBox" class="undo-import" style="display:none"></div>
 </div>

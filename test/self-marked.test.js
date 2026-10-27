@@ -236,18 +236,35 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('the two boxes add themselves up as they are typed',
     /fmtMin\(mins\) \+ ' on the day/.test(card) && /addEventListener\('input', tell\)/.test(card));
   check('and an out before an in is said so, not saved',
-    /Out is before in\./.test(card) && /wrong === 'backwards'/.test(card));
+    /Out is before in \u2014 /.test(card) && /wrong === 'backwards'/.test(card));
+  /* With the half of the day a button, the wrong half is the mistake this will
+     usually be - so the box at fault is outlined and the hint names it. */
+  check('and the box at fault is marked, not just the sentence',
+    /if\(F\.out\) F\.out\.mark\(true\);/.test(card)
+      && /Did you mean PM\?/.test(card));
   /* Picking 2:49 PM out of a spinner is a dozen taps for a time the machine
      already knows, and punching in is when somebody is most in a hurry. */
   check('each box can take the time now in one press',
-    /nowBtn\('edIn'\)/.test(card) && /nowBtn\('edOut'\)/.test(card)
-      && /el\.value = nowHHMM\(\);/.test(card));
+    /nowBtn\('in'\)/.test(card) && /nowBtn\('out'\)/.test(card)
+      && /f\.set\(nowHHMM\(\)\);/.test(card));
   check('and it is offered only on today, "now" being no time yesterday',
-    /var nowBtn = function\(id\)\{[\s\S]{0,200}return ceiling/.test(card),
+    /var nowBtn = function\(which\)\{[\s\S]{0,200}return ceiling/.test(card),
     (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);
   check('today\u2019s boxes stop at the clock',
     /var ceiling = \(day === todayISO_full\) \? nowHHMM\(\) : '';/.test(card)
-      && /max="' \+ ceiling/.test(card));
+      && /has not happened yet \u2014 it is ' \+ fmtTime\(now\)/.test(card));
+  /* The digits are typed, not spun: a time can be written any of the ways a
+     person writes one, and the half of the day is picked rather than typed. */
+  check('what was typed is read generously',
+    /function parseEntry\(raw, mer\)/.test(APP)
+      && /if\(h > 12 && h <= 23 && !said\)\{ mer = 'PM'; h -= 12; \}/.test(APP));
+  check('and A or P picks the half of the day without leaving the keys',
+    /\/\^\[apAP\]\$\/\.test\(ev\.key\)/.test(card));
+  /* Offering 9:30 because that is when they always arrive beats offering a
+     round number nobody uses. */
+  check('the times this person actually uses are a tap away',
+    /function usualTimes\(name, which\)/.test(APP)
+      && /data-chip="' \+ which \+ '"/.test(card));
   check('and a time still ahead is refused on the way out too',
     /wrong === 'future'/.test(card));
   /* The page caps its own boxes; the page is theirs to edit. */
@@ -292,9 +309,19 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /if\(detail\) cls \+= ' has-det';/.test(APP));
   check('the cell grows to what it carries rather than cropping it',
     /\.emp-cal-grid \.emp-cal-cell\{ min-height:\d+px; overflow:visible/.test(styles));
-  /* A fixed height left a band of nothing between the word and the times. */
-  check('and nothing is pushed to a floor it does not reach',
-    !/\.ec-det\{[^}]*margin-top:auto/.test(styles), (/\.ec-det\{[^}]*/.exec(styles)||[])[0]);
+  /* The times rest on the floor of the cell, so a week of them lines up along
+     one edge instead of each starting wherever its own label happened to end.
+     The cell still grows to what it carries, so that floor is never a crop. */
+  check('the times rest on the floor of the cell',
+    /\.ec-det\{[^}]*margin-top:auto/.test(styles)
+      && /\.emp-cal-grid:not\(\.compact\) \.emp-cal-cell \.t\{ margin-top:auto/.test(styles),
+    (/\.ec-det\{[^}]*/.exec(styles)||[])[0]);
+  /* The word for the day is the bold thing in the cell. The figures were set
+     at the same weight and shouted over it. */
+  check('and read as figures, not as a second heading',
+    /\.emp-cal-cell \.ecd b\{[^}]*font-weight:500/.test(styles)
+      && /\.emp-cal-cell \.ecd-dur b\{[^}]*font-weight:500/.test(styles)
+      && /\.emp-cal-cell \.t\{[^}]*font-weight:500/.test(styles));
   check('and the compact one keeps its old height',
     /\.emp-cal-grid\.compact \.emp-cal-cell,[\s\S]{0,60}height:96px/.test(styles));
 }
