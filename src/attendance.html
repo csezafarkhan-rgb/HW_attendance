@@ -8879,6 +8879,22 @@ function buildExcelBackup(){
      said it should go forward and a super admin has not yet granted it. Nothing
      is written on the record until they do. */
   var REQ_STATUSES = ['pending', 'query', 'recommended', 'approved', 'rejected', 'recorded'];
+  /* The paper day-off form says the leave was granted, so it belongs to leave
+     that was. It was offered on every request from the moment it was raised -
+     so somebody could send a request and print a form for it in the same
+     breath, before anybody had read it, and walk away holding what looks like
+     a signed-off day. The comment beside the button said "once approved" all
+     along; only the code never checked.
+
+     A recorded day is leave the office has already put on the record, taken
+     without going through the form at all. That is settled too, and the form
+     is the one thing those days might still need.
+
+     A punch correction has no day off in it, so there is nothing to print. */
+  function canPrintDayForm(req){
+    if(!req || req.leaveType === 'PUNCH') return false;
+    return req.status === 'approved' || req.status === 'recorded';
+  }
   function cleanRequests(list){
     if(!Array.isArray(list)) return [];
     return list.filter(function(r){ return r && typeof r === 'object'; }).map(function(r){
@@ -9974,7 +9990,7 @@ function buildExcelBackup(){
       }
       /* Once approved, the paper form can be printed straight from the request
          rather than filled in again by hand. */
-      if(req.leaveType !== 'PUNCH') actionsHtml += '<div class="req-actions">'
+      if(canPrintDayForm(req)) actionsHtml += '<div class="req-actions">'
         + '<button class="btn ghost" data-act="form" data-id="'+req.id+'">🖨 Print day-off form</button>'
         + '</div>';
       // Always offer to archive; offer to restore once it is in the archive.
@@ -10029,7 +10045,9 @@ function buildExcelBackup(){
         var act = btn.getAttribute('data-act');
         var req = leaveRequests.find(function(r){ return r.id === id; });
         if(!req) return;
-        if(act === 'form'){ printDayOffForm(req); return; }
+        /* Checked here as well as on the button: a page left open while the
+           request went back to waiting still has the old button on it. */
+        if(act === 'form'){ if(canPrintDayForm(req)) printDayOffForm(req); return; }
         if(act.indexOf('to-') === 0){
           var to = act.slice(3);
           /* Undoing an approval removes days from the attendance record, so it
@@ -10231,9 +10249,9 @@ function buildExcelBackup(){
         noteHtml + replyHtml +
         /* Approved means the paper form can be printed and signed, filled from
            what was already agreed here. */
-        (req.leaveType === 'PUNCH' ? '' :
+        (canPrintDayForm(req) ?
         '<div style="margin-top:10px;"><button class="btn ghost" data-print-form="'+req.id+'" '
-          + 'style="width:auto;padding:7px 14px;font-size:12px;">🖨 Print day-off form</button></div>')+
+          + 'style="width:auto;padding:7px 14px;font-size:12px;">🖨 Print day-off form</button></div>' : '')+
       '</div>';
     }).join('');
 
@@ -10255,7 +10273,9 @@ function buildExcelBackup(){
                          approvedBy:'', status:'recorded' };
           }
         }
-        if(r) printDayOffForm(r);
+        /* Checked here as well as on the button: a page left open while the
+           decision changed still has the old button on it. */
+        if(canPrintDayForm(r)) printDayOffForm(r);
       });
     });
 
@@ -10372,10 +10392,13 @@ function buildExcelBackup(){
       showUploadStatus((isPunch ? 'Punch correction' : 'Request')
         + ' sent for ' + fmtDateRange(req.dateFrom, req.dateTo)
         + ' \u2014 waiting on the office.', false);
-      /* The paper form is submitted with the request, not after it comes back
-         approved - so offer to print it straight away, with the approval line
-         left for whoever signs it. A punch correction is not a day off. */
-      if(!isPunch) printDayOffForm(req);
+      /* No form here. It used to open the moment Send was pressed, on the
+         reasoning that the paper goes in with the request rather than after
+         it comes back - but what it put in somebody's hand was a day-off form
+         for a day nobody had agreed to yet, filled in and ready to sign,
+         seconds after asking. The form says the leave was granted. It waits
+         until it was: the button on the request appears when the answer does,
+         and prints the same page from the same request. */
     }).catch(function(e){
       /* It is still in the list on this page, so say plainly that it did not
          reach the office rather than leaving it looking sent. */
