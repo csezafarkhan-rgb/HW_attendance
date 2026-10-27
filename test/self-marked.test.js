@@ -289,7 +289,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /loadManualRecords, loadLateExcuses, loadSelfMark,/.test(APP));
 
   /* The employee's own card. */
-  const card = APP.slice(APP.indexOf('function renderEmpDayCard()'),
+  const card = APP.slice(APP.indexOf('function renderEmpDayCard('),
                          APP.indexOf('function renderEmployeeCalendar()'));
   check('their page offers in and out only to those marked for it',
     /var mine = marksOwn\(name\);/.test(card) && /if\(!mine && !isLate\)/.test(card), card.slice(0, 80));
@@ -311,7 +311,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 /* ---- what the card adds up, and where it sits ---- */
 {
   const APP = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
-  const card = APP.slice(APP.indexOf('function renderEmpDayCard()'),
+  const card = APP.slice(APP.indexOf('function renderEmpDayCard('),
                          APP.indexOf('function renderEmployeeCalendar()'));
   check('the two boxes add themselves up as they are typed',
     /fmtMin\(mins\) \+ ' on the day/.test(card) && /addEventListener\('input', tell\)/.test(card));
@@ -325,7 +325,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   /* Picking 2:49 PM out of a spinner is a dozen taps for a time the machine
      already knows, and punching in is when somebody is most in a hurry. */
   check('each box can take the time now in one press',
-    /\+ nowBtn\(which\)/.test(card) && /f\.set\(nowHHMM\(\)\);/.test(card));
+    /: nowBtn\(which\)\)/.test(card) && /f\.set\(nowHHMM\(\)\);/.test(card));
   /* Two numbers took the height of the card stacked. They read across now,
      with a hairline saying where the one ends and the other begins. */
   check('the two times read across, divided by a rule',
@@ -334,6 +334,36 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
       && /\.ed-two \.ed-split\{[^}]*width:1px/.test(APP));
   check('and Save sits at the end of that row',
     /<div class="ed-acts">[\s\S]{0,160}id="edSave"/.test(card));
+
+  /* ---- a time already saved is settled ----
+     An open box with a time in it invites a nudge. Once it is saved it reads
+     back instead, and opening it again is a press and an answer. */
+  check('a saved time reads back rather than sitting in an open box',
+    /var settled = function\(which\)\{[\s\S]{0,120}man\[which\] && !EMP_EDIT\[which\]/.test(card)
+      && /\(shut \? ' readonly tabindex="-1"' : ''\)/.test(card));
+  check('its half-of-the-day buttons are shut too, and its chips put away',
+    /\(shut \? ' disabled' : ''\)/.test(card)
+      && /\(\(chips && !shut\) \?/.test(card));
+  check('and it offers a way to change it',
+    /class="ed-now ed-edit" data-unlock="/.test(card));
+  check('which asks first, and says what the office will see',
+    /hwConfirm\(\{[\s\S]{0,320}Change the ' \+ lbl \+ ' time you already saved\?/.test(card)
+      && /moment you change it/.test(card));
+  check('and only the one field asked for is opened',
+    /renderEmpDayCard\(which\);/.test(card)
+      && /EMP_EDIT = \{ 'in': openFor === 'in', out: openFor === 'out' \};/.test(APP));
+  /* Saving draws the card again with nothing opened, so a save shuts the box
+     it came from. */
+  check('a save settles it again',
+    /function renderEmpDayCard\(openFor\)\{/.test(APP));
+
+  /* ---- a time well behind the clock says so, before the office does ---- */
+  check('typing a time long past warns about the gap being recorded',
+    /var warnBack = function\(\)\{/.test(card)
+      && /if\(gap > selfFlagMin\(\)\)\{/.test(card)
+      && /The office is shown the time you typed it/.test(card));
+  check('and the warning rides along with everything that reads the pair',
+    /tell = function\(\)\{ var r = tellTimes\(\); warnBack\(\); return r; \};/.test(card));
   check('and it is offered only on today, "now" being no time yesterday',
     /var nowBtn = function\(which\)\{[\s\S]{0,200}return ceiling/.test(card),
     (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);

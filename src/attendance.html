@@ -2744,6 +2744,18 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-x:hover{ background:#FDE7E4; color:#C0392B; opacity:1; }
 .wl-foot{ font-size:11px; color:var(--ink-soft); margin-top:7px; }
 /* Who types their own day, on the row that sets everything else about them. */
+/* A time already saved reads back rather than sitting in an open box. */
+.fieldwrap.shut .tf{ background:#F6F8FB; border-color:#DDE4EE; }
+.fieldwrap.shut .tf input{ color:var(--ink-soft); cursor:default; }
+.fieldwrap.shut .tf .ampm button{ cursor:default; }
+.fieldwrap.shut .tf .ampm button.on{ background:#8FA6C4; }
+.fieldwrap.shut .tf .ampm button:not(.on){ color:#B8C2CF; }
+.fieldwrap .lab .lk{ margin-left:6px; color:#157347; font-size:9.5px; letter-spacing:.04em; }
+.ed-two .ed-edit{ font-weight:600; }
+/* Said before the office says it: the gap between the time and the typing. */
+.ed-warn{ margin-top:8px; padding:8px 11px; border-radius:9px;
+  border:1px solid #F0DCB8; background:var(--lv-amber-bg); color:#7A4A00;
+  font-size:12px; font-weight:600; line-height:1.5; }
 /* Where somebody says they spent the day out. It sits under the times, quieter
    than they are: most days it is not needed and should not be the first thing
    the eye lands on. */
@@ -18022,6 +18034,11 @@ function buildExcelBackup(){
      lateness, so one given here waits for the office - it says so, and the
      minutes go on counting until somebody accepts it. */
   var DAY_CARD_DAY = null;              // null means today
+  /* A time already saved is settled: it reads back rather than sitting in an
+     open box waiting to be nudged. Opening one again is deliberate - a press
+     and an answer - which is the point. Cleared every time the card is drawn,
+     so a save closes the box it came from. */
+  var EMP_EDIT = { 'in': false, out: false };
   /* Today, and only today. Yesterday was open here as well; it is shut because
      a day somebody can still go back and fill in is a day that can be written
      to suit the week it turned out to be. The server refuses the rest anyway,
@@ -18029,7 +18046,8 @@ function buildExcelBackup(){
   function empDayWindow(){
     return [todayISO_full];
   }
-  function renderEmpDayCard(){
+  function renderEmpDayCard(openFor){
+    EMP_EDIT = { 'in': openFor === 'in', out: openFor === 'out' };
     var box = document.getElementById('empDayCard');
     var name = viewRole && viewRole.name;
     if(!box || !name) return;
@@ -18076,8 +18094,13 @@ function buildExcelBackup(){
              + ' title="Use the time now">↻ Now</button>')
           : '';
       };
+      /* Saved, and not deliberately opened again. */
+      var settled = function(which){
+        return !!(man && man[which] && !EMP_EDIT[which]);
+      };
       var field = function(which, lbl, val){
         var cur = to12(val);
+        var shut = settled(which);
         var chips = usualTimes(name, which).map(function(t, i){
           var c = to12(t);
           return '<button type="button" class="chip' + (i === 0 ? ' sug' : '') + '"'
@@ -18085,22 +18108,28 @@ function buildExcelBackup(){
             + (i === 0 ? '★ ' : '') + shotEsc(fmtTime(t))
             + (i === 0 ? ' · usual' : '') + '</button>';
         }).join('');
-        return '<div class="fieldwrap" data-tf="' + which + '">'
-          + '<div class="lab">' + lbl + '</div>'
+        return '<div class="fieldwrap' + (shut ? ' shut' : '') + '" data-tf="' + which + '">'
+          + '<div class="lab">' + lbl + (shut ? ' <span class="lk">✓ saved</span>' : '') + '</div>'
           + '<div class="ed-boxrow">'
           + '<div class="tf">'
           +   '<span class="ico" aria-hidden="true">◷</span>'
           +   '<input id="ed' + (which === 'in' ? 'In' : 'Out') + '" inputmode="numeric"'
           +     ' maxlength="5" autocomplete="off" spellcheck="false"'
+          +     (shut ? ' readonly tabindex="-1"' : '')
           +     ' aria-label="' + lbl + ' time" value="' + shotEsc(cur.t) + '">'
           +   '<div class="ampm" role="group" aria-label="' + lbl + ' morning or afternoon">'
-          +     '<button type="button" data-ap="AM"' + (cur.mer === 'AM' ? ' class="on"' : '') + '>AM</button>'
-          +     '<button type="button" data-ap="PM"' + (cur.mer === 'PM' ? ' class="on"' : '') + '>PM</button>'
+          +     '<button type="button" data-ap="AM"' + (shut ? ' disabled' : '')
+          +       (cur.mer === 'AM' ? ' class="on"' : '') + '>AM</button>'
+          +     '<button type="button" data-ap="PM"' + (shut ? ' disabled' : '')
+          +       (cur.mer === 'PM' ? ' class="on"' : '') + '>PM</button>'
           +   '</div>'
           + '</div>'
-          + nowBtn(which)
+          + (shut
+              ? ('<button type="button" class="ed-now ed-edit" data-unlock="' + which + '"'
+                 + ' title="Change the ' + lbl.toLowerCase() + ' time already saved">✎ Edit</button>')
+              : nowBtn(which))
           + '</div>'
-          + (chips ? ('<div class="chips">' + chips + '</div>') : '')
+          + ((chips && !shut) ? ('<div class="chips">' + chips + '</div>') : '')
           + '</div>';
       };
       /* The two times read across rather than down, a hairline between them:
@@ -18116,6 +18145,7 @@ function buildExcelBackup(){
         + '</div>'
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
+        + '<div class="ed-warn" id="edWarn" style="display:none"></div>'
         + visitRow(name, day)
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
@@ -18231,6 +18261,37 @@ function buildExcelBackup(){
       return null;
     };
 
+    /* How far back the time being typed is. Not an error - somebody who gets
+       to it at lunch is doing nothing wrong - but it is the thing the office
+       is shown, so it is said here first rather than discovered there. */
+    var warnBox = box.querySelector('#edWarn');
+    var warnBack = function(){
+      if(!warnBox) return;
+      var now = (day === todayISO_full) ? nowHHMM() : '';
+      var gap = 0, lbl = '';
+      if(now){
+        ['in', 'out'].forEach(function(which){
+          var f = F[which]; if(!f) return;
+          var t = f.get(); if(!t) return;
+          var back = toMin(now) - toMin(t);
+          if(back > gap){ gap = back; lbl = which === 'in' ? 'That arrival' : 'That finish'; }
+        });
+      }
+      if(gap > selfFlagMin()){
+        warnBox.style.display = '';
+        warnBox.textContent = lbl + ' was ' + minsSaid(gap) + ' ago. '
+          + 'The office is shown the time you typed it, beside the time you typed.';
+      } else {
+        warnBox.style.display = 'none';
+        warnBox.textContent = '';
+      }
+    };
+    /* Everything already calls tell() whenever the pair changes, so the
+       warning rides along with it rather than being remembered separately at
+       each of the eight places a time can be altered. */
+    var tellTimes = tell;
+    tell = function(){ var r = tellTimes(); warnBack(); return r; };
+
     /* Typing. Read when they leave the box rather than on every keystroke, so
        "9" on the way to "930" is not rewritten under their fingers. */
     ['in', 'out'].forEach(function(which){
@@ -18330,6 +18391,24 @@ function buildExcelBackup(){
       }).catch(function(e){
         pleaSave.disabled = false;
         showUploadStatus('That did not send (' + ((e && e.message) || 'no answer') + ').', true);
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-unlock]'), function(b){
+      b.addEventListener('click', function(){
+        var which = b.getAttribute('data-unlock');
+        var lbl = which === 'in' ? 'in' : 'out';
+        var cur = (man && man[which]) ? fmtTime(man[which]) : '';
+        hwConfirm({
+          title: 'Change the ' + lbl + ' time you already saved?',
+          message: 'It is set to ' + cur + '. The office sees both the new time and the '
+                 + 'moment you change it, so a correction is a correction and reads as one.',
+          confirmLabel: 'Change it'
+        }).then(function(ok){
+          if(!ok) return;
+          renderEmpDayCard(which);
+          var f = document.getElementById(which === 'in' ? 'edIn' : 'edOut');
+          if(f){ f.focus(); f.select(); }
+        });
       });
     });
     var vKind = document.getElementById('edVisitKind');
