@@ -2759,8 +2759,8 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-two .ed-boxrow{ display:flex; align-items:center; gap:9px; }
 /* A hairline, not a border: it only has to say "these are two things". It is
    as tall as the boxes, so it divides them and leaves the chips alone. */
-.ed-two .ed-split{ flex:none; width:1px; background:#D4DCE8; height:62px; margin-top:22px; }
-.ed-two .ed-acts{ display:flex; gap:8px; margin-top:22px; margin-left:auto; }
+.ed-two .ed-split{ flex:none; width:1px; background:#B4C1D2; height:62px; margin:22px 3px 0; }
+.ed-two .ed-acts{ display:flex; gap:8px; margin-top:22px; margin-left:6px; }
 .fieldwrap{ flex:0 0 auto; min-width:0; }
 .ed-two{ justify-content:flex-start; }
 .fieldwrap .lab{ font-size:10.5px; font-weight:700; letter-spacing:.08em;
@@ -18934,12 +18934,16 @@ table.att.hw-fixed-cols{ table-layout:fixed !important; }
 .chips .chip.sug{ border-color:#BBE3C9 !important; background:#F1FBF5 !important; }
 /* Now and Save stand beside the box, not beside the box and its chips. */
 .ed-two{ align-items:flex-start; }
-/* Wrapped onto two lines there is nothing left to divide, and Save belongs
-   under the pair rather than away on the right of whichever box ended last. */
+/* Wrapped onto two lines there is nothing left to divide. */
 @media (max-width:900px){
   .ed-two .ed-split{ display:none; }
-  .ed-two .ed-acts{ margin-left:0; margin-top:4px; }
+  .ed-two .ed-acts{ margin-left:0; }
 }
+/* The rule has to be visible to be a rule. It is drawn over the glass theme,
+   which paints a near-white edge on anything it recognises. */
+.ed-two .ed-split{ background:#B4C1D2 !important; border:0 !important;
+  border-radius:0 !important; -webkit-backdrop-filter:none !important;
+  backdrop-filter:none !important; }
 @media (max-width:680px){ .tf input{ font-size:24px !important; } }
 </style>
 
