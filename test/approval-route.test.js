@@ -27,16 +27,23 @@ function grab(src, name) {
   return src.slice(i, k + 1);
 }
 
-const ctx = { Array, String, JSON };
+const ctx = { Array, String, JSON, Object };
 vm.createContext(ctx);
-['needsFirstApproval', 'stageOwns', 'stageOwnsUnreq'].forEach(fn => vm.runInContext(grab(SRV, fn), ctx));
+vm.runInContext('const EMAIL_RE = ' + /const EMAIL_RE = (\/.*\/);/.exec(SRV)[1] + ';', ctx);
+['needsFirstApproval', 'approverFor', 'stageOwns', 'stageOwnsUnreq', 'firstApprovers', 'legFor']
+  .forEach(fn => vm.runInContext(grab(SRV, fn), ctx));
 const call = (fn, ...args) => {
   vm.runInContext('__r = ' + fn + '(' + args.map(a => JSON.stringify(a)).join(', ') + ')', ctx);
   return ctx.__r;
 };
 
+/* The office's own first approver, where nothing is said against a name. */
+const USUAL = 'priya@allyconnect.in';
+const OTHER = 'dutt@essessexports.net';
 const NONE = {};
 const SOME = { 'Aman Gupta': 'final', 'Himanshu': 'final' };
+/* Shyam Lal works somewhere else and answers to somebody else. */
+const MIXED = { 'Aman Gupta': 'final', 'Shyam Lal ESS': OTHER };
 const req = (empName, status) => ({ empName, status, id: 'r1' });
 
 /* ---- the default is the arrangement that was already there ---- */
@@ -58,44 +65,44 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
 {
   ['pending', 'query', 'recommended'].forEach(st => {
     check('at one stage a ' + st + ' request is everybody’s',
-      call('stageOwns', 0, SOME, req('Aman Gupta', st)) === true);
+      call('stageOwns', 0, SOME, req('Aman Gupta', st), USUAL, USUAL) === true);
   });
   check('and an unrequested day the same',
-    call('stageOwnsUnreq', 0, SOME, { empName: 'Aman Gupta' }) === true);
+    call('stageOwnsUnreq', 0, SOME, { empName: 'Aman Gupta' }, USUAL, USUAL) === true);
 }
 
 /* ---- stage 1 is the first approver's, and only for their people ---- */
 {
   check('a pending request from somebody who goes through them is theirs',
-    call('stageOwns', 1, SOME, req('Zafar Khan', 'pending')) === true);
+    call('stageOwns', 1, SOME, req('Zafar Khan', 'pending'), USUAL, USUAL) === true);
   check('a query is theirs too',
-    call('stageOwns', 1, SOME, req('Zafar Khan', 'query')) === true);
+    call('stageOwns', 1, SOME, req('Zafar Khan', 'query'), USUAL, USUAL) === true);
   check('what they have already passed on is not theirs again',
-    call('stageOwns', 1, SOME, req('Zafar Khan', 'recommended')) === false);
+    call('stageOwns', 1, SOME, req('Zafar Khan', 'recommended'), USUAL, USUAL) === false);
   check('and somebody set to skip the stage never reaches them',
-    call('stageOwns', 1, SOME, req('Aman Gupta', 'pending')) === false);
+    call('stageOwns', 1, SOME, req('Aman Gupta', 'pending'), USUAL, USUAL) === false);
   check('nor does that person’s unrequested day',
-    call('stageOwnsUnreq', 1, SOME, { empName: 'Himanshu' }) === false);
+    call('stageOwnsUnreq', 1, SOME, { empName: 'Himanshu' }, USUAL, USUAL) === false);
   check('while everybody else’s does',
-    call('stageOwnsUnreq', 1, SOME, { empName: 'Zafar Khan' }) === true);
+    call('stageOwnsUnreq', 1, SOME, { empName: 'Zafar Khan' }, USUAL, USUAL) === true);
 }
 
 /* ---- stage 2 is the final word's ---- */
 {
   check('a recommended request is waiting on them',
-    call('stageOwns', 2, SOME, req('Zafar Khan', 'recommended')) === true);
+    call('stageOwns', 2, SOME, req('Zafar Khan', 'recommended'), USUAL, USUAL) === true);
   check('a pending one that has not been through the first stage is not',
-    call('stageOwns', 2, SOME, req('Zafar Khan', 'pending')) === false);
+    call('stageOwns', 2, SOME, req('Zafar Khan', 'pending'), USUAL, USUAL) === false);
   /* The point of the whole change: a skipper's request must show at stage 2
      while still pending, because nobody is ever going to recommend it. */
   check('but a skipper’s pending request is theirs from the moment it is raised',
-    call('stageOwns', 2, SOME, req('Aman Gupta', 'pending')) === true);
+    call('stageOwns', 2, SOME, req('Aman Gupta', 'pending'), USUAL, USUAL) === true);
   check('a skipper’s query as well',
-    call('stageOwns', 2, SOME, req('Aman Gupta', 'query')) === true);
+    call('stageOwns', 2, SOME, req('Aman Gupta', 'query'), USUAL, USUAL) === true);
   check('and a skipper’s unrequested day goes to them',
-    call('stageOwnsUnreq', 2, SOME, { empName: 'Aman Gupta' }) === true);
+    call('stageOwnsUnreq', 2, SOME, { empName: 'Aman Gupta' }, USUAL, USUAL) === true);
   check('while the two-stage people’s unrequested days do not',
-    call('stageOwnsUnreq', 2, SOME, { empName: 'Zafar Khan' }) === false);
+    call('stageOwnsUnreq', 2, SOME, { empName: 'Zafar Khan' }, USUAL, USUAL) === false);
 }
 
 /* ---- nothing falls between the two stages ---- */
@@ -179,11 +186,103 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
     ask('iAmFirstApprover') === true);
 
   check('the page offers a pass-on button at all', /data-act="recommend"/.test(APP));
+  /* The panel's box, and the page reading it the way the server does. */
+  check('the panel has a box for a per-person approver', /data-appr-emp=/.test(APP));
+  check('and the page reads one out of the map the same way',
+    /function ownApprover\(name\)/.test(APP));
+  check('an address is never mistaken for the word that skips the stage',
+    /v !== 'final' && v\.indexOf\('@'\) > -1/.test(APP));
   check('and the bulk approve passes on rather than grants, for them',
     /awaitsFirstApproval\(req\) && iAmFirstApprover\(\)[\s\S]{0,200}recommended/.test(APP));
   check('the server hears about a pass-on made from the portal',
     /newlyRecommended\(requestsBefore, value\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8')));
+}
+
+/* ---- one person, somebody else's first approval ----
+   Shyam Lal works from another location and answers to somebody outside the
+   usual line. Routing the whole company through that person to serve one of
+   them is not an answer, so the address is named against the name. */
+{
+  check('with nothing named, the office’s own approver holds the stage',
+    call('approverFor', MIXED, 'Zafar Khan', USUAL) === USUAL);
+  check('an address named against somebody holds it for them instead',
+    call('approverFor', MIXED, 'Shyam Lal ESS', USUAL) === OTHER);
+  check('and "final" still means nobody holds it',
+    call('approverFor', MIXED, 'Aman Gupta', USUAL) === null);
+  check('with no office approver either, nobody holds it',
+    call('approverFor', NONE, 'Zafar Khan', '') === null);
+  /* But one named against a person stands on its own: their leave goes
+     through them whether or not the office has named anybody. */
+  check('an address named against somebody works with no office approver at all',
+    call('approverFor', MIXED, 'Shyam Lal ESS', '') === OTHER);
+  check('rubbish in the box is not an address, so the usual one holds',
+    call('approverFor', { 'X': 'not an address' }, 'X', USUAL) === USUAL);
+  check('and the address is matched without regard to case',
+    call('approverFor', { 'X': 'DUTT@EssessExports.net' }, 'X', USUAL) === OTHER);
+}
+
+/* ---- each approver is told about their own people and nobody else's ---- */
+{
+  const theirs = r => call('stageOwns', 1, MIXED, r, USUAL, OTHER);
+  const usual  = r => call('stageOwns', 1, MIXED, r, USUAL, USUAL);
+  check('Shyam Lal’s request reaches the approver named for him',
+    theirs(req('Shyam Lal ESS', 'pending')) === true);
+  check('and not the office’s own first approver',
+    usual(req('Shyam Lal ESS', 'pending')) === false);
+  check('everybody else reaches the office’s own',
+    usual(req('Zafar Khan', 'pending')) === true);
+  check('and not somebody else’s approver',
+    theirs(req('Zafar Khan', 'pending')) === false);
+  check('a skipper reaches neither of them',
+    theirs(req('Aman Gupta', 'pending')) === false
+      && usual(req('Aman Gupta', 'pending')) === false);
+  check('and once passed on, it is nobody’s first stage again',
+    theirs(req('Shyam Lal ESS', 'recommended')) === false);
+  check('but it is the final word’s',
+    call('stageOwns', 2, MIXED, req('Shyam Lal ESS', 'recommended'), USUAL, USUAL) === true);
+  check('and their pending one is not the final word’s yet',
+    call('stageOwns', 2, MIXED, req('Shyam Lal ESS', 'pending'), USUAL, USUAL) === false);
+
+  /* Days marked with no request behind them follow the same roads. */
+  check('an unrequested day of theirs goes to their approver',
+    call('stageOwnsUnreq', 1, MIXED, { empName: 'Shyam Lal ESS' }, USUAL, OTHER) === true);
+  check('and not to the office’s own',
+    call('stageOwnsUnreq', 1, MIXED, { empName: 'Shyam Lal ESS' }, USUAL, USUAL) === false);
+}
+
+/* ---- who gets a message at all ---- */
+{
+  const who = (route, fb) => call('firstApprovers', route, fb);
+  check('with nobody named on a row, one approver: the office’s own',
+    JSON.stringify(who(SOME, USUAL)) === JSON.stringify([USUAL]), who(SOME, USUAL));
+  check('with one named, two - and the office’s own comes first',
+    JSON.stringify(who(MIXED, USUAL)) === JSON.stringify([USUAL, OTHER]), who(MIXED, USUAL));
+  check('"final" is never an approver',
+    who(MIXED, USUAL).indexOf('final') === -1);
+  check('the same address named against two people is still one message',
+    who({ a: OTHER, b: OTHER }, USUAL).length === 2, who({ a: OTHER, b: OTHER }, USUAL));
+  check('and with no office approver, only the named ones',
+    JSON.stringify(who(MIXED, '')) === JSON.stringify([OTHER]), who(MIXED, ''));
+  check('nobody anywhere means no first stage at all',
+    who(SOME, '').length === 0, who(SOME, ''));
+}
+
+/* ---- and where each message is addressed ---- */
+{
+  const S = { leave: { firstTo: [USUAL, 'hr@allyconnect.in'], firstCc: ['cc@allyconnect.in', USUAL] } };
+  const mine = call('legFor', S, USUAL, USUAL);
+  check('the office’s own stage keeps the line it was configured with',
+    JSON.stringify(mine.to) === JSON.stringify([USUAL, 'hr@allyconnect.in']), mine);
+  check('and its cc, minus anybody already on the to line',
+    JSON.stringify(mine.cc) === JSON.stringify(['cc@allyconnect.in']), mine);
+  const other = call('legFor', S, OTHER, USUAL);
+  check('an approver named against one person is that one address',
+    JSON.stringify(other.to) === JSON.stringify([OTHER]), other);
+  check('and nobody is copied on it',
+    other.cc.length === 0, other);
+  check('both are stage one, and say whose stage they are',
+    mine.stage === 1 && other.stage === 1 && other.approver === OTHER, { mine, other });
 }
 
 /* ---- the setting is the office's, and the office's alone ---- */

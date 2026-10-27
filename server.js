@@ -1839,11 +1839,13 @@ function linksFor(payload) {
 }
 /* The same, with the first approver's name sealed into the link, so the record
    can say who recommended it without trusting anything the browser sends. */
-async function requestLinks(orgId, reqId, stage) {
+async function requestLinks(orgId, reqId, stage, approver) {
   if (stage !== 1) return linksFor({ k: 'req', org: orgId, id: reqId, s: stage || 0 });
-  const first = await firstApproverOf(orgId);
-  return linksFor({ k: 'req', org: orgId, id: reqId, s: 1,
-                    by: first ? first.name : 'the first approver' });
+  /* Whoever holds the stage for this one request, which need not be the
+     office's own first approver. */
+  const by = approver ? await approverName(orgId, approver)
+                      : ((await firstApproverOf(orgId)) || {}).name || 'the first approver';
+  return linksFor({ k: 'req', org: orgId, id: reqId, s: 1, by });
 }
 /* Leave marked on the record that no request accounts for, newest first. The
    dashboard's own rule: a rejected request or a punch correction covers nothing,
@@ -2057,20 +2059,26 @@ async function buildDailyEmail(orgId, day, opts) {
    on days the first approver had not so much as seen, which is the one thing
    two stages exist to prevent. Stage 0 is leave granted in one, where
    everything shows and the buttons grant, as it always did. */
-async function buildLeaveEmail(orgId, stage) {
+async function buildLeaveEmail(orgId, stage, forApprover) {
   const settings = await mailSettings(orgId);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'companyInfo']);
   const requests = parseJson(kv.leaveRequests) || [];
   const first = await firstApproverOf(orgId);
-  const st = (first && first.email) ? (stage === 2 ? 2 : 1) : 0;
   const route = await approvalRouteOf(orgId);
+  const fallback = (first && first.email) || '';
+  /* Stage 1 is one approver's; without one named there is only one stage. */
+  const mine = forApprover || fallback;
+  const st = (stage === 2) ? 2 : (mine ? 1 : 0);
+  /* Whose name goes in the buttons, so the record can say who recommended
+     it without trusting anything the browser sends. */
+  const byName = st === 1 ? await approverName(orgId, mine) : '';
   /* An archived request is out of the way by definition - the dashboard keeps
      it off the Requests page, and the message said seven were waiting when the
      portal said none. */
   const live = r => r && !r.archived
     && (r.status === 'pending' || r.status === 'query' || r.status === 'recommended');
-  const mine = r => stageOwns(st, route, r);
-  const pending = requests.filter(r => live(r) && mine(r))
+  const isMine = r => stageOwns(st, route, r, fallback, mine);
+  const pending = requests.filter(r => live(r) && isMine(r))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
     .slice(0, 15)
     .map(r => ({ req: r,
@@ -2083,14 +2091,14 @@ async function buildLeaveEmail(orgId, stage) {
                  /* The stage is sealed into the button, so a link cannot be made
                     to grant by stripping it. */
                  links: linksFor(st === 1
-                   ? { k: 'req', org: orgId, id: r.id, s: 1, by: first.name }
+                   ? { k: 'req', org: orgId, id: r.id, s: 1, by: byName }
                    : { k: 'req', org: orgId, id: r.id, s: 2 }) }));
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
   /* A day marked with no request behind it has been through no stage at all,
      so it belongs to the first approver - for the people who have one. For
      anybody set to skip that stage it goes to the final word instead, which is
      the only place it would otherwise be seen at all. */
-  const unreqMine = u => stageOwnsUnreq(st, route, u);
+  const unreqMine = u => stageOwnsUnreq(st, route, u, fallback, mine);
   const unreq = settings.unrequested
     ? unrequestedFrom(parseJson(kv.overrides) || {}, parseJson(kv.halfDays) || {}, requests, since)
         .filter(unreqMine)
@@ -2099,7 +2107,7 @@ async function buildLeaveEmail(orgId, stage) {
           heading: st === 1 ? 'For you to look at first' : 'No request on file',
           links: linksFor(st === 1
             ? { k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
-                t: u.leaveType, h: u.half || '', s: 1, by: first.name }
+                t: u.leaveType, h: u.half || '', s: 1, by: byName }
             : { k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
                 t: u.leaveType, h: u.half || '' })
         }))
@@ -2404,11 +2412,17 @@ async function sendLeaveEmail(orgId) {
   /* One message where leave is granted in one stage; where it is granted in
      two, one for each, so neither set of people is handed a decision that is
      not theirs to make. A stage with nothing waiting sends nothing. */
+  const route = await approvalRouteOf(orgId);
+  const fallback = (first && first.email) || '';
   const legs = [];
-  if (first && first.email) {
-    const ft = (settings.leave.firstTo || []).slice();
-    legs.push({ stage: 1, to: ft,
-                cc: (settings.leave.firstCc || []).filter(a => ft.indexOf(a) === -1) });
+  if (fallback) {
+    /* One stage-1 message per person holding a first stage, each holding only
+       their own people. Where somebody is routed to an approver of their own,
+       that address gets a message about them and nobody else - and the office's
+       own first approver is not told about a request that is not theirs. */
+    firstApprovers(route, fallback).forEach(who => {
+      legs.push(legFor(settings, who, fallback));
+    });
     legs.push({ stage: 2, to: await mailRecipients(orgId, settings, 'leave'),
                 cc: mailCc(settings, 'leave') });
   } else {
@@ -2419,7 +2433,7 @@ async function sendLeaveEmail(orgId) {
   for (const leg of legs) {
     if (!leg.to.length) continue;
     addressed++;
-    const mail = await buildLeaveEmail(orgId, leg.stage);
+    const mail = await buildLeaveEmail(orgId, leg.stage, leg.approver);
     if (!mail) continue;                                   // nothing at this stage
     const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
     const r = await mailer.send(msg);
@@ -2449,26 +2463,23 @@ async function notifyNewRequests(orgId, added) {
        and each request is sent down its own road. */
     const first = await firstApproverOf(orgId, settings);
     const route = await approvalRouteOf(orgId);
-    const firstLeg = (first && first.email)
-      ? (function () {
-          const to = (settings.leave.firstTo || []).slice();
-          return { to, cc: (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1) };
-        })()
-      : null;
+    const fallback = (first && first.email) || '';
     const finalLeg = { to: await mailRecipients(orgId, settings, 'leave'),
                        cc: mailCc(settings, 'leave') };
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
-      const viaFirst = !!firstLeg && needsFirstApproval(route, r.empName);
-      const leg = viaFirst ? firstLeg : finalLeg;
+      /* Whoever holds the first stage for this particular person - which may
+         be an address named against them alone. */
+      const who = approverFor(route, r.empName, fallback);
+      const leg = who ? legFor(settings, who, fallback) : finalLeg;
       if (!leg.to.length) continue;
       const mail = mailer.requestEmail({
         orgName: orgNameOf(kv.companyInfo), req: r,
-        links: await requestLinks(orgId, r.id, viaFirst ? 1 : 0),
+        links: await requestLinks(orgId, r.id, who ? 1 : 0, who),
         siteUrl: mailer.baseUrl(),
-        heading: viaFirst ? 'A request for you to look at first'
-                          : 'A request is waiting for a decision',
-        intro: (viaFirst && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        heading: who ? 'A request for you to look at first'
+                     : 'A request is waiting for a decision',
+        intro: (who && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
         footer: settings.leave.footer
       });
       const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
@@ -2489,6 +2500,19 @@ async function notifyNewRequests(orgId, added) {
    Where that address does belong to an account, their name is used, so the
    message that follows can say who approved it rather than reciting an
    address. */
+/* The name behind an address, where it belongs to an account - so a message
+   can say who recommended something rather than reciting an address. */
+async function approverName(orgId, email) {
+  const addr = String(email || '').trim();
+  if (!EMAIL_RE.test(addr)) return 'the first approver';
+  try {
+    const r = await pool.query(
+      'SELECT name FROM users WHERE org_id = $1 AND lower(email) = lower($2) ORDER BY id LIMIT 1',
+      [orgId, addr]);
+    if (r.rows[0] && String(r.rows[0].name || '').trim()) return String(r.rows[0].name).trim();
+  } catch (e) { /* the address stands in for the name */ }
+  return addr;
+}
 async function firstApproverOf(orgId, settings) {
   const s = settings || await mailSettings(orgId);
   const email = ((s.leave && s.leave.firstTo) || [])[0] || '';
@@ -2517,27 +2541,75 @@ async function approvalRouteOf(orgId) {
 function needsFirstApproval(route, name) {
   return (route || {})[name] !== 'final';
 }
+/* Who holds the first stage for one person, as an address, or null where
+   nobody does.
+
+   A row in the map is one of three things: missing, meaning the office's own
+   first approver; the word 'final', meaning no first stage at all; or an
+   address, meaning that person's leave goes to somebody else first. The third
+   is why this exists - one employee reports to somebody outside the usual
+   line, and routing the whole company through that person to serve one of them
+   is not an answer. */
+function approverFor(route, name, fallback) {
+  const v = (route || {})[name];
+  if (v === 'final') return null;
+  const own = typeof v === 'string' && EMAIL_RE.test(v.trim()) ? v.trim() : '';
+  const who = own || String(fallback || '').trim();
+  return EMAIL_RE.test(who) ? who.toLowerCase() : null;
+}
 /* Whose decision a waiting request is, at the stage the message is being built
    for. At one stage (st 0) everybody's.
 
-   Stage 1 is the first approver's: what they have not passed on yet, and only
-   for the people whose leave goes through them at all. Stage 2 is the final
-   word's: what has been passed on, plus - from the moment it is raised -
-   anything from somebody set to skip the first stage, since no one else is
-   ever going to look at it. */
-function stageOwns(st, route, r) {
+   Stage 1 belongs to one named approver at a time: what they have not passed
+   on, for the people whose leave goes through them and nobody else's. Stage 2
+   is the final word's: what has been passed on, plus - from the moment it is
+   raised - anything from somebody with no first stage at all, since no one
+   else is ever going to look at it. */
+function stageOwns(st, route, r, fallback, forApprover) {
   if (st === 0) return true;
-  const two = needsFirstApproval(route, r && r.empName);
-  if (st === 2) return r.status === 'recommended' || !two;
-  return two && r.status !== 'recommended';
+  const who = approverFor(route, r && r.empName, fallback);
+  if (st === 2) return r.status === 'recommended' || !who;
+  return !!who && who === String(forApprover || '').toLowerCase()
+      && r.status !== 'recommended';
 }
 /* The same, for a day marked on the record with no request behind it. It has
-   been through no stage at all, so it simply belongs to whoever holds the
-   first stage for that person - or to the final word where nobody does. */
-function stageOwnsUnreq(st, route, u) {
+   been through no stage at all, so it belongs to whoever holds the first stage
+   for that person - or to the final word where nobody does. */
+function stageOwnsUnreq(st, route, u, fallback, forApprover) {
   if (st === 0) return true;
-  return st === 1 ? needsFirstApproval(route, u && u.empName)
-                  : !needsFirstApproval(route, u && u.empName);
+  const who = approverFor(route, u && u.empName, fallback);
+  return st === 1 ? (!!who && who === String(forApprover || '').toLowerCase()) : !who;
+}
+/* Every address that holds a first stage for somebody: the office's own, and
+   each one named against a particular person. One message each, so nobody is
+   handed a decision that is not theirs.
+
+   The office's own is always in the list rather than worked out from who is
+   left over - a stage with nothing waiting builds no message and sends
+   nothing, which settles it without needing the roll of employees here. */
+function firstApprovers(route, fallback) {
+  const seen = {}, out = [];
+  const add = a => {
+    const k = String(a || '').trim().toLowerCase();
+    if (EMAIL_RE.test(k) && !seen[k]) { seen[k] = true; out.push(k); }
+  };
+  add(fallback);
+  Object.keys(route || {}).forEach(n => {
+    const v = route[n];
+    if (typeof v === 'string' && v !== 'final') add(v);
+  });
+  return out;
+}
+/* Who a stage-1 message goes to. The office's own first approver keeps the
+   line it was configured with, because that stage may be shared by several
+   people; an approver named against one person is that one address. */
+function legFor(settings, who, fallback) {
+  if (who === String(fallback || '').trim().toLowerCase()) {
+    const to = ((settings.leave && settings.leave.firstTo) || []).slice();
+    return { stage: 1, approver: who, to,
+             cc: ((settings.leave && settings.leave.firstCc) || []).filter(a => to.indexOf(a) === -1) };
+  }
+  return { stage: 1, approver: who, to: [who], cc: [] };
 }
 
 /* The person the leave belongs to, by their own account. Accounts are made
@@ -2699,14 +2771,20 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
        whoever happened to come first. */
     const first = await firstApproverOf(orgId, settings);
     const route = await approvalRouteOf(orgId);
-    const twoStage = !!(first && first.email);
-    const groups = [
-      { stage: 1, items: worth.filter(m => twoStage && needsFirstApproval(route, m.empName)) },
-      { stage: 0, items: worth.filter(m => !twoStage || !needsFirstApproval(route, m.empName)) }
-    ];
+    const fallback = (first && first.email) || '';
+    /* One group per person holding a first stage, and one for the marks that
+       have no first stage at all. */
+    const groups = [];
+    firstApprovers(route, fallback).forEach(who => {
+      groups.push({ stage: 1, approver: who,
+                    items: worth.filter(m => approverFor(route, m.empName, fallback) === who) });
+    });
+    groups.push({ stage: 0, approver: '',
+                  items: worth.filter(m => !approverFor(route, m.empName, fallback)) });
     for (const g of groups) {
       if (!g.items.length) continue;
       const stage = g.stage;
+      const byName = stage === 1 ? await approverName(orgId, g.approver) : '';
       const mail = mailer.leaveEmail({
         orgName: orgNameOf(kv.companyInfo), pending: [],
         unrequested: g.items.slice(0, 15).map(m => ({
@@ -2715,7 +2793,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
                          : 'Marked on the record, no request',
           links: linksFor(stage
             ? { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
-                t: m.leaveType, h: m.half || '', s: 1, by: first.name }
+                t: m.leaveType, h: m.half || '', s: 1, by: byName }
             : { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
                 t: m.leaveType, h: m.half || '' })
         })),
@@ -2726,8 +2804,8 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
       if (!mail) continue;
       let to, cc;
       if (stage) {
-        to = (settings.leave.firstTo || []).slice();
-        cc = (settings.leave.firstCc || []).filter(a => to.indexOf(a) === -1);
+        const leg = legFor(settings, g.approver, fallback);
+        to = leg.to; cc = leg.cc;
       } else {
         to = await mailRecipients(orgId, settings, 'leave');
         cc = mailCc(settings, 'leave');

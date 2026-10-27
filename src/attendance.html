@@ -983,7 +983,7 @@ body{
     its width from whatever its widest child asks for, so one long sentence in
     the wrong kind of box stretched it across the screen and pulled every row
     apart with it. */
-#shiftDropdown{ min-width:780px; max-width:min(930px, 94vw); }
+#shiftDropdown{ min-width:780px; max-width:min(1060px, 94vw); }
 /* Rows inside a dropdown. The other dropdowns hold checkbox labels, so there
    was no button rule to inherit and these fell back to the browser's default
    bordered button - a box inside a box. */
@@ -1033,10 +1033,6 @@ body{
 .ord-row .ord-name{flex:1;font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .ord-row .ord-mv{border:1px solid #C9CFD8;background:#fff;border-radius:5px;width:22px;height:22px;cursor:pointer;font-size:10px;color:var(--ink);padding:0;}
 .ord-row .ord-mv:disabled{opacity:0.3;cursor:default;}
-.shf-bulk{display:flex;gap:6px;align-items:center;padding:0 6px 8px;}
-.shf-bulk select{flex:1;font-size:11.5px;padding:5px 6px;border-radius:6px;border:1px solid #9AA3B0;}
-.shf-bulk button{font-size:11px;font-weight:700;padding:6px 10px;border-radius:6px;border:1px solid var(--line-dk);background:var(--bg);color:var(--ink);cursor:pointer;white-space:nowrap;}
-.shf-bulk button:hover{border-color:var(--ink);}
 .pnl-x{position:absolute;top:6px;right:6px;width:24px;height:24px;line-height:1;
   border:1px solid var(--line);border-radius:7px;background:var(--panel);
   color:var(--ink-soft);font-size:16px;font-weight:600;cursor:pointer;
@@ -1060,7 +1056,12 @@ body{
     a long sentence and the same rule opens two holes across the middle of
     every row. The one thing that belongs at the edge is pushed there, once. */
 .shf-sat{display:flex;flex:0 0 auto;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);}
-.shf-flags{ display:inline-flex; align-items:center; gap:10px; margin-left:auto; flex:0 0 auto; }
+.shf-flags{ display:inline-flex; align-items:center; gap:8px; margin-left:auto; flex:0 0 auto; }
+/* Who gives the first approval for this one person. Blank is the usual one,
+   so it reads as an exception rather than a field waiting to be filled. */
+.shf-appr{ flex:0 0 auto; width:136px; font-size:11px; padding:4px 6px; border-radius:7px;
+  border:1px solid var(--line-dk); background:#fff; color:var(--ink); }
+.shf-appr::placeholder{ color:var(--ink-dim); font-style:italic; }
 .shf-satlbl{font-weight:700;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;font-size:10px;}
 /*  Sized to the longest thing each actually holds - "Full working day" and a
     date - and no further. They were wide enough that a row carrying the
@@ -8824,6 +8825,13 @@ function buildExcelBackup(){
     return storage.set('approvalRoute', JSON.stringify(approvalRoute), true);
   }
   function needsFirstApproval(name){ return approvalRoute[name] !== 'final'; }
+  /* An approver named against this one person, or '' where their leave goes to
+     whoever the office named. The server keeps the same reading; this is only
+     what the panel shows and who the page says holds the stage. */
+  function ownApprover(name){
+    var v = approvalRoute[name];
+    return (typeof v === 'string' && v !== 'final' && v.indexOf('@') > -1) ? v : '';
+  }
   /* How long after the time itself somebody typed it.
 
      A self-marked in time is the one entry worth falsifying - it is what
@@ -14404,13 +14412,7 @@ function buildExcelBackup(){
     }
     var html = '<div class="ord-hint">Set each person\u2019s work slot \u2014 a pick applies straight away, '+
       'from the <b>1st of '+monthLabelShort(String(todayISO_full||'').slice(0,7))+'</b>. '+
-      'Months before that keep the slot they were worked out on. '+
-      'Use \u201cApply to all\u201d to give everyone the same slot at once.</div>';
-    // bulk apply-to-all
-    html += '<div class="shf-bulk">'+
-      '<select id="shfAllSel">'+allShifts().map(function(p){ return '<option value="'+p+'">'+p+'</option>'; }).join('')+'</select>'+
-      '<button type="button" id="shfAllBtn">Apply to all</button>'+
-      '</div>';
+      'Months before that keep the slot they were worked out on.</div>';
     /* Sits with the people who mark their own day, because it is about them. */
     html += '<div class="shf-flag">'+
       '<span>Flag a self-marked <b>in</b> time typed more than</span>'+
@@ -14427,11 +14429,13 @@ function buildExcelBackup(){
        unbreakable item as wide as the sentence, and this one stretched the
        whole panel to fit it. */
     html += '<div class="shf-note">'+
-      '<b>First approval</b> on a row means that person’s leave goes to the '+
+      '<b>First approval</b> on a row means that person’s leave goes to a '+
       'first approver before a super admin grants it. Unticked, it goes straight '+
-      'for the final word.'+
-      '<i>Only comes into play where a first approver is named, under '+
-      'Email → Leave. With nobody there, all leave is granted in one stage.</i>'+
+      'for the final word. The box beside it names who gives that first approval '+
+      'for them — leave it blank and it goes to whoever is named under '+
+      'Email → Leave, which is what everybody had before.'+
+      '<i>Where nobody is named under Email → Leave, and nobody is named on a '+
+      'row either, all leave is granted in one stage.</i>'+
       '</div>';
     html += '<div class="shf-list">';
     /* Everybody on a slot together, earliest start first. A flat list of
@@ -14494,13 +14498,20 @@ function buildExcelBackup(){
               (marksOwn(e.name) ? ' checked' : '')+'>'+
             '<span>Marks own</span>'+
           '</label>'+
-          /* Whether their leave goes through the first approver, or straight to
-             whoever gives the final word. */
-          '<label class="shf-self" title="Their leave goes to the first approver before a super admin grants it. Unticked, it goes straight for the final word.">'+
+          /* Whether their leave goes through a first approver, and if so
+             whose - one person may report to somebody outside the usual line,
+             and routing the whole company through them to serve that one
+             person is not an answer. */
+          '<label class="shf-self" title="Their leave goes to a first approver before a super admin grants it. Unticked, it goes straight for the final word.">'+
             '<input type="checkbox" data-first-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
               (needsFirstApproval(e.name) ? ' checked' : '')+'>'+
             '<span>First approval</span>'+
           '</label>'+
+          '<input type="email" class="shf-appr" data-appr-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
+            ' value="'+ownApprover(e.name).replace(/"/g,'&quot;')+'"'+
+            ' placeholder="the usual one"'+
+            ' title="Who gives the first approval for this person. Leave it blank for whoever is named under Email → Leave."'+
+            (needsFirstApproval(e.name) ? '' : ' style="display:none;"')+'>'+
           '</span>';
         })()+
         '</div>'+
@@ -14533,43 +14544,6 @@ function buildExcelBackup(){
     shiftDropdown.innerHTML = html;
     (function(){ var l = shiftDropdown.querySelector('.shf-list'); if(l && keepScroll) l.scrollTop = keepScroll; })();
 
-    // bulk apply
-    var allBtn = document.getElementById('shfAllBtn');
-    if(allBtn) allBtn.addEventListener('click', function(ev){
-      ev.stopPropagation();
-      var v = document.getElementById('shfAllSel').value;
-      if(!v) return;
-      var curOf = function(n){ return (shiftWorking && shiftWorking[n]) || shiftBaseDefault(n); };
-      var changing = EMPLOYEES.filter(function(e){ return curOf(e.name) !== v; });
-      var b2 = document.getElementById('shfAllBtn');
-      if(!changing.length){
-        if(b2){ b2.textContent = '\u2713 Already set'; setTimeout(function(){ if(b2) b2.textContent = 'Apply to all'; }, 1200); }
-        return;
-      }
-      // One pick rewrites everybody's shift, and with it their late and short hours.
-      hwConfirm({
-        title: 'Apply ' + v + ' to all ' + EMPLOYEES.length + ' employees?',
-        message: changing.length + ' shift' + (changing.length === 1 ? '' : 's') + ' will change. It is saved '
-          + 'straight away, and late and short hours are recalculated from the new times.',
-        items: changing.map(function(e){ return dispName(e.name) + ' \u2014 ' + curOf(e.name) + ' \u2192 ' + v; }),
-        confirmLabel: 'Apply to all'
-      }).then(function(ok){
-        if(!ok) return;
-        // apply AND save, like the per-person picker - staging it into
-        // shiftWorking alone meant the change vanished unless "Save shifts"
-        // happened to be pressed afterwards
-        EMPLOYEES.forEach(function(e){
-          shiftWorking[e.name] = v;
-          setShiftFrom(e.name, v, shiftFromDay());
-        });
-        saveShiftAssignments();
-        renderTable();
-        Array.prototype.forEach.call(shiftDropdown.querySelectorAll('select[data-shift-emp]'), function(sl){
-          if(Array.prototype.some.call(sl.options, function(o){ return o.value===v; })) sl.value = v;
-        });
-        if(b2){ b2.textContent = '\u2713 Applied'; setTimeout(function(){ if(b2) b2.textContent = 'Apply to all'; }, 1200); }
-      });
-    });
     /* Who types their own day. Saved on the tick, like the shift beside it -
        there is no Save button on this panel and a setting that waits for one
        reads as not having registered. */
@@ -14614,15 +14588,45 @@ function buildExcelBackup(){
     Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-first-emp]'), function(cb){
       cb.addEventListener('change', function(){
         var name = cb.getAttribute('data-first-emp');
+        var box = shiftDropdown.querySelector('input[data-appr-emp="'+name.replace(/"/g,'\\"')+'"]');
+        /* Unticking drops whichever approver was named with it: there is no
+           first stage to hold, so an address sitting in the box would say
+           otherwise. Ticking it back starts from the usual one. */
         if(cb.checked) delete approvalRoute[name]; else approvalRoute[name] = 'final';
+        if(box){ box.style.display = cb.checked ? '' : 'none'; if(!cb.checked) box.value = ''; }
         cb.disabled = true;
         saveApprovalRoute().then(function(){
           cb.disabled = false;
           showUploadStatus(dispName(name) + (cb.checked
-            ? '’s leave now goes to the first approver before it is granted.'
+            ? '’s leave now goes to a first approver before it is granted.'
             : '’s leave now goes straight for the final word.'), false);
         }).catch(function(e){
           cb.disabled = false; cb.checked = !cb.checked;
+          showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        });
+      });
+    });
+    /* Who holds that stage for this one person. Blank means the office's own
+       first approver, which is what everybody had before this box existed. */
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-appr-emp]'), function(box){
+      box.addEventListener('change', function(){
+        var name = box.getAttribute('data-appr-emp');
+        var val = box.value.trim();
+        if(val && !/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(val)){
+          box.style.borderColor = '#B3261E';
+          box.title = 'That is not an email address.';
+          return;
+        }
+        box.style.borderColor = ''; box.title = '';
+        if(val) approvalRoute[name] = val; else delete approvalRoute[name];
+        box.disabled = true;
+        saveApprovalRoute().then(function(){
+          box.disabled = false;
+          showUploadStatus(val
+            ? (dispName(name) + '’s first approval now goes to ' + val + '.')
+            : (dispName(name) + '’s first approval goes to the usual approver again.'), false);
+        }).catch(function(e){
+          box.disabled = false;
           showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
         });
       });
