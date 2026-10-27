@@ -18152,6 +18152,14 @@ function buildExcelBackup(){
         + field('out', 'Out', shown.out)
         + '<div class="ed-acts">'
         +   '<button type="button" class="bk-btn primary ed-save" id="edSave">Save</button>'
+        /* Clear used to wipe the whole day, settled time and all, on one press
+           with nothing asked - straight through the lock. It empties the boxes
+           that are still open now, and writes nothing: a settled time is only
+           reachable through Edit, which asks first. */
+        +   ((!settled('in') || !settled('out'))
+              ? ('<button type="button" class="month-btn ed-clear" id="edClear"'
+                 + ' title="Empty the boxes that are still open">Clear</button>')
+              : '')
         + '</div>'
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
@@ -18407,6 +18415,19 @@ function buildExcelBackup(){
         pleaSave.disabled = false;
         showUploadStatus('That did not send (' + ((e && e.message) || 'no answer') + ').', true);
       });
+    });
+    var clear = document.getElementById('edClear');
+    if(clear) clear.addEventListener('click', function(){
+      var emptied = 0;
+      ['in', 'out'].forEach(function(which){
+        var f = F[which];
+        if(!f || f.wrap.classList.contains('shut')) return;   // settled stays settled
+        if(f.input.value){ f.input.value = ''; emptied++; }
+      });
+      tell();
+      if(!emptied){ said('Nothing to clear — a saved time is changed with Edit.'); return; }
+      var open = (F['in'] && !F['in'].wrap.classList.contains('shut')) ? F['in'] : F.out;
+      if(open && open.input) open.input.focus();
     });
     Array.prototype.forEach.call(box.querySelectorAll('[data-unlock]'), function(b){
       b.addEventListener('click', function(){

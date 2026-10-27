@@ -381,11 +381,17 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
      one too many. */
   check('and a settled field is left to its own line',
     /if\(f\.wrap\.classList\.contains\('shut'\)\) return;/.test(card));
-  /* Clear went straight through the lock: one press, no question, and the
-     settled time was gone - which is the whole of what the lock was for. A
-     time is changed through Edit; a day is withdrawn by the office. */
-  check('and there is no Clear to undo the lock with',
-    !/id="edClear"/.test(card) && !/ed-clear/.test(card));
+  /* Clear used to wipe the whole day, settled time and all, on one press with
+     nothing asked - straight through the lock it is sitting next to. */
+  check('Clear empties the boxes still open and leaves a settled one alone',
+    /if\(!f \|\| f\.wrap\.classList\.contains\('shut'\)\) return;   \/\/ settled stays settled/.test(card)
+      && /if\(f\.input\.value\)\{ f\.input\.value = ''; emptied\+\+; \}/.test(card));
+  check('and it writes nothing — a settled time is only reachable through Edit',
+    !/id="edClear"[\s\S]{0,900}saveManualRecords/.test(card));
+  check('it is not offered when there is nothing open to empty',
+    /\(!settled\('in'\) \|\| !settled\('out'\)\)/.test(card));
+  check('and says so rather than doing nothing silently',
+    /Nothing to clear — a saved time is changed with Edit\./.test(card));
   check('and it is offered only on today, "now" being no time yesterday',
     /var nowBtn = function\(which\)\{[\s\S]{0,200}return ceiling/.test(card),
     (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);
