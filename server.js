@@ -176,7 +176,7 @@ function canWrite(role) { return role === 'admin'; }
    day, only while it is today or yesterday, and only if the office has marked
    them as marking their own. Each of those is checked here rather than in the
    page, because the page is theirs to edit and this is not. */
-const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses'];
+const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses', 'overrides'];
 function mayWriteSharedKey(role, key) {
   if (canWrite(role)) return true;
   return role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) > -1;
@@ -342,6 +342,56 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
                by: 'self', at: nowIso,
                inAt: stamp(tin, was && was['in'], was && was.inAt),
                outAt: stamp(tout, was && was.out, was && was.outAt) };
+  });
+  return JSON.stringify(out);
+}
+
+/* A day spent out on a visit, written by the person who spent it.
+
+   This one is guarded harder than the rest, because a visit credits a whole
+   working day: it is the one thing somebody could write for themselves that
+   pays. So only the people the office has marked as typing their own day may
+   write one, only for themselves, only for today, and only ever the VISIT
+   category - leave and WFH decide money and time off and stay the office's.
+
+   And it will not write over a day the office has already settled. An entry
+   that did not come from the person themselves is left exactly as it is. */
+const VISIT_DETAIL_MAX = 40;
+const VISIT_REASON_MAX = 200;
+function mergeEmployeeVisit(storedValue, incomingValue, name, selfMarkValue) {
+  const incoming = parseJson(incomingValue);
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
+  const marked = parseJson(selfMarkValue);
+  if (!marked || marked[name] !== true) return false;
+  const parsed = parseJson(storedValue);
+  const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  const days = ownDays();
+  const mine = k => {
+    const i = String(k).lastIndexOf('|');
+    return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
+  };
+  /* Only days of their own that they wrote themselves are theirs to clear. A
+     visit the office entered stays until the office removes it. */
+  const before = {};
+  Object.keys(out).forEach(k => {
+    if (!mine(k)) return;
+    const v = out[k];
+    if (v && typeof v === 'object' && v.by === 'self') { before[k] = v; delete out[k]; }
+  });
+  Object.keys(incoming).forEach(k => {
+    if (!mine(k)) return;
+    const v = incoming[k];
+    if (!v || typeof v !== 'object') return;
+    if (v.cat !== 'VISIT') return;                       // the only one they may write
+    const settled = out[k];
+    if (settled && typeof settled === 'object' && settled.by !== 'self') return;   // the office's day
+    const detail = String(v.detail == null ? '' : v.detail).trim().slice(0, VISIT_DETAIL_MAX);
+    if (!detail) return;                                 // a visit to nowhere is not a visit
+    const reason = String(v.reason == null ? '' : v.reason).trim().slice(0, VISIT_REASON_MAX);
+    const was = before[k];
+    const nowIso = new Date().toISOString();
+    out[k] = { cat: 'VISIT', detail: detail, reason: reason, by: 'self',
+               at: (was && was.detail === detail && was.at) ? was.at : nowIso };
   });
   return JSON.stringify(out);
 }
@@ -1076,6 +1126,16 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
                                            (req.user && req.user.name) || '',
                                            mark.rows[0] ? mark.rows[0].value : '{}');
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_times' }); }
+        if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
+        value = merged;
+      } else if (key === 'overrides' && req.session.role === 'employee') {
+        const mark = await client.query(
+          "SELECT value FROM kv WHERE org_id = $1 AND key = 'selfMark' AND user_id IS NULL",
+          [req.session.orgId]);
+        const merged = mergeEmployeeVisit(row ? row.value : '{}', value,
+                                          (req.user && req.user.name) || '',
+                                          mark.rows[0] ? mark.rows[0].value : '{}');
+        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_visit' }); }
         if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
         value = merged;
       } else if (key === 'lateExcuses' && req.session.role === 'employee') {

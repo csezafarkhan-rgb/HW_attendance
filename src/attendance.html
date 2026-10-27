@@ -2744,6 +2744,27 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-x:hover{ background:#FDE7E4; color:#C0392B; opacity:1; }
 .wl-foot{ font-size:11px; color:var(--ink-soft); margin-top:7px; }
 /* Who types their own day, on the row that sets everything else about them. */
+/* Where somebody says they spent the day out. It sits under the times, quieter
+   than they are: most days it is not needed and should not be the first thing
+   the eye lands on. */
+.ed-visit{ margin-top:14px; padding-top:13px; border-top:1px dashed var(--line-dk); }
+.ed-visit .lab{ font-size:10.5px; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--ink-soft); margin-bottom:7px; }
+.ed-visit .v-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ed-visit select, .ed-visit input{ height:38px; padding:0 10px; border:1px solid var(--line-dk);
+  border-radius:9px; font-size:12.5px; background:#fff; }
+.ed-visit select{ min-width:150px; font-weight:600; }
+.ed-visit #edVisitOther{ width:170px; }
+.ed-visit #edVisitNote{ flex:1 1 220px; min-width:160px; }
+.ed-visit .bk-btn, .ed-visit .month-btn{ height:38px; padding:0 16px; font-size:12.5px; }
+.ed-visit .v-by{ display:block; margin-top:7px; font-size:11.5px; color:var(--ink-soft); line-height:1.5; }
+.ed-visit.set{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.ed-visit .v-tag{ padding:4px 11px; border-radius:999px; background:#E3F2E9; color:#14532D;
+  font-size:12px; font-weight:700; }
+.ed-visit .v-why{ font-size:12px; color:var(--ink-soft); }
+@media (max-width:680px){
+  .ed-visit #edVisitNote{ flex:1 1 100%; }
+}
 /* The one setting in Shifts that is about the whole office rather than one
    person, so it sits above the list and reads as a sentence. */
 .shf-flag{ display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin:10px 0 4px;
@@ -18095,6 +18116,7 @@ function buildExcelBackup(){
         + '</div>'
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
+        + visitRow(name, day)
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
                   + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : '') + '.')
@@ -18310,12 +18332,100 @@ function buildExcelBackup(){
         showUploadStatus('That did not send (' + ((e && e.message) || 'no answer') + ').', true);
       });
     });
+    var vKind = document.getElementById('edVisitKind');
+    var vOther = document.getElementById('edVisitOther');
+    if(vKind && vOther){
+      vKind.addEventListener('change', function(){
+        vOther.style.display = (vKind.value === '__other') ? '' : 'none';
+        if(vKind.value === '__other') vOther.focus();
+      });
+    }
+    var vSave = document.getElementById('edVisitSave');
+    if(vSave) vSave.addEventListener('click', function(){
+      var kind = vKind ? vKind.value : '';
+      var detail = (kind === '__other') ? ((vOther && vOther.value) || '').trim() : kind;
+      if(!detail){
+        said(kind === '__other' ? 'Say what kind of visit it was.' : 'Pick what kind of visit it was.', true);
+        if(kind === '__other' && vOther) vOther.focus();
+        return;
+      }
+      var note = ((document.getElementById('edVisitNote') || {}).value || '').trim();
+      overrides[name + '|' + day] = { cat:'VISIT', detail: detail, reason: note,
+                                      by:'self', at: new Date().toISOString() };
+      vSave.disabled = true;
+      saveOverrides().then(function(){
+        said('Saved. The day shows as Visit_' + detail + '.');
+        refreshActivePage(); renderEmpDayCard();
+      }).catch(function(e){
+        vSave.disabled = false;
+        said('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+      });
+    });
+    var vClear = document.getElementById('edVisitClear');
+    if(vClear) vClear.addEventListener('click', function(){
+      delete overrides[name + '|' + day];
+      saveOverrides().then(function(){
+        said('Visit removed.');
+        refreshActivePage(); renderEmpDayCard();
+      }).catch(function(e){
+        said('That did not clear (' + ((e && e.message) || 'no answer') + ').', true);
+      });
+    });
     var pleaEdit = document.getElementById('edPleaEdit');
     if(pleaEdit) pleaEdit.addEventListener('click', function(){
       delete lateExcuses[name + '|' + day];
       saveLateExcuses().then(function(){ renderEmpDayCard(); });
     });
   }
+  /* A day spent out on a visit, said by the person who spent it.
+
+     A visit credits the whole day, so this writes the VISIT category and
+     nothing else: leave and WFH decide money and time off and stay with the
+     office. The kinds offered are the ones that come up; anything else can be
+     typed. The purpose is optional - somebody on their way out of the door
+     should not have to write an essay to record where they are going. */
+  var VISIT_KINDS = ['Factory', 'Inspection', 'Client site', 'Supplier', 'Site survey'];
+  function visitRow(name, day){
+    var ov = overrides[name + '|' + day] || null;
+    var isVisit = ov && ov.cat === 'VISIT';
+    var theirs = isVisit && ov.by === 'self';
+    /* A visit the office entered is theirs to change, not the person's. */
+    if(isVisit && !theirs){
+      return '<div class="ed-visit set"><span class="v-tag">✈ '
+        + shotEsc('Visit_' + (ov.detail || 'NA')) + '</span>'
+        + (ov.reason ? ('<span class="v-why">' + shotEsc(ov.reason) + '</span>') : '')
+        + '<span class="v-by">Entered by the office.</span></div>';
+    }
+    if(ov && !isVisit){
+      return '<div class="ed-visit set"><span class="v-by">This day is marked '
+        + shotEsc((OV_CATS[ov.cat] && OV_CATS[ov.cat].label) || ov.cat)
+        + ' by the office — ask them to change it.</span></div>';
+    }
+    var known = theirs && VISIT_KINDS.indexOf(ov.detail) > -1;
+    var opts = '<option value="">Not a visit</option>'
+      + VISIT_KINDS.map(function(k){
+          return '<option value="' + shotEsc(k) + '"'
+            + (theirs && ov.detail === k ? ' selected' : '') + '>' + shotEsc(k) + '</option>';
+        }).join('')
+      + '<option value="__other"' + (theirs && !known ? ' selected' : '') + '>Something else…</option>';
+    return '<div class="ed-visit">'
+      + '<div class="lab">Out on a visit today?</div>'
+      + '<div class="v-row">'
+      +   '<select id="edVisitKind">' + opts + '</select>'
+      +   '<input id="edVisitOther" maxlength="40" placeholder="What kind of visit"'
+      +     ' value="' + (theirs && !known ? shotEsc(ov.detail) : '') + '"'
+      +     (theirs && !known ? '' : ' style="display:none"') + '>'
+      +   '<input id="edVisitNote" maxlength="200" placeholder="Purpose — optional"'
+      +     ' value="' + (theirs ? shotEsc(ov.reason || '') : '') + '">'
+      +   '<button type="button" class="bk-btn primary" id="edVisitSave">'
+      +     (theirs ? 'Update' : 'Save visit') + '</button>'
+      +   (theirs ? '<button type="button" class="month-btn" id="edVisitClear">Remove</button>' : '')
+      + '</div>'
+      + (theirs ? ('<div class="v-by">Showing as <b>' + shotEsc('Visit_' + ov.detail)
+                   + '</b> on the calendar, credited as a working day.</div>') : '')
+      + '</div>';
+  }
+
   /* ---- reading and writing a time somebody typed ----
 
      The record keeps 24-hour times. The field shows twelve of them with the

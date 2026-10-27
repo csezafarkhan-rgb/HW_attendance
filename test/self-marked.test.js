@@ -21,7 +21,10 @@ const lift = re => { const m = re.exec(SRC); if (!m) throw new Error('not found:
  /const TIME_RE = [^\n]*/,
  /const EXCUSE_MAX = [^\n]*/,
  /function mergeEmployeeManual\(storedValue, incomingValue, name, selfMarkValue\) \{[\s\S]*?\n\}/,
- /function mergeEmployeeExcuses\(storedValue, incomingValue, name\) \{[\s\S]*?\n\}/
+ /function mergeEmployeeExcuses\(storedValue, incomingValue, name\) \{[\s\S]*?\n\}/,
+ /const VISIT_DETAIL_MAX = [^\n]*/,
+ /const VISIT_REASON_MAX = [^\n]*/,
+ /function mergeEmployeeVisit\(storedValue, incomingValue, name, selfMarkValue\) \{[\s\S]*?\n\}/
 ].forEach(re => vm.runInContext(lift(re), ctx));
 
 const [TODAY] = ctx.ownDays();
@@ -150,6 +153,58 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   }
 }
 
+/* ---- a day spent out on a visit ----
+   This is the one thing somebody can write for themselves that pays: a visit
+   credits a whole working day. So it is fenced harder than the rest. */
+{
+  const V = (stored, obj, who) =>
+    ctx.mergeEmployeeVisit(stored, JSON.stringify(obj), who || 'Aman Gupta', MARKED);
+  const K = 'Aman Gupta|' + TODAY;
+
+  const ok = parse(V('{}', { [K]: { cat: 'VISIT', detail: 'Factory', reason: 'new dye lot' } }));
+  check('a visit of their own, today, is written',
+    ok[K].cat === 'VISIT' && ok[K].detail === 'Factory'
+      && ok[K].reason === 'new dye lot' && ok[K].by === 'self', ok);
+  const bare = parse(V('{}', { [K]: { cat: 'VISIT', detail: 'Factory' } }));
+  check('and the purpose is optional', bare[K].reason === '', bare[K]);
+  const nowhere = parse(V('{}', { [K]: { cat: 'VISIT', detail: '   ' } }));
+  check('but a visit to nowhere is not a visit', Object.keys(nowhere).length === 0, nowhere);
+
+  /* Leave and WFH decide money and time off. They stay the office's. */
+  ['LEAVE', 'WFH', 'OTHER'].forEach(cat => {
+    const got = parse(V('{}', { [K]: { cat: cat, detail: 'x' } }));
+    check(cat + ' is not theirs to write', Object.keys(got).length === 0, got);
+  });
+
+  const theirs = parse(V('{}', { ['Rahul Mishra|' + TODAY]: { cat: 'VISIT', detail: 'Factory' } }));
+  check('nor anybody else’s day', Object.keys(theirs).length === 0, theirs);
+  const older = parse(V('{}', { ['Aman Gupta|' + OLD]: { cat: 'VISIT', detail: 'Factory' } }));
+  check('nor a day last January', Object.keys(older).length === 0, older);
+  const back = parse(V('{}', { ['Aman Gupta|' + YESTERDAY]: { cat: 'VISIT', detail: 'Factory' } }));
+  check('nor yesterday', Object.keys(back).length === 0, back);
+
+  /* A day the office has already settled is not theirs to overwrite - nor to
+     quietly drop by saving a day that leaves it out. */
+  const office = JSON.stringify({ [K]: { cat: 'LEAVE', detail: 'CL', by: 'office' } });
+  const over = parse(V(office, { [K]: { cat: 'VISIT', detail: 'Factory' } }));
+  check('a day the office settled is left exactly as it was',
+    over[K].cat === 'LEAVE' && over[K].detail === 'CL', over);
+  check('and saving around it does not delete it', !!parse(V(office, {}))[K]);
+
+  /* Their own, though, they may take back. */
+  const mineSet = JSON.stringify({ [K]: { cat: 'VISIT', detail: 'Factory', by: 'self' } });
+  check('a visit of their own can be removed', Object.keys(parse(V(mineSet, {}))).length === 0);
+
+  const others = JSON.stringify({ ['Rahul Mishra|' + TODAY]: { cat: 'WFH', by: 'office' } });
+  const kept = parse(V(others, { [K]: { cat: 'VISIT', detail: 'Factory' } }));
+  check('and everybody else’s day is still there',
+    !!kept['Rahul Mishra|' + TODAY] && !!kept[K], kept);
+
+  check('only those the office marked may write one',
+    ctx.mergeEmployeeVisit('{}', JSON.stringify({ ['Rahul Mishra|' + TODAY]:
+      { cat: 'VISIT', detail: 'Factory' } }), 'Rahul Mishra', '{}') === false);
+}
+
 /* ---- why they were late ----
    An excuse cancels the lateness, so one written by the person it is about
    waits for the office. Otherwise the minutes mean nothing. */
@@ -192,8 +247,10 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 
 /* ---- the server's own reckoning ---- */
 {
-  check('an employee may now write their times and their reason, and still nothing else',
-    /EMPLOYEE_WRITABLE = \['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses'\]/.test(SRC));
+  /* Their times, their reason for being late, their tasks, their leave
+     requests - and a day out on a visit, which is merged under guard. */
+  check('an employee may write those five things, and still nothing else',
+    /EMPLOYEE_WRITABLE = \['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses', 'overrides'\]/.test(SRC));
   check('they read only their own row of who marks their own attendance',
     /EMP_KEYED_BY_NAME = \[[\s\S]{0,120}'selfMark'\]/.test(SRC));
   check('and a waiting excuse does not count as excused in the daily message',
