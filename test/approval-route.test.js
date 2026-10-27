@@ -127,6 +127,65 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
   });
 }
 
+/* ---- the portal follows the same rule the email does ----
+   Any admin pressing Approve on the Requests page granted the leave outright,
+   first approver or not, so the two stages existed over email and nowhere
+   else. The page asks the same question: is this one waiting on the stage I
+   hold? */
+{
+  const actx = { JSON, String };
+  vm.createContext(actx);
+  vm.runInContext('var MAIL_CFG = null, approvalRoute = ' + JSON.stringify(SOME) + ';', actx);
+  ['needsFirstApproval', 'firstApproverInfo', 'iAmFirstApprover', 'awaitsFirstApproval']
+    .forEach(fn => vm.runInContext(grab(APP, fn), actx));
+  const as = (who, firstEmail) => {
+    vm.runInContext('MAIL_CFG = ' + JSON.stringify(
+      firstEmail ? { firstApprover: { name: 'Priya', email: firstEmail }, you: who }
+                 : { firstApprover: null, you: who }) + ';', actx);
+  };
+  const ask = (fn, arg) => {
+    vm.runInContext('__r = ' + fn + '(' + (arg === undefined ? '' : JSON.stringify(arg)) + ')', actx);
+    return actx.__r;
+  };
+
+  as('priya@allyconnect.in', 'priya@allyconnect.in');
+  check('the account signing in as the first approver is recognised as them',
+    ask('iAmFirstApprover') === true);
+  check('a pending request from a two-stage person is waiting on that stage',
+    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === true);
+  check('and a query likewise', ask('awaitsFirstApproval', req('Zafar Khan', 'query')) === true);
+  check('one already passed on is not',
+    ask('awaitsFirstApproval', req('Zafar Khan', 'recommended')) === false);
+  check('nor is one from somebody set to skip the stage',
+    ask('awaitsFirstApproval', req('Aman Gupta', 'pending')) === false);
+  check('nor an approved one', ask('awaitsFirstApproval', req('Zafar Khan', 'approved')) === false);
+
+  as('zafar@allyconnect.in', 'priya@allyconnect.in');
+  check('anybody else is not the first approver',
+    ask('iAmFirstApprover') === false);
+  check('but the request is still waiting on that stage, whoever is looking',
+    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === true);
+
+  /* The whole arrangement rests on somebody being named. With nobody there,
+     nothing is waiting on a first stage and Approve means what it always did. */
+  as('zafar@allyconnect.in', '');
+  check('with no first approver named, nothing waits on a first stage',
+    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === false);
+  check('and nobody is the first approver', ask('iAmFirstApprover') === false);
+
+  /* Case and stray spaces in an address must not decide who holds a stage. */
+  as('  PRIYA@AllyConnect.in ', 'priya@allyconnect.in');
+  check('the address is matched without regard to case or spacing',
+    ask('iAmFirstApprover') === true);
+
+  check('the page offers a pass-on button at all', /data-act="recommend"/.test(APP));
+  check('and the bulk approve passes on rather than grants, for them',
+    /awaitsFirstApproval\(req\) && iAmFirstApprover\(\)[\s\S]{0,200}recommended/.test(APP));
+  check('the server hears about a pass-on made from the portal',
+    /newlyRecommended\(requestsBefore, value\)/.test(
+      fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8')));
+}
+
 /* ---- the setting is the office's, and the office's alone ---- */
 {
   const emp = /const EMPLOYEE_WRITABLE = \[([^\]]*)\]/.exec(SRV);

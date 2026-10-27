@@ -968,7 +968,11 @@ body{
     joining date. At 700 it did not fit, and the squeeze landed on the shift
     time. Wider, so each person stays on one line - below 900px the rule further
     down takes over and rows wrap instead. */
-#shiftDropdown{ min-width:780px; }
+/*  Wide enough for a whole row, and no wider. Without the cap the panel takes
+    its width from whatever its widest child asks for, so one long sentence in
+    the wrong kind of box stretched it across the screen and pulled every row
+    apart with it. */
+#shiftDropdown{ min-width:780px; max-width:min(930px, 94vw); }
 /* Rows inside a dropdown. The other dropdowns hold checkbox labels, so there
    was no button rule to inherit and these fell back to the browser's default
    bordered button - a box inside a box. */
@@ -1031,12 +1035,31 @@ body{
 .month-dropdown, .emp-dropdown, .order-dropdown, .users-dropdown{position:absolute;}
 .month-dropdown .ord-hint, .month-dropdown > div:first-child{padding-right:28px;}
 .shf-list{max-height:420px;overflow-y:auto;padding:2px;}
-.shf-sat{display:flex;flex:0 0 auto;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);margin-left:auto;}
+/*  Everybody on a slot under one heading, earliest start first. */
+.shf-group{ display:flex; align-items:baseline; gap:8px; padding:9px 8px 5px;
+  position:sticky; top:0; z-index:2; background:var(--panel);
+  border-bottom:1px solid var(--line-dk); }
+.shf-group b{ font-size:12.5px; font-weight:800; color:var(--ink); letter-spacing:.01em; }
+.shf-group span{ font-size:10.5px; color:var(--ink-dim); }
+.shf-group i{ margin-left:auto; font-style:normal; font-size:10.5px; font-weight:700;
+  color:var(--ink-soft); }
+/*  Each block sits next to the one before it. These used to be flung to the
+    right edge with margin-left:auto, which read as a tidy right-hand column
+    only while the panel was the width of a row - widen the panel by so much as
+    a long sentence and the same rule opens two holes across the middle of
+    every row. The one thing that belongs at the edge is pushed there, once. */
+.shf-sat{display:flex;flex:0 0 auto;align-items:center;gap:5px;font-size:11px;color:var(--ink-soft);}
+.shf-flags{ display:inline-flex; align-items:center; gap:10px; margin-left:auto; flex:0 0 auto; }
 .shf-satlbl{font-weight:700;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;font-size:10px;}
-.shf-sat select{flex:0 0 auto;min-width:142px;font-size:11px;padding:5px 24px 5px 8px;
+/*  Sized to the longest thing each actually holds - "Full working day" and a
+    date - and no further. They were wide enough that a row carrying the
+    work-from-home hours box as well could not fit on one line, so three of
+    the thirteen wrapped and the two ticks sat under the row instead of beside
+    it. Nothing is cropped at these widths; the slack was spare. */
+.shf-sat select{flex:0 0 auto;min-width:132px;font-size:11px;padding:5px 22px 5px 8px;
   border-radius:7px;border:1px solid var(--line-dk);background:#fff;}
-.shf-sat input{width:46px;font-size:11px;padding:5px 4px;border-radius:7px;border:1px solid var(--line-dk);text-align:center;}
-.shf-sat input[type=date]{ width:132px; font-size:11px; padding:4px 6px; border-radius:7px;
+.shf-sat input{width:42px;font-size:11px;padding:5px 3px;border-radius:7px;border:1px solid var(--line-dk);text-align:center;}
+.shf-sat input[type=date]{ width:122px; font-size:11px; padding:4px 5px; border-radius:7px;
   border:1px solid var(--line-dk); background:#fff; }
 .shf-sat em{font-style:normal;font-size:10.5px;color:var(--ink-dim);}
 /*  Wrap rather than squeeze. A row wants about 710px and the panel gives 682,
@@ -2508,21 +2531,21 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell .ecd{ display:flex; gap:5px; align-items:baseline; line-height:1.3; }
 .emp-cal-cell .ecd i{ flex:none; width:18px; font-style:normal; font-size:8px;
   font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--ink-soft); opacity:.8; }
-.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:500;
+.emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:9.5px; font-weight:500;
   white-space:nowrap; color:var(--ink-soft); opacity:.8; }
 /* The brace gathers the two times into the figure beside them. Stretched
    rather than drawn: one glyph, and it keeps the typeface's own shape. */
 /* The brace and the figure travel together: on a narrow column the pair wraps
    to its own line, rather than the brace being left pointing at nothing. */
 .emp-cal-cell .ecd-sum{ display:flex; align-items:center; gap:3px; flex:0 1 auto; min-width:0; }
-.emp-cal-cell .ecd-brace{ flex:none; font-size:19px; font-weight:300; line-height:0.9;
+.emp-cal-cell .ecd-brace{ flex:none; font-size:17px; font-weight:300; line-height:0.9;
   color:var(--ink-soft); opacity:.75; transform:scaleY(1.3); transform-origin:center; }
 .emp-cal-cell .ecd-dur{ flex:1 1 auto; min-width:46px; font-size:8.5px; font-weight:700;
   letter-spacing:.03em; text-transform:uppercase; color:var(--ink-soft); line-height:1.25;
   white-space:nowrap; }
 
 .emp-cal-cell .ecd-dur b{ display:block; font-family:'IBM Plex Mono',monospace;
-  font-size:11px; font-weight:500; letter-spacing:0; text-transform:none;
+  font-size:10px; font-weight:500; letter-spacing:0; text-transform:none;
   color:var(--ink-soft); opacity:.8; white-space:nowrap; }
 /* What the corner letter means, in words. */
 /* What the corner letter means sits to its left, in the same row - the two
@@ -2806,6 +2829,13 @@ table.dash-table tr:hover td{background:#F7F9FC;}
   border-radius:7px; font-size:12px; font-weight:700; text-align:center; }
 .shf-flag i{ flex:1 1 100%; font-style:normal; font-size:11px; font-weight:500;
   color:var(--ink-soft); line-height:1.45; }
+/* The same card, for a note that is only a sentence - no flex, so the text
+   wraps to the panel instead of the panel stretching to the text. */
+.shf-note{ margin:10px 0 4px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:10px; background:#F7F9FD; font-size:12px; font-weight:600;
+  color:var(--ink); line-height:1.45; }
+.shf-note i{ display:block; margin-top:5px; font-style:normal; font-size:11px;
+  font-weight:500; color:var(--ink-soft); }
 /* A warning in the cell, not a verdict: small, amber, next to the time. */
 .self-late-flag{ color:#B26B00; font-size:11px; }
 .self-said{ margin-bottom:10px; padding:9px 11px; border-radius:9px;
@@ -9531,7 +9561,10 @@ function buildExcelBackup(){
         hwConfirm({
           title: verb + ' ' + n + ' request' + (n === 1 ? '' : 's') + '?',
           message: {
-            approve:   'Their days are written into the attendance record.',
+            approve:   (picked.some(function(r){ return awaitsFirstApproval(r) && iAmFirstApprover(); })
+                         ? 'The ones waiting on your first approval are passed on for the final word; '
+                           + 'nothing is written on the record for those. The rest have their days written in.'
+                         : 'Their days are written into the attendance record.'),
             reject:    'Each is marked rejected, and the person sees that decision.',
             archive:   'They move out of this list into the Archive tab. Their decisions stay as they are.',
             unarchive: 'They come back out of the archive into the list.'
@@ -9548,6 +9581,16 @@ function buildExcelBackup(){
           picked.forEach(function(req){
             if(act === 'approve'){
               if(req.status === 'approved') return;
+              /* The same rule the single card follows: for whoever holds the
+                 first stage, a yes passes it on. Otherwise a careless
+                 Select-all would grant in one what two stages exist to stop. */
+              if(awaitsFirstApproval(req) && iAmFirstApprover()){
+                req.status = 'recommended';
+                req.recommendedBy = (viewRole && (viewRole.name || viewRole.username)) || '';
+                req.recommendedAt = new Date().toISOString();
+                req.updatedAt = req.recommendedAt;
+                return;
+              }
               req.status = 'approved';
               req.approvedBy = (viewRole && viewRole.username) || '';
               req.updatedAt = new Date().toISOString();
@@ -9869,6 +9912,15 @@ function buildExcelBackup(){
   function renderRequestsPage(){
     var list = document.getElementById('requestsList');
     if(!list) return;
+    /* Which button each card offers depends on who holds the first stage, so
+       the page waits for that rather than drawing Approve and correcting
+       itself a moment later - a card that changes its own primary button
+       under the cursor is how the wrong stage gets pressed. */
+    if(!MAIL_CFG){
+      list.innerHTML = '<div class="empty-state">Loading…</div>';
+      ensureMailCfg().then(renderRequestsPage);
+      return;
+    }
     var all = leaveRequests.slice().sort(function(a,b){ return (b.updatedAt||'').localeCompare(a.updatedAt||''); });
     var archivedCount = all.filter(reqInScope).filter(reqIsArchived).length;
     var bar = reqBarHtml(all);
@@ -9893,9 +9945,19 @@ function buildExcelBackup(){
          somebody, so it keeps its buttons: pressing Approve here is the word
          that grants it. */
       if(req.status === 'pending' || req.status === 'query' || req.status === 'recommended'){
+        /* Whoever holds the first stage is here to pass it on, not to grant
+           it - that is the whole of what two stages means, and the button
+           said Approve to them exactly as it did to everybody else. Approve
+           stays beside it rather than being taken away: they may be the only
+           admin the office has, and a stage nobody can get past is worse than
+           one that can be stepped over in the open. */
+        var mineFirst = awaitsFirstApproval(req) && iAmFirstApprover();
         actionsHtml =
           '<div class="req-actions">'+
-            '<button class="btn primary" data-act="approve" data-id="'+req.id+'">Approve</button>'+
+            (mineFirst
+              ? '<button class="btn primary" data-act="recommend" data-id="'+req.id+'">Pass on for approval</button>'+
+                '<button class="btn ghost" data-act="approve" data-id="'+req.id+'">Approve outright</button>'
+              : '<button class="btn primary" data-act="approve" data-id="'+req.id+'">Approve</button>')+
             '<button class="btn ghost" data-act="reject" data-id="'+req.id+'">Reject</button>'+
             '<button class="btn ghost" data-act="query" data-id="'+req.id+'">Raise Query</button>'+
           '</div>';
@@ -9925,6 +9987,15 @@ function buildExcelBackup(){
       if(req.recommendedBy) noteHtml += '<div class="req-note"><strong>✓ Approved by '
         + escapeHtml(req.recommendedBy) + ':</strong> '
         + (req.recommendNote ? req.recommendNote.replace(/</g,'&lt;') : 'passed on for final approval.')
+        + '</div>';
+      /* And where it has not been through that stage yet, whose stage it is -
+         so Approve on this card is a decision taken knowingly rather than one
+         that looks like the only thing on offer. */
+      if(awaitsFirstApproval(req)) noteHtml += '<div class="req-note"><strong>First approval:</strong> '
+        + (iAmFirstApprover()
+            ? 'yours to pass on. Approving outright grants it without the stage you hold.'
+            : 'waiting on ' + escapeHtml((firstApproverInfo() || {}).name
+                || (firstApproverInfo() || {}).email || 'the first approver') + '.')
         + '</div>';
       if(req.adminNote) noteHtml += '<div class="req-note"><strong>Admin:</strong> '+req.adminNote.replace(/</g,'&lt;')+'</div>';
       if(req.employeeReply) noteHtml += '<div class="req-note"><strong>'+escapeHtml(req.empName)+':</strong> '+req.employeeReply.replace(/</g,'&lt;')+'</div>';
@@ -9991,11 +10062,49 @@ function buildExcelBackup(){
           return;
         }
         if(act === 'approve'){
-          req.status = 'approved';
-          req.approvedBy = (viewRole && viewRole.username) || (viewRole && viewRole.name) || '';
-          req.updatedAt = new Date().toISOString();
-          applyApprovedRequestToAttendance(req).then(function(){
-            saveLeaveRequests().then(function(){ renderRequestsPage(); refreshActivePage(); });
+          var grant = function(){
+            req.status = 'approved';
+            req.approvedBy = (viewRole && viewRole.username) || (viewRole && viewRole.name) || '';
+            req.updatedAt = new Date().toISOString();
+            applyApprovedRequestToAttendance(req).then(function(){
+              saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); refreshActivePage(); });
+            });
+          };
+          /* Granting a request that has not been through the stage it is set
+             to go through is allowed - somebody has to be able to act when
+             the first approver is away - but it is not done by accident. */
+          if(awaitsFirstApproval(req)){
+            var fa = firstApproverInfo() || {};
+            hwConfirm({
+              title: 'Grant this without the first approval?',
+              message: dispName(req.empName) + '’s leave is set to go through '
+                     + (iAmFirstApprover() ? 'the first stage you hold'
+                                           : escapeHtml(fa.name || fa.email || 'the first approver'))
+                     + ', and has not been. Granting it here skips that stage, and the days go '
+                     + 'straight onto the record.',
+              items: [fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req)],
+              confirmLabel: 'Grant it anyway'
+            }).then(function(ok){ if(ok) grant(); });
+            return;
+          }
+          grant();
+        } else if(act === 'recommend'){
+          /* The first word, which decides nothing on the record: the days are
+             written only when the final word is given. */
+          hwConfirm({
+            title: 'Pass ' + dispName(req.empName) + '’s request on?',
+            message: 'It goes to a super admin for the final word. Nothing is on the record until they give it.',
+            items: [fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req)],
+            input: { placeholder: 'A note for whoever gives the final word (optional)' },
+            confirmLabel: 'Pass it on'
+          }).then(function(note){
+            if(note === false) return;
+            req.status = 'recommended';
+            req.recommendedBy = (viewRole && (viewRole.name || viewRole.username)) || '';
+            req.recommendedAt = new Date().toISOString();
+            req.updatedAt = req.recommendedAt;
+            if(note) req.recommendNote = note;
+            saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); refreshActivePage(); });
           });
         } else if(act === 'reject'){
           // In-page, not prompt(): a suppressed dialog returned null and Raise Query did nothing.
@@ -11321,15 +11430,44 @@ function buildExcelBackup(){
       });
     };
   }
+  /* The same fetch the email panel does, for the pages that need to know who
+     holds the first stage without opening it. Asked for once; everybody after
+     that gets what came back. */
+  var MAIL_CFG_WAIT = null;
+  function ensureMailCfg(){
+    if(MAIL_CFG) return Promise.resolve(MAIL_CFG);
+    if(MAIL_CFG_WAIT) return MAIL_CFG_WAIT;
+    MAIL_CFG_WAIT = fetch('/api/mail', {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ MAIL_CFG = j || {configured:false}; return MAIL_CFG; })
+      .catch(function(){ MAIL_CFG = {configured:false, error:true}; return MAIL_CFG; });
+    return MAIL_CFG_WAIT;
+  }
+  /* The first approver is an address rather than an account - it can be a
+     shared inbox, or somebody with no login at all - so "am I them?" is a
+     question about the address this account signs in with. */
+  function firstApproverInfo(){ return (MAIL_CFG && MAIL_CFG.firstApprover) || null; }
+  function iAmFirstApprover(){
+    var fa = firstApproverInfo();
+    if(!fa || !fa.email) return false;
+    var mine = String((MAIL_CFG && MAIL_CFG.you) || '').trim().toLowerCase();
+    return !!mine && mine === String(fa.email).trim().toLowerCase();
+  }
+  /* A request still waiting on the first stage: somebody holds that stage,
+     this person's leave goes through it, and it has not been passed on. */
+  function awaitsFirstApproval(req){
+    if(!req) return false;
+    var fa = firstApproverInfo();
+    if(!fa || !fa.email) return false;
+    if(!needsFirstApproval(req.empName)) return false;
+    return req.status === 'pending' || req.status === 'query';
+  }
   function renderEmailDropdown(){
     var dd = document.getElementById('emailDropdown'), d0 = dd;
     if(!dd) return;
     if(!MAIL_CFG){
       dd.innerHTML = '<div class="em-pane"><div class="em-note">Loading…</div></div>';
-      fetch('/api/mail', {credentials:'same-origin'})
-        .then(function(r){ return r.ok ? r.json() : null; })
-        .then(function(j){ MAIL_CFG = j || {configured:false}; renderEmailDropdown(); })
-        .catch(function(){ MAIL_CFG = {configured:false, error:true}; renderEmailDropdown(); });
+      ensureMailCfg().then(renderEmailDropdown);
       return;
     }
     if(!MAIL_CFG.configured){
@@ -14144,6 +14282,10 @@ function buildExcelBackup(){
   }
   function renderShiftDropdown(){
     if(!shiftWorking){ shiftWorking = {}; EMPLOYEES.forEach(function(e){ shiftWorking[e.name] = getShift(e.name); }); }
+    /* Rows move between groups when a slot changes, so the list is drawn again
+       - and a list that jumps back to the top each time is no use to somebody
+       working down thirteen of them. */
+    var keepScroll = (function(){ var l = shiftDropdown.querySelector('.shf-list'); return l ? l.scrollTop : 0; })();
     function optsFor(cur){
       var list = allShifts();
       var known = list.indexOf(cur) > -1;
@@ -14169,16 +14311,42 @@ function buildExcelBackup(){
       '</div>';
     /* The tick on each row is the rule; whether there are two stages at all is
        a question of somebody being named to hold the first one. Said here
-       because a tick that quietly does nothing is worse than no tick. */
-    html += '<div class="shf-flag">'+
-      '<span><b>First approval</b> on a row means that person’s leave goes to the '+
+       because a tick that quietly does nothing is worse than no tick.
+
+       A block rather than a flex row: a sentence inside a flex container is one
+       unbreakable item as wide as the sentence, and this one stretched the
+       whole panel to fit it. */
+    html += '<div class="shf-note">'+
+      '<b>First approval</b> on a row means that person’s leave goes to the '+
       'first approver before a super admin grants it. Unticked, it goes straight '+
-      'for the final word.</span>'+
-      '<i>This only comes into play where a first approver is named, under '+
+      'for the final word.'+
+      '<i>Only comes into play where a first approver is named, under '+
       'Email → Leave. With nobody there, all leave is granted in one stage.</i>'+
       '</div>';
     html += '<div class="shf-list">';
+    /* Everybody on a slot together, earliest start first. A flat list of
+       thirteen names said nothing about who works alongside whom; grouped, the
+       night shift is two rows under one heading and the question "who else is
+       on this?" is answered by looking. */
+    var byShift = {}, shiftOrder = [];
     EMPLOYEES.forEach(function(e){
+      var slot = shiftWorking[e.name] || shiftBaseDefault(e.name);
+      if(!byShift[slot]){ byShift[slot] = []; shiftOrder.push(slot); }
+      byShift[slot].push(e);
+    });
+    shiftOrder.sort(function(a, b){
+      var pa = parseShift(a), pb = parseShift(b);
+      return (pa.startMin - pb.startMin) || (pa.endMin - pb.endMin) || a.localeCompare(b);
+    });
+    shiftOrder.forEach(function(slot){
+      var group = byShift[slot], sh = parseShift(slot);
+      html += '<div class="shf-group">'+
+        '<b>'+slot+'</b>'+
+        '<span>'+Math.round((sh.endMin - sh.startMin) / 6) / 10 + 'h'+
+          (sh.overnight ? ' · crosses midnight' : '')+'</span>'+
+        '<i>'+group.length+(group.length === 1 ? ' person' : ' people')+'</i>'+
+      '</div>';
+      group.forEach(function(e){
       var cur = shiftWorking[e.name] || shiftBaseDefault(e.name);
       var isPreset = SHIFT_PRESETS.indexOf(cur) > -1;
       html += '<div class="shf-row">'+
@@ -14208,6 +14376,9 @@ function buildExcelBackup(){
           /* Somebody who works away from the card readers. Their in and out
              were typed in for them every morning; ticked here, they type their
              own on their page instead - today and yesterday, no further. */
+          /* The two ticks are one column, not two things drifting apart at
+             whatever width the panel happens to be. */
+          '<span class="shf-flags">'+
           '<label class="shf-self" title="This person types their own in and out, instead of punching a card">'+
             '<input type="checkbox" data-self-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
               (marksOwn(e.name) ? ' checked' : '')+'>'+
@@ -14219,7 +14390,8 @@ function buildExcelBackup(){
             '<input type="checkbox" data-first-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
               (needsFirstApproval(e.name) ? ' checked' : '')+'>'+
             '<span>First approval</span>'+
-          '</label>';
+          '</label>'+
+          '</span>';
         })()+
         '</div>'+
         '<div style="padding:0 6px 6px;">'+
@@ -14241,6 +14413,7 @@ function buildExcelBackup(){
             }).join('')+
           '</div>';
         })();
+      });
     });
     html += '</div>';
     html += '<div class="actions">'+
@@ -14248,6 +14421,7 @@ function buildExcelBackup(){
       '<button type="button" data-act="reset">\u21BA Reset to default</button>'+
       '</div>';
     shiftDropdown.innerHTML = html;
+    (function(){ var l = shiftDropdown.querySelector('.shf-list'); if(l && keepScroll) l.scrollTop = keepScroll; })();
 
     // bulk apply
     var allBtn = document.getElementById('shfAllBtn');
@@ -14361,6 +14535,7 @@ function buildExcelBackup(){
         setShiftFrom(name, sel.value, shiftFromDay());
         saveShiftAssignments();
         renderTable();
+        renderShiftDropdown();   // the row belongs under a different heading now
       };
       sel.addEventListener('change', apply);
       sel.addEventListener('input', apply);

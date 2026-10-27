@@ -1270,6 +1270,12 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
     /* And whoever has just been told yes or no hears it from the site. */
     newlyDecided(requestsBefore, value).slice(0, 10)
       .forEach(r => { notifyDecision(req.session.orgId, r); });
+    /* A first approver who passes one on from the portal rather than from
+       their email is the same event, and the final word has to hear about it
+       either way. The notice claims the request in maintenance_done first, so
+       the two doors cannot send it twice. */
+    newlyRecommended(requestsBefore, value).slice(0, 10)
+      .forEach(r => { notifyRecommended(req.session.orgId, r); });
   }
   /* And a day marked as leave straight on the grid, which is the same news
      arriving by another door. */
@@ -2593,6 +2599,15 @@ function newlyDecided(beforeText, afterText) {
   (Array.isArray(before) ? before : []).forEach(r => { if (r && r.id) was[String(r.id)] = r.status; });
   return after.filter(r => r && r.id && (r.status === 'approved' || r.status === 'rejected')
                         && was[String(r.id)] !== r.status);
+}
+/* The same, for the middle of the two-stage grant: a request the first
+   approver has just passed on from the portal. */
+function newlyRecommended(beforeText, afterText) {
+  const before = parseJson(beforeText), after = parseJson(afterText);
+  if (!Array.isArray(after)) return [];
+  const was = {};
+  (Array.isArray(before) ? before : []).forEach(r => { if (r && r.id) was[String(r.id)] = r.status; });
+  return after.filter(r => r && r.id && r.status === 'recommended' && was[String(r.id)] !== 'recommended');
 }
 
 /* A day marked as leave on the grid with no request behind it is the same
