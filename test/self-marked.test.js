@@ -379,6 +379,23 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('and says the same thing the office is told',
     /⚠ Marked late\./.test(card) && /after the time claimed\./.test(card)
       && /The office sees the same thing/.test(card));
+  /* The sentence belongs to the mark and is asked for - a hover, a tab or a
+     tap - rather than standing open under the card repeating itself every day
+     to somebody who read it the first time. */
+  check('the sentence is folded into the mark, not left standing',
+    /class="lk-pop" role="tooltip"/.test(card)
+      && !/class="ed-warn kept"/.test(card));
+  check('and opens by hover, by keyboard and by tap',
+    /\.lk\.late:hover \.lk-pop,/.test(APP)
+      && /\.lk\.late:focus \.lk-pop,/.test(APP)
+      && /chip\.classList\.toggle\('open'\)/.test(card));
+  check('a tap elsewhere, or Escape, shuts it again',
+    /document\.addEventListener\('click', shutPops\);/.test(card)
+      && /if\(ev\.key === 'Escape'\)/.test(card));
+  /* The time box and its buttons come later in the card and painted straight
+     over the open sentence until the mark carried the stacking order. */
+  check('and it is drawn above the box beneath it',
+    /\.fieldwrap \.lab \.lk\.late\{ position:relative; z-index:45;/.test(APP));
   check('still as a gap, not a verdict',
     /it is the gap that is on the record, not a verdict/.test(card));
   /* The live warning is about the time being typed; the settled one has its

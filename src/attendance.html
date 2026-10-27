@@ -2756,9 +2756,26 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-warn{ margin-top:8px; padding:8px 11px; border-radius:9px;
   border:1px solid #F0DCB8; background:var(--lv-amber-bg); color:#7A4A00;
   font-size:12px; font-weight:600; line-height:1.5; }
-.ed-warn.kept{ font-weight:500; }
-.ed-warn.kept b{ font-weight:700; }
-.fieldwrap .lab .lk.late{ color:#B26B00; }
+/* The mark carries its own explanation, shown when it is asked for: a hover,
+   a tab, or a tap. It used to sit open under the card, which said the same
+   sentence every day to somebody who had read it the first time. */
+/* The chip carries the stacking order, not just the box inside it: the time
+   box and its buttons come later in the card and were painting straight over
+   the open sentence. */
+.fieldwrap .lab .lk.late{ position:relative; z-index:45; color:#B26B00; cursor:help;
+  border-bottom:1px dotted rgba(178,107,0,.5); }
+.fieldwrap .lab .lk.late:focus{ outline:2px solid #B26B00; outline-offset:2px; border-radius:3px; }
+.fieldwrap .lab .lk-pop{ display:none; position:absolute; left:0; top:calc(100% + 7px);
+  z-index:1; width:max-content; max-width:min(330px, 70vw);
+  padding:9px 12px; border-radius:9px; border:1px solid #F0DCB8;
+  background:#FDF3E2; color:#7A4A00; box-shadow:0 8px 22px rgba(20,30,45,.16);
+  -webkit-backdrop-filter:none; backdrop-filter:none;
+  font-size:11.5px; font-weight:500; line-height:1.55; letter-spacing:0;
+  text-transform:none; white-space:normal; }
+.fieldwrap .lab .lk-pop b{ font-weight:700; }
+.fieldwrap .lab .lk.late:hover .lk-pop,
+.fieldwrap .lab .lk.late:focus .lk-pop,
+.fieldwrap .lab .lk.late.open .lk-pop{ display:block; }
 /* Where somebody says they spent the day out. It sits under the times, quieter
    than they are: most days it is not needed and should not be the first thing
    the eye lands on. */
@@ -18166,7 +18183,16 @@ function buildExcelBackup(){
           + '<div class="lab">' + lbl
           +   (shut ? ' <span class="lk">✓ saved</span>' : '')
           +   ((shut && which === 'in' && flagged)
-                ? ' <span class="lk late" title="The office sees this">⚠ late entry</span>' : '')
+                ? (' <span class="lk late" data-flagpop tabindex="0" role="button"'
+                   + ' aria-expanded="false" aria-label="Why this is marked late">'
+                   + '⚠ late entry'
+                   + '<span class="lk-pop" role="tooltip"><b>⚠ Marked late.</b> In time '
+                   + shotEsc(fmtTime(man['in'])) + ', typed at ' + shotEsc(fmtTime(flagged.typed))
+                   + (flagged.sameDay ? '' : ' the next day')
+                   + ' — ' + shotEsc(minsSaid(flagged.gap)) + ' after the time claimed. '
+                   + 'The office sees the same thing. Nothing is wrong with a late entry; '
+                   + 'it is the gap that is on the record, not a verdict.</span>'
+                   + '</span>') : '')
           + '</div>'
           + '<div class="ed-boxrow">'
           + '<div class="tf">'
@@ -18211,14 +18237,6 @@ function buildExcelBackup(){
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="ed-warn" id="edWarn" style="display:none"></div>'
-        + (flagged
-            ? ('<div class="ed-warn kept"><b>⚠ Marked late.</b> In time '
-               + shotEsc(fmtTime(man['in'])) + ', typed at ' + shotEsc(fmtTime(flagged.typed))
-               + (flagged.sameDay ? '' : ' the next day')
-               + ' — ' + shotEsc(minsSaid(flagged.gap)) + ' after the time claimed. '
-               + 'The office sees the same thing. Nothing is wrong with a late entry; '
-               + 'it is the gap that is on the record, not a verdict.</div>')
-            : '')
         + visitRow(name, day)
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
@@ -18463,6 +18481,26 @@ function buildExcelBackup(){
         showUploadStatus('That did not send (' + ((e && e.message) || 'no answer') + ').', true);
       });
     });
+    /* The sentence belongs to the mark, so it is asked for rather than sitting
+       under the card saying the same thing every day. Hover and keyboard focus
+       are CSS; this is the tap, which has neither. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-flagpop]'), function(chip){
+      chip.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        var open = chip.classList.toggle('open');
+        chip.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      chip.addEventListener('keydown', function(ev){
+        if(ev.key === 'Escape'){ chip.classList.remove('open'); chip.setAttribute('aria-expanded','false'); }
+        if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); chip.click(); }
+      });
+    });
+    var shutPops = function(){
+      Array.prototype.forEach.call(box.querySelectorAll('[data-flagpop].open'), function(c){
+        c.classList.remove('open'); c.setAttribute('aria-expanded', 'false');
+      });
+    };
+    document.addEventListener('click', shutPops);
     var clear = document.getElementById('edClear');
     if(clear) clear.addEventListener('click', function(){
       var emptied = 0;
