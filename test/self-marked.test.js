@@ -245,8 +245,15 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   /* Picking 2:49 PM out of a spinner is a dozen taps for a time the machine
      already knows, and punching in is when somebody is most in a hurry. */
   check('each box can take the time now in one press',
-    /nowBtn\('in'\)/.test(card) && /nowBtn\('out'\)/.test(card)
-      && /f\.set\(nowHHMM\(\)\);/.test(card));
+    /\+ nowBtn\(which\)/.test(card) && /f\.set\(nowHHMM\(\)\);/.test(card));
+  /* Two numbers took the height of the card stacked. They read across now,
+     with a hairline saying where the one ends and the other begins. */
+  check('the two times read across, divided by a rule',
+    /html \+= '<div class="ed-two">'/.test(card)
+      && /<div class="ed-split" aria-hidden="true"><\/div>/.test(card)
+      && /\.ed-two \.ed-split\{[^}]*width:1px/.test(APP));
+  check('and Save sits at the end of that row',
+    /<div class="ed-acts">[\s\S]{0,160}id="edSave"/.test(card));
   check('and it is offered only on today, "now" being no time yesterday',
     /var nowBtn = function\(which\)\{[\s\S]{0,200}return ceiling/.test(card),
     (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);

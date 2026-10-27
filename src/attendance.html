@@ -2754,10 +2754,15 @@ table.dash-table tr:hover td{background:#F7F9FC;}
    the half is picked rather than typed - which is the part people get wrong.
    Roughly twice the old height: this is filled standing at a desk, in a hurry,
    often on a phone. */
-.ed-pair{ display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; }
-.ed-pair2{ margin-top:16px; }
+/* In, then a hairline, then Out, with Save at the end of the row. */
+.ed-two{ display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-top:12px; }
+.ed-two .ed-boxrow{ display:flex; align-items:center; gap:9px; }
+/* A hairline, not a border: it only has to say "these are two things". It is
+   as tall as the boxes, so it divides them and leaves the chips alone. */
+.ed-two .ed-split{ flex:none; width:1px; background:#D4DCE8; height:62px; margin-top:22px; }
+.ed-two .ed-acts{ display:flex; gap:8px; margin-top:22px; margin-left:auto; }
 .fieldwrap{ flex:0 0 auto; min-width:0; }
-.ed-pair{ justify-content:flex-start; }
+.ed-two{ justify-content:flex-start; }
 .fieldwrap .lab{ font-size:10.5px; font-weight:700; letter-spacing:.08em;
   text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
 .tf{ display:inline-flex; align-items:stretch; border:1.5px solid var(--line);
@@ -2788,12 +2793,13 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .chips .chip:hover{ border-color:#2E6BE6; color:#2E6BE6; background:#F6F9FF; }
 .chips .chip.sug{ border-color:#BBE3C9; background:#F1FBF5; color:#157347; }
 .chips .chip.sug:hover{ border-color:#157347; }
-.ed-pair .ed-now{ height:62px; padding:0 16px; border-radius:12px; font-size:13px; }
-.ed-pair .ed-save{ height:62px; padding:0 28px; font-size:15px; }
-.ed-pair .ed-clear{ height:62px; padding:0 18px; }
+.ed-two .ed-now{ height:62px; padding:0 16px; border-radius:12px; font-size:13px; }
+.ed-two .ed-save{ height:62px; padding:0 28px; font-size:15px; }
+.ed-two .ed-clear{ height:62px; padding:0 18px; }
 @media (max-width:680px){
   .tf input{ width:88px; font-size:24px; }
-  .ed-pair .ed-save, .ed-pair .ed-now, .ed-pair .ed-clear{ height:54px; }
+  .ed-two .ed-save, .ed-two .ed-now, .ed-two .ed-clear{ height:54px; }
+  .ed-two .ed-split{ height:54px; }
   .tf{ height:54px; }
 }
 .ed-row label{ display:flex; flex-direction:column; gap:3px; font-size:11px;
@@ -17889,6 +17895,12 @@ function buildExcelBackup(){
       var ceiling = (day === todayISO_full) ? nowHHMM() : '';
       /* One field a time: the digits, and the half of the day as two buttons
          joined to the same border so it reads as one control. */
+      var nowBtn = function(which){
+        return ceiling
+          ? ('<button type="button" class="ed-now" data-now="' + which + '"'
+             + ' title="Use the time now">↻ Now</button>')
+          : '';
+      };
       var field = function(which, lbl, val){
         var cur = to12(val);
         var chips = usualTimes(name, which).map(function(t, i){
@@ -17900,6 +17912,7 @@ function buildExcelBackup(){
         }).join('');
         return '<div class="fieldwrap" data-tf="' + which + '">'
           + '<div class="lab">' + lbl + '</div>'
+          + '<div class="ed-boxrow">'
           + '<div class="tf">'
           +   '<span class="ico" aria-hidden="true">◷</span>'
           +   '<input id="ed' + (which === 'in' ? 'In' : 'Out') + '" inputmode="numeric"'
@@ -17910,19 +17923,22 @@ function buildExcelBackup(){
           +     '<button type="button" data-ap="PM"' + (cur.mer === 'PM' ? ' class="on"' : '') + '>PM</button>'
           +   '</div>'
           + '</div>'
+          + nowBtn(which)
+          + '</div>'
           + (chips ? ('<div class="chips">' + chips + '</div>') : '')
           + '</div>';
       };
-      var nowBtn = function(which){
-        return ceiling
-          ? ('<button type="button" class="ed-now" data-now="' + which + '"'
-             + ' title="Use the time now">↻ Now</button>')
-          : '';
-      };
-      html += '<div class="ed-pair">' + field('in', 'In', shown['in']) + nowBtn('in') + '</div>'
-        + '<div class="ed-pair ed-pair2">' + field('out', 'Out', shown.out) + nowBtn('out')
+      /* The two times read across rather than down, a hairline between them:
+         one is the start of the day and one is the end of it, and stacked they
+         took the height of the card for what is two numbers. */
+      html += '<div class="ed-two">'
+        + field('in', 'In', shown['in'])
+        + '<div class="ed-split" aria-hidden="true"></div>'
+        + field('out', 'Out', shown.out)
+        + '<div class="ed-acts">'
         +   '<button type="button" class="bk-btn primary ed-save" id="edSave">Save</button>'
         +   (man ? '<button type="button" class="month-btn ed-clear" id="edClear">Clear</button>' : '')
+        + '</div>'
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="wl-foot" id="edSaid">'
@@ -18917,8 +18933,13 @@ table.att.hw-fixed-cols{ table-layout:fixed !important; }
 }
 .chips .chip.sug{ border-color:#BBE3C9 !important; background:#F1FBF5 !important; }
 /* Now and Save stand beside the box, not beside the box and its chips. */
-.ed-pair{ align-items:flex-start; }
-.ed-pair > .ed-now, .ed-pair > .ed-save, .ed-pair > .ed-clear{ margin-top:22px; }
+.ed-two{ align-items:flex-start; }
+/* Wrapped onto two lines there is nothing left to divide, and Save belongs
+   under the pair rather than away on the right of whichever box ended last. */
+@media (max-width:900px){
+  .ed-two .ed-split{ display:none; }
+  .ed-two .ed-acts{ margin-left:0; margin-top:4px; }
+}
 @media (max-width:680px){ .tf input{ font-size:24px !important; } }
 </style>
 
