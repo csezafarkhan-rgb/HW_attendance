@@ -473,6 +473,10 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
   return JSON.stringify(out);
 }
 
+/* Which of their own requests somebody may take back: the ones nobody has
+   acted on. The page offers the button on exactly these, but the page is
+   theirs to edit, so this is where it is decided. */
+const EMP_CANCELLABLE = ['pending', 'query', 'recommended'];
 function mergeEmployeeRequests(storedValue, incomingValue, name) {
   const incoming = parseJson(incomingValue);
   if (!Array.isArray(incoming)) return null;
@@ -504,6 +508,18 @@ function mergeEmployeeRequests(storedValue, incomingValue, name) {
       }
       out.push(fresh);
       byId[fresh.id] = fresh;
+    } else if (cur.empName === name && r.status === 'cancelled'
+               && EMP_CANCELLABLE.indexOf(cur.status) > -1) {
+      /* Taking their own request back, while nobody has acted on it. Checked
+         before the query reply below, so cancelling one that has a query on it
+         cancels rather than answering.
+
+         Only in this direction: 'cancelled' is not in the list, so they cannot
+         bring it back and nor can they touch one already granted or refused -
+         a granted day is on the record, and taking it off is the office's. */
+      cur.status = 'cancelled';
+      cur.cancelledAt = now;
+      cur.updatedAt = now;
     } else if (cur.empName === name && cur.status === 'query'
                && typeof r.employeeReply === 'string' && r.employeeReply.trim()) {
       cur.employeeReply = clip(r.employeeReply.trim(), 2000);
@@ -1836,7 +1852,9 @@ function unrequestedFrom(overrides, halfDays, requests, sinceDay) {
   const coveredFull = {}, coveredPart = {};
   const PART = ['HALF', 'SHORT', 'THREEQ'];
   (Array.isArray(requests) ? requests : []).forEach(r => {
-    if (!r || r.status === 'rejected' || r.leaveType === 'PUNCH') return;
+    /* Refused, or taken back by the person who asked: either way it accounts
+       for nothing, and the day stands as leave nobody agreed to. */
+    if (!r || r.status === 'rejected' || r.status === 'cancelled' || r.leaveType === 'PUNCH') return;
     const part = PART.indexOf(r.leaveType) > -1;
     for (let d = new Date(r.dateFrom + 'T00:00:00Z'); d <= new Date(r.dateTo + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) {
       const key = r.empName + '|' + d.toISOString().slice(0, 10);
@@ -2656,7 +2674,8 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
 
     const kv = await sharedKeys(orgId, ['leaveRequests', 'companyInfo']);
     const requests = parseJson(kv.leaveRequests) || [];
-    const covered = (m) => requests.some(r => r && r.status !== 'rejected' && r.leaveType !== 'PUNCH'
+    const covered = (m) => requests.some(r => r && r.status !== 'rejected'
+      && r.status !== 'cancelled' && r.leaveType !== 'PUNCH'
       && r.empName === m.empName && r.dateFrom <= m.dateFrom && r.dateTo >= m.dateFrom
       && ((PART.indexOf(r.leaveType) > -1) === (PART.indexOf(m.leaveType) > -1)));
     const worth = [];

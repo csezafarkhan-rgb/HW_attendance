@@ -561,6 +561,8 @@ body{
 .req-status.approved{background:var(--ok-soft);color:#1B4B31;}
 .req-status.rejected{background:var(--weekend);color:#7A2A24;}
 .req-status.query{background:var(--client-bg,#E6ECF7);color:#3457A6;}
+/* Taken back by the person who asked. Settled, and nobody refused it. */
+.req-status.cancelled{background:#ECEEF2;color:#59606B;border:1px solid #D4D9E0;}
 .req-note{
   background:var(--panel-2);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:12px;
 }
@@ -8887,7 +8889,19 @@ function buildExcelBackup(){
   /* "recommended" is the middle of the two-stage grant: the first approver has
      said it should go forward and a super admin has not yet granted it. Nothing
      is written on the record until they do. */
-  var REQ_STATUSES = ['pending', 'query', 'recommended', 'approved', 'rejected', 'recorded'];
+  var REQ_STATUSES = ['pending', 'query', 'recommended', 'approved', 'rejected', 'recorded', 'cancelled'];
+  /* Taken back by the person who asked, before anybody acted on it. Plans
+     change, and the only way to undo a request was to ask an admin to reject
+     it - which puts a refusal on the record for a day they were no longer
+     asking for. Their own withdrawal says what actually happened.
+
+     Only while nobody has acted on it. Once leave is granted the days are on
+     the record and taking them off is the office's to do; the server holds
+     the same rule, because this one is only the button. */
+  var REQ_CANCELLABLE = ['pending', 'query', 'recommended'];
+  function canCancelRequest(req){
+    return !!req && !req._unrequested && REQ_CANCELLABLE.indexOf(req.status) > -1;
+  }
   /* The paper day-off form says the leave was granted, so it belongs to leave
      that was. It was offered on every request from the moment it was raised -
      so somebody could send a request and print a form for it in the same
@@ -9361,7 +9375,8 @@ function buildExcelBackup(){
                           query:'Query', recorded:'Taken \u2014 not requested',
                           /* The middle of the two-stage grant: said yes to once,
                              waiting on the word that puts it on the record. */
-                          recommended:'Approved by first \u00b7 awaiting final'};
+                          recommended:'Approved by first \u00b7 awaiting final',
+                          cancelled:'Cancelled'};
   /* A request is no longer always leave, so the list has to name the kind. */
   /* The part-day sizes, matching what the grid can already mark. */
   function isPartDay(t){ return t === 'HALF' || t === 'SHORT' || t === 'THREEQ'; }
@@ -9406,7 +9421,8 @@ function buildExcelBackup(){
     if(az) az.addEventListener('click', function(){
       // Work out what would move first, and change nothing until it is confirmed.
       var settled = leaveRequests.filter(function(r){
-        return !r.archived && (r.status === 'approved' || r.status === 'rejected');
+        return !r.archived && (r.status === 'approved' || r.status === 'rejected'
+                            || r.status === 'cancelled');
       });
       var n = settled.length;
       if(!n){ showUploadStatus('Nothing settled to archive.', true); return; }
@@ -9775,7 +9791,9 @@ function buildExcelBackup(){
        everything on that date hid every part-day from this panel. */
     var coveredFull = {}, coveredPart = {};
     leaveRequests.forEach(function(r){
-      if(r.status === 'rejected' || r.leaveType === 'PUNCH') return;   // a punch correction is not leave
+      /* A request nobody granted accounts for nothing: refused, or taken back
+         by the person who asked. A punch correction is not leave at all. */
+      if(r.status === 'rejected' || r.status === 'cancelled' || r.leaveType === 'PUNCH') return;
       var part = isPartDay(r.leaveType);
       eachDateBetween(r.dateFrom, r.dateTo).forEach(function(d){
         var key = r.empName + '|' + d;
@@ -10272,6 +10290,10 @@ function buildExcelBackup(){
         (canPrintDayForm(req) ?
         '<div style="margin-top:10px;"><button class="btn ghost" data-print-form="'+req.id+'" '
           + 'style="width:auto;padding:7px 14px;font-size:12px;">🖨 Print day-off form</button></div>' : '')+
+        /* Theirs to take back while it is still theirs. */
+        (canCancelRequest(req) ?
+        '<div style="margin-top:10px;"><button class="btn ghost" data-cancel-req="'+req.id+'" '
+          + 'style="width:auto;padding:7px 14px;font-size:12px;">Cancel this request</button></div>' : '')+
       '</div>';
     };
     list.innerHTML =
@@ -10305,6 +10327,42 @@ function buildExcelBackup(){
         /* Checked here as well as on the button: a page left open while the
            decision changed still has the old button on it. */
         if(canPrintDayForm(r)) printDayOffForm(r);
+      });
+    });
+
+    /* Taking their own request back. The server decides whether it may still
+       be taken back - this asks, and says what it means. */
+    Array.prototype.forEach.call(list.querySelectorAll('button[data-cancel-req]'), function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-cancel-req');
+        var req = leaveRequests.filter(function(x){ return x.id === id; })[0];
+        if(!canCancelRequest(req)) return;
+        hwConfirm({
+          title: 'Cancel this request?',
+          message: 'It goes off the list waiting on the office. Nothing is marked '
+                 + 'on your record either way, and you can ask again if plans change back.',
+          items: [fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req)],
+          confirmLabel: 'Cancel the request',
+          danger: true
+        }).then(function(ok){
+          if(!ok) return;
+          btn.disabled = true;
+          var was = req.status;
+          req.status = 'cancelled';
+          req.updatedAt = new Date().toISOString();
+          saveLeaveRequests().then(function(){
+            renderMyRequests();
+            showUploadStatus('Request for ' + fmtDateRange(req.dateFrom, req.dateTo)
+              + ' cancelled.', false);
+          }).catch(function(e){
+            /* Put it back on the page rather than leaving it looking cancelled
+               when the office never heard. */
+            req.status = was;
+            renderMyRequests();
+            showUploadStatus('That cancellation did not reach the office ('
+              + ((e && e.message) || 'no answer') + ').', true);
+          });
+        });
       });
     });
 

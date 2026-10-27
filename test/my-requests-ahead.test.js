@@ -48,7 +48,9 @@ function run(month, requests) {
     'function unrequestedLeave(){ return []; }',
     'function unmarkedNoteHtml(){ return ""; }',
     'function renderEmpAlerts(){}',
+    'var REQ_CANCELLABLE = ' + /var REQ_CANCELLABLE = (\[[^\]]*\])/.exec(APP)[1] + ';',
     grab('canPrintDayForm'),
+    grab('canCancelRequest'),
     grab('renderMyRequests'),
     'renderMyRequests();'
   ].join('\n'), ctx);
