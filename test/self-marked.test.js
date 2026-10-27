@@ -364,6 +364,28 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
       && /The office is shown the time you typed it/.test(card));
   check('and the warning rides along with everything that reads the pair',
     /tell = function\(\)\{ var r = tellTimes\(\); warnBack\(\); return r; \};/.test(card));
+
+  /* ---- the mark the office sees is shown here too ----
+     Nobody should learn from a meeting that their day carries a flag on
+     somebody else's screen. Seeing it is what makes it fair to have. */
+  check('a flagged entry is marked on the person’s own card',
+    /var flagged = selfEntryFlagged\(name, day\);/.test(card)
+      && /⚠ late entry/.test(card));
+  check('and says the same thing the office is told',
+    /⚠ Marked late\./.test(card) && /after the time claimed\./.test(card)
+      && /The office sees the same thing/.test(card));
+  check('still as a gap, not a verdict',
+    /it is the gap that is on the record, not a verdict/.test(card));
+  /* The live warning is about the time being typed; the settled one has its
+     own line above and says more. Two amber boxes saying the same thing is
+     one too many. */
+  check('and a settled field is left to its own line',
+    /if\(f\.wrap\.classList\.contains\('shut'\)\) return;/.test(card));
+  /* Clear went straight through the lock: one press, no question, and the
+     settled time was gone - which is the whole of what the lock was for. A
+     time is changed through Edit; a day is withdrawn by the office. */
+  check('and there is no Clear to undo the lock with',
+    !/id="edClear"/.test(card) && !/ed-clear/.test(card));
   check('and it is offered only on today, "now" being no time yesterday',
     /var nowBtn = function\(which\)\{[\s\S]{0,200}return ceiling/.test(card),
     (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);

@@ -2756,6 +2756,9 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-warn{ margin-top:8px; padding:8px 11px; border-radius:9px;
   border:1px solid #F0DCB8; background:var(--lv-amber-bg); color:#7A4A00;
   font-size:12px; font-weight:600; line-height:1.5; }
+.ed-warn.kept{ font-weight:500; }
+.ed-warn.kept b{ font-weight:700; }
+.fieldwrap .lab .lk.late{ color:#B26B00; }
 /* Where somebody says they spent the day out. It sits under the times, quieter
    than they are: most days it is not needed and should not be the first thing
    the eye lands on. */
@@ -18098,6 +18101,10 @@ function buildExcelBackup(){
       var settled = function(which){
         return !!(man && man[which] && !EMP_EDIT[which]);
       };
+      /* The same mark the office is shown, shown here too. Somebody should not
+         learn from a meeting that their day carries a flag on somebody else's
+         screen - and seeing it is what makes it fair to have. */
+      var flagged = selfEntryFlagged(name, day);
       var field = function(which, lbl, val){
         var cur = to12(val);
         var shut = settled(which);
@@ -18109,7 +18116,11 @@ function buildExcelBackup(){
             + (i === 0 ? ' · usual' : '') + '</button>';
         }).join('');
         return '<div class="fieldwrap' + (shut ? ' shut' : '') + '" data-tf="' + which + '">'
-          + '<div class="lab">' + lbl + (shut ? ' <span class="lk">✓ saved</span>' : '') + '</div>'
+          + '<div class="lab">' + lbl
+          +   (shut ? ' <span class="lk">✓ saved</span>' : '')
+          +   ((shut && which === 'in' && flagged)
+                ? ' <span class="lk late" title="The office sees this">⚠ late entry</span>' : '')
+          + '</div>'
           + '<div class="ed-boxrow">'
           + '<div class="tf">'
           +   '<span class="ico" aria-hidden="true">◷</span>'
@@ -18141,11 +18152,18 @@ function buildExcelBackup(){
         + field('out', 'Out', shown.out)
         + '<div class="ed-acts">'
         +   '<button type="button" class="bk-btn primary ed-save" id="edSave">Save</button>'
-        +   (man ? '<button type="button" class="month-btn ed-clear" id="edClear">Clear</button>' : '')
         + '</div>'
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="ed-warn" id="edWarn" style="display:none"></div>'
+        + (flagged
+            ? ('<div class="ed-warn kept"><b>⚠ Marked late.</b> In time '
+               + shotEsc(fmtTime(man['in'])) + ', typed at ' + shotEsc(fmtTime(flagged.typed))
+               + (flagged.sameDay ? '' : ' the next day')
+               + ' — ' + shotEsc(minsSaid(flagged.gap)) + ' after the time claimed. '
+               + 'The office sees the same thing. Nothing is wrong with a late entry; '
+               + 'it is the gap that is on the record, not a verdict.</div>')
+            : '')
         + visitRow(name, day)
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
@@ -18272,6 +18290,9 @@ function buildExcelBackup(){
       if(now){
         ['in', 'out'].forEach(function(which){
           var f = F[which]; if(!f) return;
+          /* A settled time has its own line above, which says more. This one is
+             about the time being typed right now. */
+          if(f.wrap.classList.contains('shut')) return;
           var t = f.get(); if(!t) return;
           var back = toMin(now) - toMin(t);
           if(back > gap){ gap = back; lbl = which === 'in' ? 'That arrival' : 'That finish'; }
@@ -18372,12 +18393,6 @@ function buildExcelBackup(){
         save.disabled = false;
         said('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
       });
-    });
-    var clear = document.getElementById('edClear');
-    if(clear) clear.addEventListener('click', function(){
-      delete manualRecords[name + '|' + day];
-      saveManualRecords().then(function(){ refreshActivePage(); renderEmpDayCard(); })
-        .catch(function(e){ said('That did not clear (' + ((e && e.message) || 'no answer') + ').', true); });
     });
     var pleaSave = document.getElementById('edPleaSave');
     if(pleaSave) pleaSave.addEventListener('click', function(){
