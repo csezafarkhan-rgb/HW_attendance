@@ -541,6 +541,15 @@ body{
   background:var(--panel);border:1px solid var(--line);border-radius:10px;
   padding:14px 16px;margin-bottom:10px;
 }
+/* Leave booked past the month on screen, under its own heading so it cannot
+   be read as this month's. */
+.myreq-ahead{
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  margin:16px 0 9px;padding-top:12px;border-top:1px solid var(--line-dk);
+  font-size:12.5px;font-weight:800;color:var(--ink);
+}
+.myreq-ahead span{font-size:11.5px;font-weight:500;color:var(--ink-soft);}
+.myreq-none{color:var(--ink-soft);font-size:12.5px;}
 .req-card .req-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
 .req-card .req-emp{font-weight:800;font-size:13px;}
 .req-card .req-dates{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
@@ -10189,8 +10198,8 @@ function buildExcelBackup(){
     var list = document.getElementById('myRequestsList');
     if(!name || !list) return;
     try{ renderEmpAlerts(); }catch(e){}
-    /* Only the month on screen. The list grows with every request ever made,
-       and someone looking at August does not want March's leave in the way. */
+    /* The month on screen. The list grows with every request ever made, and
+       someone looking at August does not want March's leave in the way. */
     var ym = empCalMonth || defaultMonth;
     var inMonth = function(from, to){
       return String(from||'').slice(0,7) <= ym && String(to||from||'').slice(0,7) >= ym;
@@ -10198,6 +10207,17 @@ function buildExcelBackup(){
     var mine = leaveRequests.filter(function(r){
       return r.empName === name && inMonth(r.dateFrom, r.dateTo);
     });
+    /* And what is booked past it, which the month rule hid completely.
+
+       Ask for a day in November while the page is on October - which is where
+       it opens - and the request vanished on being sent: not in this month, so
+       not in the list, and nothing anywhere else to say it existed. The one
+       thing somebody wants to see after booking leave is the leave they just
+       booked. It sits under its own heading, so it is not mistaken for this
+       month's. */
+    var ahead = leaveRequests.filter(function(r){
+      return r.empName === name && String(r.dateFrom||'').slice(0,7) > ym;
+    }).sort(function(a,b){ return String(a.dateFrom||'').localeCompare(String(b.dateFrom||'')); });
     /* Days marked in the grid without a request - an emergency, usually. They
        belong in this list too: from where the employee stands it was leave they
        took, whether or not it went through the form. Shown as a record rather
@@ -10218,13 +10238,13 @@ function buildExcelBackup(){
     mine.sort(function(a,b){ return (b.updatedAt||'').localeCompare(a.updatedAt||''); });
     var mLbl = document.getElementById('myReqMonth');
     if(mLbl) mLbl.textContent = '\u2014 ' + monthLabel(ym);
-    if(mine.length === 0){
+    if(mine.length === 0 && ahead.length === 0){
       list.innerHTML = '<div style="color:var(--ink-soft);font-size:12.5px;">Nothing in '
         + monthLabel(ym) + '. Use the arrows above the calendar to look at another month.</div>';
       return;
     }
     list.className = MYREQ_COMPACT ? 'req-compact' : '';
-    list.innerHTML = mine.map(function(req){
+    var cardHtml = function(req){
       var statusCls = req.status || 'pending';
       /* The employee should know their approved day is no longer showing as
          leave - they are the one who will be marked absent for it. No button
@@ -10253,7 +10273,16 @@ function buildExcelBackup(){
         '<div style="margin-top:10px;"><button class="btn ghost" data-print-form="'+req.id+'" '
           + 'style="width:auto;padding:7px 14px;font-size:12px;">🖨 Print day-off form</button></div>' : '')+
       '</div>';
-    }).join('');
+    };
+    list.innerHTML =
+      (mine.length ? mine.map(cardHtml).join('')
+        : '<div class="myreq-none">Nothing in ' + monthLabel(ym) + '.</div>')+
+      (ahead.length
+        ? '<div class="myreq-ahead">Booked ahead'+
+            '<span>' + ahead.length + (ahead.length === 1 ? ' request' : ' requests')
+            + ' for dates after ' + monthLabel(ym) + '</span></div>'
+          + ahead.map(cardHtml).join('')
+        : '');
 
     Array.prototype.forEach.call(list.querySelectorAll('button[data-print-form]'), function(btn){
       btn.addEventListener('click', function(){
