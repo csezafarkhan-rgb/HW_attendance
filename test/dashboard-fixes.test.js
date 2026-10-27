@@ -530,25 +530,42 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
      missing from the new list. September is not missing from October's list,
      so Shyam Lal spent the whole of October looking at September. */
   {
-    const fn = grab('empMonthNow');
-    const run = (months, dflt) => {
-      const c = { ALL_MONTHS: months, defaultMonth: dflt, Date };
+    const run = (src2, months, manual, name) => {
+      const c = { ALL_MONTHS: months, manualRecords: manual || {}, Date, Object,
+                  viewRole: name ? { role: 'employee', name } : null };
       vm.createContext(c);
-      vm.runInContext(fn + '; __r = empMonthNow();', c);
+      vm.runInContext(grab('empMonthNow') + grab('empMonths') + '; __r = ' + src2 + ';', c);
       return c.__r;
     };
     const d = new Date();
     const THIS = d.getFullYear() + '-' + (d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1);
-    check('it opens on the month we are in when there is data for it',
-      run(['2026-08', '2026-09', THIS], '2026-09') === THIS, run(['2026-08', '2026-09', THIS], '2026-09'));
-    check('and on the last month there is data for when there is not',
-      run(['2026-08', '2026-09'], '2026-09') === '2026-09');
+    check('the calendar opens on the month we are in',
+      run('empMonthNow()', ['2026-08', '2026-09'], {}) === THIS,
+      run('empMonthNow()', ['2026-08', '2026-09'], {}));
+    /* Shyam Lal and Munish are not on the attendance machine at all, and the
+       server serves an employee only their own rows - so the months built from
+       punch records are somebody else's months, or none. */
+    check('and this month is reachable even with no punch rows anywhere',
+      run('empMonths(null)', [], {}).indexOf(THIS) > -1);
+    check('days they typed themselves put their months in the list',
+      run('empMonths("Shyam Lal ESS")', [],
+          { 'Shyam Lal ESS|2026-07-14': {}, 'Zafar Khan|2026-03-02': {} }, 'Shyam Lal ESS')
+        .indexOf('2026-07') > -1);
+    check('and another person’s typed days stay out of it',
+      run('empMonths("Shyam Lal ESS")', [],
+          { 'Shyam Lal ESS|2026-07-14': {}, 'Zafar Khan|2026-03-02': {} }, 'Shyam Lal ESS')
+        .indexOf('2026-03') === -1);
+    check('the punch months are still in it for everybody else',
+      run('empMonths(null)', ['2026-08', '2026-09'], {}).join(',')
+        === ['2026-08', '2026-09', THIS].sort().join(','));
     check('a default nobody chose is corrected once the real data lands',
-      /if\(ALL_MONTHS\.indexOf\(empCalMonth\) === -1 \|\| !empCalPicked\) empCalMonth = empMonthNow\(\);/.test(src));
-    /* But a month somebody went looking for is theirs, and stays put. */
-    check('a month reached with the arrows is left alone',
-      /empCalPicked = true; empCalMonth = ALL_MONTHS\[idx-1\]/.test(src)
-        && /empCalPicked = true; empCalMonth = ALL_MONTHS\[idx\+1\]/.test(src));
+      /if\(empMonths\(null\)\.indexOf\(empCalMonth\) === -1 \|\| !empCalPicked\) empCalMonth = empMonthNow\(\);/.test(src));
+    /* The arrows walked the punch months, so a month that was not in that list
+       gave an index of -1 and neither arrow had anywhere to go. */
+    check('the arrows walk the months the calendar can actually reach',
+      /var ms = empMonthList\(\), idx = ms\.indexOf\(empCalMonth\);/.test(src)
+        && /empCalPicked = true; empCalMonth = ms\[idx-1\]/.test(src)
+        && /empCalPicked = true; empCalMonth = ms\[idx\+1\]/.test(src));
     check('and signing in starts from the month we are in, not a stale default',
       /empCalMonth = empMonthNow\(\); empCalPicked = false;/.test(src)
         && !/empCalMonth = defaultMonth;/.test(src));

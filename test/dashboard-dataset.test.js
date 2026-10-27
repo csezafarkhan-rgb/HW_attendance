@@ -24,7 +24,7 @@ function makeCtx(serverAnswers) {
     EMPLOYEES: [], RECORDS: [], employeesByName: {}, recIndex: {}, monthSet: {}, ALL_MONTHS: [],
     DATASET_SOURCE: 'server', localBaseline: null,
     state: { selectedMonths: [] }, defaultMonth: undefined, empCalMonth: undefined,
-    empCalPicked: false, visibleEmpSet: null,
+    empCalPicked: false, visibleEmpSet: null, manualRecords: {},
     idbSets: 0, serverSaves: [], redraws: 0, notices: [],
     setTimeout: (fn) => { ctx.timers.push(fn); return 0; }, timers: [],
     idbData: () => { ctx.idbSets++; return Promise.resolve(); },
@@ -40,7 +40,7 @@ function makeCtx(serverAnswers) {
      employee calendar is moved to the month we are in once the real data is
      here, unless somebody has used the arrows. */
   ['applyDataset', 'markLocalDataset', 'adoptServerDataset', 'waitForServerDataset', 'persistDataset',
-   'empMonthNow'].forEach(n => vm.runInContext(grab(n), ctx));
+   'empMonthNow', 'empMonths'].forEach(n => vm.runInContext(grab(n), ctx));
   vm.runInContext('function redrawAfterDataset(){ redraws++; }', ctx);
   return ctx;
 }

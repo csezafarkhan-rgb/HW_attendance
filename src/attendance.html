@@ -4091,7 +4091,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
        move it to the month we are in - it stayed on September all through
        October otherwise, September being a real month in the list and so
        never replaced. */
-    if(ALL_MONTHS.indexOf(empCalMonth) === -1 || !empCalPicked) empCalMonth = empMonthNow();
+    if(empMonths(null).indexOf(empCalMonth) === -1 || !empCalPicked) empCalMonth = empMonthNow();
     // People who arrived with this data start visible, as they do at load and after an import.
     if(!visibleEmpSet) visibleEmpSet = {};
     EMPLOYEES.forEach(function(e){ if(!(e.name in visibleEmpSet)) visibleEmpSet[e.name] = true; });
@@ -17746,18 +17746,39 @@ function buildExcelBackup(){
   /* Set the moment somebody presses the arrows. Until then the calendar is
      only showing a default, and a default is free to be corrected. */
   var empCalPicked = false;
-  /* The month we are actually in, as long as there is data for it; otherwise
-     the last month there is data for.
+  /* The month we are in. Not "if there is data for it": a calendar of my own
+     attendance should open on this month even when the month is empty, and
+     especially then - an empty October is the thing somebody needs to look at
+     and fill in.
 
-     Worked out afresh every time rather than read off defaultMonth, because
-     defaultMonth is settled early - from the months baked into the page, which
-     stop wherever the build did - and the real data arrives later. */
+     Worked out afresh every time rather than read off defaultMonth, which is
+     settled early from the months baked into the page. */
   function empMonthNow(){
     var d = new Date();
-    var ym = d.getFullYear() + '-' + (d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1);
-    if(ALL_MONTHS.indexOf(ym) > -1) return ym;
-    if(ALL_MONTHS.indexOf(defaultMonth) > -1) return defaultMonth;
-    return ALL_MONTHS[ALL_MONTHS.length - 1] || defaultMonth;
+    return d.getFullYear() + '-' + (d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1);
+  }
+  /* The months an employee's calendar can reach.
+
+     The punch file is not the whole story for somebody who works away from a
+     reader. Shyam Lal and Munish Dhamija have no punches at all, and the
+     server serves an employee only their own rows - so a list built from punch
+     records alone ended at their last punch. That is what sat their calendar
+     in September through the whole of October, and what left the arrows dead:
+     the month on screen was not in the list, so the index was -1 and neither
+     arrow had anywhere to go. Their own typed days count too, and so does the
+     month we are in. */
+  function empMonths(name){
+    var set = {}, i;
+    ALL_MONTHS.forEach(function(m){ set[m] = true; });
+    Object.keys(manualRecords).forEach(function(k){
+      i = k.lastIndexOf('|');
+      if(i > 0 && (!name || k.slice(0, i) === name)) set[k.slice(i + 1, i + 8)] = true;
+    });
+    set[empMonthNow()] = true;
+    return Object.keys(set).sort();
+  }
+  function empMonthList(){
+    return empMonths(viewRole && viewRole.role === 'employee' ? viewRole.name : null);
   }
 
   /* Blank cells before the 1st, counted from Monday: getDay() calls Sunday 0,
@@ -18566,12 +18587,12 @@ function buildExcelBackup(){
   }
 
   document.getElementById('empCalPrev').addEventListener('click', function(){
-    var idx = ALL_MONTHS.indexOf(empCalMonth);
-    if(idx > 0){ empCalPicked = true; empCalMonth = ALL_MONTHS[idx-1]; renderEmployeeCalendar(); renderMyRequests(); }
+    var ms = empMonthList(), idx = ms.indexOf(empCalMonth);
+    if(idx > 0){ empCalPicked = true; empCalMonth = ms[idx-1]; renderEmployeeCalendar(); renderMyRequests(); }
   });
   document.getElementById('empCalNext').addEventListener('click', function(){
-    var idx = ALL_MONTHS.indexOf(empCalMonth);
-    if(idx > -1 && idx < ALL_MONTHS.length-1){ empCalPicked = true; empCalMonth = ALL_MONTHS[idx+1]; renderEmployeeCalendar(); renderMyRequests(); }
+    var ms = empMonthList(), idx = ms.indexOf(empCalMonth);
+    if(idx > -1 && idx < ms.length-1){ empCalPicked = true; empCalMonth = ms[idx+1]; renderEmployeeCalendar(); renderMyRequests(); }
   });
 
   // ---------- admin init (runs once admin view is entered) ----------
