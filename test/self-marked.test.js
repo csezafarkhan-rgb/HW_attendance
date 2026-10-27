@@ -24,7 +24,8 @@ const lift = re => { const m = re.exec(SRC); if (!m) throw new Error('not found:
  /function mergeEmployeeExcuses\(storedValue, incomingValue, name\) \{[\s\S]*?\n\}/
 ].forEach(re => vm.runInContext(lift(re), ctx));
 
-const [TODAY, YESTERDAY] = ctx.ownDays();
+const [TODAY] = ctx.ownDays();
+const YESTERDAY = new Date(Date.now() + 5.5 * 3600000 - 86400000).toISOString().slice(0, 10);
 /* Two times that have already gone today, whenever the suite happens to run -
    a fixed evening time is refused by the clock check as the day wears on. */
 const IST_NOW = new Date(Date.now() + 5.5 * 3600000);
@@ -59,10 +60,17 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   const out3 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(old), 'Shyam Lal ESS', MARKED));
   check('nor a day last January', Object.keys(out3).length === 0, out3);
 
+  /* Yesterday was open, for somebody who did not get to it until the morning.
+     It is shut: a day you can still go back and fill in is a day that can be
+     written to suit the week it turned out to be. A missed day goes through
+     the office now. */
   const back = {}; back['Shyam Lal ESS|' + YESTERDAY] = { 'in': '09:35', out: '18:05' };
   const out4 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(back), 'Shyam Lal ESS', MARKED));
-  check('yesterday is still open, for somebody who forgot until the morning',
-    !!out4['Shyam Lal ESS|' + YESTERDAY], out4);
+  check('nor yesterday, which is the office’s to enter now',
+    Object.keys(out4).length === 0, out4);
+  check('and the window the page offers is the same one day',
+    /function empDayWindow\(\)\{[\s\S]{0,400}?return \[todayISO_full\];/.test(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8')));
 }
 
 /* ---- only those the office has marked ---- */
@@ -101,8 +109,13 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   });
   const ok = {}; ok['Aman Gupta|' + TODAY] = { 'in': GONE_IN, out: '' };
   const got = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(ok), 'Aman Gupta', MARKED));
-  check('an in with no out yet is kept, and is not called present',
-    got['Aman Gupta|' + TODAY].st === 'AB' && got['Aman Gupta|' + TODAY]['in'] === GONE_IN, got);
+  /* This used to insist the day was not "present" until both times were in.
+     What that meant in practice was somebody marking their arrival at ten to
+     ten and then reading "Absent", in red, on their own calendar and on the
+     office's, until the evening. Arrived is present; the duration is what
+     waits for the other half. */
+  check('an in with no out yet is kept, and counts as present',
+    got['Aman Gupta|' + TODAY].st === 'PR' && got['Aman Gupta|' + TODAY]['in'] === GONE_IN, got);
 }
 
 /* ---- a time that has not come round yet ----
@@ -125,11 +138,16 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     const got2 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(past), 'Aman Gupta', MARKED));
     check('a time already gone is taken', !!got2['Aman Gupta|' + TODAY], got2);
   }
-  /* Yesterday is a whole day in the past: any hour of it is fair. */
-  const last = {}; last['Aman Gupta|' + YESTERDAY] = { 'in': '09:30', out: '23:30' };
-  const got3 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(last), 'Aman Gupta', MARKED));
-  check('and yesterday evening is fine, the day having finished',
-    !!got3['Aman Gupta|' + YESTERDAY], got3);
+  /* And an evening that has not come round yet is still refused, which is the
+     one thing the clock check was always for. */
+  {
+    const soon = {}; soon['Aman Gupta|' + TODAY] = { 'in': '09:30', out: '23:59' };
+    const got3 = parse(ctx.mergeEmployeeManual('{}', JSON.stringify(soon), 'Aman Gupta', MARKED));
+    const nowMin = new Date(Date.now() + 5.5 * 3600000).getUTCHours() * 60
+                 + new Date(Date.now() + 5.5 * 3600000).getUTCMinutes();
+    check('a finish still ahead is refused', nowMin >= 23 * 60 + 57
+      ? true : Object.keys(got3).length === 0, got3);
+  }
 }
 
 /* ---- why they were late ----
@@ -218,8 +236,13 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
                          APP.indexOf('function renderEmployeeCalendar()'));
   check('their page offers in and out only to those marked for it',
     /var mine = marksOwn\(name\);/.test(card) && /if\(!mine && !isLate\)/.test(card), card.slice(0, 80));
-  check('and only for today or yesterday',
-    /function empDayWindow\(\)\{[\s\S]{0,220}setDate\(back\.getDate\(\) - 1\)/.test(APP));
+  check('and only for today',
+    /function empDayWindow\(\)\{[\s\S]{0,400}?return \[todayISO_full\];/.test(APP)
+      && !/setDate\(back\.getDate\(\) - 1\)/.test(card));
+  /* One day to choose from is no choice, and the date is written beside the
+     title already - so no lone dead chip where the pair used to be. */
+  check('and the day picker goes with it, there being one day',
+    /days\.length > 1 \? days\.map/.test(card));
   check('a day typed in counts for lateness the same as one punched',
     /forLate = \(man && man\['in'\]\)/.test(card));
   check('the reason box tells them plainly that it is not granted yet',

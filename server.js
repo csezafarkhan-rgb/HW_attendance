@@ -270,13 +270,17 @@ function mergeEmployeeTasks(storedValue, incomingValue, name) {
   });
   return JSON.stringify(out);
 }
-/* The day somebody may still be writing: today, or yesterday until they have
-   had a morning to remember it. Counted at +05:30, where the office is. */
+/* The day somebody may write: today, and only today. Counted at +05:30, where
+   the office is.
+
+   Yesterday used to be open as well, on the grounds that somebody might not
+   get to it until the morning. It is shut because a day you can still go back
+   and fill in is a day that can be written to suit the week it ended up being,
+   and the office asked for it shut. Anything older, or missed, goes through
+   them - which is what the office entry on the day itself is for. */
 function ownDays() {
   const now = new Date(Date.now() + IST_MS);
-  const today = now.toISOString().slice(0, 10);
-  const back = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
-  return [today, back];
+  return [now.toISOString().slice(0, 10)];
 }
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
@@ -329,7 +333,12 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
     const nowIso = new Date().toISOString();
     const was = (before[k] && typeof before[k] === 'object') ? before[k] : null;
     const stamp = (t, had, hadAt) => (t && had === t && hadAt) ? hadAt : (t ? nowIso : '');
-    out[k] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB',
+    /* Arrived is present. Wanting both times before it counts as a day meant
+       somebody who marked their arrival at ten to ten sat there reading
+       "Absent" in red until the evening - on their own page and on the
+       office's. A day with a time on it is a day they were here; the duration
+       simply waits for the other half. */
+    out[k] = { 'in': tin, out: tout, st: (tin || tout) ? 'PR' : 'AB',
                by: 'self', at: nowIso,
                inAt: stamp(tin, was && was['in'], was && was.inAt),
                outAt: stamp(tout, was && was.out, was && was.outAt) };

@@ -2509,7 +2509,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-cell .ecd i{ flex:none; width:18px; font-style:normal; font-size:8px;
   font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--ink-soft); opacity:.8; }
 .emp-cal-cell .ecd b{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:500;
-  white-space:nowrap; }
+  white-space:nowrap; color:var(--ink-soft); opacity:.8; }
 /* The brace gathers the two times into the figure beside them. Stretched
    rather than drawn: one glyph, and it keeps the typeface's own shape. */
 /* The brace and the figure travel together: on a narrow column the pair wraps
@@ -2522,8 +2522,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
   white-space:nowrap; }
 
 .emp-cal-cell .ecd-dur b{ display:block; font-family:'IBM Plex Mono',monospace;
-  font-size:11px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--ink);
-  white-space:nowrap; }
+  font-size:11px; font-weight:500; letter-spacing:0; text-transform:none;
+  color:var(--ink-soft); opacity:.8; white-space:nowrap; }
 /* What the corner letter means, in words. */
 /* What the corner letter means sits to its left, in the same row - the two
    are one statement, and reading "L" and then hunting for the minutes is the
@@ -8790,7 +8790,7 @@ function buildExcelBackup(){
     var rec = recIndex[key] || null;               // what the readers recorded
     var tin = req.punchIn || (rec && rec['in']) || '';
     var tout = req.punchOut || (rec && rec.out) || '';
-    manualRecords[key] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB', reqId: req.id };
+    manualRecords[key] = { 'in': tin, out: tout, st: (tin || tout) ? 'PR' : 'AB', reqId: req.id };
     return saveManualRecords();
   }
   function applyApprovedRequestToAttendance(req){
@@ -10508,7 +10508,11 @@ function buildExcelBackup(){
         'in': manual['in']||'', out: manual.out||'',
         dur: durMin!==null ? fmtMin(durMin) : '',
         late:'', early:'',
-        st: manual.st || (manual['in'] && manual.out ? 'PR' : 'AB'),
+        /* One time is enough to have been here. Both were wanted, so a morning
+           with no out time yet read as Absent all day - and days saved while
+           that was true still carry the 'AB' on them, so a stored Absent with
+           a time against it is overruled rather than believed. */
+        st: (manual['in'] || manual.out) ? 'PR' : (manual.st || 'AB'),
         c: 0,
         manual: true
       };
@@ -17177,7 +17181,7 @@ function buildExcelBackup(){
           return;
         }
         var key = emp+'|'+dateStr;
-        manualRecords[key] = {'in':inVal, out:outVal, st: (inVal && outVal) ? 'PR' : 'AB'};
+        manualRecords[key] = {'in':inVal, out:outVal, st: (inVal || outVal) ? 'PR' : 'AB'};
         saveManualRecords().then(function(){ refreshActivePage(); closeModal(); });
       });
     }
@@ -17997,10 +18001,12 @@ function buildExcelBackup(){
      lateness, so one given here waits for the office - it says so, and the
      minutes go on counting until somebody accepts it. */
   var DAY_CARD_DAY = null;              // null means today
+  /* Today, and only today. Yesterday was open here as well; it is shut because
+     a day somebody can still go back and fill in is a day that can be written
+     to suit the week it turned out to be. The server refuses the rest anyway,
+     so this is the two of them agreeing rather than the page being polite. */
   function empDayWindow(){
-    var back = new Date(todayISO_full + 'T00:00:00');
-    back.setDate(back.getDate() - 1);
-    return [todayISO_full, isoOf(back)];
+    return [todayISO_full];
   }
   function renderEmpDayCard(){
     var box = document.getElementById('empDayCard');
@@ -18025,10 +18031,12 @@ function buildExcelBackup(){
     if(!mine && !isLate){ box.style.display = 'none'; box.innerHTML = ''; return; }
     box.style.display = '';
 
-    var dayBtns = days.map(function(d, i){
+    /* One day to choose from is no choice, and the date is already written
+       beside the title - so nothing is drawn rather than a lone dead chip. */
+    var dayBtns = days.length > 1 ? days.map(function(d, i){
       return '<button type="button" class="month-btn' + (d === day ? ' on' : '') + '" data-ed-day="' + d + '">'
         + (i === 0 ? 'Today' : 'Yesterday') + '</button>';
-    }).join('');
+    }).join('') : '';
 
     var html = '<div class="wl-head">'
       + '<div><b>My attendance</b><span>' + shotEsc(fmtDayLong(day)) + '</span></div>'
@@ -18089,7 +18097,7 @@ function buildExcelBackup(){
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
-                  + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : ''))
+                  + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : '') + '.')
                : 'Nothing marked for this day yet.')
         + (ceiling ? (' Nothing later than ' + shotEsc(fmtTime(ceiling)) + ' — the day is still going.') : '')
         + '</div>';
@@ -18272,7 +18280,7 @@ function buildExcelBackup(){
       var wrong = tell();
       if(wrong === 'future'){ said('That time has not happened yet.', true); return; }
       if(wrong === 'backwards'){ said('The out time is before the in time.', true); return; }
-      manualRecords[name + '|' + day] = { 'in': tin, out: tout, st: (tin && tout) ? 'PR' : 'AB' };
+      manualRecords[name + '|' + day] = { 'in': tin, out: tout, st: (tin || tout) ? 'PR' : 'AB' };
       save.disabled = true;
       saveManualRecords().then(function(){
         said('Saved. The office sees it on the record.');

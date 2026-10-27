@@ -63,6 +63,30 @@ const save = (stored, rec) =>
     && forged[KEY].by === 'self', forged[KEY]);
 }
 
+/* ---- arrived is present ----
+   Both times were wanted before a day counted, so somebody who marked their
+   arrival at ten to ten read "Absent", in red, on their own calendar and on
+   the office's, until they came back in the evening and typed the other half. */
+{
+  const IN = hhmm(Math.max(0, NOW_MIN - 90));
+  const only = save('{}', { 'in': IN, out: '' });
+  check('an in time with no out yet is present, not absent',
+    only[KEY].st === 'PR', only[KEY]);
+  const outOnly = save('{}', { 'in': '', out: hhmm(Math.max(1, NOW_MIN - 5)) });
+  check('and so is an out time on its own', outOnly[KEY].st === 'PR', outOnly[KEY]);
+  check('the page agrees, wherever it writes one',
+    (APP.match(/st: \(tin \|\| tout\) \? 'PR' : 'AB'/g) || []).length >= 1
+      && (APP.match(/st: \(inVal \|\| outVal\) \? 'PR' : 'AB'/g) || []).length >= 1);
+  /* Days saved while that was true still carry the AB on them. */
+  check('and a stored Absent with a time against it is overruled',
+    /st: \(manual\['in'\] \|\| manual\.out\) \? 'PR' : \(manual\.st \|\| 'AB'\),/.test(APP));
+  /* The figures in a day cell read as quietly as the words IN and OUT beside
+     them; they were set in the cell's own dark colour and shouted. */
+  check('the times and the duration are as grey as their labels',
+    /\.emp-cal-cell \.ecd b\{[^}]*color:var\(--ink-soft\); opacity:\.8;/.test(APP)
+      && /\.emp-cal-cell \.ecd-dur b\{[^}]*color:var\(--ink-soft\); opacity:\.8;/.test(APP));
+}
+
 /* ---- what the office is shown ---- */
 {
   check('the page works out the gap from the server’s stamp',
