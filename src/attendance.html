@@ -18073,9 +18073,25 @@ function buildExcelBackup(){
   /* Today, and only today. Yesterday was open here as well; it is shut because
      a day somebody can still go back and fill in is a day that can be written
      to suit the week it turned out to be. The server refuses the rest anyway,
-     so this is the two of them agreeing rather than the page being polite. */
+     so this is the two of them agreeing rather than the page being polite.
+
+     "Today" means the working day, which is not the calendar day for anybody on
+     a night shift: at two in the morning the shift they are standing in started
+     yesterday, and offering them today's date would file the night under the
+     wrong day. So the day turns over at the shift's own start time rather than
+     at midnight. For a day shift the two are the same thing. */
+  function empWorkingDay(){
+    var name = viewRole && viewRole.name;
+    if(!name) return todayISO_full;
+    var sh = parseShift(getShift(name, todayISO_full));
+    if(!sh || !sh.overnight) return todayISO_full;
+    if(toMin(nowHHMM()) >= sh.startMin) return todayISO_full;
+    var back = new Date(todayISO_full + 'T00:00:00');
+    back.setDate(back.getDate() - 1);
+    return isoOf(back);
+  }
   function empDayWindow(){
-    return [todayISO_full];
+    return [empWorkingDay()];
   }
   function renderEmpDayCard(openFor){
     EMP_EDIT = { 'in': openFor === 'in', out: openFor === 'out' };
@@ -18108,8 +18124,11 @@ function buildExcelBackup(){
         + (i === 0 ? 'Today' : 'Yesterday') + '</button>';
     }).join('') : '';
 
+    /* On a night shift the date on this card is deliberately not today's, so
+       it says so rather than looking like a mistake. */
+    var nightDay = (day !== todayISO_full) ? ' · your shift started this day' : '';
     var html = '<div class="wl-head">'
-      + '<div><b>My attendance</b><span>' + shotEsc(fmtDayLong(day)) + '</span></div>'
+      + '<div><b>My attendance</b><span>' + shotEsc(fmtDayLong(day)) + nightDay + '</span></div>'
       + '<div class="wl-nav">' + dayBtns + '</div></div>';
 
     if(mine){

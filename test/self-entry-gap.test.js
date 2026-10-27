@@ -19,9 +19,10 @@ const ctx = { Date, String, Number, Object, Array, JSON, IST_MS: 5.5 * 3600 * 10
 vm.createContext(ctx);
 const lift = re => { const m = re.exec(SRC); if (!m) throw new Error('not found: ' + re); return m[0]; };
 [/function parseJson\(s\) \{[\s\S]*?\n\}/,
- /function ownDays\(\) \{[\s\S]*?\n\}/,
+ /function parseShiftSpan\(str\) \{[\s\S]*?\n\}/,
+ /function ownDays\(shift\) \{[\s\S]*?\n\}/,
  /const TIME_RE = [^\n]*/,
- /function mergeEmployeeManual\(storedValue, incomingValue, name, selfMarkValue\) \{[\s\S]*?\n\}/
+ /function mergeEmployeeManual\(storedValue, incomingValue, name, selfMarkValue, shift\) \{[\s\S]*?\n\}/
 ].forEach(re => vm.runInContext(lift(re), ctx));
 
 const [TODAY] = ctx.ownDays();

@@ -83,6 +83,62 @@ const ok = s => { vm.runInContext('__v = validShift(' + JSON.stringify(s) + ')',
   check('and a fourteen-hour one', ok('6:00-20:00') === false);
 }
 
+/* ---- the server reads a shift the same way the page does ----
+   There are two copies of this rule, because the page is theirs to edit and
+   the server cannot take its word for which day it is writing. Two copies
+   drift, so they are checked against the same table. */
+{
+  const SRV = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const sctx = { isFinite, Number, String };
+  vm.createContext(sctx);
+  const lift = re => { const m = re.exec(SRV); if (!m) throw new Error('not found: ' + re); return m[0]; };
+  vm.runInContext(lift(/function parseShiftSpan\(str\) \{[\s\S]*?\n\}/), sctx);
+  vm.runInContext(lift(/function shiftFor\(assignments, name, day\) \{[\s\S]*?\n\}/), sctx);
+  const srv = s => { vm.runInContext('__r = parseShiftSpan(' + JSON.stringify(s) + ')', sctx); return sctx.__r; };
+
+  ['8:30-5:30', '9:30-6:30', '10:00-7:00', '11:00-8:00', '12:00-9:00', '9:00-17:00',
+   '22:00-6:00', '21:00-5:30', '20:00-4:00', '23:00-7:00', '19:30-4:30'].forEach(slot => {
+    const a = parse(slot), b = srv(slot);
+    check('the two readings of "' + slot + '" agree',
+      a.startMin === b.startMin && a.endMin === b.endMin && !!a.overnight === !!b.overnight,
+      { page: a, server: b });
+  });
+
+  /* Whichever standing shift was in force on the day, not whichever is in
+     force now - a shift changed in October must not re-judge September. */
+  const runs = { Himanshu: [{ from: '2026-01-01', shift: '8:30-5:30' },
+                            { from: '2026-10-01', shift: '22:00-6:00' }] };
+  const at = d => { vm.runInContext('__s = shiftFor(' + JSON.stringify(runs) + ', "Himanshu", ' + JSON.stringify(d) + ')', sctx); return sctx.__s; };
+  check('the shift in force in September is September’s', at('2026-09-20') === '8:30-5:30', at('2026-09-20'));
+  check('and October’s is the night one', at('2026-10-20') === '22:00-6:00', at('2026-10-20'));
+  check('a day before any of them has none', at('2025-12-31') === '', at('2025-12-31'));
+  check('and somebody with no shift set has none', (function () {
+    vm.runInContext('__s = shiftFor({}, "Nobody", "2026-10-20")', sctx); return sctx.__s === '';
+  })());
+}
+
+/* ---- and the day turns over at the shift start, not at midnight ---- */
+{
+  const SRV = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  /* ownDays reads the real clock, so rather than pretend otherwise this checks
+     the rule it applies: before the shift's start, the working day is
+     yesterday's date. */
+  check('the server turns the day over at the shift start',
+    /if \(mins < sh\.startMin\) \{[\s\S]{0,160}- 86400000/.test(SRV));
+  check('and only for a shift that crosses midnight',
+    /if \(sh && sh\.overnight\) \{/.test(SRV));
+  check('the page does the same, from the same reading',
+    /function empWorkingDay\(\)\{[\s\S]{0,420}if\(toMin\(nowHHMM\(\)\) >= sh\.startMin\) return todayISO_full;/.test(APP));
+  check('and says so, the date not being today’s',
+    /your shift started this day/.test(APP));
+  /* The merges all judge it the same way, from one read of the shifts. */
+  check('every merge is given the shift to judge it by',
+    (SRV.match(/const days = ownDays\(shift\);/g) || []).length === 3);
+  check('and the route reads it once for all of them',
+    /let empShift = '';/.test(SRV)
+      && /\['manualRecords', 'overrides', 'lateExcuses'\]\.indexOf\(key\) > -1/.test(SRV));
+}
+
 const bad = results.filter(r => !r).length;
 console.log(bad ? ('SOME FAILED (' + bad + ')') : ('ALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);

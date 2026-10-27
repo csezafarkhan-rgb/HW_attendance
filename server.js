@@ -278,9 +278,56 @@ function mergeEmployeeTasks(storedValue, incomingValue, name) {
    and fill in is a day that can be written to suit the week it ended up being,
    and the office asked for it shut. Anything older, or missed, goes through
    them - which is what the office entry on the day itself is for. */
-function ownDays() {
+/* The same reading of a shift the page does, kept here because the page is
+   theirs to edit and this decides which day they may write. If one of the two
+   is ever changed the other has to move with it; test/night-shift.test.js
+   checks the pair against the same table of slots. */
+function parseShiftSpan(str) {
+  const parts = String(str || '').split('-');
+  if (parts.length < 2) return null;
+  const sp = parts[0].split(':').map(Number);
+  const ep = parts[1].split(':').map(Number);
+  if (!isFinite(sp[0]) || !isFinite(ep[0])) return null;
+  const startMin = sp[0] * 60 + (isFinite(sp[1]) ? sp[1] : 0);
+  const endM = isFinite(ep[1]) ? ep[1] : 0;
+  const asDay = (ep[0] < 12 ? ep[0] + 12 : ep[0]) * 60 + endM;
+  if (asDay > startMin && (asDay - startMin) <= 12 * 60) {
+    return { startMin, endMin: asDay, overnight: false };
+  }
+  let night = ep[0] * 60 + endM;
+  while (night <= startMin) night += 24 * 60;
+  return { startMin, endMin: night, overnight: true };
+}
+/* Whichever standing shift was in force on that day. A one-off shift for a
+   single date is not consulted: it is keyed by the very date being worked out,
+   which would be circular. */
+function shiftFor(assignments, name, day) {
+  const runs = (assignments && assignments[name]) || null;
+  if (!Array.isArray(runs)) return '';
+  let best = null;
+  runs.forEach(r => {
+    if (!r || !r.from || r.from > day) return;
+    if (!best || r.from >= best.from) best = r;
+  });
+  return best ? String(best.shift || '') : '';
+}
+/* The day somebody may write: the working day, and only that one.
+
+   Not the calendar day for anybody on a night shift - at two in the morning
+   the shift they are standing in started yesterday, and today's date would
+   file the night under the wrong day. The day turns over at the shift's own
+   start time instead of at midnight; for a day shift the two are the same. */
+function ownDays(shift) {
   const now = new Date(Date.now() + IST_MS);
-  return [now.toISOString().slice(0, 10)];
+  const today = now.toISOString().slice(0, 10);
+  const sh = parseShiftSpan(shift);
+  if (sh && sh.overnight) {
+    const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+    if (mins < sh.startMin) {
+      return [new Date(now.getTime() - 86400000).toISOString().slice(0, 10)];
+    }
+  }
+  return [today];
 }
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
@@ -291,14 +338,14 @@ const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
    neither reach another person's day nor an older one of their own. The office
    can still type over any of it afterwards - an entry says it came from the
    person, and that is all it claims. */
-function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
+function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue, shift) {
   const incoming = parseJson(incomingValue);
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
   const marked = parseJson(selfMarkValue);
   if (!marked || marked[name] !== true) return false;      // not one of theirs to mark
   const parsed = parseJson(storedValue);
   const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  const days = ownDays();
+  const days = ownDays(shift);
   const mine = k => {
     const i = String(k).lastIndexOf('|');
     return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
@@ -358,14 +405,14 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue) {
    that did not come from the person themselves is left exactly as it is. */
 const VISIT_DETAIL_MAX = 40;
 const VISIT_REASON_MAX = 200;
-function mergeEmployeeVisit(storedValue, incomingValue, name, selfMarkValue) {
+function mergeEmployeeVisit(storedValue, incomingValue, name, selfMarkValue, shift) {
   const incoming = parseJson(incomingValue);
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
   const marked = parseJson(selfMarkValue);
   if (!marked || marked[name] !== true) return false;
   const parsed = parseJson(storedValue);
   const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  const days = ownDays();
+  const days = ownDays(shift);
   const mine = k => {
     const i = String(k).lastIndexOf('|');
     return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
@@ -404,12 +451,12 @@ function mergeEmployeeVisit(storedValue, incomingValue, name, selfMarkValue) {
    entry the office has already accepted is left untouched - otherwise writing
    a new reason over it would quietly un-accept it. */
 const EXCUSE_MAX = 300;
-function mergeEmployeeExcuses(storedValue, incomingValue, name) {
+function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
   const incoming = parseJson(incomingValue);
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
   const parsed = parseJson(storedValue);
   const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  const days = ownDays();
+  const days = ownDays(shift);
   const mine = k => {
     const i = String(k).lastIndexOf('|');
     return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
@@ -1114,6 +1161,19 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         'SELECT value, version FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE',
         [req.session.orgId, key]);
       const row = cur.rows[0];
+      /* Which day is theirs to write depends on their shift: a night shift's
+         day turns over at its own start, not at midnight. Read here so the
+         three merges below all judge it the same way. */
+      let empShift = '';
+      if (req.session.role === 'employee'
+          && ['manualRecords', 'overrides', 'lateExcuses'].indexOf(key) > -1) {
+        const sa = await client.query(
+          "SELECT value FROM kv WHERE org_id = $1 AND key = 'shiftAssignments' AND user_id IS NULL",
+          [req.session.orgId]);
+        empShift = shiftFor(parseJson(sa.rows[0] ? sa.rows[0].value : '{}'),
+                            (req.user && req.user.name) || '',
+                            new Date(Date.now() + IST_MS).toISOString().slice(0, 10));
+      }
       if (key === 'dailyTasks' && req.session.role === 'employee') {
         const merged = mergeEmployeeTasks(row ? row.value : '{}', value, (req.user && req.user.name) || '');
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_tasks' }); }
@@ -1124,7 +1184,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
           [req.session.orgId]);
         const merged = mergeEmployeeManual(row ? row.value : '{}', value,
                                            (req.user && req.user.name) || '',
-                                           mark.rows[0] ? mark.rows[0].value : '{}');
+                                           mark.rows[0] ? mark.rows[0].value : '{}', empShift);
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_times' }); }
         if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
         value = merged;
@@ -1134,13 +1194,13 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
           [req.session.orgId]);
         const merged = mergeEmployeeVisit(row ? row.value : '{}', value,
                                           (req.user && req.user.name) || '',
-                                          mark.rows[0] ? mark.rows[0].value : '{}');
+                                          mark.rows[0] ? mark.rows[0].value : '{}', empShift);
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_visit' }); }
         if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
         value = merged;
       } else if (key === 'lateExcuses' && req.session.role === 'employee') {
         const merged = mergeEmployeeExcuses(row ? row.value : '{}', value,
-                                            (req.user && req.user.name) || '');
+                                            (req.user && req.user.name) || '', empShift);
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_excuse' }); }
         value = merged;
       } else if (key === 'leaveRequests') {

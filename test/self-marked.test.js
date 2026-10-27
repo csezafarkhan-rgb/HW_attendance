@@ -17,14 +17,15 @@ const ctx = { Date, String, Number, Object, Array, JSON, IST_MS: 5.5 * 3600 * 10
 vm.createContext(ctx);
 const lift = re => { const m = re.exec(SRC); if (!m) throw new Error('not found: ' + re); return m[0]; };
 [/function parseJson\(s\) \{[\s\S]*?\n\}/,
- /function ownDays\(\) \{[\s\S]*?\n\}/,
+ /function parseShiftSpan\(str\) \{[\s\S]*?\n\}/,
+ /function ownDays\(shift\) \{[\s\S]*?\n\}/,
  /const TIME_RE = [^\n]*/,
  /const EXCUSE_MAX = [^\n]*/,
- /function mergeEmployeeManual\(storedValue, incomingValue, name, selfMarkValue\) \{[\s\S]*?\n\}/,
- /function mergeEmployeeExcuses\(storedValue, incomingValue, name\) \{[\s\S]*?\n\}/,
+ /function mergeEmployeeManual\(storedValue, incomingValue, name, selfMarkValue, shift\) \{[\s\S]*?\n\}/,
+ /function mergeEmployeeExcuses\(storedValue, incomingValue, name, shift\) \{[\s\S]*?\n\}/,
  /const VISIT_DETAIL_MAX = [^\n]*/,
  /const VISIT_REASON_MAX = [^\n]*/,
- /function mergeEmployeeVisit\(storedValue, incomingValue, name, selfMarkValue\) \{[\s\S]*?\n\}/
+ /function mergeEmployeeVisit\(storedValue, incomingValue, name, selfMarkValue, shift\) \{[\s\S]*?\n\}/
 ].forEach(re => vm.runInContext(lift(re), ctx));
 
 const [TODAY] = ctx.ownDays();
@@ -72,7 +73,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('nor yesterday, which is the office’s to enter now',
     Object.keys(out4).length === 0, out4);
   check('and the window the page offers is the same one day',
-    /function empDayWindow\(\)\{[\s\S]{0,400}?return \[todayISO_full\];/.test(
+    /function empDayWindow\(\)\{\s*\n\s*return \[empWorkingDay\(\)\];/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8')));
 }
 
@@ -293,8 +294,12 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
                          APP.indexOf('function renderEmployeeCalendar()'));
   check('their page offers in and out only to those marked for it',
     /var mine = marksOwn\(name\);/.test(card) && /if\(!mine && !isLate\)/.test(card), card.slice(0, 80));
-  check('and only for today',
-    /function empDayWindow\(\)\{[\s\S]{0,400}?return \[todayISO_full\];/.test(APP)
+  /* One day, and it is the working day: on a night shift that is the day the
+     shift started, not the date on the calendar, or a shift worked through
+     midnight would be filed under the morning it happened to end in. */
+  check('and only for the one working day',
+    /function empDayWindow\(\)\{\s*\n\s*return \[empWorkingDay\(\)\];/.test(APP)
+      && /function empWorkingDay\(\)\{/.test(APP)
       && !/setDate\(back\.getDate\(\) - 1\)/.test(card));
   /* One day to choose from is no choice, and the date is written beside the
      title already - so no lone dead chip where the pair used to be. */
