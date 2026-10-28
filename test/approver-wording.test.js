@@ -128,16 +128,26 @@ function grab(src, name) {
     wire.indexOf('if(!e.target || !document.contains(e.target)) return;') > -1);
   check('a click inside the panel, or on the button that opened it, leaves it open',
     wire.indexOf('if(dd.contains(e.target) || e.target === btn) return;') > -1);
-  check('and a list inside the panel being open holds it open',
-    wire.indexOf("if(on && on.tagName === 'SELECT' && dd.contains(on)) return;") > -1);
+  check('and a click on a choice in a list belongs to whatever opened it',
+    wire.indexOf('if(inChoiceList(e.target)) return;') > -1);
+  /* The list is drawn at the top of the page rather than inside the panel, so
+     "is it inside the panel" was always false for it. Every panel that shuts
+     on a click from elsewhere had the same trap, including the one that shuts
+     all of them at once - so the rule is written once and read by each. */
+  check('the rule is written once',
+    (APP.match(/function inChoiceList\(t\)\{/g) || []).length === 1);
+  check('and it names the list the page actually draws',
+    APP.indexOf("t.closest('.selx-pop')") > -1);
+  check('the panel that shuts all the others reads it first of all',
+    APP.indexOf('if(inChoiceList(t)) return;') > -1
+    && APP.indexOf('if(inChoiceList(t)) return;') < APP.indexOf("var inside = t.closest('.month-dropdown');"));
+  check('and every panel with a closer of its own reads it too',
+    (APP.match(/if\(inChoiceList\(e\.target\)\) return;/g) || []).length >= 5,
+    (APP.match(/if\(inChoiceList\(e\.target\)\) return;/g) || []).length);
   check('the blanket close is gone',
     wire.indexOf("document.addEventListener('click', function(){ dd.classList.remove('open'); });") === -1);
   /* Holding it open on a focused list would hold it open for good; the box
      lets go of the focus as soon as a name is picked. */
-  check('picking a name lets go of the focus, so an outside click closes again',
-    APP.indexOf('pick.onchange = function(){') > -1 && APP.indexOf('pick.blur();') > -1);
-  check('and so does picking an approver',
-    APP.indexOf('if(sel) sel.onchange = function(){') > -1 && APP.indexOf('sel.blur();') > -1);
 }
 
 /* ---- where it sits, and what it calls people ---- */

@@ -8124,6 +8124,7 @@ function buildExcelBackup(){
       if(opening){ renderImportFolder(); dd.classList.add('open'); }
     });
     document.addEventListener('click', function(e){
+      if(inChoiceList(e.target)) return;
       if(!dd.contains(e.target) && e.target !== btn) dd.classList.remove('open');
     });
     var up = document.getElementById('updUploadOpt');
@@ -11027,6 +11028,7 @@ function buildExcelBackup(){
     }
   });
   document.addEventListener('click', function(e){
+    if(inChoiceList(e.target)) return;
     if(!monthDropdown.contains(e.target) && e.target!==monthBtn) monthDropdown.classList.remove('open');
   });
 
@@ -11039,9 +11041,16 @@ function buildExcelBackup(){
 
      The panel's own button is left alone so its toggle still closes it, and a
      click inside an open panel is a click on its contents, not a dismissal. */
+  /* A dropdown draws its list of choices at the top of the page, outside the
+     panel the box itself sits in, so a click on a choice had nothing above it
+     to say where it came from - and every panel that shuts on a click from
+     elsewhere shut, with the person mid-edit in one of them. A click on a
+     choice belongs to whatever opened the list; the list closes itself. */
+  function inChoiceList(t){ return !!(t && t.closest && t.closest('.selx-pop')); }
   document.addEventListener('click', function(e){
     var t = e.target;
     if(!t || !t.closest) return;
+    if(inChoiceList(t)) return;
     var inside = t.closest('.month-dropdown');
     var onBtn = t.closest('.month-btn, .status-btn, #emailBtn, #statusBtn');
     document.querySelectorAll('.month-dropdown.open').forEach(function(dd){
@@ -11320,6 +11329,7 @@ function buildExcelBackup(){
       if(opening){ dd.classList.add('open'); positionDropdown(btn, dd); }
     });
     document.addEventListener('click', function(e){
+      if(inChoiceList(e.target)) return;
       if(!dd.contains(e.target) && e.target !== btn) dd.classList.remove('open');
     });
   })();
@@ -12067,7 +12077,6 @@ function buildExcelBackup(){
       var other = document.getElementById('emLvWhoOther');
       var intro = document.getElementById('emLvWhoIntro');
       if(sel) sel.onchange = function(){
-        sel.blur();
         var v = sel.value;
         if(v === '__other'){
           if(other){ other.parentNode.style.display = ''; other.focus(); }
@@ -12105,7 +12114,6 @@ function buildExcelBackup(){
       var pick = document.getElementById('emLvWho');
       if(!pick) return;
       pick.onchange = function(){
-        pick.blur();                  // the list is shut; an outside click may close the panel again
         if(!APPROVER_LIST){
           ensureApproverChoices().then(function(){ lvWhoRender(pick.value); });
           return;
@@ -12623,8 +12631,7 @@ function buildExcelBackup(){
     document.addEventListener('click', function(e){
       if(!e.target || !document.contains(e.target)) return;
       if(dd.contains(e.target) || e.target === btn) return;
-      var on = document.activeElement;
-      if(on && on.tagName === 'SELECT' && dd.contains(on)) return;
+      if(inChoiceList(e.target)) return;
       dd.classList.remove('open');
     });
   })();
@@ -15321,6 +15328,7 @@ function buildExcelBackup(){
     // clicked. contains() then reports "outside" and the panel closed itself
     // mid-edit. A node no longer in the document tells us nothing - ignore it.
     if(!e.target || !document.contains(e.target)) return;
+    if(inChoiceList(e.target)) return;
     if(!empDropdown.contains(e.target) && e.target!==empBtn) empDropdown.classList.remove('open');
     if(!shiftDropdown.contains(e.target) && e.target!==shiftBtn) shiftDropdown.classList.remove('open');
     if(!orderDropdown.contains(e.target) && e.target!==orderBtn) orderDropdown.classList.remove('open');
