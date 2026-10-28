@@ -428,6 +428,33 @@ const check = (name, ok, got) => {
   check('there is a button for it too, for whoever reaches for the mouse',
     /data-wl-sub/.test(card));
 
+  /* Where that button is, and whether anyone can see it. It used to be a faint
+     arrow at the far right of the row, shown only under the pointer: no way to
+     make a sub-point on a phone, and nothing on a laptop to say there was one.
+     It is the bullet now - the mark it changes, on the side the shape of the
+     list is read from. */
+  check('the bullet itself is the control',
+    /class="wl-dot wl-dot-btn" data-wl-sub=/.test(card));
+  check('and it is the first thing in the row, not the last',
+    card.indexOf('data-wl-sub') < card.indexOf('class="wl-in"'));
+  check('the hover-only arrow at the far end is gone',
+    card.indexOf('wl-sub-btn') === -1 && app.indexOf('.wl-sub-btn') === -1);
+  check('it is always there to be seen, not only under the pointer',
+    !/\.wl-row:hover \.wl-dot-btn/.test(app) && /\.wl-dot-btn\{[^}]*cursor:pointer/.test(app));
+  check('with something under the pointer to say it does anything',
+    /\.wl-dot-btn:hover\{/.test(app) && /\.wl-dot-btn:focus-visible\{/.test(app));
+  /* The first line has nothing above it, so its bullet is a bullet. */
+  check('the line with nothing above it keeps a plain mark',
+    /: '<span class="wl-dot">\\u2022<\/span>'/.test(card));
+  /* What it offers has to follow what it did. */
+  check('the mark and what it offers change together',
+    /dot\.textContent = lvl \? '\\u21B3' : '\\u2022';/.test(card)
+    && /dot\.title = lvl \? WL_OUT : WL_IN;/.test(card));
+  check('and both readings are written once, so they cannot drift apart',
+    (card.match(/WL_IN =/g) || []).length === 1 && (card.match(/WL_OUT =/g) || []).length === 1);
+  check('the card says the bullet can be clicked, rather than only naming a key',
+    /click a bullet \(or press Tab\)/.test(card) && /Click a bullet/.test(card));
+
   /* The arrow that cannot move says why, rather than looking broken. */
   check('the forward arrow says tomorrow has not happened',
     /Tomorrow has not happened yet/.test(card));

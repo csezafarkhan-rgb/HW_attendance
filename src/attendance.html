@@ -2978,10 +2978,27 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .wl-sub{ padding-left:26px; }
 .wl-sub .wl-dot{ font-size:12px; opacity:.75; }
 .wl-sub .wl-in{ font-size:12.5px; }
-.wl-sub-btn{ flex:none; border:none; background:transparent; color:var(--ink-soft);
-  opacity:.25; font-size:12px; cursor:pointer; border-radius:6px; padding:2px 5px; }
-.wl-row:hover .wl-sub-btn{ opacity:.7; }
-.wl-sub-btn:hover{ background:#EEF3FA; color:var(--ink); opacity:1; }
+/* A glyph on its own, with no word beside it to give it size: at the row's own
+   size it sat well under the bell next to it and read as something minor.
+   Bigger text, less padding, so the button keeps the height of its
+   neighbours - and said here rather than on the button itself, because a
+   later rule sets a size on every .month-btn with !important and an inline
+   style loses to it. By name, so it carries further than that rule does. */
+#empCalOptsBtn{ font-size:17px !important; padding:5px 10px !important; line-height:1.15; }
+/* The bullet, where it can be clicked: a mark first and a button second, so
+   the list still reads as a list, with enough of a target to hit on a phone
+   and something under the pointer to say it does anything. */
+/* The first line has nothing above it, so its bullet is a plain mark and not a
+   button - but it has to stand in the same place as the ones that are, or the
+   boxes beside them step in and out down the list. Both get the box; only one
+   of them does anything. */
+.wl-dot{ border:1px solid transparent; border-radius:6px; padding:3px 6px;
+  margin-left:-6px; text-align:center; min-width:13px; }
+.wl-dot-btn{ background:transparent; font:inherit; color:var(--ink-soft);
+  font-size:15px; line-height:1; flex:none; cursor:pointer; }
+.wl-dot-btn:hover{ background:#EEF3FA; border-color:#CBD9EC; color:var(--ink); }
+.wl-dot-btn:focus-visible{ outline:2px solid #7FB0E8; outline-offset:1px; }
+.wl-sub .wl-dot-btn{ font-size:13px; }
 /* Dark green, with the words in white over it. The pale version read as part
    of the page and was missed; this one is plainly a notice, and every piece of
    text on it clears 7:1 against the background. */
@@ -3972,8 +3989,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="modal-close" id="requestModalClose">✕</button>
     </div>
     <div class="modal-body">
-      <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/></div>
-      <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/></div>
+      <!-- What is being asked for comes before when. It decides what the rest
+           of the form is: a half day closes the To box, a forgotten punch
+           swaps the day-back question for two times. Asked after the dates,
+           it rewrote boxes that had already been filled in. -->
       <div class="gate-field"><label>Request type</label>
         <select id="reqLeaveType">
           <option value="CL">Casual Leave (CL)</option>
@@ -3986,6 +4005,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
           <option value="PUNCH">Forgot to punch (correct my time)</option>
         </select>
       </div>
+      <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/></div>
+      <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/></div>
       <div class="gate-field" id="reqPunchWrap" style="display:none;">
         <label>The time you actually came in or left</label>
         <div style="display:flex;gap:10px;">
@@ -11135,6 +11156,10 @@ function buildExcelBackup(){
     var day = TASK_DAY || todayISO_full;
     var mine = getTasks(TASK_WHO, day);
     var isToday = day === todayISO_full;
+    /* Said in one place, because the bullet carries it before it is clicked
+       and after, and the two have to agree. */
+    var WL_IN = 'Tuck this under the line above';
+    var WL_OUT = 'Bring this back out to a line of its own';
     /* A blank line at the end, so there is always somewhere to type. */
     var lines = mine.slice();
     lines.push('');
@@ -11159,25 +11184,34 @@ function buildExcelBackup(){
             /* The first line has nothing to sit under, so it is never offered
                the chance to become a sub-point of nothing. */
             var canIndent = i > 0;
+            /* The bullet is the control. It was a faint arrow at the far right
+               of the row that only appeared under the pointer, so on a phone
+               there was no way to make a sub-point at all and on a laptop
+               nothing said there was one - the card said "Tab tucks a line
+               under the one above" and that was the whole of it.
+
+               It sits on the left because that is where the shape of the list
+               is read, and it is the mark it changes: click the dot and the
+               line steps in under the one above, click the arrow and it comes
+               back out. */
             return '<div class="wl-row' + (lvl ? ' wl-sub' : '') + '" data-wl-lvl="' + lvl + '">'
-              + '<span class="wl-dot">' + (lvl ? '\u21B3' : '\u2022') + '</span>'
+              + (canIndent
+                  ? ('<button type="button" class="wl-dot wl-dot-btn" data-wl-sub="' + i + '" title="'
+                     + (lvl ? WL_OUT : WL_IN) + '">' + (lvl ? '\u21B3' : '\u2022') + '</button>')
+                  : '<span class="wl-dot">\u2022</span>')
               + '<input class="wl-in" data-wl-i="' + i + '" value="' + shotEsc(txt).replace(/"/g, '&quot;') + '"'
               + ' placeholder="' + (i === 0 ? 'What did you work on?'
                                     : (lvl ? 'More on the line above\u2026' : 'Another one\u2026')) + '"'
               + ' maxlength="300">'
-              + (canIndent
-                  ? ('<button type="button" class="wl-sub-btn" data-wl-sub="' + i + '" title="'
-                     + (lvl ? 'Make this a line of its own' : 'Tuck this under the line above')
-                     + '">' + (lvl ? '\u2191' : '\u21B3') + '</button>')
-                  : '')
               + (txt ? '<button type="button" class="wl-x" data-wl-del="' + i + '" title="Take this line out">\u00d7</button>' : '')
               + '</div>';
           }).join('')
       + '</div>'
       + '<div class="wl-foot">' + (mine.length
           ? (mine.length + (mine.length === 1 ? ' line' : ' lines')
-             + ' \u00b7 saved \u00b7 Tab tucks a line under the one above')
-          : 'One line a job \u2014 Tab tucks a line under the one above. It saves itself as you type.')
+             + ' \u00b7 saved \u00b7 click a bullet (or press Tab) to tuck a line under the one above')
+          : 'One line a job. Click a bullet \u2014 or press Tab \u2014 to tuck a line under the one '
+            + 'above it. It saves itself as you type.')
       + '</div>';
 
     var rowOf = function(el){
@@ -11196,18 +11230,17 @@ function buildExcelBackup(){
     };
     /* Moved in or out where it stands, without redrawing the card: a redraw
        here would take the cursor out from under the hand mid-sentence. */
-    var setLevel = function(el, lvl){
-      var r = rowOf(el); if(!r) return;
+    var markRow = function(r, lvl){
+      if(!r) return;
       r.setAttribute('data-wl-lvl', lvl ? '1' : '0');
-      if(lvl) r.className = 'wl-row wl-sub'; else r.className = 'wl-row';
+      r.className = lvl ? 'wl-row wl-sub' : 'wl-row';
       var dot = r.querySelector('.wl-dot');
-      if(dot) dot.textContent = lvl ? '\u21B3' : '\u2022';
-      var b = r.querySelector('[data-wl-sub]');
-      if(b){
-        b.textContent = lvl ? '\u2191' : '\u21B3';
-        b.title = lvl ? 'Make this a line of its own' : 'Tuck this under the line above';
-      }
+      if(!dot) return;
+      dot.textContent = lvl ? '\u21B3' : '\u2022';
+      /* The mark is the button, so what it offers next changes with it. */
+      if(dot.tagName === 'BUTTON') dot.title = lvl ? WL_OUT : WL_IN;
     };
+    var setLevel = function(el, lvl){ markRow(rowOf(el), lvl); };
     var foot = box.querySelector('.wl-foot');
     var says = function(text){ if(foot) foot.textContent = text; };
     var written = function(items){
@@ -11270,13 +11303,7 @@ function buildExcelBackup(){
           var ins = document.querySelectorAll('#empTasksCard .wl-in');
           var last = ins[ins.length - 1];
           if(last){
-            if(TASK_NEXT_LVL && ins.length > 1){
-              var r = last.parentNode;
-              r.setAttribute('data-wl-lvl', '1');
-              r.className = 'wl-row wl-sub';
-              var dot = r.querySelector('.wl-dot');
-              if(dot) dot.textContent = '\u21B3';
-            }
+            if(TASK_NEXT_LVL && ins.length > 1) markRow(last.parentNode, 1);
             last.focus();
           }
           TASK_NEXT_LVL = 0;

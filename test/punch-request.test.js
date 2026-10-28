@@ -42,6 +42,27 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   const kept = await ctx.revertApprovedRequest(req2);
   check("and undoing the request leaves the hand entry", !!ctx.manualRecords['Ravi|2026-09-11'] && kept === 1, kept);
 
+  /* ---- the order the form asks in ----
+     What is being asked for decides what the rest of the form is: a part-day
+     closes the To box and copies the From date into it, a forgotten punch
+     takes the day-back question away and puts two times in its place. Asked
+     last, it rewrote boxes that had already been filled in. */
+  {
+    const form = src.slice(src.indexOf('id="requestModalOverlay"'), src.indexOf('id="modalOverlay"'));
+    const at = s => form.indexOf(s);
+    check('the form asks what before it asks when',
+      at('id="reqLeaveType"') < at('id="reqDateFrom"')
+      && at('id="reqDateFrom"') < at('id="reqDateTo"'),
+      { type: at('id="reqLeaveType"'), from: at('id="reqDateFrom"'), to: at('id="reqDateTo"') });
+    check('and the questions only some kinds ask come after the dates',
+      at('id="reqDateTo"') < at('id="reqPunchWrap"') && at('id="reqPunchWrap"') < at('id="reqHalfWrap"'));
+    check('the day back and the message still come last',
+      at('id="reqHalfWrap"') < at('id="reqReturnWrap"') && at('id="reqReturnWrap"') < at('id="reqMessage"'));
+    check('every box is still there once, moved rather than copied',
+      ['reqLeaveType', 'reqDateFrom', 'reqDateTo', 'reqReturn', 'reqMessage']
+        .every(id => (form.match(new RegExp('id="' + id + '"', 'g')) || []).length === 1));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();
