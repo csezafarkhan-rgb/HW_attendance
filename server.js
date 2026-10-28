@@ -2078,9 +2078,19 @@ async function buildDailyEmail(orgId, day, opts) {
     const start = shiftStartMin(todayShift || usual || '9:30-6:30');
     const came = hhmmToMinutes(rec['in']);
     if (came != null && start != null && came - start > threshold) {
+      /* A reason the person gave for themselves is waiting on the office. It
+         changes nothing yet - the minutes still count, here and on the screen -
+         but it was typed into a box that told nobody, so a day could be
+         answered for and never read. The message carries it in their words,
+         which is where the office already looks every evening. */
+      const said = allExcuses[key];
+      const plea = (said && typeof said === 'object' && said.pending === true
+                    && String(said.note || '').trim()) ? String(said.note).trim() : '';
       late.push({ name: shown,
                   detail: 'in ' + mailer.clock(rec['in']) + ' (' + mailer.minsSaid(came - start) + ' late)'
-                        + (excuses[key] ? ' \u2014 excused' : '') });
+                        + (excuses[key] ? ' \u2014 excused'
+                           : (plea ? (' \u2014 reason waiting: \u201c'
+                                      + plea.slice(0, 160) + '\u201d') : '')) });
       /* So the card can mark the hour they came in. An excused lateness has
          been answered for already and is left alone. */
       if (rows[i] && !excuses[key]) { rows[i].late = came - start; }
