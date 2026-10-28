@@ -3474,6 +3474,151 @@ async function sendTasksOnce(orgId, day, settings) {
   if (!r.ok || r.nothing) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
   return r;
 }
+/* ---- DeskTime ----
+   A second record of the same days, made by a different instrument: the card
+   reader says somebody was here, DeskTime says their computer woke and how
+   long it was in use. The dashboard sets them side by side; this is how the
+   second one arrives without anybody typing it.
+
+   The key belongs to the DeskTime account owner, so it is read from the
+   environment first - where a secret belongs - and from a shared key only as
+   a fallback, for an office that would rather paste it into the panel than
+   wait for a deploy. With neither, nothing here runs and nothing breaks. */
+const DESKTIME_API = 'https://desktime.com/api/v2/json/employees';
+async function deskTimeKeyOf(orgId) {
+  const env = String(process.env.DESKTIME_API_KEY || '').trim();
+  if (env) return env;
+  const kv = await sharedKeys(orgId, ['deskTimeKey']);
+  return String(kv.deskTimeKey || '').trim();
+}
+/* "2026-10-28 09:34:12", "09:34:12" and "9:34 AM" all mean the same moment. */
+function dtClock(v) {
+  const s = String(v == null ? '' : v);
+  const m = /(\d{1,2}):(\d{2})/.exec(s);
+  if (!m) return '';
+  let h = Number(m[1]);
+  if (/pm/i.test(s) && h < 12) h += 12;
+  if (/am/i.test(s) && h === 12) h = 0;
+  return ('0' + h).slice(-2) + ':' + m[2];
+}
+/* Durations come as a count of seconds. A number small enough to be minutes is
+   taken as minutes rather than as a few seconds at a desk, because the one
+   reading that is certainly wrong is the one that turns a working day into a
+   rounding error. */
+function dtMinutes(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n <= 0) return 0;
+  return n > 1440 ? Math.round(n / 60) : Math.round(n);
+}
+/* DeskTime keeps its own roll of names, and they are not the record's names.
+   Only the ones that differ are mapped; anything unmapped stands as it is, so
+   a new person shows up under whatever DeskTime calls them rather than
+   vanishing. */
+function dtNameOf(map, raw) {
+  const k = String(raw || '').trim();
+  if (!k) return '';
+  const hit = (map || {})[k] !== undefined ? map[k] : map[k.toLowerCase()];
+  return String(hit === undefined || hit === null || hit === '' ? k : hit);
+}
+/* One day, read from DeskTime and folded into what is already stored. Never
+   throws: a pull that fails says so and leaves the record as it was. */
+async function pullDeskTime(orgId, day) {
+  if (!DAY_RE.test(String(day || ''))) return { ok: false, error: 'bad_day' };
+  const key = await deskTimeKeyOf(orgId);
+  if (!key) return { ok: false, error: 'no_key' };
+  let body = null, status = 0, text = '';
+  try {
+    const r = await fetch(DESKTIME_API + '?apiKey=' + encodeURIComponent(key)
+                          + '&date=' + encodeURIComponent(day),
+                          { headers: { Accept: 'application/json' } });
+    status = r.status;
+    text = await r.text();
+    try { body = JSON.parse(text); } catch (e) { body = null; }
+  } catch (e) {
+    return { ok: false, error: 'unreachable', detail: (e && e.message) || '' };
+  }
+  if (!body || typeof body !== 'object') return { ok: false, error: 'not_json', status, said: text.slice(0, 200) };
+  if (body.error) return { ok: false, error: 'desktime_said', status, said: String(body.error).slice(0, 200) };
+  const raw = body.employees;
+  const list = Array.isArray(raw) ? raw
+             : (raw && typeof raw === 'object') ? Object.keys(raw).map(k => raw[k])
+             : [];
+  /* What the first record actually carried, reported back with the result.
+     The field names here are DeskTime's and cannot be checked against a live
+     account until there is a key; this is how they get checked in one look
+     rather than by guesswork. */
+  const fields = list[0] && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 25) : [];
+  const kv = await sharedKeys(orgId, ['deskTime', 'deskTimeNames']);
+  const store = parseJson(kv.deskTime) || {};
+  const names = parseJson(kv.deskTimeNames) || {};
+  let wrote = 0;
+  list.forEach(e => {
+    if (!e || typeof e !== 'object') return;
+    const who = dtNameOf(names, e.name || e.employeeName || e.fullName || '');
+    const arrived = dtClock(e.arrivedTime || e.arrived || e.arrive_time || e.startTime);
+    if (!who || !arrived) return;                       // nothing was tracked
+    store[who + '|' + day] = {
+      i: arrived,
+      o: dtClock(e.leftTime || e.left || e.left_time || e.endTime),
+      w: dtMinutes(e.atWorkTime !== undefined ? e.atWorkTime : (e.atWork !== undefined ? e.atWork : e.at_work_time))
+    };
+    wrote++;
+  });
+  if (wrote) {
+    await pool.query(
+      `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'deskTime', $2, NULL)
+       ON CONFLICT (org_id, key) WHERE user_id IS NULL
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
+      [orgId, JSON.stringify(store)]);
+  }
+  return { ok: true, day, wrote, seen: list.length, fields };
+}
+/* Asked for by hand, a day or a stretch of days at a time. A stretch is capped
+   because each day is one call to DeskTime and a careless range would be a
+   month of them in a row. */
+app.post('/api/desktime/pull', requireRole('admin'), async (req, res) => {
+  const b = req.body || {};
+  const from = String(b.from || b.day || '').trim();
+  const to = String(b.to || from).trim();
+  if (!DAY_RE.test(from) || !DAY_RE.test(to) || to < from) return res.status(400).json({ error: 'bad_range' });
+  const days = [];
+  for (let d = new Date(from + 'T00:00:00Z'); days.length < 31; d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    days.push(iso);
+    if (iso >= to) break;
+  }
+  const out = [];
+  for (const day of days) {
+    try { out.push(await pullDeskTime(req.session.orgId, day)); }
+    catch (e) { out.push({ ok: false, day, error: 'threw', detail: (e && e.message) || '' }); }
+  }
+  const wrote = out.reduce((n, r) => n + (r.wrote || 0), 0);
+  res.json({ ok: out.some(r => r.ok), days: out.length, wrote, results: out.slice(0, 5) });
+});
+/* And once a night, for yesterday and for the day that is running - yesterday
+   because a day is only whole once it is over, today because somebody looking
+   in the afternoon should not be looking at nothing. Claimed per day, so two
+   instances of the service do not both go asking. */
+async function deskTimeTick() {
+  const orgs = await pool.query('SELECT id FROM orgs ORDER BY id');
+  const { day } = istParts();
+  const before = new Date(new Date(day + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
+  for (const org of orgs.rows) {
+    try {
+      if (!(await deskTimeKeyOf(org.id))) continue;              // nothing configured: nothing to do
+      await pullDeskTime(org.id, day);                           // today, as often as the tick runs
+      const job = 'desktime-pull:' + org.id + ':' + before;
+      const claimed = await pool.query(
+        'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+      if (!claimed.rows.length) continue;                        // yesterday is already in
+      const r = await pullDeskTime(org.id, before);
+      if (!r.ok) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
+    } catch (e) {
+      console.error('desktime pull:', e && e.message);
+    }
+  }
+}
+
 async function dailyEmailTick() {
   if (!mailer.ready()) return;
   const { day, min } = istParts();
@@ -3830,6 +3975,10 @@ if (require.main === module) {
     // Listen either way: a service that answers is one whose log can be read.
     .finally(() => app.listen(PORT, () => console.log('listening on ' + PORT)));
   setInterval(function () { flushUsage().catch(function () {}); }, 60000).unref();
+  /* Its own tick rather than a passenger on the email one: the two records
+     should sit side by side whether or not this office sends any mail. */
+  setTimeout(function () { deskTimeTick().catch(function () {}); }, 90000).unref();
+  setInterval(function () { deskTimeTick().catch(function () {}); }, DAILY_CHECK_MS).unref();
   if (mailer.ready()) {
     setTimeout(dailyEmailTick, 60000).unref();
     setInterval(dailyEmailTick, DAILY_CHECK_MS).unref();
@@ -3840,4 +3989,4 @@ if (require.main === module) {
 /* dailyEmailTick is exported so the scheduler itself can be tested, rather
    than only the sending it calls. The holiday word going missing was a fault in
    the timing, not in the message. */
-module.exports = { app, pool, dailyEmailTick };
+module.exports = { app, pool, dailyEmailTick, deskTimeTick, pullDeskTime };

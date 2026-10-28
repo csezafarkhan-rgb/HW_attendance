@@ -1,0 +1,13 @@
+{
+  "appId": "net.homeweavers.attendance.admin",
+  "appName": "HW Attendance Admin",
+  "webDir": "www",
+  "server": { "androidScheme": "https", "hostname": "localhost", "cleartext": false },
+  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false },
+  "plugins": {
+    "SystemBars": { "insetsHandling": "css", "style": "LIGHT" },
+    "CapacitorHttp": { "enabled": false },
+    "SplashScreen": { "launchAutoHide": true, "launchShowDuration": 800, "backgroundColor": "#F5F7FB", "androidSplashResourceName": "hw_splash", "showSpinner": false },
+    "StatusBar": { "style": "LIGHT", "backgroundColor": "#F5F7FB" }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "hw-attendance-admin-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Super Admin Android app for Homeweavers Attendance",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "sync": "npm run build && cap sync android && node scripts/configure-android.mjs",
+    "android": "cap open android",
+    "preview": "node scripts/preview.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/share": "8.0.3",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.4",
+    "html2canvas": "1.4.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "esbuild": "0.28.2"
+  }
+}
