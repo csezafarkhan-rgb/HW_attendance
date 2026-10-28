@@ -87,6 +87,15 @@ function grab(src, name) {
      settles it rather than a guess. */
   check('what the records actually carried comes back with the result',
     /const fields = list\[0\][\s\S]{0,120}Object\.keys\(list\[0\]\)/.test(SRV));
+  /* Two durations, and not the same thing: the span from arriving to leaving,
+     and the part of it the computer was in use. The second is what DeskTime's
+     own page leads with and what the office reads as the day's work, so
+     keeping only the first would have answered a question nobody asked. */
+  check('both of DeskTime’s durations are kept, not only the span',
+    /w: dtMinutes\(pick\('atWorkTime'/.test(SRV) && /d: dtMinutes\(pick\('desktimeTime'/.test(SRV));
+  check('and each accepts the spellings it might arrive under',
+    /pick\('atWorkTime', 'atWork', 'at_work_time'/.test(SRV)
+    && /pick\('desktimeTime', 'deskTimeTime', 'desktime_time'/.test(SRV));
   check('several spellings of the same field are accepted',
     /e\.arrivedTime \|\| e\.arrived \|\| e\.arrive_time/.test(SRV)
     && /e\.leftTime \|\| e\.left \|\| e\.left_time/.test(SRV));
@@ -145,7 +154,35 @@ function grab(src, name) {
   check('the two readings of a day are shown side by side, both times and the hours',
     /Marked in<\/th><th>DeskTime in/.test(page)
     && /Marked out<\/th><th>DeskTime out/.test(page)
-    && /Hours marked<\/th><th>At the computer/.test(page));
+    && /Hours marked<\/th><th>At work<\/th><th>DeskTime time/.test(page));
+  check('the figure DeskTime leads with is shown, and said to be the one it leads with',
+    page.indexOf("class=\"dt-desk\"") > -1 && page.indexOf('seen.d') > -1
+    && page.indexOf('the computer was actually in use') > -1);
+  /* A row of dashes in the marked columns is not an accusation: it may be a
+     Sunday, a day of leave, or somebody who simply does not punch. The record's
+     own word for the day sits beside it so it can be read that way. */
+  check('the record’s own word for the day is shown beside it',
+    page.indexOf('The record says') > -1 && page.indexOf('STATUS_LABEL[rec.st]') > -1
+    && page.indexOf('OV_CATS[ov.cat].label') > -1);
+  check('and the hour they were due in, which is what late is measured from',
+    page.indexOf('>Due in<') > -1 && /getShift\(DT_WHO, day\)/.test(page));
+  /* The four durations, which are four different things. */
+  check('the day’s length is given four ways, each said once',
+    /<th class="dt-sep">Hours marked<\/th><th>At work<\/th><th>DeskTime time<\/th>/.test(page)
+    && page.indexOf('<th>Productive</th><th>Idle</th>') > -1);
+  check('idle is the span less the time the computer was in use',
+    page.indexOf('(seen.w - seen.d)') > -1);
+  check('and each is explained, because none of them is obvious',
+    page.indexOf('in applications the office counts as work') > -1
+    && page.indexOf('the span less the') > -1);
+  /* Fourteen columns are four questions. */
+  check('the columns are grouped under what they answer',
+    /colspan="3">The day<[\s\S]{0,200}Arriving[\s\S]{0,120}Leaving[\s\S]{0,140}How long/.test(page));
+  check('with a hairline between the groups, in the header and down the rows',
+    /\.dt-table-cmp \.dt-sep\{ border-left:1px solid/.test(APP)
+    && (page.match(/class="dt-sep"/g) || []).length >= 8);
+  check('and the table scrolls inside the page rather than widening it',
+    page.indexOf('<div class="dt-scroll">') > -1 && /\.dt-scroll\{ overflow-x:auto/.test(APP));
   check('the difference is DeskTime measured from the marked time',
     /function dtGap\(marked, seen\)[\s\S]{0,260}return b - a;/.test(APP));
   check('and is said with a sign, so later and earlier cannot be confused',

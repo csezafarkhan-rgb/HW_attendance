@@ -3016,6 +3016,17 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-table-cmp tr:last-child td{ border-bottom:none; }
 .dt-table-cmp .dt-day{ font-weight:700; }
 .dt-table-cmp .dt-gap{ font-weight:700; color:var(--ink-soft); }
+/* The figure the office reads first, so it is the one that is not grey. */
+.dt-table-cmp .dt-desk{ font-weight:700; }
+/* The hairline between one question and the next. Thin enough to group
+   rather than to divide: four readings of one day, not four tables. */
+.dt-table-cmp .dt-sep{ border-left:1px solid var(--line-dk); }
+.dt-table-cmp tr.dt-grp th{ background:#E8EEF7; color:var(--ink); font-size:10px;
+  border-bottom:1px solid var(--line-dk); text-align:center; padding:5px 10px; }
+.dt-table-cmp .dt-said{ color:var(--ink-soft); }
+/* Fourteen columns do not fit a laptop. The table scrolls inside the page
+   rather than pushing the page sideways. */
+.dt-scroll{ overflow-x:auto; max-width:100%; padding-bottom:4px; }
 /* The day the two records disagree about. Amber rather than red: it is a
    question to ask, not a finding. */
 .dt-table-cmp tr.dt-off{ background:#FFF7E8; }
@@ -14643,16 +14654,35 @@ function buildExcelBackup(){
          no mark against them at all. Not a difference - there is nothing to
          take a difference from - and worth its own count. */
       if(seen && !markedIn) unmarked++;
+      /* What the record itself says the day was, so a row of dashes is read
+         as a Sunday or a day of leave rather than as somebody missing. */
+      var ov = getOverride(DT_WHO, day);
+      var said = (ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].label)
+        || STATUS_LABEL[rec.st] || (rec.st || '—');
+      var due = (getShift(DT_WHO, day) || '').split('-')[0] || '';
+      /* The span from arriving to leaving, less the part the computer was
+         actually in use: a lunch, a meeting, an afternoon the machine sat
+         open on an empty desk. */
+      var idle = (seen && seen.w && seen.d) ? (seen.w - seen.d) : null;
       rows += '<tr' + (late ? ' class="dt-off"' : '') + '>'
         + '<td class="dt-day">' + shotEsc(fmtDayLong(day)) + '</td>'
-        + '<td>' + (markedIn ? shotEsc(fmtTime(markedIn)) : '—') + '</td>'
+        + '<td class="dt-said">' + shotEsc(said) + '</td>'
+        + '<td>' + (due ? shotEsc(fmtTime(due)) : '—') + '</td>'
+        + '<td class="dt-sep">' + (markedIn ? shotEsc(fmtTime(markedIn)) : '—') + '</td>'
         + '<td>' + (seen ? shotEsc(fmtTime(seen.i)) : '—') + '</td>'
         + '<td class="dt-gap">' + (gIn === null ? '' : shotEsc(dtSaid(gIn))) + '</td>'
-        + '<td>' + (markedOut ? shotEsc(fmtTime(markedOut)) : '—') + '</td>'
+        + '<td class="dt-sep">' + (markedOut ? shotEsc(fmtTime(markedOut)) : '—') + '</td>'
         + '<td>' + ((seen && seen.o) ? shotEsc(fmtTime(seen.o)) : (seen ? 'still on' : '—')) + '</td>'
         + '<td class="dt-gap">' + (gOut === null ? '' : shotEsc(dtSaid(gOut))) + '</td>'
-        + '<td>' + (markedMin === null ? '—' : shotEsc(fmtMin(markedMin))) + '</td>'
+        + '<td class="dt-sep">' + (markedMin === null ? '—' : shotEsc(fmtMin(markedMin))) + '</td>'
         + '<td>' + ((seen && seen.w) ? shotEsc(fmtMin(seen.w)) : '—') + '</td>'
+        /* DeskTime's own figure for the day's work, which is not the span from
+           arriving to leaving: it is the time the computer was actually in
+           use. The span counts a lunch and an afternoon the machine sat idle;
+           this does not, and it is the number the office reads. */
+        + '<td class="dt-desk">' + ((seen && seen.d) ? shotEsc(fmtMin(seen.d)) : '—') + '</td>'
+        + '<td>' + ((seen && seen.p) ? shotEsc(fmtMin(seen.p)) : '—') + '</td>'
+        + '<td>' + (idle === null ? '—' : shotEsc(fmtMin(idle))) + '</td>'
         + '</tr>';
     });
     box.innerHTML = head
@@ -14662,12 +14692,29 @@ function buildExcelBackup(){
              + (apart ? (' · <b>' + apart + '</b> more than ' + DT_GAP + ' minutes apart') : '')
              + (unmarked ? (' · <b>' + unmarked + '</b> at the computer with nothing marked') : '')
              + '</div>'
-             + '<table class="dt-table-cmp"><thead><tr>'
-             + '<th>Day</th><th>Marked in</th><th>DeskTime in</th><th>Difference</th>'
-             + '<th>Marked out</th><th>DeskTime out</th><th>Difference</th>'
-             + '<th>Hours marked</th><th>At the computer</th>'
-             + '</tr></thead><tbody>' + rows + '</tbody></table>'
-             + '<div class="dt-note">A difference is DeskTime minus what was marked: '
+             /* Fourteen columns are four questions, not fourteen: what the
+                day was, when it started, when it ended, how long it ran. The
+                header says so and a hairline keeps them apart. */
+             + '<div class="dt-scroll"><table class="dt-table-cmp"><thead>'
+             + '<tr class="dt-grp"><th colspan="3">The day</th>'
+             +   '<th class="dt-sep" colspan="3">Arriving</th>'
+             +   '<th class="dt-sep" colspan="3">Leaving</th>'
+             +   '<th class="dt-sep" colspan="5">How long</th></tr>'
+             + '<tr>'
+             + '<th>Day</th><th>The record says</th><th>Due in</th>'
+             + '<th class="dt-sep">Marked in</th><th>DeskTime in</th><th>Difference</th>'
+             + '<th class="dt-sep">Marked out</th><th>DeskTime out</th><th>Difference</th>'
+             + '<th class="dt-sep">Hours marked</th><th>At work</th><th>DeskTime time</th>'
+             + '<th>Productive</th><th>Idle</th>'
+             + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+             + '<div class="dt-note"><b>At work</b> is DeskTime’s span from arriving to leaving; '
+             + '<b>DeskTime time</b> is the part of it the computer was actually in use, which is '
+             + 'the figure DeskTime itself leads with; <b>Productive</b> is the part of that spent '
+             + 'in applications the office counts as work, and <b>Idle</b> is the span less the '
+             + 'time in use. <b>The record says</b> is this record’s own word for the day, so a '
+             + 'row of dashes can be read as a Sunday or a day of leave rather than as somebody '
+             + 'missing. '
+             + 'A difference is DeskTime minus what was marked: '
              + '<b>+1h 30m</b> means the computer stirred an hour and a half after the marked time. '
              + 'Days more than ' + DT_GAP + ' minutes apart are picked out. '
              + 'A day away from the desk is not a day away from work — this says what the two '

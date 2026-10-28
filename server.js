@@ -3557,10 +3557,21 @@ async function pullDeskTime(orgId, day) {
     const who = dtNameOf(names, e.name || e.employeeName || e.fullName || '');
     const arrived = dtClock(e.arrivedTime || e.arrived || e.arrive_time || e.startTime);
     if (!who || !arrived) return;                       // nothing was tracked
+    /* Two durations, and they are not the same thing. `atWorkTime` is the span
+       from arriving to leaving, lunch and idle afternoons included;
+       `desktimeTime` is the part of it the computer was actually in use, and
+       that is the figure DeskTime's own page leads with and the office reads
+       as the day's work. Both are kept, because the gap between them is
+       itself worth seeing. */
+    const pick = (...names) => {
+      for (const n of names) if (e[n] !== undefined && e[n] !== null) return e[n];
+      return 0;
+    };
     store[who + '|' + day] = {
       i: arrived,
       o: dtClock(e.leftTime || e.left || e.left_time || e.endTime),
-      w: dtMinutes(e.atWorkTime !== undefined ? e.atWorkTime : (e.atWork !== undefined ? e.atWork : e.at_work_time))
+      w: dtMinutes(pick('atWorkTime', 'atWork', 'at_work_time', 'timeAtWork')),
+      d: dtMinutes(pick('desktimeTime', 'deskTimeTime', 'desktime_time', 'desktime'))
     };
     wrote++;
   });
