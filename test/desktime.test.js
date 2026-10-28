@@ -155,6 +155,16 @@ function grab(src, name) {
     page.indexOf('if(!seen && !markedIn) return;') > -1);
   check('a day they are still working is said so rather than left blank',
     page.indexOf("'still on'") > -1);
+  check('two times that agree say so, rather than reading as an error',
+    /if\(mins === 0\) return 'same';/.test(APP));
+  /* Somebody at a computer with no mark against them at all is not a
+     difference - there is nothing to take a difference from - so it is counted
+     on its own rather than passed over. */
+  check('a day at the computer with nothing marked is counted separately',
+    page.indexOf('if(seen && !markedIn) unmarked++;') > -1
+    && page.indexOf('at the computer with nothing marked') > -1);
+  check('and the month says how many days the two records both know about',
+    page.indexOf('both records know about') > -1);
   check('days far apart are picked out, by a measure said once',
     /var DT_GAP = 15;/.test(APP) && page.indexOf('gIn > DT_GAP') > -1
     && /tr\.dt-off\{ background:#FFF7E8/.test(APP));
