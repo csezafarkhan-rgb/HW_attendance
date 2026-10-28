@@ -39,8 +39,10 @@ function makeCtx(serverAnswers) {
   /* empMonthNow comes along because adopting a dataset now calls it: the
      employee calendar is moved to the month we are in once the real data is
      here, unless somebody has used the arrows. */
-  ['applyDataset', 'markLocalDataset', 'adoptServerDataset', 'waitForServerDataset', 'persistDataset',
-   'empMonthNow', 'empMonths'].forEach(n => vm.runInContext(grab(n), ctx));
+  /* stillHere comes along because the roster is now kept whole and filtered:
+     the page holds everybody and shows those who have not left. */
+  ['stillHere', 'applyDataset', 'markLocalDataset', 'adoptServerDataset', 'waitForServerDataset',
+   'persistDataset', 'empMonthNow', 'empMonths'].forEach(n => vm.runInContext(grab(n), ctx));
   vm.runInContext('function redrawAfterDataset(){ redraws++; }', ctx);
   return ctx;
 }

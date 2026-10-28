@@ -4094,7 +4094,13 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   })();
 
   var DATA = JSON.parse(document.getElementById('data-holder').textContent);
-  var EMPLOYEES = DATA.employees.filter(function(e){ return e.name !== 'Card'; });
+  /* Everybody the record knows, and everybody still here. A person who has
+     left keeps their row in ALL_EMPLOYEES - that is what the page writes back
+     and what a browser backup carries - and is absent from EMPLOYEES, which is
+     what every screen is built from. */
+  var ALL_EMPLOYEES = DATA.employees.filter(function(e){ return e.name !== 'Card'; });
+  function stillHere(e){ return !!e && e.is_active !== false; }
+  var EMPLOYEES = ALL_EMPLOYEES.filter(stillHere);
   var RECORDS = DATA.records;
 
   var recIndex = {};
@@ -4114,13 +4120,16 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
   }
 
   var employeesByName = {};
-  EMPLOYEES.forEach(function(e){ employeesByName[e.name] = e; });
+  ALL_EMPLOYEES.forEach(function(e){ employeesByName[e.name] = e; });
 
   function applyDataset(d){
-    EMPLOYEES = d.employees.filter(function(e){ return e.name !== 'Card'; });
+    ALL_EMPLOYEES = d.employees.filter(function(e){ return e.name !== 'Card'; });
+    EMPLOYEES = ALL_EMPLOYEES.filter(stillHere);
     RECORDS = d.records;
+    /* Keyed on everybody: a leaver's shift still has to resolve for the
+       months they worked, which are unchanged. */
     employeesByName = {};
-    EMPLOYEES.forEach(function(e){ employeesByName[e.name] = e; });
+    ALL_EMPLOYEES.forEach(function(e){ employeesByName[e.name] = e; });
     recIndex = {};
     RECORDS.forEach(function(r){ recIndex[r.e + '|' + r.d] = r; });
     monthSet = {};
@@ -4300,7 +4309,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     return localLoad();
   }
   function persistDataset(){
-    var dataset = {employees:EMPLOYEES, records:RECORDS};
+    /* Everybody, so writing the dataset back never drops a leaver's row. */
+    var dataset = {employees:ALL_EMPLOYEES, records:RECORDS};
     var json = JSON.stringify(dataset);
     if(DATASET_SOURCE === 'local'){
       // Kept here until the server answers - see DATASET_SOURCE.
@@ -7403,7 +7413,7 @@ function buildExcelBackup(){
     // 2) ensure the employee exists
     if(name && !EMPLOYEES.some(function(e){ return e.name===name; })){ EMPLOYEES.push({code:'', name:name, shift:obj.shift||'9:00-6:00'}); }
     // 3) rebuild indexes / employeesByName / months
-    applyDataset({employees:EMPLOYEES, records:RECORDS});
+    applyDataset({employees:ALL_EMPLOYEES, records:RECORDS});
     // 4) merge mark stores into live state
     function mergeInto(t, inc){ if(!inc) return; Object.keys(inc).forEach(function(k){ t[k]=inc[k]; }); }
     mergeInto(overrides, obj.overrides);
@@ -14343,11 +14353,12 @@ function buildExcelBackup(){
     if(!name) return;
     var mine = (RECORDS||[]).filter(function(r){ return r.e === name; }).length;
     savePreImportPoint('before removing ' + name).then(function(){
-      EMPLOYEES = (EMPLOYEES||[]).filter(function(e){ return e.name !== name; });
+      ALL_EMPLOYEES = (ALL_EMPLOYEES||[]).filter(function(e){ return e.name !== name; });
+      EMPLOYEES = ALL_EMPLOYEES.filter(stillHere);
       RECORDS   = (RECORDS||[]).filter(function(r){ return r.e !== name; });
       try{ delete visibleEmpSet[name]; }catch(e){}
       try{ delete employeesByName[name]; }catch(e){}
-      applyDataset({employees:EMPLOYEES, records:RECORDS});
+      applyDataset({employees:ALL_EMPLOYEES, records:RECORDS});
       persistDataset();
       saveVisibleEmployees();
       renderEmpDropdown(); renderEmpBtnLabel();
@@ -14364,10 +14375,11 @@ function buildExcelBackup(){
     if(!names.length) return;
     var rows = (RECORDS||[]).filter(function(r){ return names.indexOf(r.e) >= 0; }).length;
     savePreImportPoint('before removing ' + names.length + ' employees').then(function(){
-      EMPLOYEES = (EMPLOYEES||[]).filter(function(e){ return names.indexOf(e.name) < 0; });
+      ALL_EMPLOYEES = (ALL_EMPLOYEES||[]).filter(function(e){ return names.indexOf(e.name) < 0; });
+      EMPLOYEES = ALL_EMPLOYEES.filter(stillHere);
       RECORDS   = (RECORDS||[]).filter(function(r){ return names.indexOf(r.e) < 0; });
       names.forEach(function(n){ try{ delete visibleEmpSet[n]; delete employeesByName[n]; }catch(e){} });
-      applyDataset({employees:EMPLOYEES, records:RECORDS});
+      applyDataset({employees:ALL_EMPLOYEES, records:RECORDS});
       persistDataset(); saveVisibleEmployees();
       renderEmpDropdown(); renderEmpBtnLabel();
       try{ renderTable(); }catch(e){}
@@ -14401,7 +14413,12 @@ function buildExcelBackup(){
   }
   /* Who is no longer here, asked for only when the panel that shows them is
      opened - it is a short list and rarely looked at. */
-  var LEAVERS = null;                                 // null = not asked for yet
+  /* Read off the roster the page already holds rather than asked for: the
+     dataset carries everybody now, so a separate list could only go out of
+     step with it. The route is still there for anything else that wants it. */
+  function leavers(){
+    return (ALL_EMPLOYEES||[]).filter(function(e){ return !stillHere(e); });
+  }
   function loadLeavers(){
     return fetch('/api/employees/left', {credentials:'same-origin'})
       .then(function(r){ return r.ok ? r.json() : {left:[]}; })
@@ -14414,11 +14431,11 @@ function buildExcelBackup(){
      the server, which is the point. */
   function markEmployeeLeft(name){
     return setEmployeeLeft(name, true).then(function(){
-      EMPLOYEES = (EMPLOYEES||[]).filter(function(e){ return e.name !== name; });
-      /* Straight onto the list that offers the way back, so undoing it does
-         not wait on a reload. */
-      if(LEAVERS === null) LEAVERS = [];
-      if(!LEAVERS.some(function(l){ return l.name === name; })) LEAVERS.push({name:name});
+      /* The flag moves on the row the page is holding; the row itself stays,
+       so what gets written back still names them and the way back is
+       offered without waiting on a reload. */
+      (ALL_EMPLOYEES||[]).forEach(function(e){ if(e.name === name) e.is_active = false; });
+      EMPLOYEES = (ALL_EMPLOYEES||[]).filter(stillHere);
       try{ delete visibleEmpSet[name]; }catch(e){}
       saveVisibleEmployees();
       renderEmpDropdown(); renderEmpBtnLabel();
@@ -14530,11 +14547,7 @@ function buildExcelBackup(){
        drawn rather than filled in after it: a picker that gains its options a
        moment later is one somebody has already given up on. */
     if(!APPROVER_LIST){ ensureApproverChoices().then(renderShiftDropdown); }
-    /* And who is no longer here, so the panel can offer the way back. */
-    if(LEAVERS === null){
-      LEAVERS = [];                                   // asked for once, not on every draw
-      loadLeavers().then(function(l){ LEAVERS = l; renderShiftDropdown(); });
-    }
+
     /* Rows move between groups when a slot changes, so the list is drawn again
        - and a list that jumps back to the top each time is no use to somebody
        working down thirteen of them. */
@@ -14693,9 +14706,10 @@ function buildExcelBackup(){
        panel included, so without a list of them there would be no way to undo
        it short of the database. Their attendance never went anywhere; this
        only puts the name back on the roster. */
-    if(LEAVERS && LEAVERS.length){
+    var gone = leavers();
+    if(gone.length){
       html += '<div class="shf-left"><div class="shf-left-h">No longer here</div>'+
-        LEAVERS.map(function(l){
+        gone.map(function(l){
           return '<div class="shf-left-row"><span>'+escapeHtml(dispName(l.name))+'</span>'+
             '<button type="button" data-back-emp="'+String(l.name).replace(/"/g,'&quot;')+'">Bring back</button>'+
           '</div>';
@@ -14711,27 +14725,23 @@ function buildExcelBackup(){
     shiftDropdown.innerHTML = html;
     (function(){ var l = shiftDropdown.querySelector('.shf-list'); if(l && keepScroll) l.scrollTop = keepScroll; })();
 
-    /* Putting somebody back on the roster. The dataset is asked for again
-       rather than patched here, because their rows have to come back with
-       them and the server is what holds both. */
+    /* Putting somebody back on the roster. Only the flag moves: their rows
+       never left the page, so there is nothing to fetch again. */
     Array.prototype.forEach.call(shiftDropdown.querySelectorAll('button[data-back-emp]'), function(b){
       b.addEventListener('click', function(ev){
         ev.stopPropagation();
         var name = b.getAttribute('data-back-emp');
         b.disabled = true; b.textContent = 'Bringing back…';
         setEmployeeLeft(name, false).then(function(){
-          LEAVERS = (LEAVERS||[]).filter(function(l){ return l.name !== name; });
-          showUploadStatus(dispName(name) + ' is on the roster again.', false);
-          return (window.HWSync && window.HWSync.hydrateDataset)
-            ? window.HWSync.hydrateDataset().then(function(d){
-                if(d && d.employees && d.employees.length) applyDataset(d);
-              }).catch(function(){})
-            : null;
-        }).then(function(){
+          (ALL_EMPLOYEES||[]).forEach(function(e){ if(e.name === name) e.is_active = true; });
+          EMPLOYEES = (ALL_EMPLOYEES||[]).filter(stillHere);
+          visibleEmpSet[name] = true;
+          saveVisibleEmployees();
           shiftWorking = null;
           renderEmpDropdown(); renderEmpBtnLabel();
           try{ renderTable(); }catch(e){}
           renderShiftDropdown();
+          showUploadStatus(dispName(name) + ' is on the roster again.', false);
         }).catch(function(e){
           b.disabled = false; b.textContent = 'Bring back';
           showUploadStatus('That did not work (' + ((e && e.message) || 'no answer') + ').', true);

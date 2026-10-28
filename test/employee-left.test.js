@@ -39,17 +39,29 @@ const check = (name, ok, got) => {
    flag is all this needs: the person comes off every screen at once. */
 {
   /* Whole SELECTs, so the column list is in view as well as the WHERE. */
-  const reads = (SRV.match(/SELECT[^;]{0,200}?FROM employees WHERE org_id = \$1[^\n]*/g) || []);
-  check('the roster handed to the page asks for active people only',
-    reads.filter(r => /is_active = TRUE/.test(r)).length >= 2, reads.length);
-  /* The backup is the one read that must see everybody - that is what keeping
-     their data means - and it carries the flag so a restore puts back who had
-     left as well as who was here. */
-  const backup = reads.filter(r => /SELECT code, name, shift, is_active FROM employees/.test(r));
-  check('the backup takes everybody, and carries the flag', backup.length === 1, backup);
-  const unfiltered = reads.filter(r => !/is_active/.test(r));
-  check('and no read of the roster is left without the filter',
-    unfiltered.length === 0, unfiltered);
+  const reads = (SRV.match(/SELECT[^;]{0,220}?FROM employees WHERE org_id = \$1[^\n]*/g) || []);
+  check('there are several reads of the roster', reads.length >= 5, reads.length);
+  /* Everything that acts on today - who to write about, who to count - takes
+     the active ones. This is what makes a flag enough. */
+  const filtered = reads.filter(r => /is_active = TRUE|AND is_active\b/.test(r));
+  check('the daily message asks for the active ones',
+    reads.some(r => /SELECT name FROM employees WHERE org_id = \$1 AND is_active ORDER BY/.test(r)));
+  check('and so does the count of how many people there are',
+    reads.some(r => /count\(\*\) FROM employees WHERE org_id = \$1 AND is_active/.test(r)));
+  /* The three that take everybody, each for a stated reason: the backup, so
+     nothing is lost; the office's dataset, so the page can write back a roster
+     that still names a leaver; and the list of who has left. */
+  const everybody = reads.filter(r => !/is_active = TRUE|AND is_active\b/.test(r));
+  check('the backup takes everybody, and carries the flag',
+    everybody.some(r => /SELECT code, name, shift, is_active FROM employees WHERE org_id = \$1'/.test(r)));
+  check('the office’s dataset takes everybody, and carries the flag',
+    everybody.some(r => /SELECT code, name, shift, is_active FROM employees WHERE org_id = \$1 ORDER BY id/.test(r)));
+  check('and the leavers list asks for the other side of the flag',
+    /WHERE org_id = \$1 AND is_active = FALSE/.test(SRV));
+  check('no read takes everybody without saying so in its columns',
+    everybody.every(r => /is_active/.test(r)), everybody.filter(r => !/is_active/.test(r)));
+  check('and every read is one or the other',
+    filtered.length + everybody.length === reads.length);
 }
 
 /* ---- marking somebody as left, and the way back ---- */
@@ -89,8 +101,36 @@ const check = (name, ok, got) => {
   check('"Delete + N rows?" is no longer offered for somebody with a record',
     !/'Delete \+ ' \+ mine \+ ' rows\?'/.test(APP));
   check('there is a way back', /data-back-emp=/.test(APP) && /Bring back/.test(APP));
-  check('and the list of leavers is asked for, not guessed',
-    /function loadLeavers\(\)/.test(APP));
+  /* The page holds everybody and a flag, so who has left is read off what it
+     already has rather than kept as a second list that can drift from it. */
+  check('who has left is read off the roster the page holds',
+    /function leavers\(\)/.test(APP) && /ALL_EMPLOYEES\|\|\[\]\)\.filter\(function\(e\)\{ return !stillHere\(e\); \}\)/.test(APP));
+}
+
+/* ---- the page keeps everybody, and shows those still here ----
+   Handing the page only the active ones meant a browser backup carried a
+   leaver's attendance rows with no row on the roster to say whose they were. */
+{
+  check('the dataset route hands the office everybody now',
+    /SELECT code, name, shift, is_active FROM employees WHERE org_id = \$1 ORDER BY id/.test(SRV));
+  check('and still hands an employee only themselves, and only while they are here',
+    /AND is_active = TRUE\s+AND name = \(SELECT name FROM users WHERE id = \$2\)/.test(SRV));
+  check('the page keeps the whole roster', /var ALL_EMPLOYEES =/.test(APP));
+  check('and builds its screens from those still here',
+    /var EMPLOYEES = ALL_EMPLOYEES\.filter\(stillHere\)/.test(APP));
+  check('a row with no flag on it counts as still here',
+    /function stillHere\(e\)\{ return !!e && e\.is_active !== false; \}/.test(APP));
+  /* The trap: writing the dataset back from the filtered list would drop the
+     leaver's row for good, on the next save after they left. */
+  check('what the page writes back is everybody',
+    /var dataset = \{employees:ALL_EMPLOYEES, records:RECORDS\}/.test(APP));
+  check('and nothing round-trips the filtered list into the dataset',
+    !/applyDataset\(\{employees:EMPLOYEES,/.test(APP));
+  check('a name is looked up against everybody, so a leaver’s shift still resolves',
+    /ALL_EMPLOYEES\.forEach\(function\(e\)\{ employeesByName\[e\.name\] = e; \}\)/.test(APP));
+  /* A real delete is still a real delete. */
+  check('deleting outright takes them off the whole roster',
+    /ALL_EMPLOYEES = \(ALL_EMPLOYEES\|\|\[\]\)\.filter\(function\(e\)\{ return e\.name !== name; \}\)/.test(APP));
 }
 
 /* ---- the rule the whole thing rests on ----

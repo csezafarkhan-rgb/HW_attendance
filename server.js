@@ -1363,13 +1363,18 @@ app.get('/api/dataset', requireAuth, async (req, res) => {
      whole table again. */
   res.set('Cache-Control', 'no-cache');
   const orgId = req.session.orgId;
+  /* The office is given everybody, each with the flag that says whether they
+     are still here; the page keeps those who are off its lists and keeps the
+     rest in the copy it holds. Handing out only the active ones meant a
+     browser backup carried a leaver's attendance rows with no row on the
+     roster to say whose they were. An employee only ever gets themselves. */
   const emp = req.session.role === 'employee'
     ? await pool.query(
-        `SELECT code, name, shift FROM employees WHERE org_id = $1 AND is_active = TRUE
+        `SELECT code, name, shift, is_active FROM employees WHERE org_id = $1 AND is_active = TRUE
          AND name = (SELECT name FROM users WHERE id = $2) ORDER BY id`, [orgId, req.session.userId]
       )
     : await pool.query(
-        'SELECT code, name, shift FROM employees WHERE org_id = $1 AND is_active = TRUE ORDER BY id', [orgId]
+        'SELECT code, name, shift, is_active FROM employees WHERE org_id = $1 ORDER BY id', [orgId]
       );
   const params = [orgId];
   let where = 'org_id = $1';
