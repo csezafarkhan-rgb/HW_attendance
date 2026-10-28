@@ -13,12 +13,19 @@ const check = (name, ok, got) => {
 };
 
 /* The colour a rule paints, read out of the stylesheet rather than retyped
-   here - a test that carries its own copy of the answer proves nothing. */
+   here - a test that carries its own copy of the answer proves nothing. A
+   rule may name a colour outright or point at one by name, so a pointer is
+   followed to what it points at. */
+function named(v) {
+  const m = new RegExp('--' + v + ':\\s*(#[0-9A-Fa-f]{6})').exec(APP);
+  return m ? m[1].toUpperCase() : null;
+}
 function bg(selector) {
   const re = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    + '\\s*\\{[^}]*background:\\s*(#[0-9A-Fa-f]{6})');
+    + '\\s*\\{[^}]*background:\\s*(#[0-9A-Fa-f]{6}|var\\(--[a-z-]+\\))');
   const m = re.exec(APP);
-  return m ? m[1].toUpperCase() : null;
+  if (!m) return null;
+  return m[1][0] === '#' ? m[1].toUpperCase() : named(m[1].slice(6, -1));
 }
 const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
 /* Hue, because that is what the eye sorts colours by first. Two pale tints an
@@ -98,13 +105,39 @@ check('the three are one family, not three unrelated colours',
 
 /* The words on the cell have to be readable on it. */
 {
-  const ink = /\.emp-cal-cell\.is-part \.d\{ color:(#[0-9A-Fa-f]{6}); \}/.exec(APP);
-  check('the day number has ink chosen for the new colour', !!ink, ink && ink[0]);
+  const ink = named('part-ink');
+  check('the day number has ink chosen for the new colour', !!ink, ink);
   if (ink) {
     check('and it is dark enough to read on the lightest of them',
-      light(ink[1].toUpperCase()) < 100 && light(PART.SHORT) > 180,
-      { ink: ink[1], lightest: PART.SHORT });
+      light(ink) < 100 && light(PART.SHORT) > 180,
+      { ink, lightest: PART.SHORT });
+    check('it is read by name wherever a part-day is written',
+      /\.emp-cal-cell\.is-part \.d\{ color:var\(--part-ink\); \}/.test(APP));
   }
+}
+
+/* ---- the same fact, however it was recorded ----
+   The calendar reaches a half day by two roads: a day whose own status is
+   half, and an ordinary present day with half of it marked against it. They
+   were painted apart, and the status one wore the yellow a late arrival
+   wears - so on one calendar a half day was yellow in August and blue in
+   October, and the yellow one read as lateness. */
+{
+  const statusHalf = bg('.emp-cal-cell.st-HD');
+  check('a day whose own status is half is painted', !!statusHalf, statusHalf);
+  check('and it is the same colour as half a day marked on a present one',
+    statusHalf === PART.HALF, { status: statusHalf, marked: PART.HALF });
+  check('which is no longer the colour a late arrival wears',
+    statusHalf !== named('late'), { status: statusHalf, late: named('late') });
+  /* Written once, so the two cannot drift apart again. */
+  check('both read the one name rather than each carrying a copy',
+    /\.emp-cal-cell\.st-HD\{background:var\(--part-half\)/.test(APP)
+    && /\.emp-cal-cell\.is-part-HALF\{ background:var\(--part-half\)/.test(APP));
+  check('and the other two sizes are named the same way',
+    /\.emp-cal-cell\.is-part-SHORT\{ background:var\(--part-short\)/.test(APP)
+    && /\.emp-cal-cell\.is-part-THREEQ\{ background:var\(--part-threeq\)/.test(APP));
+  check('a status half day has ink chosen for what is behind it',
+    /\.emp-cal-cell\.st-HD\{background:var\(--part-half\);color:var\(--part-ink\);\}/.test(APP));
 }
 
 const bad = results.filter(x => !x).length;

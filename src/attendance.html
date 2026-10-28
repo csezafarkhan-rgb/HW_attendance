@@ -337,6 +337,16 @@ code,kbd,pre,samp,.mono,.num,.tnum{font-family:var(--hw-mono);}
   --leave-dk:#4E535B;
   --visit:#1B6E3C;
   --late:#FFF07A;
+  /* Part of a day taken: the deeper the tint, the more of it went. Named here
+     because the calendar reaches this fact by two roads - a day whose own
+     status is half, and an ordinary day with a part of it marked against it -
+     and those two were painted apart, one of them in the yellow a late
+     arrival wears. Same fact, same colour, whichever road it came by. */
+  --part-short:#DCE8FB;
+  --part-half:#BFD6F6;
+  --part-threeq:#9DBEEF;
+  --part-ink:#143862;
+  --part-ink-soft:#1F4E82;
   --early:#FFD9A0;
   --early-exc:#FBEBD2;
   --late-exc:#9FD4FF;
@@ -2409,12 +2419,12 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
    the edge of a late day - so the one free hue is the one to spend here. The
    pills stay purple; they say which part-day it was, and they are read on top
    of the colour rather than instead of it. */
-.emp-cal-cell.is-part-SHORT{ background:#DCE8FB !important; }
-.emp-cal-cell.is-part-HALF{ background:#BFD6F6 !important; }
-.emp-cal-cell.is-part-THREEQ{ background:#9DBEEF !important; }
+.emp-cal-cell.is-part-SHORT{ background:var(--part-short) !important; }
+.emp-cal-cell.is-part-HALF{ background:var(--part-half) !important; }
+.emp-cal-cell.is-part-THREEQ{ background:var(--part-threeq) !important; }
 .emp-cal-cell.is-part .s,
-.emp-cal-cell.is-part .d{ color:#143862; }
-.emp-cal-cell.is-part .t{ color:#1F4E82; }
+.emp-cal-cell.is-part .d{ color:var(--part-ink); }
+.emp-cal-cell.is-part .t{ color:var(--part-ink-soft); }
 .emp-cal-cell.is-sunday{ background:#F4A9A2; }
 .emp-cal-cell.is-sunday.st-WO{ background:#EF8E85; }
 .emp-cal-dow.is-sunday{ color:#A3231F; font-weight:800; }
@@ -2607,7 +2617,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .emp-cal-grid.compact .emp-cal-cell .ec-notes{ display:none; }
 .emp-cal-cell.st-PR{background:#CDEBD6;color:#14522E;}
 .emp-cal-cell.st-AB{background:var(--alert);color:#fff;}
-.emp-cal-cell.st-HD{background:var(--late);}
+.emp-cal-cell.st-HD{background:var(--part-half);color:var(--part-ink);}
 .emp-cal-cell.st-WO{background:var(--sat);}
 /* Match the attendance grid: leave grey, WFH light green, a visit dark green,
    anything else neutral. One colour for every override read as if all marked
