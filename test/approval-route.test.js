@@ -285,6 +285,35 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
     mine.stage === 1 && other.stage === 1 && other.approver === OTHER, { mine, other });
 }
 
+/* ---- a per-person approver stands on its own ----
+   Whether leave is granted in two stages is a question of whether anybody
+   holds the first one, not of the office having named a default. */
+{
+  const who = (route, fb) => call('firstApprovers', route, fb);
+  check('with no default named, the one named against somebody still holds a stage',
+    JSON.stringify(who(MIXED, '')) === JSON.stringify([OTHER]), who(MIXED, ''));
+  check('and that person’s request is that approver’s at stage one',
+    call('stageOwns', 1, MIXED, req('Shyam Lal ESS', 'pending'), '', OTHER) === true);
+  check('while everybody else goes straight to the final word',
+    call('stageOwns', 2, MIXED, req('Zafar Khan', 'pending'), '', OTHER) === true);
+  check('with nobody named anywhere there is no first stage at all',
+    who(SOME, '').length === 0);
+  /* The summary used to gate the whole arrangement on the default alone, so
+     this is checked on the sender itself and not only on the helper. */
+  const sender = /async function sendLeaveEmail\(orgId\)[\s\S]*?\n\}/.exec(SRV)[0];
+  check('the nightly summary asks whether anybody holds a first stage',
+    /const approvers = firstApprovers\(route, fallback\);/.test(sender)
+      && /if \(approvers\.length\) \{/.test(sender), sender.slice(0, 200));
+  check('and no longer asks only whether a default was named',
+    !/^\s*if \(fallback\) \{/m.test(sender));
+  /* An address named against one person is that one address, with nobody
+     copied; the office's own stage keeps the line it was configured with. */
+  const S0 = { leave: { firstTo: [], firstCc: ['cc@x.com'] } };
+  const only = call('legFor', S0, OTHER, '');
+  check('with no default line, their approver is simply the address',
+    JSON.stringify(only.to) === JSON.stringify([OTHER]) && only.cc.length === 0, only);
+}
+
 /* ---- the setting is the office's, and the office's alone ---- */
 {
   const emp = /const EMPLOYEE_WRITABLE = \[([^\]]*)\]/.exec(SRV);

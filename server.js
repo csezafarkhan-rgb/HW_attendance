@@ -2465,15 +2465,20 @@ async function sendLeaveEmail(orgId) {
      not theirs to make. A stage with nothing waiting sends nothing. */
   const route = await approvalRouteOf(orgId);
   const fallback = (first && first.email) || '';
+  /* Whether leave is granted in two stages is a question of whether anybody
+     holds the first one - which is not the same as the office having named a
+     default. Gating this on the default alone meant that naming an approver
+     against one person and leaving the Leave tab's own line empty sent their
+     new requests to that person, as it should, and then had the nightly
+     summary grant in one stage as though nobody were there. */
+  const approvers = firstApprovers(route, fallback);
   const legs = [];
-  if (fallback) {
+  if (approvers.length) {
     /* One stage-1 message per person holding a first stage, each holding only
        their own people. Where somebody is routed to an approver of their own,
        that address gets a message about them and nobody else - and the office's
        own first approver is not told about a request that is not theirs. */
-    firstApprovers(route, fallback).forEach(who => {
-      legs.push(legFor(settings, who, fallback));
-    });
+    approvers.forEach(who => { legs.push(legFor(settings, who, fallback)); });
     legs.push({ stage: 2, to: await mailRecipients(orgId, settings, 'leave'),
                 cc: mailCc(settings, 'leave') });
   } else {
