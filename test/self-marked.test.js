@@ -207,24 +207,39 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 }
 
 /* ---- why they were late ----
-   An excuse cancels the lateness, so one written by the person it is about
-   waits for the office. Otherwise the minutes mean nothing. */
+   This used to wait for the office: an excuse cancels the lateness, so one
+   written by the person it is about counted for nothing until it was ticked.
+   In practice the office was never told there was anything to tick, and not
+   one person ever used it. The office chose the other way - the mark stands
+   on its own and a message goes out for reading - so what is guarded here is
+   no longer "whose word counts" but "whose entry is it". */
 {
   const mine = {}; mine['karan Ahuja|' + TODAY] = { note: 'Train was held at Gurgaon' };
   const out = parse(ctx.mergeEmployeeExcuses('{}', JSON.stringify(mine), 'karan Ahuja'));
   const e = out['karan Ahuja|' + TODAY];
   check('anybody may give a reason for being late, marked or not', !!e, out);
-  check('it waits for the office rather than excusing the day itself',
-    e.pending === true && e.by === 'self', e);
+  check('it excuses the day from the moment it is given',
+    e.pending !== true && e.by === 'self', e);
   check('and the words are kept', /Train was held/.test(e.note), e);
 
-  /* The page could claim it was already accepted. It is not believed. */
+  /* The page could claim the office wrote it, which would put it beyond
+     their own reach to change and make it read as the office's decision in
+     every message. Who wrote it is decided here, not there. */
   const sneaky = {};
-  sneaky['karan Ahuja|' + TODAY] = { note: 'Traffic', pending: false, by: 'admin' };
+  sneaky['karan Ahuja|' + TODAY] = { note: 'Traffic', by: 'admin' };
   const out2 = parse(ctx.mergeEmployeeExcuses('{}', JSON.stringify(sneaky), 'karan Ahuja'));
-  check('a page claiming its own excuse is already accepted is not believed',
-    out2['karan Ahuja|' + TODAY].pending === true && out2['karan Ahuja|' + TODAY].by === 'self',
-    out2['karan Ahuja|' + TODAY]);
+  check('a page claiming the office wrote it is not believed',
+    out2['karan Ahuja|' + TODAY].by === 'self', out2['karan Ahuja|' + TODAY]);
+  check('and the time it was given is the server’s, not the page’s',
+    out2['karan Ahuja|' + TODAY].at !== '2000-01-01T00:00:00Z'
+    && !isNaN(Date.parse(out2['karan Ahuja|' + TODAY].at)));
+
+  /* Their own mark is theirs to lift: ticking it by mistake has a way back. */
+  const own = {};
+  own['karan Ahuja|' + TODAY] = { note: 'Traffic', at: '2026-10-28T04:00:00Z', by: 'self' };
+  const gone = parse(ctx.mergeEmployeeExcuses(JSON.stringify(own), '{}', 'karan Ahuja'));
+  check('a mark they made themselves can be taken back',
+    !gone['karan Ahuja|' + TODAY], gone);
 
   /* What the office has accepted stays accepted. */
   const settled = {};
@@ -307,8 +322,11 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /days\.length > 1 \? days\.map/.test(card));
   check('a day typed in counts for lateness the same as one punched',
     /forLate = \(man && man\['in'\]\)/.test(card));
-  check('the reason box tells them plainly that it is not granted yet',
-    /the minutes count until they accept it/.test(card));
+  check('the tick says what it does, and that nobody has to agree to it',
+    /Nobody has to approve it\./.test(card)
+    && /takes the minutes off this day and tells the office why/.test(card));
+  check('and the box for the words only appears once it is ticked',
+    /id="edExcRow"/.test(card) && /selfExc \? '' : ' style="display:none;"'/.test(card));
   check('and anybody late may give one, marked or not',
     /} else if\(rec\['in'\]\)\{/.test(card) && /if\(isLate\)\{/.test(card));
 }
@@ -520,9 +538,11 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /That request did not reach the office/.test(APP));
   check('a reply to the office says it has gone too',
     /Your reply has gone to the office/.test(APP));
-  check('their own in and out says so, and their reason for being late',
+  check('their own in and out says so, and so does marking a late day excused',
     /Saved\. The office sees it on the record/.test(APP)
-      && /Sent to the office\. The minutes count until they accept it/.test(APP));
+      && /Marked excused\. The office has been told\./.test(APP));
+  check('and taking that mark off says what it costs them',
+    /Taken off\. The day counts as late again\./.test(APP));
 }
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

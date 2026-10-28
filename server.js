@@ -461,14 +461,23 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
     const i = String(k).lastIndexOf('|');
     return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
   };
-  const settled = k => { const v = out[k]; return v && typeof v === 'object' && v.pending !== true; };
-  Object.keys(out).forEach(k => { if (mine(k) && !settled(k)) delete out[k]; });
+  /* A reason somebody gives for their own late arrival counts from the moment
+     they give it. It used to be written as waiting and excused nothing until
+     the office ticked it, and in practice the office was never told there was
+     anything to tick - so the office asked for the mark to stand on its own
+     and for a message to go out for review instead of for permission.
+
+     What they still may not touch is a decision the office made: an entry the
+     office wrote stays the office's. One they wrote themselves they may change
+     or take back, which is how a mark made by mistake is undone. */
+  const byOffice = k => { const v = out[k]; return !!v && typeof v === 'object' && v.by !== 'self'; };
+  Object.keys(out).forEach(k => { if (mine(k) && !byOffice(k)) delete out[k]; });
   Object.keys(incoming).forEach(k => {
-    if (!mine(k) || settled(k)) return;
+    if (!mine(k) || byOffice(k)) return;
     const v = incoming[k];
     const note = String((v && v.note) || '').trim().slice(0, EXCUSE_MAX);
     if (!note) return;
-    out[k] = { note, at: new Date().toISOString(), by: 'self', pending: true };
+    out[k] = { note, at: new Date().toISOString(), by: 'self' };
   });
   return JSON.stringify(out);
 }
@@ -1168,6 +1177,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   const baseVersion = (typeof base === 'number' && Number.isFinite(base)) ? base : null;
   let version = null;
   let requestsBefore = null;                 // for the email about a new request
+  let excusesBefore = null;                  // and the one about a late arrival answered for
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1215,6 +1225,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
         value = merged;
       } else if (key === 'lateExcuses' && req.session.role === 'employee') {
+        excusesBefore = row ? row.value : '{}';
         const merged = mergeEmployeeExcuses(row ? row.value : '{}', value,
                                             (req.user && req.user.name) || '', empShift);
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_excuse' }); }
@@ -1292,6 +1303,13 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
        the two doors cannot send it twice. */
     newlyRecommended(requestsBefore, value).slice(0, 10)
       .forEach(r => { notifyRecommended(req.session.orgId, r); });
+  }
+  /* Somebody has marked their own late arrival as excused. It is already on
+     the record - this is for reading, not for deciding - so it goes out after
+     the commit and is not waited for. */
+  if (shared && key === 'lateExcuses' && excusesBefore !== null) {
+    const fresh = newlySelfExcused(excusesBefore, value);
+    if (fresh.length) notifySelfExcused(req.session.orgId, fresh.slice(0, 10));
   }
   /* And a day marked as leave straight on the grid, which is the same news
      arriving by another door. */
@@ -1736,7 +1754,13 @@ const MAIL_DEFAULTS = {
      earlier than the record, or wants it when the record is turned off. Either
      way it goes once a day: both paths claim the same job. */
   tasks: { on: false, auto: false, at: '19:30',
-           to: [], cc: [], subject: '', intro: '', footer: '' }
+           to: [], cc: [], subject: '', intro: '', footer: '' },
+  /* Somebody answering for their own late arrival is told to whoever the
+     office wants reading it. It is a different thing from every list above:
+     nobody is being asked for anything, so there is no falling back to the
+     attendance list - an empty TO means nobody wanted telling, and nothing is
+     sent rather than the news going somewhere nobody chose. */
+  excused: { to: [], cc: [] }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1801,6 +1825,13 @@ async function mailSettings(orgId) {
     firstTo: (Array.isArray(lv.firstTo) ? lv.firstTo : []).map(x => String(x).trim())
       .filter(x => EMAIL_RE.test(x)).slice(0, 20),
     firstCc: (Array.isArray(lv.firstCc) ? lv.firstCc : []).map(x => String(x).trim())
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20)
+  };
+  const ex = isPlainObject(s.excused) ? s.excused : {};
+  s.excused = {
+    to: (Array.isArray(ex.to) ? ex.to : []).map(x => String(x).trim())
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    cc: (Array.isArray(ex.cc) ? ex.cc : []).map(x => String(x).trim())
       .filter(x => EMAIL_RE.test(x)).slice(0, 20)
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
@@ -2785,6 +2816,82 @@ function newlyRecommended(beforeText, afterText) {
   const was = {};
   (Array.isArray(before) ? before : []).forEach(r => { if (r && r.id) was[String(r.id)] = r.status; });
   return after.filter(r => r && r.id && r.status === 'recommended' && was[String(r.id)] !== 'recommended');
+}
+
+/* Which marks are new: somebody has answered for their own late arrival, or
+   has changed what they said. One the office wrote is not this - that is the
+   office deciding, and nobody needs telling about their own decision. */
+function newlySelfExcused(beforeText, afterText) {
+  const asMap = t => {
+    const v = parseJson(t);
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  };
+  const was = asMap(beforeText), now = asMap(afterText), out = [];
+  Object.keys(now).forEach(k => {
+    const v = now[k];
+    if (!v || typeof v !== 'object' || v.by !== 'self' || v.pending === true) return;
+    const old = was[k];
+    if (old && typeof old === 'object' && old.by === 'self' && old.note === v.note) return;
+    const i = String(k).lastIndexOf('|');
+    if (i < 1) return;
+    const day = String(k).slice(i + 1);
+    if (!DAY_RE.test(day)) return;
+    out.push({ empName: String(k).slice(0, i), day, note: String(v.note || ''),
+               changed: !!(old && typeof old === 'object' && old.by === 'self') });
+  });
+  return out;
+}
+/* The message about it. For reading, not for deciding: the day is already
+   excused on the record, there are no buttons on it, and it goes to whoever
+   the office named for this and nobody else - an empty list means nobody
+   wanted telling, so nothing is sent. */
+async function notifySelfExcused(orgId, marks) {
+  try {
+    if (!mailer.ready() || !marks || !marks.length) return;
+    const settings = await mailSettings(orgId);
+    const to = (settings.excused.to || []).slice();
+    if (!to.length) return;
+    const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
+    const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'dayShifts', 'shiftAssignments',
+                                        'lateThresholdMin']);
+    const shownNames = parseJson(kv.empNames) || {};
+    const dayShifts = parseJson(kv.dayShifts) || {};
+    const assigned = parseJson(kv.shiftAssignments) || {};
+    /* How late they actually were is read off the record here rather than
+       taken from the page: the page is theirs, and a figure in a message
+       about their own lateness is the one figure worth checking. */
+    const days = Array.from(new Set(marks.map(m => m.day)));
+    const recs = await pool.query(
+      'SELECT employee, day, data FROM records WHERE org_id = $1 AND day = ANY($2)', [orgId, days]);
+    const byKey = {};
+    recs.rows.forEach(r => {
+      const d = (r.day instanceof Date) ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10);
+      byKey[r.employee + '|' + d] = r.data || {};
+    });
+    const items = marks.map(m => {
+      const key = m.empName + '|' + m.day;
+      const rec = byKey[key] || {};
+      const shift = dayShifts[key] || shiftInForce(assigned, m.empName, m.day) || '';
+      const start = shiftStartMin(shift || '9:30-6:30');
+      const came = hhmmToMinutes(rec['in']);
+      return {
+        name: shownNames[m.empName] || m.empName,
+        day: m.day, note: m.note, changed: m.changed,
+        came: rec['in'] || '', shift: shift,
+        late: (came != null && start != null && came - start > 0) ? (came - start) : null
+      };
+    });
+    const mail = mailer.excusedEmail({
+      orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl()
+    });
+    if (!mail) return;
+    const msg = { to, cc, subject: mail.subject, html: mail.html };
+    const sent = await mailer.send(msg);
+    await logMail(orgId, 'excused', msg, sent);
+  } catch (e) {
+    /* The mark is on the record either way; only the telling failed. */
+    console.error('the excused mark stands but its message failed:', e && e.message);
+  }
 }
 
 /* A day marked as leave on the grid with no request behind it is the same

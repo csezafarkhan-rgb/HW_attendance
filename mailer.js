@@ -667,6 +667,41 @@ function leaveEmail(o) {
   };
 }
 
+/* Somebody has answered for their own late arrival. The day is already
+   excused on the record - this is for reading, not for deciding - so the
+   message carries no buttons at all, and says plainly that nothing is being
+   asked of whoever gets it. */
+function excusedEmail(o) {
+  const items = (o.items || []).filter(Boolean);
+  if (!items.length) return null;
+  const one = items.length === 1;
+  const body = [];
+  body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+    + (one ? 'Somebody has marked their own late arrival as excused and said why.'
+           : (items.length + ' late arrivals have been marked as excused by the people themselves.'))
+    + '<br><span style="color:' + SOFT + ';">Already on the record — nothing is being asked of you. '
+    + 'The mark can be changed on the day itself if it is wrong.</span></div>');
+  items.forEach(function (it) {
+    const late = (it.late != null && it.late > 0) ? minsSaid(it.late) + ' late' : 'late';
+    body.push('<div style="padding:10px 12px;margin-bottom:8px;border:1px solid ' + LINE + ';border-radius:10px;">'
+      + '<div style="font-size:13.5px;"><b>' + esc(it.name) + '</b>'
+      + '<span style="color:' + SOFT + ';"> · ' + esc(fmtDay(it.day)) + '</span></div>'
+      + '<div style="font-size:12px;color:' + SOFT + ';margin-top:2px;">'
+      + esc(late) + (it.came ? (' · in ' + esc(clock(it.came))) : '')
+      + (it.shift ? (' · shift ' + esc(it.shift)) : '')
+      + (it.changed ? ' · changed from what they said before' : '') + '</div>'
+      + '<div style="font-size:13px;margin-top:6px;">“' + esc(it.note) + '”</div>'
+      + '</div>');
+  });
+  if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  return {
+    subject: one
+      ? ('Late excused · ' + items[0].name + ' · ' + fmtDay(items[0].day))
+      : ('Late excused · ' + items.length + ' marked'),
+    html: layout(o.orgName || 'Attendance', one ? 'A late arrival answered for' : 'Late arrivals answered for', body)
+  };
+}
+
 /* What the person who asked is told once it is settled. Approved or not, the
    answer is short and carries the dates it was about. */
 function decisionEmail(o) {
@@ -908,7 +943,7 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
+  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

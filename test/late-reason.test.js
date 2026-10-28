@@ -1,7 +1,8 @@
-// Somebody who arrives late can say why from their own page, and the office
-// accepts it or does not. The saying worked; the hearing did not. A reason
-// went into a box that told nobody, so a day could be answered for and the
-// answer never read - which is the same as not being able to answer at all.
+// Somebody who arrives late marks the day excused from their own page and
+// says why. Nobody is asked: the mark counts at once and a message goes to
+// whoever the office named, for reading. It waited for a tick before, and
+// nobody was ever told there was anything to tick - eighty excuses on file
+// and every one typed by the office.
 'use strict';
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const REPO = path.join(__dirname, '..');
@@ -55,10 +56,11 @@ function grab(src, name) {
 
 /* ---- the page: saying it, and what saying it claims ---- */
 {
-  check('the reason is sent as waiting, not as granted',
-    APP.indexOf("{ note: note, at: new Date().toISOString(), by: 'self', pending: true }") > -1);
-  check('and the person is told plainly that it has not counted yet',
-    APP.indexOf('Sent to the office. The minutes count until they accept it.') > -1);
+  check('the mark counts from the moment it is made, with nothing waiting on it',
+    APP.indexOf("{ note: note, at: new Date().toISOString(), by: 'self' }") > -1
+    && APP.indexOf("by: 'self', pending: true }") === -1);
+  check('and the person is told it has counted and that the office knows',
+    APP.indexOf('Marked excused. The office has been told.') > -1);
   check('a reason already sent can be changed rather than sent twice',
     APP.indexOf('id="edPleaEdit"') > -1);
   check('an empty box is not a reason',
@@ -109,6 +111,101 @@ function grab(src, name) {
     && SRV.indexOf('mergeEmployeeExcuses(') > -1);
   check('and the key is one an employee is allowed to write at all',
     /const EMPLOYEE_WRITABLE = \[[^\]]*'lateExcuses'/.test(SRV));
+}
+
+/* ---- who is told, and that it is only telling ---- */
+{
+  const ctx = { console, parseJson: t => { try { return JSON.parse(t); } catch (e) { return null; } },
+                DAY_RE: /^\d{4}-\d{2}-\d{2}$/ };
+  vm.createContext(ctx);
+  vm.runInContext(grab(SRV, 'newlySelfExcused'), ctx);
+  const was = JSON.stringify({
+    'Asha|2026-10-27': { note: 'train', at: 'x', by: 'self' },
+    'Ravi|2026-10-27': { note: 'approved by me', at: 'x' }
+  });
+  const now = JSON.stringify({
+    'Asha|2026-10-27': { note: 'train', at: 'x', by: 'self' },        // unchanged
+    'Asha|2026-10-28': { note: 'tyre', at: 'x', by: 'self' },          // new
+    'Ravi|2026-10-27': { note: 'approved by me', at: 'x' },            // the office's, untouched
+    'Ravi|2026-10-28': { note: 'allowed', at: 'x' },                   // the office's, new
+    'Neha|2026-10-28': { note: 'waiting one', at: 'x', by: 'self', pending: true }
+  });
+  const fresh = ctx.newlySelfExcused(was, now);
+  const names = fresh.map(f => f.empName + '|' + f.day).sort();
+  check('a mark somebody just made for themselves is news',
+    names.indexOf('Asha|2026-10-28') > -1, names);
+  check('one they made before and have not touched is not news again',
+    names.indexOf('Asha|2026-10-27') === -1, names);
+  check('nothing the office wrote is reported back to the office',
+    names.every(n => n.indexOf('Ravi') !== 0), names);
+  check('and an old-style waiting one is left alone',
+    names.indexOf('Neha|2026-10-28') === -1, names);
+  check('the words go with it',
+    (fresh[0] || {}).note === 'tyre', fresh);
+
+  /* Changing their mind is worth hearing about, and saying so. */
+  const after = JSON.stringify({ 'Asha|2026-10-27': { note: 'tyre, not the train', at: 'y', by: 'self' } });
+  const again = ctx.newlySelfExcused(was, after);
+  check('changing what they said is news too',
+    again.length === 1 && again[0].note === 'tyre, not the train', again);
+  check('and the message can say it was a change',
+    again[0].changed === true, again[0]);
+
+  check('a key with no day on it is ignored rather than guessed at',
+    ctx.newlySelfExcused('{}', JSON.stringify({ 'Asha': { note: 'x', by: 'self' } })).length === 0);
+  check('and so is a day that is not a day',
+    ctx.newlySelfExcused('{}', JSON.stringify({ 'Asha|last tuesday': { note: 'x', by: 'self' } })).length === 0);
+  check('rubbish in place of a map says nothing rather than throwing',
+    ctx.newlySelfExcused('not json', 'also not json').length === 0);
+}
+
+/* ---- the message, and the addresses it goes to ---- */
+{
+  const mailer = require(path.join(REPO, 'mailer.js'));
+  const mail = mailer.excusedEmail({
+    orgName: 'Homeweavers', siteUrl: 'https://x/',
+    items: [{ name: 'Asha', day: '2026-10-28', note: 'train was cancelled',
+              came: '10:05', shift: '9:30-6:30', late: 35, changed: false }]
+  });
+  const text = mail.html.replace(/<[^>]+>/g, ' ');
+  check('the message names who, when, and how late they were',
+    /Asha/.test(text) && /28 Oct/.test(text) && /35 min/.test(text), text.slice(0, 0));
+  check('and carries their own words',
+    /train was cancelled/.test(text));
+  check('it says plainly that nothing is being asked',
+    /nothing is being asked of you/.test(text));
+  /* The one thing it must not be is a decision to make: no approve, no
+     reject, nothing that writes anything. */
+  check('there is nothing on it to approve or reject',
+    !/Approve|Reject/i.test(mail.html), (mail.html.match(/Approve|Reject/gi) || []).slice(0, 3));
+  check('nothing to send at all means no message',
+    mailer.excusedEmail({ orgName: 'x', items: [] }) === null);
+
+  /* Who it goes to is the office's own list and nothing else: this is not a
+     message anybody falls back into receiving. */
+  const notify = SRV.slice(SRV.indexOf('async function notifySelfExcused'),
+                           SRV.indexOf('/* A day marked as leave on the grid'));
+  check('it goes to the addresses named for it',
+    notify.indexOf('settings.excused.to') > -1);
+  check('with nobody named, nothing is sent rather than it going to the usual list',
+    notify.indexOf('if (!to.length) return;') > -1
+    && notify.indexOf('mailRecipients(') === -1);
+  check('nobody is copied twice',
+    notify.indexOf('.filter(a => to.indexOf(a) < 0)') > -1);
+  check('how late they were is read off the record, not taken from the page',
+    notify.indexOf('FROM records WHERE org_id = $1 AND day = ANY($2)') > -1);
+  check('and the message is kept like every other',
+    notify.indexOf("logMail(orgId, 'excused'") > -1);
+  check('a message that fails leaves the mark standing',
+    notify.indexOf('the excused mark stands but its message failed') > -1);
+  /* The setting is a real setting, kept and validated like the rest. */
+  check('the addresses are validated like every other address box',
+    /s\.excused = \{\s*to: \(Array\.isArray\(ex\.to\)/.test(SRV));
+  check('and the panel has somewhere to type them',
+    APP.indexOf('id="emExcTo"') > -1 && APP.indexOf('id="emExcCc"') > -1
+    && APP.indexOf("excused: { to: list('emExcTo'), cc: list('emExcCc') }") > -1);
+  check('the panel says what the message is for',
+    APP.indexOf('for reading, not for deciding') > -1);
 }
 
 const bad = results.filter(x => !x).length;
