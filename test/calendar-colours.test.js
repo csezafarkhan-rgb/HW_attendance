@@ -140,6 +140,57 @@ check('the three are one family, not three unrelated colours',
     /\.emp-cal-cell\.st-HD\{background:var\(--part-half\);color:var\(--part-ink\);\}/.test(APP));
 }
 
+/* ---- what a day says, and what it keeps back ----
+   Four lines of figures on thirty squares is a wall of numbers to read past,
+   so the times are off unless asked for. What they must not take with them is
+   the line they share with things said in its place. */
+{
+  check('there is a gear on the calendar, with a panel behind it',
+    APP.indexOf('id="empCalOptsBtn"') > -1 && APP.indexOf('id="empCalOptsDropdown"') > -1);
+  check('and one setting on it, about the times',
+    APP.indexOf('id="empOptTimes"') > -1
+    && APP.indexOf('In, out and hours on every day') > -1);
+  const decl = APP.slice(APP.indexOf('var EMP_CAL_TIMES'), APP.indexOf('var EMP_CAL_TIMES') + 240);
+  check('off unless it has been turned on',
+    decl.indexOf("localStorage.getItem('hw_emp_cal_times') === '1'") > -1
+    && decl.indexOf('return false;') > -1, decl.slice(0, 160));
+  check('it is remembered between visits, the way the density is',
+    APP.indexOf("localStorage.setItem('hw_emp_cal_times'") > -1);
+  check('and the month is redrawn the moment it is changed',
+    /EMP_CAL_TIMES = chk\.checked;[\s\S]{0,200}renderEmployeeCalendar\(\);/.test(APP));
+  /* The panel is a panel like the others, so it closes like the others - and
+     carries the rule that a click on a choice is not a dismissal. */
+  check('the panel closes the way every other one does',
+    /if\(dd\.contains\(e\.target\) \|\| e\.target === btn\) return;/.test(
+      APP.slice(APP.indexOf("getElementById('empCalOptsBtn')"),
+                APP.indexOf("getElementById('empCalOptsBtn')") + 2000)));
+
+  /* The gate itself: both ways of writing the times go, and nothing else. */
+  check('turning it off takes away the stacked figures and the packed line',
+    APP.indexOf("if(!EMP_CAL_TIMES){ detail = ''; if(timeIsClock) timeStr = ''; }") > -1);
+  check('and only takes the packed line when it was a clock time',
+    APP.indexOf('var timeIsClock = false;') > -1
+    && (APP.match(/timeIsClock = true;/g) || []).length === 2,
+    (APP.match(/timeIsClock = true;/g) || []).length);
+  /* These three live in that line and nowhere else - hiding it for every day
+     would take them off the calendar, which is the fault this guards. */
+  const lines = APP.split(/\r?\n/);
+  const keeps = [
+    ['a holiday keeps its name', "timeStr = holiday.name"],
+    ['a day worked from home keeps what was logged', "timeStr = ov.duration + ' logged'"],
+    ['and a credited day keeps its hours', "timeStr = fmtMin(owedOv) + ' credited'"]
+  ];
+  keeps.forEach(([what, written]) => {
+    const line = lines.filter(l => l.indexOf(written) > -1);
+    check(what, line.length === 1 && line[0].indexOf('timeIsClock') === -1, line);
+  });
+  /* And the flag is raised only where a clock time is written, so nothing
+     else is put away with them. */
+  const clockLines = lines.filter(l => l.indexOf('timeIsClock = true') > -1);
+  check('only the two lines that write a clock time raise the flag',
+    clockLines.length === 2 && clockLines.every(l => l.indexOf('fmtTime(') > -1), clockLines);
+}
+
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);
