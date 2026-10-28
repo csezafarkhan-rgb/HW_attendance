@@ -983,7 +983,7 @@ body{
     its width from whatever its widest child asks for, so one long sentence in
     the wrong kind of box stretched it across the screen and pulled every row
     apart with it. */
-#shiftDropdown{ min-width:780px; max-width:min(1060px, 94vw); }
+#shiftDropdown{ min-width:780px; max-width:min(1120px, 94vw); }
 /* Rows inside a dropdown. The other dropdowns hold checkbox labels, so there
    was no button rule to inherit and these fell back to the browser's default
    bordered button - a box inside a box. */
@@ -1059,8 +1059,9 @@ body{
 .shf-flags{ display:inline-flex; align-items:center; gap:8px; margin-left:auto; flex:0 0 auto; }
 /* Who gives the first approval for this one person. Blank is the usual one,
    so it reads as an exception rather than a field waiting to be filled. */
-.shf-appr{ flex:0 0 auto; width:136px; font-size:11px; padding:4px 6px; border-radius:7px;
-  border:1px solid var(--line-dk); background:#fff; color:var(--ink); }
+.shf-appr{ flex:0 0 auto; width:176px; max-width:176px; font-size:11px; padding:4px 6px;
+  border-radius:7px; border:1px solid var(--line-dk); background:#fff; color:var(--ink); }
+select.shf-appr{ padding-right:18px; }
 .shf-appr::placeholder{ color:var(--ink-dim); font-style:italic; }
 .shf-satlbl{font-weight:700;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;font-size:10px;}
 /*  Sized to the longest thing each actually holds - "Full working day" and a
@@ -11561,6 +11562,52 @@ function buildExcelBackup(){
       .catch(function(){ MAIL_CFG = {configured:false, error:true}; return MAIL_CFG; });
     return MAIL_CFG_WAIT;
   }
+  /* The addresses already known to this office, for the shifts panel to offer
+     rather than have somebody type one from memory.
+
+     A name was typed into the box the first time it was used, which is the
+     natural thing to type and the one thing that cannot work: the first
+     approval is given by pressing a button in a message, so it has to go
+     somewhere. Offering the addresses on file makes picking a person the
+     ordinary path and typing an address the exception.
+
+     Accounts, whoever gives the final word, whoever holds the first stage now,
+     and any address already named against somebody. The list is a convenience:
+     an approver need not have an account at all. */
+  var APPROVER_LIST = null, APPROVER_WAIT = null;
+  function ensureApproverChoices(){
+    if(APPROVER_LIST) return Promise.resolve(APPROVER_LIST);
+    if(APPROVER_WAIT) return APPROVER_WAIT;
+    APPROVER_WAIT = Promise.all([
+      ensureMailCfg(),
+      fetch('/api/users', {credentials:'same-origin'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .catch(function(){ return null; })
+    ]).then(function(got){
+      var cfg = got[0] || {}, users = (got[1] && got[1].users) || [];
+      var seen = {}, out = [];
+      var add = function(email, who){
+        var e = String(email || '').trim();
+        if(!/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(e)) return;
+        var k = e.toLowerCase();
+        if(seen[k]) return;
+        seen[k] = true;
+        out.push({ email: e, name: String(who || '').trim() });
+      };
+      users.filter(function(u){ return u.is_active !== false; })
+           .forEach(function(u){ add(u.email, u.name); });
+      var lv = (cfg.settings && cfg.settings.leave) || {};
+      (lv.firstTo || []).forEach(function(a){ add(a, ''); });
+      (lv.firstCc || []).forEach(function(a){ add(a, ''); });
+      (cfg.to || []).forEach(function(a){ add(a, ''); });
+      if(cfg.firstApprover) add(cfg.firstApprover.email, cfg.firstApprover.name);
+      Object.keys(approvalRoute || {}).forEach(function(n){ add(ownApprover(n), ''); });
+      out.sort(function(a, b){ return a.email.localeCompare(b.email); });
+      APPROVER_LIST = out;
+      return out;
+    }).catch(function(){ APPROVER_LIST = []; return APPROVER_LIST; });
+    return APPROVER_WAIT;
+  }
   /* The first approver is an address rather than an account - it can be a
      shared inbox, or somebody with no login at all - so "am I them?" is a
      question about the address this account signs in with. */
@@ -14400,6 +14447,10 @@ function buildExcelBackup(){
   }
   function renderShiftDropdown(){
     if(!shiftWorking){ shiftWorking = {}; EMPLOYEES.forEach(function(e){ shiftWorking[e.name] = getShift(e.name); }); }
+    /* The addresses the approver pickers offer. Fetched before the panel is
+       drawn rather than filled in after it: a picker that gains its options a
+       moment later is one somebody has already given up on. */
+    if(!APPROVER_LIST){ ensureApproverChoices().then(renderShiftDropdown); }
     /* Rows move between groups when a slot changes, so the list is drawn again
        - and a list that jumps back to the top each time is no use to somebody
        working down thirteen of them. */
@@ -14507,11 +14558,28 @@ function buildExcelBackup(){
               (needsFirstApproval(e.name) ? ' checked' : '')+'>'+
             '<span>First approval</span>'+
           '</label>'+
-          '<input type="email" class="shf-appr" data-appr-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
-            ' value="'+ownApprover(e.name).replace(/"/g,'&quot;')+'"'+
-            ' placeholder="the usual one"'+
-            ' title="Who gives the first approval for this person. Leave it blank for whoever is named under Email → Leave."'+
-            (needsFirstApproval(e.name) ? '' : ' style="display:none;"')+'>'+
+          (function(){
+            /* Picked from the addresses on file, the way the shift beside it
+               is picked from the slots - with the same way out for one that
+               is not on the list yet. */
+            var cur = ownApprover(e.name), known = false;
+            var opts = '<option value="">the usual one</option>';
+            (APPROVER_LIST || []).forEach(function(a){
+              var on = a.email.toLowerCase() === cur.toLowerCase();
+              if(on) known = true;
+              opts += '<option value="'+a.email.replace(/"/g,'&quot;')+'"'+(on?' selected':'')+'>'
+                    + escapeHtml(a.email) + '</option>';
+            });
+            var other = !!cur && !known;
+            opts += '<option value="__other"'+(other?' selected':'')+'>Other…</option>';
+            var hide = needsFirstApproval(e.name) ? '' : 'display:none;';
+            return '<select class="shf-appr" data-appr-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
+                   ' title="Who gives the first approval for this person. “The usual one” is whoever is named under Email → Leave."'+
+                   ' style="'+hide+'">'+opts+'</select>'+
+                   '<input type="email" class="shf-appr shf-appr-other" data-appr-other="'+e.name.replace(/"/g,'&quot;')+'"'+
+                   ' value="'+(other?cur.replace(/"/g,'&quot;'):'')+'" placeholder="their address"'+
+                   ' style="'+(other && !hide ? '' : 'display:none;')+'">';
+          })()+
           '</span>';
         })()+
         '</div>'+
@@ -14588,12 +14656,15 @@ function buildExcelBackup(){
     Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-first-emp]'), function(cb){
       cb.addEventListener('change', function(){
         var name = cb.getAttribute('data-first-emp');
-        var box = shiftDropdown.querySelector('input[data-appr-emp="'+name.replace(/"/g,'\\"')+'"]');
+        var q = name.replace(/"/g,'\\"');
+        var sel = shiftDropdown.querySelector('select[data-appr-emp="'+q+'"]');
+        var box = shiftDropdown.querySelector('input[data-appr-other="'+q+'"]');
         /* Unticking drops whichever approver was named with it: there is no
-           first stage to hold, so an address sitting in the box would say
+           first stage to hold, so an address still showing would say
            otherwise. Ticking it back starts from the usual one. */
         if(cb.checked) delete approvalRoute[name]; else approvalRoute[name] = 'final';
-        if(box){ box.style.display = cb.checked ? '' : 'none'; if(!cb.checked) box.value = ''; }
+        if(sel){ sel.style.display = cb.checked ? '' : 'none'; if(!cb.checked) sel.value = ''; }
+        if(box){ box.style.display = 'none'; box.value = ''; }
         cb.disabled = true;
         saveApprovalRoute().then(function(){
           cb.disabled = false;
@@ -14607,10 +14678,41 @@ function buildExcelBackup(){
       });
     });
     /* Who holds that stage for this one person. Blank means the office's own
-       first approver, which is what everybody had before this box existed. */
-    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-appr-emp]'), function(box){
+       first approver, which is what everybody had before this existed. */
+    var saveApprover = function(name, val, el){
+      if(val) approvalRoute[name] = val; else delete approvalRoute[name];
+      el.disabled = true;
+      return saveApprovalRoute().then(function(){
+        el.disabled = false;
+        showUploadStatus(val
+          ? (dispName(name) + '’s first approval now goes to ' + val + '.')
+          : (dispName(name) + '’s first approval goes to the usual approver again.'), false);
+      }).catch(function(e){
+        el.disabled = false;
+        showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+      });
+    };
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('select[data-appr-emp]'), function(sel){
+      sel.addEventListener('change', function(){
+        var name = sel.getAttribute('data-appr-emp');
+        var box = shiftDropdown.querySelector('input[data-appr-other="'+name.replace(/"/g,'\\"')+'"]');
+        /* Somebody not on the list yet: the box appears and nothing is saved
+           until they have typed the address. */
+        if(sel.value === '__other'){
+          if(box){ box.style.display = ''; box.focus(); }
+          return;
+        }
+        if(box){ box.style.display = 'none'; box.value = ''; }
+        saveApprover(name, sel.value, sel).then(function(){
+          /* A newly named address becomes one of the choices, so the next row
+             can be pointed at the same person by picking rather than typing. */
+          if(sel.value) renderShiftDropdown();
+        });
+      });
+    });
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-appr-other]'), function(box){
       box.addEventListener('change', function(){
-        var name = box.getAttribute('data-appr-emp');
+        var name = box.getAttribute('data-appr-other');
         var val = box.value.trim();
         if(val && !/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(val)){
           box.style.borderColor = '#B3261E';
@@ -14618,16 +14720,11 @@ function buildExcelBackup(){
           return;
         }
         box.style.borderColor = ''; box.title = '';
-        if(val) approvalRoute[name] = val; else delete approvalRoute[name];
-        box.disabled = true;
-        saveApprovalRoute().then(function(){
-          box.disabled = false;
-          showUploadStatus(val
-            ? (dispName(name) + '’s first approval now goes to ' + val + '.')
-            : (dispName(name) + '’s first approval goes to the usual approver again.'), false);
-        }).catch(function(e){
-          box.disabled = false;
-          showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        saveApprover(name, val, box).then(function(){
+          if(val){
+            APPROVER_LIST = null; APPROVER_WAIT = null;      // it belongs on the list now
+            ensureApproverChoices().then(renderShiftDropdown);
+          }
         });
       });
     });
