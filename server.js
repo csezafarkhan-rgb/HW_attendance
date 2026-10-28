@@ -2166,7 +2166,8 @@ async function buildLeaveEmail(orgId, stage, forApprover) {
   return mailer.leaveEmail({
     orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
     subject: settings.leave.subject, footer: settings.leave.footer,
-    intro: (st === 1 && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro
+    intro: (st === 1 && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+    approver: byName
   });
 }
 
@@ -2536,6 +2537,7 @@ async function notifyNewRequests(orgId, added) {
         heading: who ? 'A request for you to look at first'
                      : 'A request is waiting for a decision',
         intro: (who && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        approver: who ? await approverName(orgId, who) : '',
         footer: settings.leave.footer
       });
       const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
@@ -2855,6 +2857,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
         })),
         subject: settings.leave.subject,
         intro: (stage && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        approver: byName,
         footer: settings.leave.footer, siteUrl: mailer.baseUrl()
       });
       if (!mail) continue;

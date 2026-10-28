@@ -249,7 +249,7 @@ const DEFAULT_TEXT = {
     footer: 'Best regards,\n{org}'
   },
   leave: {
-    firstIntro: 'Hello,\n\nA leave request is waiting for your word before it goes to the '
+    firstIntro: 'Hello {approver},\n\nA leave request is waiting for your word before it goes to the '
       + 'management for final approval. Approve or reject it from the buttons below.',
     subject: 'Leave \u00b7 {n} waiting for a decision',
     intro: 'Hello,\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
@@ -625,8 +625,19 @@ function leaveEmail(o) {
   const words = DEFAULT_TEXT.leave;
   const say = { n: pending.length + unreq.length, waiting: pending.length,
                 unrequested: unreq.length, org: o.orgName || 'Attendance' };
+  /* The wording for the first stage is one set of words sent to several
+     different people - whoever holds that stage for the person the request is
+     about. {approver} is who this copy is going to, so the greeting can name
+     them instead of naming whoever the words were written for. Left out when
+     nobody holds the stage, so the placeholder stays visible rather than
+     greeting an empty name. */
+  if (o.approver) say.approver = o.approver;
   const body = [];
-  const intro = fillText(o.intro || words.intro, say);
+  /* Left blank with a first stage in use, the words fell back to the ones
+     written for the final word - "the leave below is waiting for a decision",
+     told to somebody whose word does not decide it. The first stage has its
+     own wording to fall back on. */
+  const intro = fillText(o.intro || (o.approver ? words.firstIntro : words.intro), say);
   if (intro) {
     body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
       + esc(intro) + '</div>');
@@ -782,16 +793,24 @@ function holidayEmail(o) {
 /* One new request, sent as it is raised. */
 function requestEmail(o) {
   const r = o.req;
+  /* The same words the other leave messages take their placeholders from:
+     {name} the person who asked, {approver} whoever this copy is going to for
+     the first word, {org} the office. Without this the words came through with
+     the braces still in them. */
+  const say = { name: r.empName || '', org: o.orgName || 'Attendance',
+                kind: kindName(r.leaveType), dates: dateRange(r.dateFrom, r.dateTo) };
+  if (o.approver) say.approver = o.approver;
+  const intro = fillText(o.intro, say), footer = fillText(o.footer, say);
   return {
     subject: (r.leaveType === 'PUNCH' ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
              + ' · ' + dateRange(r.dateFrom, r.dateTo),
     html: layout(o.orgName || 'Attendance',
       o.heading || 'A request is waiting for a decision', [
-      o.intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-                 + esc(o.intro) + '</div>') : '',
+      intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
+                 + esc(intro) + '</div>') : '',
       requestCard(r, o.links, 'Raised ' + (r.createdAt ? fmtDay(String(r.createdAt).slice(0, 10)) : 'just now')),
-      o.footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-                  + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(o.footer) + '</div>') : '',
+      footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
+                  + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>') : '',
       o.siteUrl ? ('<div style="margin-top:8px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>') : ''
     ])
   };
