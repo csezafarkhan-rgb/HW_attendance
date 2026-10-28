@@ -2988,17 +2988,19 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 /* The bullet, where it can be clicked: a mark first and a button second, so
    the list still reads as a list, with enough of a target to hit on a phone
    and something under the pointer to say it does anything. */
-/* The first line has nothing above it, so its bullet is a plain mark and not a
-   button - but it has to stand in the same place as the ones that are, or the
-   boxes beside them step in and out down the list. Both get the box; only one
-   of them does anything. */
-.wl-dot{ border:1px solid transparent; border-radius:6px; padding:3px 6px;
-  margin-left:-6px; text-align:center; min-width:13px; }
-.wl-dot-btn{ background:transparent; font:inherit; color:var(--ink-soft);
-  font-size:15px; line-height:1; flex:none; cursor:pointer; }
-.wl-dot-btn:hover{ background:#EEF3FA; border-color:#CBD9EC; color:var(--ink); }
-.wl-dot-btn:focus-visible{ outline:2px solid #7FB0E8; outline-offset:1px; }
-.wl-sub .wl-dot-btn{ font-size:13px; }
+/* It has to look like a button standing still, not only under the pointer: a
+   control nobody can see is a control nobody uses, and that is what the first
+   two attempts at this were. Small enough to sit inside the line, with a
+   target big enough for a thumb. */
+.wl-dot{ text-align:center; min-width:13px; }
+.wl-tuck{ flex:none; border:1px solid #CBD9EC; background:#EEF3FA; color:#3C5A7A;
+  font:inherit; font-size:12px; line-height:1; cursor:pointer; border-radius:6px;
+  padding:5px 7px; }
+.wl-tuck:hover{ background:#DCE8FB; border-color:#9DBEEF; color:#143862; }
+.wl-tuck:focus-visible{ outline:2px solid #7FB0E8; outline-offset:1px; }
+/* The line that cannot be tucked holds the space one would take, so every box
+   on the card starts in the same place. */
+.wl-tuck-gap{ flex:none; width:26px; }
 /* Dark green, with the words in white over it. The pale version read as part
    of the page and was missed; this one is plainly a notice, and every piece of
    text on it clears 7:1 against the background. */
@@ -11184,21 +11186,25 @@ function buildExcelBackup(){
             /* The first line has nothing to sit under, so it is never offered
                the chance to become a sub-point of nothing. */
             var canIndent = i > 0;
-            /* The bullet is the control. It was a faint arrow at the far right
-               of the row that only appeared under the pointer, so on a phone
-               there was no way to make a sub-point at all and on a laptop
-               nothing said there was one - the card said "Tab tucks a line
-               under the one above" and that was the whole of it.
+            /* A button of its own on the left, beside the mark rather than
+               instead of it. It was a faint arrow at the far right of the row
+               that appeared only under the pointer - no way to make a
+               sub-point on a phone at all, and nothing on a laptop to say
+               there was one. Then it was the bullet itself, which was worse in
+               one way: a dot that quietly did something still looks exactly
+               like a dot that does not.
 
-               It sits on the left because that is where the shape of the list
-               is read, and it is the mark it changes: click the dot and the
-               line steps in under the one above, click the arrow and it comes
-               back out. */
+               So it looks like a button, sits where the shape of the list is
+               read, and says which way it goes: step this line in under the
+               one above, or bring it back out. */
             return '<div class="wl-row' + (lvl ? ' wl-sub' : '') + '" data-wl-lvl="' + lvl + '">'
+              + '<span class="wl-dot">' + (lvl ? '\u21B3' : '\u2022') + '</span>'
               + (canIndent
-                  ? ('<button type="button" class="wl-dot wl-dot-btn" data-wl-sub="' + i + '" title="'
-                     + (lvl ? WL_OUT : WL_IN) + '">' + (lvl ? '\u21B3' : '\u2022') + '</button>')
-                  : '<span class="wl-dot">\u2022</span>')
+                  ? ('<button type="button" class="wl-tuck" data-wl-sub="' + i + '" title="'
+                     + (lvl ? WL_OUT : WL_IN) + '">' + (lvl ? '\u21E4' : '\u21E5') + '</button>')
+                  /* The first line has nothing to sit under, and the boxes
+                     below it have to start where it does. */
+                  : '<span class="wl-tuck-gap"></span>')
               + '<input class="wl-in" data-wl-i="' + i + '" value="' + shotEsc(txt).replace(/"/g, '&quot;') + '"'
               + ' placeholder="' + (i === 0 ? 'What did you work on?'
                                     : (lvl ? 'More on the line above\u2026' : 'Another one\u2026')) + '"'
@@ -11209,9 +11215,9 @@ function buildExcelBackup(){
       + '</div>'
       + '<div class="wl-foot">' + (mine.length
           ? (mine.length + (mine.length === 1 ? ' line' : ' lines')
-             + ' \u00b7 saved \u00b7 click a bullet (or press Tab) to tuck a line under the one above')
-          : 'One line a job. Click a bullet \u2014 or press Tab \u2014 to tuck a line under the one '
-            + 'above it. It saves itself as you type.')
+             + ' \u00b7 saved \u00b7 \u21e5 tucks a line under the one above, \u21e4 brings it back out')
+          : 'One line a job. \u21e5 tucks a line under the one above it, \u21e4 brings it back out '
+            + '\u2014 or press Tab. It saves itself as you type.')
       + '</div>';
 
     var rowOf = function(el){
@@ -11235,10 +11241,13 @@ function buildExcelBackup(){
       r.setAttribute('data-wl-lvl', lvl ? '1' : '0');
       r.className = lvl ? 'wl-row wl-sub' : 'wl-row';
       var dot = r.querySelector('.wl-dot');
-      if(!dot) return;
-      dot.textContent = lvl ? '\u21B3' : '\u2022';
-      /* The mark is the button, so what it offers next changes with it. */
-      if(dot.tagName === 'BUTTON') dot.title = lvl ? WL_OUT : WL_IN;
+      if(dot) dot.textContent = lvl ? '\u21B3' : '\u2022';
+      /* The button offers the other way once it has gone one way. */
+      var b = r.querySelector('.wl-tuck');
+      if(b){
+        b.textContent = lvl ? '\u21E4' : '\u21E5';
+        b.title = lvl ? WL_OUT : WL_IN;
+      }
     };
     var setLevel = function(el, lvl){ markRow(rowOf(el), lvl); };
     var foot = box.querySelector('.wl-foot');

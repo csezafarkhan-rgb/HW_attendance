@@ -431,29 +431,35 @@ const check = (name, ok, got) => {
   /* Where that button is, and whether anyone can see it. It used to be a faint
      arrow at the far right of the row, shown only under the pointer: no way to
      make a sub-point on a phone, and nothing on a laptop to say there was one.
-     It is the bullet now - the mark it changes, on the side the shape of the
-     list is read from. */
-  check('the bullet itself is the control',
-    /class="wl-dot wl-dot-btn" data-wl-sub=/.test(card));
-  check('and it is the first thing in the row, not the last',
-    card.indexOf('data-wl-sub') < card.indexOf('class="wl-in"'));
+     Then it was the bullet itself, which looks exactly like a bullet that does
+     nothing. It is a button on the left now, beside the mark. */
+  check('the control is on the left, before the line it moves',
+    card.indexOf('class="wl-tuck"') < card.indexOf('class="wl-in"'));
+  check('and it is a button, not the bullet wearing a second job',
+    /class="wl-tuck" data-wl-sub=/.test(card) && card.indexOf('wl-dot-btn') === -1);
+  check('the bullet is still the mark it always was',
+    card.indexOf('<span class="wl-dot">') > -1
+    && card.indexOf("(lvl ? '\\u21B3' : '\\u2022')") > -1);
   check('the hover-only arrow at the far end is gone',
     card.indexOf('wl-sub-btn') === -1 && app.indexOf('.wl-sub-btn') === -1);
-  check('it is always there to be seen, not only under the pointer',
-    !/\.wl-row:hover \.wl-dot-btn/.test(app) && /\.wl-dot-btn\{[^}]*cursor:pointer/.test(app));
-  check('with something under the pointer to say it does anything',
-    /\.wl-dot-btn:hover\{/.test(app) && /\.wl-dot-btn:focus-visible\{/.test(app));
-  /* The first line has nothing above it, so its bullet is a bullet. */
-  check('the line with nothing above it keeps a plain mark',
-    /: '<span class="wl-dot">\\u2022<\/span>'/.test(card));
-  /* What it offers has to follow what it did. */
-  check('the mark and what it offers change together',
-    /dot\.textContent = lvl \? '\\u21B3' : '\\u2022';/.test(card)
-    && /dot\.title = lvl \? WL_OUT : WL_IN;/.test(card));
+  check('it can be seen standing still, not only under the pointer',
+    /\.wl-tuck\{[^}]*background:#EEF3FA/.test(app) && !/\.wl-row:hover \.wl-tuck\{/.test(app));
+  check('with something under the pointer, and a ring for the keyboard',
+    /\.wl-tuck:hover\{/.test(app) && /\.wl-tuck:focus-visible\{/.test(app));
+  /* The first line has nothing above it, so it has no button - and the boxes
+     below it must still start where it does. */
+  check('the line with nothing above it holds the space instead',
+    card.indexOf("<span class=\"wl-tuck-gap\"></span>") > -1
+    && /\.wl-tuck-gap\{[^}]*width:26px/.test(app));   // the width the button takes
+  /* Which way it goes has to follow where the line is. */
+  check('the button turns around once the line has moved',
+    card.indexOf("b.textContent = lvl ? '\\u21E4' : '\\u21E5';") > -1
+    && card.indexOf('b.title = lvl ? WL_OUT : WL_IN;') > -1);
   check('and both readings are written once, so they cannot drift apart',
     (card.match(/WL_IN =/g) || []).length === 1 && (card.match(/WL_OUT =/g) || []).length === 1);
-  check('the card says the bullet can be clicked, rather than only naming a key',
-    /click a bullet \(or press Tab\)/.test(card) && /Click a bullet/.test(card));
+  check('the card says what the two arrows do',
+    /\\u21[Ee]5 tucks a line under the one above/.test(card)
+    && /\\u21[Ee]4 brings it back out/.test(card));
 
   /* The arrow that cannot move says why, rather than looking broken. */
   check('the forward arrow says tomorrow has not happened',
