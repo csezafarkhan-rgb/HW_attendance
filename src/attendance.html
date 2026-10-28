@@ -11797,6 +11797,23 @@ function buildExcelBackup(){
           return '<div data-lv-pane="first"' + (fa ? '' : ' style="display:none;"') + '>'
             + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is raised. '
             +   'Approving here does not grant the leave — it passes it on.</div>'
+            /* Who holds the stage is set against each person, over in the
+               Shifts panel, and the words are set here - so neither screen
+               ever showed one person's arrangement whole. Pick a name and
+               this says who gets the first word about them and what that
+               person will read, and lets both be changed from the one place.
+
+               It sits above the addresses because it is the question actually
+               asked of this pane - whose leave goes to whom - and the boxes
+               below it are the fallback for everybody it does not name. */
+            + '<div class="em-lab">One person at a time '
+            +   '<span>who gets the first word about them, and what they read</span></div>'
+            + '<div class="em-row"><select id="emLvWho"><option value="">Pick a name…</option>'
+            +   lvWhoPeople().map(function(e){
+                  return '<option value="' + mailEscape(e.name) + '">'
+                    + mailEscape(dispName(e.name)) + '</option>';
+                }).join('') + '</select></div>'
+            + '<div id="emLvWhoBox" style="display:none;margin-bottom:12px;"></div>'
             + '<div class="em-lab">To <span>whoever looks at it first '
             +   '· empty means leave is granted in one stage</span></div>'
             + '<div class="em-row"><input type="text" id="emLvFirstTo" placeholder="comma separated" value="'
@@ -11808,18 +11825,6 @@ function buildExcelBackup(){
             +   '\u00b7 {approver} is whoever this copy goes to</span></div>'
             + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
             +   mailEscape(text((s.leave || {}).firstIntro, (W.leave || {}).firstIntro)) + '</textarea></div>'
-            /* Who holds the stage is set against each person, over in the
-               Shifts panel, and the words are set here - so neither screen
-               ever showed one person's arrangement whole. Pick a name and
-               this says who gets the first word about them and what that
-               person will read, and lets both be changed from the one place. */
-            + '<div class="em-lab" style="margin-top:14px;">One person at a time '
-            +   '<span>who gets the first word about them, and what they read</span></div>'
-            + '<div class="em-row"><select id="emLvWho"><option value="">Pick a name…</option>'
-            +   lvWhoPeople().map(function(e){
-                  return '<option value="' + mailEscape(e.name) + '">' + mailEscape(e.name) + '</option>';
-                }).join('') + '</select></div>'
-            + '<div id="emLvWhoBox" style="display:none;"></div>'
             + '</div>';
         })()
       /* ---- and the one that grants it ---- */
@@ -12062,6 +12067,7 @@ function buildExcelBackup(){
       var other = document.getElementById('emLvWhoOther');
       var intro = document.getElementById('emLvWhoIntro');
       if(sel) sel.onchange = function(){
+        sel.blur();
         var v = sel.value;
         if(v === '__other'){
           if(other){ other.parentNode.style.display = ''; other.focus(); }
@@ -12099,6 +12105,7 @@ function buildExcelBackup(){
       var pick = document.getElementById('emLvWho');
       if(!pick) return;
       pick.onchange = function(){
+        pick.blur();                  // the list is shut; an outside click may close the panel again
         if(!APPROVER_LIST){
           ensureApproverChoices().then(function(){ lvWhoRender(pick.value); });
           return;
@@ -12603,7 +12610,23 @@ function buildExcelBackup(){
       if(opening){ renderEmailDropdown(); positionDropdown(btn, dd); }
     });
     dd.addEventListener('click', function(e){ e.stopPropagation(); });
-    document.addEventListener('click', function(){ dd.classList.remove('open'); });
+    /* The panel closed on any click it had not stopped itself, and a dropdown
+       inside it draws its list of names outside the panel - outside the page,
+       in a menu the browser draws - so choosing a name arrived here as a click
+       from somewhere else and shut the panel mid-edit.
+
+       A click is only somebody finishing with the panel if it landed on
+       something that is still in the page and is not part of the panel, and
+       not while a list inside it is open. The list is open exactly while its
+       box holds the focus, and the box lets go of it as soon as a name is
+       picked, so the next click outside closes the panel as it always did. */
+    document.addEventListener('click', function(e){
+      if(!e.target || !document.contains(e.target)) return;
+      if(dd.contains(e.target) || e.target === btn) return;
+      var on = document.activeElement;
+      if(on && on.tagName === 'SELECT' && dd.contains(on)) return;
+      dd.classList.remove('open');
+    });
   })();
 
 

@@ -117,6 +117,47 @@ function grab(src, name) {
     APP.indexOf('if(v && !/^[^@') > -1 && APP.indexOf('{ other.focus(); return; }') > -1);
 }
 
+/* ---- the panel stays open while it is being used ----
+   The panel closed on any click it had not stopped itself. A dropdown draws
+   its list of names in a menu outside the page, so choosing a name arrived as
+   a click from somewhere else and shut the panel mid-edit. */
+{
+  const wire = APP.slice(APP.indexOf("var btn = document.getElementById('emailBtn')"),
+                         APP.indexOf('function domNodeToCanvas'));
+  check('a click that is not in the page any more decides nothing',
+    wire.indexOf('if(!e.target || !document.contains(e.target)) return;') > -1);
+  check('a click inside the panel, or on the button that opened it, leaves it open',
+    wire.indexOf('if(dd.contains(e.target) || e.target === btn) return;') > -1);
+  check('and a list inside the panel being open holds it open',
+    wire.indexOf("if(on && on.tagName === 'SELECT' && dd.contains(on)) return;") > -1);
+  check('the blanket close is gone',
+    wire.indexOf("document.addEventListener('click', function(){ dd.classList.remove('open'); });") === -1);
+  /* Holding it open on a focused list would hold it open for good; the box
+     lets go of the focus as soon as a name is picked. */
+  check('picking a name lets go of the focus, so an outside click closes again',
+    APP.indexOf('pick.onchange = function(){') > -1 && APP.indexOf('pick.blur();') > -1);
+  check('and so does picking an approver',
+    APP.indexOf('if(sel) sel.onchange = function(){') > -1 && APP.indexOf('sel.blur();') > -1);
+}
+
+/* ---- where it sits, and what it calls people ---- */
+{
+  const pane = APP.slice(APP.indexOf('<div data-lv-pane="first"'),
+                         APP.indexOf('<div data-lv-pane="final"'));
+  check('the name comes first - it is the question this pane is asked',
+    pane.indexOf('emLvWho') < pane.indexOf('emLvFirstTo'),
+    [pane.indexOf('emLvWho'), pane.indexOf('emLvFirstTo')]);
+  check('and the addresses below it are the fallback for everybody it does not name',
+    pane.indexOf('emLvFirstTo') < pane.indexOf('emLvFirstCc')
+    && pane.indexOf('emLvFirstCc') < pane.indexOf('emLvFirstIntro'));
+  /* A card-punch row renamed to say what it is should read that way here too,
+     rather than showing the key its records are filed under. */
+  check('a name is shown the way the rest of the page shows it',
+    APP.indexOf("+ mailEscape(dispName(e.name)) + '</option>'") > -1);
+  check('while the value stays the name the records are filed under',
+    APP.indexOf(`'<option value="' + mailEscape(e.name) + '">'`) > -1);
+}
+
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);
