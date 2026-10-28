@@ -1063,6 +1063,19 @@ body{
   border-radius:7px; border:1px solid var(--line-dk); background:#fff; color:var(--ink); }
 select.shf-appr{ padding-right:18px; }
 .shf-appr::placeholder{ color:var(--ink-dim); font-style:italic; }
+/* The way back for somebody marked as having left. */
+.shf-left{ margin:10px 0 4px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:10px; background:#F7F9FD; }
+.shf-left-h{ font-size:11px; font-weight:800; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--ink-dim); margin-bottom:5px; }
+.shf-left-row{ display:flex; align-items:center; gap:8px; padding:3px 0; font-size:12px;
+  font-weight:600; color:var(--ink); }
+.shf-left-row button{ margin-left:auto; font-size:11px; font-weight:700; padding:4px 10px;
+  border-radius:6px; border:1px solid var(--line-dk); background:var(--panel);
+  color:var(--ink); cursor:pointer; }
+.shf-left-row button:hover{ border-color:var(--ink); }
+.shf-left i{ display:block; margin-top:6px; font-style:normal; font-size:11px;
+  font-weight:500; color:var(--ink-soft); line-height:1.45; }
 .shf-satlbl{font-weight:700;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;font-size:10px;}
 /*  Sized to the longest thing each actually holds - "Full working day" and a
     date - and no further. They were wide enough that a row carrying the
@@ -14364,19 +14377,77 @@ function buildExcelBackup(){
     });
   }
   try{ window.__attDelEmp = deleteEmployee; window.__attDelEmps = deleteEmployeesBulk; }catch(e){}
+  /* Somebody has left. Not a deletion: their attendance stays exactly where it
+     is, and so does everything worked out from it. The office marks it on the
+     person, the server stops handing them out with the roster, and they come
+     off the grid, the pickers, payroll, the shifts panel and the daily message
+     together.
+
+     Removing them was the only thing on offer, and it did two wrong things at
+     once - threw away the rows that are the whole reason to keep a record, and
+     did not stick, because the roster is rebuilt from the server on the next
+     page load. */
+  function setEmployeeLeft(name, left){
+    return fetch('/api/employees/left', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name:name, left:!!left})
+    }).then(function(r){
+      if(!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){
+        throw new Error((j && j.error) || ('the server said ' + r.status));
+      });
+      return r.json();
+    });
+  }
+  /* Who is no longer here, asked for only when the panel that shows them is
+     opened - it is a short list and rarely looked at. */
+  var LEAVERS = null;                                 // null = not asked for yet
+  function loadLeavers(){
+    return fetch('/api/employees/left', {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : {left:[]}; })
+      .then(function(j){ return (j && j.left) || []; })
+      .catch(function(){ return []; });
+  }
+  /* Taking somebody off the roster, and putting the page back in step with it
+     without a reload: their column goes, their row goes, and the dataset the
+     page is holding no longer names them. The rows themselves are untouched on
+     the server, which is the point. */
+  function markEmployeeLeft(name){
+    return setEmployeeLeft(name, true).then(function(){
+      EMPLOYEES = (EMPLOYEES||[]).filter(function(e){ return e.name !== name; });
+      /* Straight onto the list that offers the way back, so undoing it does
+         not wait on a reload. */
+      if(LEAVERS === null) LEAVERS = [];
+      if(!LEAVERS.some(function(l){ return l.name === name; })) LEAVERS.push({name:name});
+      try{ delete visibleEmpSet[name]; }catch(e){}
+      saveVisibleEmployees();
+      renderEmpDropdown(); renderEmpBtnLabel();
+      try{ renderTable(); }catch(e){}
+      try{ if(typeof renderShiftDropdown === 'function') renderShiftDropdown(); }catch(e){}
+      showUploadStatus(dispName(name) + ' is marked as having left. Their attendance is '
+        + 'kept in full — bring them back from “No longer here” in Shifts.', false);
+    }).catch(function(e){
+      showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+    });
+  }
   function renderEmpDropdown(){
     var html = '';
     EMPLOYEES.forEach(function(e){
       var checked = visibleEmpSet[e.name] ? 'checked' : '';
-      /* The tick only hides someone from the view. A wrong import can add
-         people who should not be here at all, so there is also a way to remove
-         an employee outright, together with their attendance rows. */
+      /* The tick only hides someone from this screen, for whoever is looking.
+         The \u2715 is for the two other things: somebody who has left, and
+         somebody a bad import put here who was never an employee at all.
+         Which one it offers depends on whether there is any attendance behind
+         them - 210 rows of somebody's year is never a thing to throw away. */
+      var rows = (RECORDS||[]).filter(function(r){ return r.e === e.name; }).length;
       html += '<div class="mrow emprow">'
             +   '<label class="empname"><input type="checkbox" data-emp="'+escAttr(e.name)+'" '+checked+'/>'
             +     escHtml(e.name)
             +   '</label>'
             +   '<button type="button" class="empdel" data-del="'+escAttr(e.name)+'" '
-            +     'title="Remove '+escAttr(e.name)+' and all their attendance">\u2715</button>'
+            +     'data-rows="'+rows+'" title="'+(rows
+                    ? escAttr(e.name) + ' has left \u2014 their attendance is kept'
+                    : 'Remove ' + escAttr(e.name) + ', who has no attendance on file')+'">\u2715</button>'
             + '</div>';
     });
     html += '<div class="actions"><button type="button" data-act="all">All</button><button type="button" data-act="none">None</button></div>';
@@ -14389,13 +14460,21 @@ function buildExcelBackup(){
            browser suppresses dialogs, so confirm() returns false without ever
            asking and the ✕ looked completely dead. Arm the button instead - the
            same approach the request buttons already use. */
+        var mine = parseInt(btn.getAttribute('data-rows'), 10) || 0;
         if(btn.dataset.armed !== '1'){
-          var mine = (RECORDS||[]).filter(function(r){ return r.e === name; }).length;
           btn.dataset.armed = '1';
           btn.dataset.was = btn.textContent;
-          btn.textContent = mine ? ('Delete + ' + mine + ' rows?') : 'Delete?';
+          /* "Delete + 210 rows?" was the only thing it ever said, which is why
+             somebody who had resigned got deleted rather than marked as gone -
+             and then came back on the next load, because the roster is rebuilt
+             from the server. With attendance behind them it offers the right
+             thing instead; with none, it is still a plain removal. */
+          btn.textContent = mine ? 'Has left?' : 'Delete?';
           btn.classList.add('empdel-armed');
-          btn.title = 'Click again to remove ' + name;
+          btn.title = mine
+            ? ('Click again \u2014 ' + name + ' comes off the roster and their '
+               + mine + ' attendance row(s) are kept')
+            : ('Click again to remove ' + name);
           setTimeout(function(){
             if(btn.dataset.armed === '1'){
               btn.dataset.armed = '';
@@ -14407,7 +14486,7 @@ function buildExcelBackup(){
         }
         btn.dataset.armed = '';
         btn.classList.remove('empdel-armed');
-        deleteEmployee(name);
+        if(mine) markEmployeeLeft(name); else deleteEmployee(name);
       });
     });
     Array.prototype.forEach.call(empDropdown.querySelectorAll('input[type=checkbox]'), function(cb){
@@ -14451,6 +14530,11 @@ function buildExcelBackup(){
        drawn rather than filled in after it: a picker that gains its options a
        moment later is one somebody has already given up on. */
     if(!APPROVER_LIST){ ensureApproverChoices().then(renderShiftDropdown); }
+    /* And who is no longer here, so the panel can offer the way back. */
+    if(LEAVERS === null){
+      LEAVERS = [];                                   // asked for once, not on every draw
+      loadLeavers().then(function(l){ LEAVERS = l; renderShiftDropdown(); });
+    }
     /* Rows move between groups when a slot changes, so the list is drawn again
        - and a list that jumps back to the top each time is no use to somebody
        working down thirteen of them. */
@@ -14605,6 +14689,21 @@ function buildExcelBackup(){
       });
     });
     html += '</div>';
+    /* The way back. Somebody marked as left is off every roster by then, this
+       panel included, so without a list of them there would be no way to undo
+       it short of the database. Their attendance never went anywhere; this
+       only puts the name back on the roster. */
+    if(LEAVERS && LEAVERS.length){
+      html += '<div class="shf-left"><div class="shf-left-h">No longer here</div>'+
+        LEAVERS.map(function(l){
+          return '<div class="shf-left-row"><span>'+escapeHtml(dispName(l.name))+'</span>'+
+            '<button type="button" data-back-emp="'+String(l.name).replace(/"/g,'&quot;')+'">Bring back</button>'+
+          '</div>';
+        }).join('')+
+        '<i>Their attendance was kept in full and is in every backup. Bringing '+
+        'somebody back puts the name on the roster again; nothing else changes.</i>'+
+      '</div>';
+    }
     html += '<div class="actions">'+
       '<button type="button" class="primary" data-act="save">\uD83D\uDCBE Save shifts</button>'+
       '<button type="button" data-act="reset">\u21BA Reset to default</button>'+
@@ -14612,6 +14711,33 @@ function buildExcelBackup(){
     shiftDropdown.innerHTML = html;
     (function(){ var l = shiftDropdown.querySelector('.shf-list'); if(l && keepScroll) l.scrollTop = keepScroll; })();
 
+    /* Putting somebody back on the roster. The dataset is asked for again
+       rather than patched here, because their rows have to come back with
+       them and the server is what holds both. */
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('button[data-back-emp]'), function(b){
+      b.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        var name = b.getAttribute('data-back-emp');
+        b.disabled = true; b.textContent = 'Bringing back…';
+        setEmployeeLeft(name, false).then(function(){
+          LEAVERS = (LEAVERS||[]).filter(function(l){ return l.name !== name; });
+          showUploadStatus(dispName(name) + ' is on the roster again.', false);
+          return (window.HWSync && window.HWSync.hydrateDataset)
+            ? window.HWSync.hydrateDataset().then(function(d){
+                if(d && d.employees && d.employees.length) applyDataset(d);
+              }).catch(function(){})
+            : null;
+        }).then(function(){
+          shiftWorking = null;
+          renderEmpDropdown(); renderEmpBtnLabel();
+          try{ renderTable(); }catch(e){}
+          renderShiftDropdown();
+        }).catch(function(e){
+          b.disabled = false; b.textContent = 'Bring back';
+          showUploadStatus('That did not work (' + ((e && e.message) || 'no answer') + ').', true);
+        });
+      });
+    });
     /* Who types their own day. Saved on the tick, like the shift beside it -
        there is no Save button on this panel and a setting that waits for one
        reads as not having registered. */

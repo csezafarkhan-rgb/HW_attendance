@@ -1414,10 +1414,22 @@ app.put('/api/dataset', requireAuth, bigJson, async (req, res) => {
     }
     for (const e of employees) {
       if (!e || !e.name) continue;
+      /* Somebody who has left stays left. This used to set is_active = TRUE on
+         every save, so the next time the page wrote the dataset - which it
+         does after almost anything - a person who had been taken off the
+         roster came straight back, and no amount of removing them on screen
+         ever stuck.
+
+         The flag is only written when the payload actually carries one, which
+         a restore from backup does and an ordinary save does not. A name the
+         table has never seen is new, and new people start active. */
+      const flag = (e && typeof e.is_active === 'boolean') ? e.is_active : null;
       await client.query(
-        `INSERT INTO employees (org_id, code, name, shift) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (org_id, name) DO UPDATE SET code = EXCLUDED.code, shift = EXCLUDED.shift, is_active = TRUE`,
-        [req.session.orgId, e.code || null, String(e.name), e.shift || null]
+        `INSERT INTO employees (org_id, code, name, shift, is_active) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (org_id, name) DO UPDATE SET code = EXCLUDED.code, shift = EXCLUDED.shift,
+           is_active = COALESCE($6, employees.is_active)`,
+        [req.session.orgId, e.code || null, String(e.name), e.shift || null,
+         flag === null ? true : flag, flag]
       );
       employeesUpserted++;
     }
@@ -1514,6 +1526,36 @@ app.get('/api/history', requireRole('admin', 'admin_view'), async (req, res) => 
   res.json({ history: rows });
 });
 
+/* Somebody who has left. Their rows stay exactly where they are - this is a
+   flag on the person, not a deletion - and every read of the roster already
+   asks for the active ones, so they come off the grid, the pickers, the
+   payroll, the shifts panel and the daily message at once. The backup carries
+   the flag, so a restore puts back who had left as well as who was here.
+
+   Deleting them was the only thing on offer before, and it did two wrong
+   things at once: it threw away the attendance rows that are the reason to
+   keep a record at all, and it did not stick, because the roster is rebuilt
+   from this table on the next page load. */
+app.get('/api/employees/left', requireRole('admin', 'admin_view'), async (req, res) => {
+  const r = await pool.query(
+    `SELECT name, code, shift FROM employees
+      WHERE org_id = $1 AND is_active = FALSE ORDER BY lower(name)`, [req.session.orgId]);
+  res.json({ left: r.rows });
+});
+app.post('/api/employees/left', requireRole('admin'), async (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim();
+  const left = !!(req.body && req.body.left);
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  const r = await pool.query(
+    'UPDATE employees SET is_active = $1 WHERE org_id = $2 AND name = $3 RETURNING name',
+    [!left, req.session.orgId, name]);
+  if (!r.rows.length) return res.status(404).json({ error: 'no_such_employee' });
+  await logChange(pool, req.session.orgId, 'employees', name, req.session.userId);
+  await addHistory(pool, req.session.orgId, req.session.userId, (req.user && req.user.name) || null,
+    'employees', [{ item: name, before: left ? 'here' : 'left',
+                    after: left ? 'left' : 'here' }]);
+  res.json({ ok: true, name, left });
+});
 app.post('/api/employees', requireAuth, bigJson, async (req, res) => {
   if (!canWrite(req.session.role)) return res.status(403).json({ error: 'read_only' });
   const employees = (req.body && req.body.employees) || [];
