@@ -86,8 +86,16 @@ function grab(src, name) {
 {
   check('there is a name to pick in the first-approval pane',
     /id="emLvWho"/.test(APP) && /Pick a name/.test(APP));
-  check('only people who are still here are offered',
-    /\(ALL_EMPLOYEES \|\| \[\]\)\.filter\(stillHere\)\.map\(function\(e\)\{/.test(APP));
+  /* A card-punch row with no person behind it - "500" on this reader - is on
+     the roster and is hidden on the portal, which is already what keeps it out
+     of the daily message. This pane goes by the same rule rather than a second
+     one that would have to be kept in step with it. */
+  check('it goes by the people the portal is showing',
+    /function lvWhoPeople\(\)/.test(APP) && /\+   lvWhoPeople\(\)\.map\(function\(e\)\{/.test(APP));
+  check('somebody hidden is still offered where an approver is named against them',
+    /return shown \|\| \(e\.name in \(approvalRoute \|\| \{\}\)\)/.test(APP));
+  check('and the tally of whose words these are goes by the same rule',
+    /return lvWhoPeople\(\)\.filter\(function\(e\)\{/.test(APP));
   check('picking one shows who gets the first word about them',
     /id="emLvWhoAppr"/.test(APP) && /The usual one/.test(APP));
   check('an approver with no account can still be named',

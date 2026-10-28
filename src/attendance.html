@@ -11816,7 +11816,7 @@ function buildExcelBackup(){
             + '<div class="em-lab" style="margin-top:14px;">One person at a time '
             +   '<span>who gets the first word about them, and what they read</span></div>'
             + '<div class="em-row"><select id="emLvWho"><option value="">Pick a name…</option>'
-            +   (ALL_EMPLOYEES || []).filter(stillHere).map(function(e){
+            +   lvWhoPeople().map(function(e){
                   return '<option value="' + mailEscape(e.name) + '">' + mailEscape(e.name) + '</option>';
                 }).join('') + '</select></div>'
             + '<div id="emLvWhoBox" style="display:none;"></div>'
@@ -11985,6 +11985,18 @@ function buildExcelBackup(){
        Both save as they are changed rather than on the panel's own Save,
        which writes the mail settings - these are two different stores, and a
        button that saved one of them would be lying about the other. */
+    /* Who this pane is about: the people the portal is showing, which is the
+       rule every message already goes by - it is what keeps a card-punch row
+       with no person behind it out of the daily message - and anybody with an
+       approver named against them, so hiding somebody never hides an
+       arrangement that is still in force. */
+    function lvWhoPeople(){
+      return (ALL_EMPLOYEES || []).filter(stillHere).filter(function(e){
+        var shown = (typeof visibleEmpSet !== 'undefined' && visibleEmpSet)
+          ? !!visibleEmpSet[e.name] : true;
+        return shown || (e.name in (approvalRoute || {}));
+      });
+    }
     function lvWhoRender(name){
       var box = document.getElementById('emLvWhoBox');
       if(!box) return;
@@ -12039,7 +12051,7 @@ function buildExcelBackup(){
     function lvWhoSharing(email){
       var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
       var k = String(email || '').toLowerCase();
-      return (ALL_EMPLOYEES || []).filter(stillHere).filter(function(e){
+      return lvWhoPeople().filter(function(e){
         if(!needsFirstApproval(e.name)) return false;
         var w = ownApprover(e.name) || (usual && usual.email) || '';
         return w.toLowerCase() === k;
