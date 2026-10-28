@@ -2521,7 +2521,8 @@ async function sendLeaveEmail(orgId) {
        their own people. Where somebody is routed to an approver of their own,
        that address gets a message about them and nobody else - and the office's
        own first approver is not told about a request that is not theirs. */
-    approvers.forEach(who => { legs.push(legFor(settings, who, fallback)); });
+    const ccMap = await approverCcOf(orgId);
+    approvers.forEach(who => { legs.push(legFor(settings, who, fallback, ccMap)); });
     legs.push({ stage: 2, to: await mailRecipients(orgId, settings, 'leave'),
                 cc: mailCc(settings, 'leave') });
   } else {
@@ -2564,6 +2565,7 @@ async function notifyNewRequests(orgId, added) {
     const route = await approvalRouteOf(orgId);
     const fallback = (first && first.email) || '';
     const intros = await approverIntroOf(orgId);
+    const ccMap = await approverCcOf(orgId);
     const finalLeg = { to: await mailRecipients(orgId, settings, 'leave'),
                        cc: mailCc(settings, 'leave') };
     const kv = await sharedKeys(orgId, ['companyInfo']);
@@ -2571,7 +2573,7 @@ async function notifyNewRequests(orgId, added) {
       /* Whoever holds the first stage for this particular person - which may
          be an address named against them alone. */
       const who = approverFor(route, r.empName, fallback);
-      const leg = who ? legFor(settings, who, fallback) : finalLeg;
+      const leg = who ? legFor(settings, who, fallback, ccMap) : finalLeg;
       if (!leg.to.length) continue;
       const mail = mailer.requestEmail({
         orgName: orgNameOf(kv.companyInfo), req: r,
@@ -2650,6 +2652,14 @@ async function approverIntroOf(orgId) {
   const map = parseJson(kv.approverIntro);
   return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
 }
+/* Who else is copied on one approver's first-stage message, kept against the
+   address for the same reason the wording is. The office's own first approver
+   is not in here: that line has a Cc of its own in the settings. */
+async function approverCcOf(orgId) {
+  const kv = await sharedKeys(orgId, ['approverCc']);
+  const map = parseJson(kv.approverCc);
+  return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+}
 /* The words this one address reads: their own, or the office's for everybody
    who holds the stage. Empty means nothing was written for either. */
 function firstWords(intros, who, settings) {
@@ -2721,13 +2731,23 @@ function firstApprovers(route, fallback) {
 /* Who a stage-1 message goes to. The office's own first approver keeps the
    line it was configured with, because that stage may be shared by several
    people; an approver named against one person is that one address. */
-function legFor(settings, who, fallback) {
+function legFor(settings, who, fallback, ccMap) {
   if (who === String(fallback || '').trim().toLowerCase()) {
     const to = ((settings.leave && settings.leave.firstTo) || []).slice();
     return { stage: 1, approver: who, to,
              cc: ((settings.leave && settings.leave.firstCc) || []).filter(a => to.indexOf(a) === -1) };
   }
-  return { stage: 1, approver: who, to: [who], cc: [] };
+  /* An address named against one person could be written to and never copied:
+     the office's Cc belongs to the office's own line, and there was nowhere
+     else to put one. This is that somewhere - kept against the approver, like
+     their wording, and read here rather than trusted, because it is a stored
+     map that decides who a message reaches. */
+  const seen = {}, cc = [];
+  ((ccMap || {})[who] || []).forEach(a => {
+    const k = String(a || '').trim().toLowerCase();
+    if (EMAIL_RE.test(k) && k !== who && !seen[k]) { seen[k] = true; cc.push(k); }
+  });
+  return { stage: 1, approver: who, to: [who], cc };
 }
 
 /* The person the leave belongs to, by their own account. Accounts are made
@@ -2968,6 +2988,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
     const fallback = (first && first.email) || '';
     /* One group per person holding a first stage, and one for the marks that
        have no first stage at all. */
+    const markCc = await approverCcOf(orgId);
     const groups = [];
     firstApprovers(route, fallback).forEach(who => {
       groups.push({ stage: 1, approver: who,
@@ -3000,7 +3021,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
       if (!mail) continue;
       let to, cc;
       if (stage) {
-        const leg = legFor(settings, g.approver, fallback);
+        const leg = legFor(settings, g.approver, fallback, markCc);
         to = leg.to; cc = leg.cc;
       } else {
         to = await mailRecipients(orgId, settings, 'leave');

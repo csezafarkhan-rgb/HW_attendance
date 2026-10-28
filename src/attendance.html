@@ -4753,7 +4753,7 @@ function attachDismiss(el){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro',
+    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro','approverCc',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
   /* Kept per person rather than for the office: what this account has already
@@ -8894,6 +8894,28 @@ function buildExcelBackup(){
     var k = String(email || '').trim().toLowerCase();
     return k ? String(approverIntro[k] || '') : '';
   }
+  /* Who else is copied on one approver's first-stage message. Kept against the
+     address for the same reason the wording is: the message is built per
+     approver, not per person, so a copy list kept against a person would have
+     had to pick one of them.
+
+     The office's own first approver is not in here - its line has had a To and
+     a Cc of its own since before any of this, and that line is what the panel
+     below edits. This is for the addresses named against one person, which
+     until now could be written to and never copied. */
+  var approverCc = {};
+  function loadApproverCc(){
+    return storage.get('approverCc', true).then(function(res){
+      if(res && res.value){ try{ approverCc = JSON.parse(res.value) || {}; }catch(e){ approverCc = {}; } }
+    }).catch(function(){ approverCc = {}; });
+  }
+  function saveApproverCc(){
+    return storage.set('approverCc', JSON.stringify(approverCc), true);
+  }
+  function ccFor(email){
+    var k = String(email || '').trim().toLowerCase(), v = k ? approverCc[k] : null;
+    return Array.isArray(v) ? v.slice() : [];
+  }
   function needsFirstApproval(name){ return approvalRoute[name] !== 'final'; }
   /* An approver named against this one person, or '' where their leave goes to
      whoever the office named. The server keeps the same reading; this is only
@@ -12088,7 +12110,27 @@ function buildExcelBackup(){
         + (skips
             ? '<div class="em-note">' + mailEscape(name) + ' skips the first stage — their '
               + 'leave goes straight to whoever gives the final word.</div>'
-            : ('<div class="em-lab">Wording for ' + mailEscape(who || 'nobody yet')
+            : (/* The address their first message actually goes to. It was only
+                  ever implied here - the pane named an approver and then showed
+                  the office's own To and Cc underneath, so picking somebody
+                  routed elsewhere still read as going to the office's line.
+                  It is not typed here: it is whoever is chosen above. */
+               '<div class="em-lab">To <span>'
+               + (own ? ('named against ' + mailEscape(dispName(name)))
+                      : 'the office’s own line, further down')
+               + '</span></div>'
+               + '<div class="em-row"><input type="text" id="emLvWhoTo" readonly '
+               +   'title="Set by who gets the first word, above" '
+               +   'style="background:#F5F6F8;" value="' + mailEscape(lvWhoTo(own)) + '"></div>'
+               + '<div class="em-lab">Cc <span>'
+               + (own ? 'copied on their message · saved as you change it'
+                      : 'the office’s own copy list · saved with the panel')
+               + '</span></div>'
+               + '<div class="em-row"><input type="text" id="emLvWhoCc" placeholder="comma separated" '
+               +   'value="' + mailEscape(own ? ccFor(own).join(', ') : lvFirstCcText()) + '"></div>'
+               + (own ? ('<div class="em-note">Copied on every first-stage message to '
+                         + mailEscape(own) + '.</div>') : '')
+               + '<div class="em-lab">Wording for ' + mailEscape(who || 'nobody yet')
                + ' <span>blank: the message above</span></div>'
                + '<div class="em-row"><textarea id="emLvWhoIntro" rows="3" placeholder="'
                + mailEscape(shared) + '">' + mailEscape(mine) + '</textarea></div>'
@@ -12098,6 +12140,25 @@ function buildExcelBackup(){
                          + ' about everybody they look after: '
                          + mailEscape(lvWhoSharing(who).join(', ')) + '.</div>') : '')));
       lvWhoWire(name);
+    }
+    /* The two office-wide boxes further down this pane, read as they stand
+       rather than as they were saved - somebody who types an address there and
+       then picks a name should see what they typed, not what it replaced. */
+    function lvFirstToText(){
+      var el = document.getElementById('emLvFirstTo');
+      var v = el ? String(el.value || '').trim() : '';
+      if(v) return v;
+      var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
+      return (usual && usual.email) || '';
+    }
+    function lvFirstCcText(){
+      var el = document.getElementById('emLvFirstCc');
+      return el ? String(el.value || '').trim() : '';
+    }
+    /* Where this one person's first message goes: the address named against
+       them, or the office's own line where none is. */
+    function lvWhoTo(own){
+      return own || lvFirstToText() || 'nobody named yet — leave is granted in one stage';
     }
     /* Everybody whose first word goes to this address, so changing the wording
        does not quietly change it for people the office was not looking at. */
@@ -12146,6 +12207,27 @@ function buildExcelBackup(){
         var k = who.toLowerCase(), v = String(intro.value || '').trim();
         if(v) approverIntro[k] = v; else delete approverIntro[k];
         saveApproverIntro().then(function(){ lvWhoRender(name); });
+      };
+      /* Two boxes behind one. Against an address named for this person alone
+         it is that address's own copy list, saved as it is typed like the
+         wording beside it; against the office's own approver it is the office's
+         Cc further down the pane, so it is written straight into that box and
+         goes with the rest when the panel is saved. Keeping a second copy of
+         the office's list here would have let the two disagree. */
+      var cc = document.getElementById('emLvWhoCc');
+      if(cc) cc.onchange = function(){
+        var own = ownApprover(name);
+        var list = String(cc.value || '').split(',').map(function(a){ return a.trim(); })
+          .filter(function(a){ return /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(a); });
+        if(!own){
+          var box = document.getElementById('emLvFirstCc');
+          if(box) box.value = list.join(', ');
+          cc.value = list.join(', ');
+          return;                      // the panel's own Save puts it away
+        }
+        var k = own.toLowerCase();
+        if(list.length) approverCc[k] = list; else delete approverCc[k];
+        saveApproverCc().then(function(){ lvWhoRender(name); });
       };
     }
     (function(){
@@ -19868,7 +19950,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute, loadApproverIntro,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute, loadApproverIntro, loadApproverCc,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){
