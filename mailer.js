@@ -377,43 +377,93 @@ function dailyEmail(o) {
     /* Who is not in yet comes second, straight after who is: it is the card
        somebody opening this at ten in the morning is looking for. Work from
        home goes last - it is a settled arrangement, not something to chase. */
+    /* The two cards about arriving are grouped by the slot people are on -
+       a list running 8:28, 8:53, 9:27, 9:32, 10:01 reads as five degrees of
+       lateness until you know three different shifts are in it. The other
+       cards are not: a day off is a day off whatever slot it was owed on, and
+       a heading there would only repeat itself. */
     const kinds = [
-      ['Present', who('present'), '#137A3B'],
-      ['Not Reached Office', who('missing'), '#B3261E'],
-      ['Visiting', who('visit'), '#7C3AED'],
-      ['On leave', who('leave'), '#B45309'],
-      ['Work from home', who('wfh'), '#2F6FE4']
+      ['Present', who('present'), '#137A3B', true],
+      ['Not Reached Office', who('missing'), '#B3261E', true],
+      ['Visiting', who('visit'), '#7C3AED', false],
+      ['On leave', who('leave'), '#B45309', false],
+      ['Work from home', who('wfh'), '#2F6FE4', false]
     ].filter(function (k) { return k[1].length; });
+    /* Earliest start first, so the groups read down the day. */
+    const slotMin = function (s) {
+      const m = /^(\d{1,2}):(\d{2})/.exec(String(s || ''));
+      return m ? (+m[1]) * 60 + (+m[2]) : 24 * 60 * 2;      // no slot set: last
+    };
+    /* A hairline with the slot sitting on its left end. Two cells rather than
+       a bordered div with text over it, because a card is a fifth of the
+       message wide and this has to hold in Outlook as well as anywhere else.
+
+       The label cell is width="1%" so it shrinks to its own text and the rule
+       takes the rest. Left to themselves the first cell took the whole row and
+       the rule came out nought pixels wide - present in the markup, invisible
+       on the screen, which is the one thing it is there to do. */
+    const slotRule = function (s) {
+      return '<table role="presentation" cellpadding="0" cellspacing="0" width="100%"'
+        + ' style="margin:6px 0 1px;"><tr>'
+        + '<td width="1%" style="font-size:9px;font-weight:700;color:' + SOFT + ';'
+        + 'white-space:nowrap;padding-right:5px;line-height:1.3;">' + esc(s || 'no shift set') + '</td>'
+        + '<td width="99%" style="border-top:1px solid #D8DEE8;font-size:0;line-height:0;">&nbsp;</td>'
+        + '</tr></table>';
+    };
     if (kinds.length) {
       const w = Math.floor(100 / kinds.length);
       const cells = kinds.map(function (k) {
+        /* Numbered, so a card can be counted down at a glance and read back
+           over the phone without losing the place, with the time they came
+           in beside the name. One person is one line: a card is a quarter of
+           the message wide, and "1_Aman Chandra (9:29 AM)" broke over two
+           lines and read as two people.
+           The number runs on through the groups, so the last one still
+           matches the figure at the top of the card. */
+        const lineOf = function (r, i) {
+          const at = (r.inMin != null) ? clock(r['in']) : '';
+          /* Anyone past their shift's start has that hour picked out in
+             yellow and says by how much, so a late arrival is both seen
+             and measured without reading the list below. Only the late
+             carry the longer text, and there are seldom more than one or
+             two of them, so the card keeps its width. */
+          const time = r.late
+            ? ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
+               + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>'
+               + '<span style="color:#7A5200;font-size:9.5px;"> - '
+               + minsSaid(r.late) + ' late</span>')
+            : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
+          return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
+               + (at ? time : '')
+               + '</div>';
+        };
+        /* Grouped only where there is more than one slot in the card: with
+           everybody on the same one the heading says nothing. */
+        let order = [];
+        const by = {};
+        if (k[3]) {
+          k[1].forEach(function (r) {
+            const s = String(r.shift || '');
+            if (!by[s]) { by[s] = []; order.push(s); }
+            by[s].push(r);
+          });
+          order.sort(function (a, b) { return slotMin(a) - slotMin(b) || a.localeCompare(b); });
+        }
+        let listHtml;
+        if (order.length > 1) {
+          let n = 0;
+          listHtml = order.map(function (s) {
+            return slotRule(s) + by[s].map(function (r) { return lineOf(r, n++); }).join('');
+          }).join('');
+        } else {
+          listHtml = k[1].map(lineOf).join('');
+        }
         return '<td width="' + w + '%" valign="top" style="padding:0 3px;">'
           + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:8px 6px;text-align:center;">'
           + '<div style="font-size:18px;font-weight:700;color:' + k[2] + ';line-height:1.1;">' + k[1].length + '</div>'
           + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
-          + '<div style="font-size:10.5px;line-height:1.5;color:' + INK + ';">'
-          /* Numbered, so a card can be counted down at a glance and read back
-             over the phone without losing the place, with the time they came
-             in beside the name. One person is one line: a card is a quarter of
-             the message wide, and "1_Aman Chandra (9:29 AM)" broke over two
-             lines and read as two people. */
-          +   k[1].map(function (r, i) {
-                const at = (r.inMin != null) ? clock(r['in']) : '';
-                /* Anyone past their shift's start has that hour picked out in
-                   yellow and says by how much, so a late arrival is both seen
-                   and measured without reading the list below. Only the late
-                   carry the longer text, and there are seldom more than one or
-                   two of them, so the card keeps its width. */
-                const time = r.late
-                  ? ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
-                     + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>'
-                     + '<span style="color:#7A5200;font-size:9.5px;"> - '
-                     + minsSaid(r.late) + ' late</span>')
-                  : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
-                return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
-                     + (at ? time : '')
-                     + '</div>';
-              }).join('')
+          + '<div style="font-size:10.5px;line-height:1.5;color:' + INK + ';text-align:left;">'
+          +   listHtml
           + '</div></div></td>';
       }).join('');
       body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'

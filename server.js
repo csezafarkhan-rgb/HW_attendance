@@ -2013,6 +2013,10 @@ async function buildDailyEmail(orgId, day, opts) {
     const ov = overrides[key];
     const todayShift = dayShifts[key] || null;
     const usual = shiftInForce(assigned, empName, day);
+    /* The slot they are on, carried onto the row so the message can group a
+       card by it. Set before the work-from-home branch below returns, so every
+       row has it whether or not that branch is taken. */
+    if (rows[i]) rows[i].shift = todayShift || usual || '';
     if (todayShift && usual && todayShift !== usual) {
       shifts.push({ name: shown, detail: todayShift + ' today \u00b7 usual ' + usual });
     }
