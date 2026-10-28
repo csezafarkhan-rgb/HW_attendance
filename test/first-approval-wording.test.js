@@ -86,11 +86,11 @@ const links = { approve: 'https://x/a', reject: 'https://x/r' };
   check('all three first-approval messages are given the name',
     sites.length >= 3, sites);
   check('the digest gives it the name it seals into its own buttons',
-    /intro: \(st === 1 && settings\.leave\.firstIntro\)[\s\S]{0,120}approver: byName/.test(SRV));
+    /intro: myWords \|\| settings\.leave\.intro,\s+approver: byName/.test(SRV));
   check('the request note looks the name up for whoever holds the stage',
     /approver: who \? await approverName\(orgId, who\) : ''/.test(SRV));
   check('and so does the notice about days taken without a request',
-    /intro: \(stage && settings\.leave\.firstIntro\)[\s\S]{0,80}approver: byName/.test(SRV));
+    /intro: gWords \|\| settings\.leave\.intro,\s+approver: byName,/.test(SRV));
 }
 
 /* ---- the panel says so ---- */

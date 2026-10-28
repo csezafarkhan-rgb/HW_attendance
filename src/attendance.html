@@ -4727,7 +4727,7 @@ function attachDismiss(el){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute',
+    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
   /* Kept per person rather than for the office: what this account has already
@@ -8848,6 +8848,25 @@ function buildExcelBackup(){
   function saveApprovalRoute(){
     return storage.set('approvalRoute', JSON.stringify(approvalRoute), true);
   }
+  /* The wording one approver reads, where the office wants them to read
+     something of their own. Kept against the address rather than against the
+     person who asked, because one message can cover several people - the
+     nightly summary gathers everybody that approver looks after into one - and
+     wording kept against a person would have had to pick one of them. Blank,
+     or missing, means the wording every first approver gets. */
+  var approverIntro = {};
+  function loadApproverIntro(){
+    return storage.get('approverIntro', true).then(function(res){
+      if(res && res.value){ try{ approverIntro = JSON.parse(res.value) || {}; }catch(e){ approverIntro = {}; } }
+    }).catch(function(){ approverIntro = {}; });
+  }
+  function saveApproverIntro(){
+    return storage.set('approverIntro', JSON.stringify(approverIntro), true);
+  }
+  function introFor(email){
+    var k = String(email || '').trim().toLowerCase();
+    return k ? String(approverIntro[k] || '') : '';
+  }
   function needsFirstApproval(name){ return approvalRoute[name] !== 'final'; }
   /* An approver named against this one person, or '' where their leave goes to
      whoever the office named. The server keeps the same reading; this is only
@@ -11789,6 +11808,18 @@ function buildExcelBackup(){
             +   '\u00b7 {approver} is whoever this copy goes to</span></div>'
             + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
             +   mailEscape(text((s.leave || {}).firstIntro, (W.leave || {}).firstIntro)) + '</textarea></div>'
+            /* Who holds the stage is set against each person, over in the
+               Shifts panel, and the words are set here - so neither screen
+               ever showed one person's arrangement whole. Pick a name and
+               this says who gets the first word about them and what that
+               person will read, and lets both be changed from the one place. */
+            + '<div class="em-lab" style="margin-top:14px;">One person at a time '
+            +   '<span>who gets the first word about them, and what they read</span></div>'
+            + '<div class="em-row"><select id="emLvWho"><option value="">Pick a name…</option>'
+            +   (ALL_EMPLOYEES || []).filter(stillHere).map(function(e){
+                  return '<option value="' + mailEscape(e.name) + '">' + mailEscape(e.name) + '</option>';
+                }).join('') + '</select></div>'
+            + '<div id="emLvWhoBox" style="display:none;"></div>'
             + '</div>';
         })()
       /* ---- and the one that grants it ---- */
@@ -11945,6 +11976,124 @@ function buildExcelBackup(){
         });
       };
     });
+    /* ---- one person's arrangement, whole ----
+       Who holds the first stage is set against each person over in the Shifts
+       panel; the wording is set here. Neither screen showed both, so nobody
+       could see what one named approver would actually read. This does: pick
+       a name, see the address and the words, change either.
+
+       Both save as they are changed rather than on the panel's own Save,
+       which writes the mail settings - these are two different stores, and a
+       button that saved one of them would be lying about the other. */
+    function lvWhoRender(name){
+      var box = document.getElementById('emLvWhoBox');
+      if(!box) return;
+      if(!name){ box.style.display = 'none'; box.innerHTML = ''; return; }
+      box.style.display = '';
+      var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
+      var own = ownApprover(name), skips = !needsFirstApproval(name);
+      var who = skips ? '' : (own || (usual && usual.email) || '');
+      var chosen = skips ? 'final' : (own || '');
+      var known = {};
+      (APPROVER_LIST || []).forEach(function(a){ known[a.email.toLowerCase()] = a.name; });
+      var listed = !own || known[own.toLowerCase()] !== undefined;
+      var opts = '<option value=""' + (chosen === '' ? ' selected' : '') + '>'
+        + (usual ? ('The usual one — ' + mailEscape(usual.email)) : 'The usual one (nobody named yet)')
+        + '</option>';
+      (APPROVER_LIST || []).forEach(function(a){
+        opts += '<option value="' + mailEscape(a.email) + '"'
+          + (own && own.toLowerCase() === a.email.toLowerCase() ? ' selected' : '') + '>'
+          + mailEscape(a.name ? (a.name + ' · ' + a.email) : a.email) + '</option>';
+      });
+      opts += '<option value="__other"' + (own && !listed ? ' selected' : '') + '>Other…</option>'
+        + '<option value="final"' + (chosen === 'final' ? ' selected' : '') + '>'
+        + 'Nobody — granted in one stage</option>';
+      /* What that address will actually read, with the name filled in the way
+         the message itself fills it. */
+      var mine = introFor(who);
+      var shared = (document.getElementById('emLvFirstIntro') || {}).value || '';
+      var byName = who ? (known[who.toLowerCase()] || who) : '';
+      var reads = (mine || shared).replace(/\{approver\}/g, byName);
+      box.innerHTML =
+          '<div class="em-lab">Their first approver <span>saved as you change it</span></div>'
+        + '<div class="em-row"><select id="emLvWhoAppr">' + opts + '</select></div>'
+        + '<div class="em-row"' + ((own && !listed) ? '' : ' style="display:none;"') + '>'
+        +   '<input type="email" id="emLvWhoOther" placeholder="their email address" value="'
+        +   mailEscape(own && !listed ? own : '') + '"></div>'
+        + (skips
+            ? '<div class="em-note">' + mailEscape(name) + ' skips the first stage — their '
+              + 'leave goes straight to whoever gives the final word.</div>'
+            : ('<div class="em-lab">Wording for ' + mailEscape(who || 'nobody yet')
+               + ' <span>blank: the message above</span></div>'
+               + '<div class="em-row"><textarea id="emLvWhoIntro" rows="3" placeholder="'
+               + mailEscape(shared) + '">' + mailEscape(mine) + '</textarea></div>'
+               + '<div class="em-lab">What they will read</div>'
+               + '<div class="em-note" style="white-space:pre-line;">' + mailEscape(reads) + '</div>'
+               + (who ? ('<div class="em-note">These words go to ' + mailEscape(who)
+                         + ' about everybody they look after: '
+                         + mailEscape(lvWhoSharing(who).join(', ')) + '.</div>') : '')));
+      lvWhoWire(name);
+    }
+    /* Everybody whose first word goes to this address, so changing the wording
+       does not quietly change it for people the office was not looking at. */
+    function lvWhoSharing(email){
+      var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
+      var k = String(email || '').toLowerCase();
+      return (ALL_EMPLOYEES || []).filter(stillHere).filter(function(e){
+        if(!needsFirstApproval(e.name)) return false;
+        var w = ownApprover(e.name) || (usual && usual.email) || '';
+        return w.toLowerCase() === k;
+      }).map(function(e){ return e.name; });
+    }
+    function lvWhoWire(name){
+      var sel = document.getElementById('emLvWhoAppr');
+      var other = document.getElementById('emLvWhoOther');
+      var intro = document.getElementById('emLvWhoIntro');
+      if(sel) sel.onchange = function(){
+        var v = sel.value;
+        if(v === '__other'){
+          if(other){ other.parentNode.style.display = ''; other.focus(); }
+          return;                                   // nothing to save until it is typed
+        }
+        if(v === 'final') approvalRoute[name] = 'final';
+        else if(v) approvalRoute[name] = v;
+        else delete approvalRoute[name];
+        saveApprovalRoute().then(function(){
+          if(typeof renderShiftDropdown === 'function' && document.getElementById('shiftDropdown')){
+            try{ renderShiftDropdown(); }catch(e){}
+          }
+          lvWhoRender(name);
+        });
+      };
+      if(other) other.onchange = function(){
+        var v = String(other.value || '').trim();
+        if(v && !/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(v)){ other.focus(); return; }
+        if(v) approvalRoute[name] = v; else delete approvalRoute[name];
+        saveApprovalRoute().then(function(){
+          APPROVER_LIST = null; APPROVER_WAIT = null;        // it belongs on the list now
+          return ensureApproverChoices();
+        }).then(function(){ lvWhoRender(name); });
+      };
+      if(intro) intro.onchange = function(){
+        var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
+        var who = ownApprover(name) || (usual && usual.email) || '';
+        if(!who) return;
+        var k = who.toLowerCase(), v = String(intro.value || '').trim();
+        if(v) approverIntro[k] = v; else delete approverIntro[k];
+        saveApproverIntro().then(function(){ lvWhoRender(name); });
+      };
+    }
+    (function(){
+      var pick = document.getElementById('emLvWho');
+      if(!pick) return;
+      pick.onchange = function(){
+        if(!APPROVER_LIST){
+          ensureApproverChoices().then(function(){ lvWhoRender(pick.value); });
+          return;
+        }
+        lvWhoRender(pick.value);
+      };
+    })();
     var more = document.getElementById('emMore'), set = document.getElementById('emSet');
     if(more && set) more.onclick = function(){
       var open = set.style.display !== 'none';
@@ -19545,7 +19694,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute, loadApproverIntro,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){

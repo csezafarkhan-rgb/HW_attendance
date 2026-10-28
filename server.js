@@ -2123,6 +2123,7 @@ async function buildLeaveEmail(orgId, stage, forApprover) {
   /* Whose name goes in the buttons, so the record can say who recommended
      it without trusting anything the browser sends. */
   const byName = st === 1 ? await approverName(orgId, mine) : '';
+  const myWords = st === 1 ? firstWords(await approverIntroOf(orgId), mine, settings) : '';
   /* An archived request is out of the way by definition - the dashboard keeps
      it off the Requests page, and the message said seven were waiting when the
      portal said none. */
@@ -2166,7 +2167,7 @@ async function buildLeaveEmail(orgId, stage, forApprover) {
   return mailer.leaveEmail({
     orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
     subject: settings.leave.subject, footer: settings.leave.footer,
-    intro: (st === 1 && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+    intro: myWords || settings.leave.intro,
     approver: byName
   });
 }
@@ -2521,6 +2522,7 @@ async function notifyNewRequests(orgId, added) {
     const first = await firstApproverOf(orgId, settings);
     const route = await approvalRouteOf(orgId);
     const fallback = (first && first.email) || '';
+    const intros = await approverIntroOf(orgId);
     const finalLeg = { to: await mailRecipients(orgId, settings, 'leave'),
                        cc: mailCc(settings, 'leave') };
     const kv = await sharedKeys(orgId, ['companyInfo']);
@@ -2536,7 +2538,7 @@ async function notifyNewRequests(orgId, added) {
         siteUrl: mailer.baseUrl(),
         heading: who ? 'A request for you to look at first'
                      : 'A request is waiting for a decision',
-        intro: (who && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        intro: (who && firstWords(intros, who, settings)) || settings.leave.intro,
         approver: who ? await approverName(orgId, who) : '',
         footer: settings.leave.footer
       });
@@ -2595,6 +2597,23 @@ async function approvalRouteOf(orgId) {
   const kv = await sharedKeys(orgId, ['approvalRoute']);
   const map = parseJson(kv.approvalRoute);
   return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+}
+/* The wording one approver reads, where the office set them wording of their
+   own. Kept against the address rather than against the person who asked,
+   because one message can cover several people - the nightly summary gathers
+   everybody an approver looks after into one - and wording kept against a
+   person would have had to pick one of them. Empty, or missing, means the
+   wording every first approver gets. */
+async function approverIntroOf(orgId) {
+  const kv = await sharedKeys(orgId, ['approverIntro']);
+  const map = parseJson(kv.approverIntro);
+  return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+}
+/* The words this one address reads: their own, or the office's for everybody
+   who holds the stage. Empty means nothing was written for either. */
+function firstWords(intros, who, settings) {
+  const own = String((intros || {})[String(who || '').trim().toLowerCase()] || '').trim();
+  return own || String((settings.leave || {}).firstIntro || '');
 }
 function needsFirstApproval(route, name) {
   return (route || {})[name] !== 'final';
@@ -2843,6 +2862,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
       if (!g.items.length) continue;
       const stage = g.stage;
       const byName = stage === 1 ? await approverName(orgId, g.approver) : '';
+      const gWords = stage ? firstWords(await approverIntroOf(orgId), g.approver, settings) : '';
       const mail = mailer.leaveEmail({
         orgName: orgNameOf(kv.companyInfo), pending: [],
         unrequested: g.items.slice(0, 15).map(m => ({
@@ -2856,7 +2876,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
                 t: m.leaveType, h: m.half || '' })
         })),
         subject: settings.leave.subject,
-        intro: (stage && settings.leave.firstIntro) ? settings.leave.firstIntro : settings.leave.intro,
+        intro: gWords || settings.leave.intro,
         approver: byName,
         footer: settings.leave.footer, siteUrl: mailer.baseUrl()
       });
