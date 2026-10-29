@@ -137,6 +137,38 @@ const REC = {
       fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')));
 }
 
+/* ---- the digest, when it happens to be about one request ----
+   The message the office actually opens is the list of everything waiting. A
+   list of one is a request like any other and carries its year; a list of
+   several does not, or the first thing an approver would be handed is a dozen
+   people's leave records. The same rule the copy list goes by. */
+{
+  const mk = n => mailer.leaveEmail({
+    orgName: 'x', siteUrl: 'https://x/', unrequested: [],
+    pending: Array.from({ length: n }, (_, i) => ({
+      req: { id: 'r' + i, empName: 'Person ' + i, leaveType: 'CL',
+             dateFrom: '2026-11-0' + (i + 1), dateTo: '2026-11-0' + (i + 1),
+             /* what the server attaches: the record only where the whole
+                message is about one request */
+             leaveRecord: n === 1 ? REC : null },
+      heading: 'For you to look at first', links: { approve: 'a', reject: 'r' } }))
+  });
+  check('a digest of one request carries the year behind it',
+    /Their leave record/.test(mk(1).html));
+  check('and the same card shows the balances in it',
+    /left of 8\.33/.test(mk(1).html));
+  check('a digest of several carries none of them',
+    !/Their leave record/.test(mk(2).html));
+  check('and the card draws only what it is handed, the deciding being the sender’s',
+    /req\.leaveRecord \? leaveRecordBlock/.test(
+      fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')));
+  check('the sender decides that by counting what is in the message',
+    /const only = \(pending\.length \+ unreq\.length === 1\)/.test(SRV)
+    && /leaveRecordFor\(orgId, only\.req\.empName, only\.req\)/.test(SRV));
+  check('and attaches it without changing the stored request',
+    /only\.req = Object\.assign\(\{\}, only\.req, \{ leaveRecord: rec \}\)/.test(SRV));
+}
+
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);

@@ -2308,6 +2308,18 @@ async function buildLeaveEmail(orgId, stage, forApprover) {
                 t: u.leaveType, h: u.half || '' })
         }))
     : [];
+  /* Where the whole message is about one request, it carries the year behind
+     it, exactly as the one sent when that request was raised. A digest of
+     several people does not: it would be a year each, and the first thing it
+     would hand every approver is a dozen people's leave records.
+
+     Which is the same rule the copy list goes by - about one person, or about
+     everybody. */
+  const only = (pending.length + unreq.length === 1) ? (pending[0] || unreq[0]) : null;
+  if (only && only.req && only.req.empName) {
+    const rec = await leaveRecordFor(orgId, only.req.empName, only.req);
+    if (rec) only.req = Object.assign({}, only.req, { leaveRecord: rec });
+  }
   const built = mailer.leaveEmail({
     orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
     subject: settings.leave.subject, footer: settings.leave.footer,
