@@ -880,11 +880,16 @@ process.env.SESSION_SECRET = SECRET;
     await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(withNew), shared: true });
     await new Promise(r => setTimeout(r, 700));
     const raised = sent[sent.length - 1];
-    check('a new request goes to whoever looks at them first, and to them alone',
+    /* To the one who looks first, and nobody else is asked - but the person it
+       is about is copied, because a request going round about somebody that
+       they never see is one they cannot correct. */
+    check('a new request goes to whoever looks at them first, and to nobody else',
       sent.length === raisedBefore + 1
-        && JSON.stringify(raised.to) === JSON.stringify(['karan@homeweavers.net'])
-        && !(raised.cc || []).length,
+        && JSON.stringify(raised.to) === JSON.stringify(['karan@homeweavers.net']),
       raised && { to: raised.to, cc: raised.cc });
+    check('with the person who raised it copied in',
+      JSON.stringify(raised.cc || []) === JSON.stringify(['keshav@homeweavers.net']),
+      raised && raised.cc);
 
     /* The one who looks first is addressed in words of their own: the message
        to the super admins opens "Hello Shivani ma'am and Nitish Sir", which is
@@ -924,7 +929,7 @@ process.env.SESSION_SECRET = SECRET;
     check('the first message goes only where the first-stage tab says',
       sent.length === sentToBefore + 1
         && JSON.stringify(sentTo.to) === JSON.stringify(['support@x.com'])
-        && JSON.stringify(sentTo.cc) === JSON.stringify(['watch@x.com']),
+        && JSON.stringify(sentTo.cc) === JSON.stringify(['watch@x.com', 'keshav@homeweavers.net']),
       sentTo && { to: sentTo.to, cc: sentTo.cc });
     check('and the approver is not written to alongside them',
       !(sentTo.to || []).concat(sentTo.cc || []).some(a => /karan/.test(a)),

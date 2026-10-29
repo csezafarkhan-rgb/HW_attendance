@@ -2308,12 +2308,20 @@ async function buildLeaveEmail(orgId, stage, forApprover) {
                 t: u.leaveType, h: u.half || '' })
         }))
     : [];
-  return mailer.leaveEmail({
+  const built = mailer.leaveEmail({
     orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
     subject: settings.leave.subject, footer: settings.leave.footer,
     intro: myWords || settings.leave.intro,
     approver: byName
   });
+  /* Whose days are in it, so the sender can copy them where the message turns
+     out to be about one person. A digest naming several is not theirs to read. */
+  if (built) {
+    built.names = Array.from(new Set(
+      pending.map(p => p.req && p.req.empName)
+        .concat(unreq.map(u => u.req && u.req.empName)).filter(Boolean)));
+  }
+  return built;
 }
 
 /* Every message that goes out is kept: what it was, when, who it went to and
@@ -2638,7 +2646,10 @@ async function sendLeaveEmail(orgId) {
     addressed++;
     const mail = await buildLeaveEmail(orgId, leg.stage, leg.approver);
     if (!mail) continue;                                   // nothing at this stage
-    const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
+    /* About one person: they are copied. About several: they are not, because
+       a digest is everybody's business and nobody else's. */
+    const alone = await ownersIfAlone(orgId, mail.names || [], leg.to, leg.cc);
+    const msg = { to: leg.to, cc: leg.cc.concat(alone), subject: mail.subject, html: mail.html };
     const r = await mailer.send(msg);
     await logMail(orgId, 'leave', msg, r);
     if (r.ok) { sent++; toN += leg.to.length; ccN += leg.cc.length; }
@@ -2688,7 +2699,10 @@ async function notifyNewRequests(orgId, added) {
         approver: who ? await approverName(orgId, who) : '',
         footer: settings.leave.footer
       });
-      const msg = { to: leg.to, cc: leg.cc, subject: mail.subject, html: mail.html };
+      /* The person who raised it, copied in: a request going round about
+         somebody that they never see is one they cannot correct. */
+      const theirs = await ownersOf(orgId, [r.empName], leg.to, leg.cc);
+      const msg = { to: leg.to, cc: leg.cc.concat(theirs), subject: mail.subject, html: mail.html };
       const sentOne = await mailer.send(msg);
       await logMail(orgId, 'request', msg, sentOne);
     }
@@ -2868,6 +2882,15 @@ function legFor(settings, who, fallback, ccMap) {
    correct, and the one person certain to know whether it is right is the one
    it is about. Anybody with no account, or no address on it, is simply not
    there to copy. */
+/* The same, but only where the message is about one person. A digest naming
+   several people is a different thing: copying somebody on it would hand them
+   everybody else's leave, which is not theirs to read. So a group of one is
+   copied and a group of several is not. */
+async function ownersIfAlone(orgId, names, to, cc) {
+  const distinct = Array.from(new Set((names || []).filter(Boolean)));
+  if (distinct.length !== 1) return [];
+  return ownersOf(orgId, distinct, to, cc);
+}
 async function ownersOf(orgId, names, to, cc) {
   const out = [];
   const seen = {};
@@ -2935,7 +2958,8 @@ async function notifyRecommended(orgId, req) {
       heading: 'Approved by ' + (req.recommendedBy || 'the first approver') + ', waiting on you',
       intro: settings.leave.intro, footer: settings.leave.footer
     });
-    const cc = mailCc(settings, 'leave');
+    const cc = mailCc(settings, 'leave').concat(
+      await ownersOf(orgId, [req.empName], to, mailCc(settings, 'leave')));
     const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
     await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {
@@ -3207,6 +3231,9 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
         cc = mailCc(settings, 'leave');
       }
       if (!to.length) continue;
+      /* One person's days: they are copied. Several people's in the one
+         message: nobody is, because it is not theirs to read. */
+      cc = cc.concat(await ownersIfAlone(orgId, g.items.map(m => m.empName), to, cc));
       const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
       await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
     }

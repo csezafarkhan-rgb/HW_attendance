@@ -183,6 +183,24 @@ check('and so does the one about hours',
 check('the panel says so, rather than leaving it to be discovered',
   APP.indexOf('behind their back') > -1);
 
+/* ---- every message about one person, not only these two ----
+   A request raised, a recommendation passed on, a day marked with no request
+   behind it: all of them are about somebody, and all of them used to go round
+   without them. The rule is the same everywhere, and so is its limit - a
+   digest naming several people is not theirs to read. */
+check('the request raised about them copies them',
+  /const theirs = await ownersOf\(orgId, \[r\.empName\], leg\.to, leg\.cc\);/.test(SRV));
+check('and so does the one passing their recommendation on',
+  /mailCc\(settings, 'leave'\)\.concat\(\s*await ownersOf\(orgId, \[req\.empName\]/.test(SRV));
+check('a digest copies them only when it is about them alone',
+  /async function ownersIfAlone/.test(SRV)
+  && /if \(distinct\.length !== 1\) return \[\];/.test(SRV));
+check('which is how the waiting-leave message and the marks message decide',
+  /ownersIfAlone\(orgId, mail\.names \|\| \[\], leg\.to, leg\.cc\)/.test(SRV)
+  && /ownersIfAlone\(orgId, g\.items\.map\(m => m\.empName\), to, cc\)/.test(SRV));
+check('and the digest says whose days are in it, so that can be decided',
+  /built\.names = Array\.from\(new Set\(/.test(SRV));
+
 const ctx3 = { console, Array, Set, String,
   EMAIL_RE: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
   employeeAddress: async (org, name) => ({ Asha: 'asha@hw.net', Ravi: 'RAVI@hw.net' })[name] || '' };
