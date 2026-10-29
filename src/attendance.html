@@ -15153,8 +15153,16 @@ function buildExcelBackup(){
     var insideMin = rec.dur ? toMin(rec.dur) : null;
     if(insideMin === null || isNaN(insideMin)) insideMin = dtInside(rec.praw);
     /* A credited day has no building to have been out of, so the time inside is
-       the day itself - the four hours of a Saturday included. */
-    if(insideMin === null && markedMin !== null) insideMin = markedMin;
+       the day itself - the four hours of a Saturday included.
+
+       It has to be asked of the credit rather than of the duration, because a
+       day from home carries a duration of 0:00 on the record - no punches, so
+       nothing measured - and nought is not nothing. Read as a figure it put
+       0:00 against a nine-hour day, and a month of working from home came out
+       with forty-four hours inside against a hundred and seventy-eight marked. */
+    if(credited || insideMin === null || isNaN(insideMin) || insideMin === 0){
+      insideMin = markedMin;
+    }
     return { seen: seen, rec: rec, markedIn: markedIn, markedOut: markedOut,
       insideMin: insideMin,
       gIn: gIn, gOut: gOut, markedMin: markedMin, credited: credited, hol: hol,

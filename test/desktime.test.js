@@ -693,8 +693,13 @@ function grab(src, name) {
   check('the record\u2019s own duration is preferred, the punches being the fallback',
     /var insideMin = rec\.dur \? toMin\(rec\.dur\) : null;/.test(facts)
     && /insideMin = dtInside\(rec\.praw\);/.test(facts));
-  check('and a day with no punches falls back to the day itself',
-    /if\(insideMin === null && markedMin !== null\) insideMin = markedMin;/.test(facts));
+  /* A day from home carries a duration of 0:00 on the record - no punches, so
+     nothing measured - and nought is not nothing. Read as a figure it put 0:00
+     against a nine-hour day, and a month of working from home came out with
+     forty-four hours inside against a hundred and seventy-eight marked. */
+  check('a credited day takes the credit, a stored nought not being a measurement',
+    /if\(credited \|\| insideMin === null \|\| isNaN\(insideMin\) \|\| insideMin === 0\){/.test(facts)
+    && /insideMin = markedMin;/.test(facts));
   /* A Saturday is an assignment, not a measurement. The hours typed against one
      were being read off DeskTime and typed back in, which made the share come
      out at a hundred per cent every Saturday by construction - the same number
