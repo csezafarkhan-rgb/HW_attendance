@@ -74,7 +74,16 @@ function grab(src, name) {
   check('it is the employee’s page only',
     /if\(!\(viewRole && viewRole\.role === 'employee'\)\) return Promise\.resolve\(false\);/.test(fn));
   check('and never two at once',
-    /if\(EMP_SYNC_BUSY\) return Promise\.resolve\(false\);/.test(fn));
+    /if\(EMP_SYNC_BUSY\)\{[\s\S]{0,160}return Promise\.resolve\(false\);/.test(fn));
+  /* Each of these used to return quietly, which from the outside is a button
+     that does nothing - and a button that does nothing gets pressed again. */
+  check('and none of the ways it declines are silent',
+    fn.indexOf('Already checking') > -1
+    && fn.indexOf('This page cannot reach the server from here.') > -1);
+  /* askHelperToFetch can throw on the spot - a blocked fetch to a local
+     address does - and that throw escaped the whole press. */
+  check('a knock that throws is a failed knock, not a dead button',
+    /new Promise\(function\(done\)\{\s*\r?\n?\s*try\{ done\(askHelperToFetch\(false\)\); \}catch\(e\)\{ done\(null\); \}/.test(fn));
   /* A browser holding edits of its own keeps them: adopting the server's copy
      over the top is a different path, with its own merge. */
   check('a copy with edits of its own is not overwritten',
@@ -91,10 +100,21 @@ function grab(src, name) {
   check('a server that cannot be reached says so rather than looking up to date',
     fn.indexOf('Could not reach the server just now.') > -1);
 
-  const wire = APP.slice(APP.indexOf("var b = document.getElementById('empSyncBtn');"),
+  /* The clocks run whether the gear is open or not; the button itself is
+     drawn inside the gear, so it is wired where it is drawn. */
+  const wire = APP.slice(APP.indexOf('/* The button itself lives in the gear now'),
                          APP.indexOf("var btn = document.getElementById('empCalOptsBtn');"));
-  check('there is a button to check at once',
-    APP.indexOf('id="empSyncBtn"') > -1 && wire.indexOf('empSync(false)') > -1);
+  const gear = APP.slice(APP.indexOf("var btn = document.getElementById('empCalOptsBtn');"),
+                         APP.indexOf('function renderEmployeeCalendar()'));
+  check('the button to check at once is in the gear, with the rest of the settings',
+    gear.indexOf('id="empSyncBtn"') > -1
+    && gear.indexOf('empSync(false)') > -1
+    && APP.indexOf('<button class="month-btn" id="empSyncBtn"') === -1);
+  /* It did nothing visible when anything went wrong, which reads exactly like
+     a button that is broken. */
+  check('and it says what happened, whichever way it went',
+    /said\.textContent = changed \? 'Brought in what was new.' : 'Already up to date.'/.test(gear)
+    && /That did not run/.test(gear));
   check('it checks on its own every minute',
     /setInterval\(function\(\)\{[\s\S]{0,200}empSync\(true\);\s*\}, 60000\)/.test(wire));
   /* A page nobody is looking at does not need to ask, and a phone in a pocket

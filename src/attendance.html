@@ -4115,11 +4115,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button id="empCalNext">›</button>
     <button id="empCalDensity" title="Switch between a dense month and full cells" style="width:auto;padding:0 12px;font-size:11.5px;font-weight:700;">⤢ Compact</button>
     </div>
-    <!-- The page was drawn once, when it was opened, and then stood still: a
-         day marked by the office, a request decided, a punch read off the
-         reader an hour later - none of it arrived until the page was loaded
-         again. This asks the server what it has now. -->
-    <button class="month-btn" id="empSyncBtn" title="Check for anything new">⟳ <span id="empSyncWhen">Sync</span></button>
+
     <div class="month-picker">
       <button class="month-btn" id="empCalOptsBtn" title="What each day shows">⚙</button>
       <div class="month-dropdown" id="empCalOptsDropdown" style="min-width:270px;"></div>
@@ -20578,9 +20574,18 @@ function buildExcelBackup(){
     /* The employee's own page only. The office's grid has its own way of
        taking in new data, and pulling the dataset out from under a half-typed
        row there would be a different bug entirely. */
+    /* Each of these used to return quietly, which from the outside is a button
+       that does nothing - and a button that does nothing gets pressed again. */
     if(!(viewRole && viewRole.role === 'employee')) return Promise.resolve(false);
-    if(EMP_SYNC_BUSY) return Promise.resolve(false);
-    if(!(window.HWSync && window.HWSync.hydrateDataset)) return Promise.resolve(false);
+    if(EMP_SYNC_BUSY){
+      if(!quiet) showUploadStatus('Already checking — give it a moment.', false);
+      return Promise.resolve(false);
+    }
+    if(!(window.HWSync && window.HWSync.hydrateDataset)){
+      if(!quiet) showUploadStatus('This page cannot reach the server from here. '
+        + 'Reload and try again.', true);
+      return Promise.resolve(false);
+    }
     EMP_SYNC_BUSY = true;
     var before = empSyncSig();
     var safe = function(fn){
@@ -20596,9 +20601,12 @@ function buildExcelBackup(){
        else does not, and the knock gives up in three seconds rather than
        holding the press for the minute a reader takes. Either way what follows
        is the same: ask the server for everything it has now. */
-    var readers = quiet
-      ? Promise.resolve(null)
-      : Promise.resolve(askHelperToFetch(false)).catch(function(){ return null; });
+    /* Built this way round because askHelperToFetch can throw on the spot - a
+       blocked fetch to a local address does - and a throw there escaped the
+       whole press rather than being caught as a failed knock. */
+    var readers = quiet ? Promise.resolve(null) : new Promise(function(done){
+      try{ done(askHelperToFetch(false)); }catch(e){ done(null); }
+    }).catch(function(){ return null; });
     return readers.then(function(pull){
       if(bar) bar.stage((pull && pull.ok)
         ? 'Readers read \u2014 taking in what the office has\u2026'
@@ -20640,9 +20648,9 @@ function buildExcelBackup(){
     el.textContent = mins < 1 ? 'Just now' : (mins === 1 ? '1 min ago' : (mins + ' min ago'));
   }
   (function(){
-    var b = document.getElementById('empSyncBtn');
-    if(!b) return;
-    b.addEventListener('click', function(){ empSync(false); });
+    /* The button itself lives in the gear now and is drawn afresh every time
+       that opens, so it is wired where it is drawn. These are the clocks, which
+       run whether the gear is open or not. */
     /* Every minute, and only while this tab is in front: a page nobody is
        looking at does not need to ask, and a phone in a pocket should not be
        spending its battery on it. */
@@ -20677,13 +20685,42 @@ function buildExcelBackup(){
         +   '<span>Check for anything new on its own</span></label>'
         + '<div class="em-note">Every minute, while this tab is open and in front. The page is '
         +   'redrawn only when something has actually changed, so it will not move under your '
-        +   'hand. The ⟳ button checks at once either way.</div>';
+        +   'hand.</div>'
+        + '<div class="em-row" style="justify-content:space-between;gap:10px;margin-top:6px;">'
+        +   '<button type="button" class="month-btn" id="empSyncBtn">⟳ '
+        +     '<span id="empSyncWhen">Sync</span></button>'
+        +   '<span class="em-note" id="empSyncSaid" style="margin:0;"></span>'
+        + '</div>'
+        + '<div class="em-note">Asks the punch readers, then the office, and takes in '
+          + 'whatever is new. It takes a moment; the notice in the corner says where it '
+          + 'has got to.</div>';
       var live = document.getElementById('empOptLive');
       if(live) live.addEventListener('change', function(){
         EMP_LIVE = live.checked;
         try{ localStorage.setItem('hw_emp_live', EMP_LIVE ? '1' : '0'); }catch(_){}
         if(EMP_LIVE) empSync(true);
       });
+      /* Wired here rather than at boot: this is drawn each time the gear opens,
+         so there was no button to bind to when the page was built. */
+      var sb = document.getElementById('empSyncBtn');
+      if(sb) sb.addEventListener('click', function(e){
+        e.stopPropagation();
+        var said = document.getElementById('empSyncSaid');
+        if(said) said.textContent = 'Checking…';
+        sb.disabled = true;
+        /* Whatever happens, it says so: this button did nothing visible when
+           anything went wrong, which reads exactly like a button that is
+           broken. */
+        new Promise(function(done){ done(empSync(false)); })
+          .then(function(changed){
+            if(said) said.textContent = changed ? 'Brought in what was new.' : 'Already up to date.';
+          })
+          .catch(function(err){
+            if(said) said.textContent = 'That did not run — ' + ((err && err.message) || err);
+          })
+          .then(function(){ sb.disabled = false; empSyncLabel(); });
+      });
+      empSyncLabel();
       var chk = document.getElementById('empOptTimes');
       if(chk) chk.addEventListener('change', function(){
         EMP_CAL_TIMES = chk.checked;

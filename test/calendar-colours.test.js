@@ -163,7 +163,7 @@ check('the three are one family, not three unrelated colours',
   check('the panel closes the way every other one does',
     /if\(dd\.contains\(e\.target\) \|\| e\.target === btn\) return;/.test(
       APP.slice(APP.indexOf("getElementById('empCalOptsBtn')"),
-                APP.indexOf("getElementById('empCalOptsBtn')") + 3200)));
+                APP.indexOf("getElementById('empCalOptsBtn')") + 6000)));
 
   /* The gate itself: both ways of writing the times go, and nothing else. */
   check('turning it off takes away the stacked figures and the packed line',
