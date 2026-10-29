@@ -1369,3 +1369,39 @@ process.env.SESSION_SECRET = SECRET;
   console.log(failed ? ('FAILED (' + failed + ' of ' + results.length + ')') : ('ALL PASS (' + results.length + ')'));
   if (failed) process.exitCode = 1;
 })().catch(e => { console.error(e); process.exitCode = 1; });
+
+/* ---- what Outlook can draw ----
+   Outlook renders mail with Word's engine. It ignores white-space:pre-line, so
+   a signature typed on three lines arrived as one; it drops the margin on an
+   inline-block, so two buttons came out welded together; and it recolours a
+   link it has not been told about firmly enough, which turned a white label on
+   a dark button purple. */
+{
+  const m = require('../mailer.js');
+  const mail = m.requestEmail({
+    orgName: 'x', heading: 'h',
+    intro: 'Dear karan Ahuja,' + '\n\n' + 'A leave request is waiting.',
+    footer: 'Best regards,' + '\n' + 'Zafar K.' + '\n' + 'Home Weavers Inc',
+    req: { id: 'r1', empName: 'Keshav Garg', leaveType: 'CL', dateFrom: '2026-11-06',
+           dateTo: '2026-11-06', message: 'urgent', createdAt: '2026-10-29T06:00:00Z' },
+    links: { approve: 'https://x/a', reject: 'https://x/r' }, siteUrl: 'https://x/'
+  });
+  check('no message leans on white-space to break its lines',
+    !/pre-line/.test(mail.html));
+  check('the breaks somebody typed are written as tags',
+    (mail.html.match(/<br>/g) || []).length >= 4, (mail.html.match(/<br>/g) || []).length);
+  check('a button is a coloured cell, which Word paints, not a styled link',
+    /<td bgcolor="#137A3B"[^>]*background:#137A3B/.test(mail.html));
+  check('and carries its own padding for Word as well',
+    /mso-padding-alt/.test(mail.html));
+  check('the label says it is white inside the link as well as on it',
+    /<a href="https:\/\/x\/a"[^>]*color:#ffffff[\s\S]{0,160}<span style="color:#ffffff/.test(mail.html));
+  check('two buttons cannot weld together, because each is its own table',
+    (mail.html.match(/<table role="presentation" border="0"/g) || []).length >= 2);
+  check('every coloured area says so in an attribute, not only in a style',
+    /bgcolor="#F3F6FB"/.test(mail.html) && /bgcolor="#ffffff"/.test(mail.html));
+  check('and the message declares its own charset',
+    /<meta charset="utf-8">/.test(mail.html));
+}
+
+

@@ -187,11 +187,15 @@ function layout(title, subtitle, blocks) {
   return '<!doctype html><html><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
     + '<body style="margin:0;padding:0;background:#F3F6FB;">'
-    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F3F6FB;padding:24px 12px;">'
+    /* Word paints a cell from its bgcolor attribute, not from a style, so
+        every coloured area carries both. */
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F3F6FB" '
+    +   'style="background:#F3F6FB;padding:24px 12px;">'
     + '<tr><td align="center">'
-    + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:100%;background:#fff;'
+    + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" bgcolor="#ffffff" '
+    +   'style="width:640px;max-width:100%;background:#fff;'
     +   'border:1px solid ' + LINE + ';border-radius:14px;overflow:hidden;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
-    + '<tr><td style="padding:18px 22px;background:' + INK + ';color:#fff;">'
+    + '<tr><td bgcolor="' + INK + '" style="padding:18px 22px;background:' + INK + ';color:#fff;">'
     +   '<div style="font-size:16px;font-weight:700;letter-spacing:.2px;">' + esc(title) + '</div>'
     +   (subtitle ? ('<div style="font-size:12.5px;opacity:.75;margin-top:3px;">' + esc(subtitle) + '</div>') : '')
     + '</td></tr>'
@@ -203,10 +207,35 @@ function layout(title, subtitle, blocks) {
     + '</table></td></tr></table></body></html>';
 }
 
+/* Text with the line breaks somebody typed into it. Outlook renders mail
+   with Word's engine, which ignores white-space:pre-line entirely - every
+   message that relied on it arrived as one run-on paragraph, signature and
+   all. The breaks are written as tags instead. */
+function lines(t) {
+  return esc(t).replace(/\r?\n/g, '<br>');
+}
+/* A button Outlook can draw. Word's engine ignores the margin on an
+   inline-block, so two of these drawn as styled links came out welded
+   together - "ApproveReject" - and it recolours a link it has not been told
+   about firmly enough, which is how a white label on a dark button arrived as
+   purple on dark.
+
+   So the colour is on a table cell, where Word honours it, the padding is the
+   cell's, and the label carries its own colour inside the link as well as on
+   it. The table is inline-block for every other client, which keeps the pair
+   side by side; Word stacks them instead, which is the right way round - a
+   little further apart rather than touching. */
 function button(href, label, kind) {
   const bg = kind === 'approve' ? '#137A3B' : kind === 'reject' ? '#B3261E' : '#33415C';
-  return '<a href="' + esc(href) + '" style="display:inline-block;padding:9px 18px;margin:0 6px 6px 0;border-radius:8px;'
-    + 'background:' + bg + ';color:#fff;font-size:13px;font-weight:600;text-decoration:none;">' + esc(label) + '</a>';
+  return '<table role="presentation" border="0" cellpadding="0" cellspacing="0" '
+    + 'style="display:inline-block;vertical-align:top;margin:0 8px 8px 0;border-collapse:separate;">'
+    + '<tr><td bgcolor="' + bg + '" style="background:' + bg + ';border-radius:8px;padding:9px 18px;'
+    +   'mso-padding-alt:9px 18px;">'
+    + '<a href="' + esc(href) + '" style="color:#ffffff;text-decoration:none;font-size:13px;'
+    +   'font-weight:600;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.2;'
+    +   'mso-line-height-rule:exactly;">'
+    + '<span style="color:#ffffff;text-decoration:none;">' + esc(label) + '</span></a>'
+    + '</td></tr></table>';
 }
 function pill(text, colour) {
   return '<span style="display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;'
@@ -382,8 +411,8 @@ function dailyEmail(o) {
                 leave: count('leave'), missing: count('missing'), late: (o.late || []).length };
   const intro = fillText(o.intro || words.intro, say);
   if (intro) {
-    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(intro) + '</div>');
+    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;">'
+      + lines(intro) + '</div>');
   }
 
   if (on.tally) {
@@ -559,7 +588,7 @@ function dailyEmail(o) {
   const footer = fillText(o.footer || words.footer, say);
   if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>');
   }
   if (o.siteUrl) {
     body.push('<div style="margin-top:18px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
@@ -614,8 +643,8 @@ function tasksEmail(o) {
   const body = [];
   const intro = fillText(o.intro || words.intro, say);
   if (intro) {
-    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(intro) + '</div>');
+    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;">'
+      + lines(intro) + '</div>');
   }
   given.forEach(function (p) {
     /* What is counted is tasks, not lines: a sub-point is more about the task
@@ -649,7 +678,7 @@ function tasksEmail(o) {
   const footer = fillText(o.footer == null || o.footer === '' ? words.footer : o.footer, say);
   if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>');
   }
   return {
     subject: fillText(o.subject || words.subject, say),
@@ -676,8 +705,8 @@ function leaveEmail(o) {
      own wording to fall back on. */
   const intro = fillText(o.intro || (o.approver ? words.firstIntro : words.intro), say);
   if (intro) {
-    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(intro) + '</div>');
+    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+      + lines(intro) + '</div>');
   }
   if (pending.length) {
     body.push('<h3 style="font-size:14px;margin:0 0 10px;">Waiting for a decision</h3>');
@@ -692,7 +721,7 @@ function leaveEmail(o) {
   const footer = fillText(o.footer || words.footer, say);
   if (footer) {
     body.push('<div style="margin-top:18px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>');
   }
   if (o.siteUrl) body.push('<div style="margin-top:18px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   /* {n} everything waiting, {waiting} the requests, {unrequested} the days
@@ -763,8 +792,8 @@ function decisionEmail(o) {
   const body = [];
   const intro = fillText(o.intro || (yes ? words.introYes : words.introNo), say);
   if (intro) {
-    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(intro) + '</div>');
+    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+      + lines(intro) + '</div>');
   }
   body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + (yes ? '#137A3B' : '#B3261E')
     + ';border-radius:10px;padding:12px 14px;margin:0 0 10px;">'
@@ -778,7 +807,7 @@ function decisionEmail(o) {
   const footer = fillText(o.footer || words.footer, say);
   if (footer) {
     body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>');
   }
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
@@ -796,8 +825,8 @@ function monthEmail(o) {
   const body = [];
   const intro = fillText(o.intro || words.intro, say);
   if (intro) {
-    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(intro) + '</div>');
+    body.push('<div style="margin:0 0 16px;font-size:13.5px;line-height:1.55;">'
+      + lines(intro) + '</div>');
   }
   /* What is in the file, stated before the picture, so it reads even where
      images are turned off. */
@@ -828,7 +857,7 @@ function monthEmail(o) {
   const footer = fillText(o.footer || words.footer, say);
   if (footer) {
     body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>');
   }
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
@@ -852,8 +881,8 @@ function holidayEmail(o) {
   const body = [];
   const intro = fillText(o.intro || words.intro, say);
   if (intro) {
-    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-      + esc(intro) + '</div>');
+    body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+      + lines(intro) + '</div>');
   }
   list.forEach(function (h) {
     body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid #B45309;border-radius:10px;'
@@ -868,7 +897,7 @@ function holidayEmail(o) {
   const footer = fillText(o.footer || words.footer, say);
   if (footer) {
     body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-      + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>');
+      + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>');
   }
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
@@ -891,11 +920,11 @@ function requestEmail(o) {
              + ' · ' + dateRange(r.dateFrom, r.dateTo),
     html: layout(o.orgName || 'Attendance',
       o.heading || 'A request is waiting for a decision', [
-      intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;white-space:pre-line;">'
-                 + esc(intro) + '</div>') : '',
+      intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+                 + lines(intro) + '</div>') : '',
       requestCard(r, o.links, 'Raised ' + (r.createdAt ? fmtDay(String(r.createdAt).slice(0, 10)) : 'just now')),
       footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
-                  + 'font-size:12px;color:' + SOFT + ';white-space:pre-line;">' + esc(footer) + '</div>') : '',
+                  + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>') : '',
       o.siteUrl ? ('<div style="margin-top:8px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>') : ''
     ])
   };
