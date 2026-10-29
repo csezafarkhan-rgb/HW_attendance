@@ -3152,6 +3152,7 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-shot{ color:var(--brand); font-weight:700; text-decoration:none;
   white-space:nowrap; }
 .dt-shot:hover{ text-decoration:underline; }
+.dt-shotsep{ color:var(--line-dk); font-style:normal; margin:0 5px; }
 .dt-table-cmp tr.dt-week .dt-shotcell{ color:transparent; }
 /* The day the two records disagree about. Amber rather than red: it is a
    question to ask, not a finding. */
@@ -4947,7 +4948,7 @@ function attachDismiss(el){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames',
+    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames','deskTimeIds',
     'leaveRecord',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
@@ -9160,6 +9161,20 @@ function buildExcelBackup(){
      Karan, Rahul, Zafar, Himanshu jain where the record says karan Ahuja,
      Rahul Mishra, Zafar Khan, Himanshu. Only the ones that differ are stored;
      a name that matches itself needs no entry. */
+  /* And DeskTime's own number for each of them, which is what its address bar
+     takes. The name on the export cannot be turned into one - DeskTime never
+     puts the number in a file - so it is kept here once and used thereafter.
+     Where it is not known the link still works, it just lands on the day's list
+     of everybody instead of straight on the person. */
+  var deskTimeIds = {};
+  function loadDeskTimeIds(){
+    return storage.get('deskTimeIds', true).then(function(res){
+      if(res && res.value){ try{ deskTimeIds = JSON.parse(res.value) || {}; }catch(e){ deskTimeIds = {}; } }
+    }).catch(function(){ deskTimeIds = {}; });
+  }
+  function saveDeskTimeIds(){
+    return storage.set('deskTimeIds', JSON.stringify(deskTimeIds), true);
+  }
   var deskTimeNames = {};
   function loadDeskTimeNames(){
     return storage.get('deskTimeNames', true).then(function(res){
@@ -14942,12 +14957,35 @@ function buildExcelBackup(){
      picture in it. DeskTime's page takes the day in its address, which is the
      part that matters - it opens on the day being read rather than on today,
      and the person's row is one press from there. */
+  /* The day as DeskTime draws it: arrival and leaving, the productivity bar,
+     and which applications the hours went to - the page the office actually
+     wants when a row here raises a question, since this record can say how far
+     apart the two readings are but not what the time was spent on.
+
+     With the person's DeskTime number it opens on them; without one it opens on
+     the day's list of everybody, which is a press away from the same place and
+     is never a broken link. */
+  function dtDayLink(day, name){
+    var id = deskTimeIds[name];
+    var href = id
+      ? ('https://desktime.com/app/employee/' + encodeURIComponent(id) + '/' + day)
+      : ('https://desktime.com/app/team-members/' + day);
+    return '<a class="dt-shot" target="_blank" rel="noopener noreferrer" href="'
+      + shotEsc(href) + '" title="'
+      + (id ? ('Opens ' + shotEsc(dispName(name)) + '’s DeskTime day for '
+               + shotEsc(fmtDayLong(day)) + ' — the hours, the productivity bar '
+               + 'and what the time went to')
+            : ('Opens DeskTime’s list for ' + shotEsc(fmtDayLong(day)) + '. '
+               + shotEsc(dispName(name)) + ' has no DeskTime number stored here yet, '
+               + 'so this lands on everybody for that day'))
+      + '">Day ›</a>';
+  }
   function dtShotLink(day, name){
     return '<a class="dt-shot" target="_blank" rel="noopener noreferrer" href="'
       + 'https://desktime.com/app/screenshots/' + shotEsc(day) + '" title="'
       + 'Opens DeskTime on ' + shotEsc(fmtDayLong(day)) + ', where '
       + shotEsc(dispName(name)) + '’s screenshots for the day can be looked at '
-      + 'and downloaded">Look ›</a>';
+      + 'and downloaded">Shots ›</a>';
   }
   /* Everything one day of one person comes to, worked out in one place because
      the month view and the year view both need it and two copies of this would
@@ -15562,7 +15600,13 @@ function buildExcelBackup(){
         + '<td class="dt-usecell">' + dtUseBar(dtUse(markedMin, seen && seen.d)) + '</td>'
         /* Only where DeskTime saw the day at all: it takes no screenshots on a
            day it tracked nothing, and a link to an empty page is a wasted press. */
-        + '<td class="dt-shotcell">' + (seen ? dtShotLink(day, DT_WHO) : '—') + '</td>'
+        + '<td class="dt-shotcell">'
+            + dtDayLink(day, DT_WHO)
+            /* Screenshots only where DeskTime saw the day: it takes none on a
+               day it tracked nothing, and a link to an empty page is a wasted
+               press. The day itself is always worth opening. */
+            + (seen ? ('<i class="dt-shotsep">·</i>' + dtShotLink(day, DT_WHO)) : '')
+          + '</td>'
         + '</tr>';
       /* What the week came to, carried along as its days go by - and the month
          with it, since it is the same addition over a longer run. */
@@ -15610,7 +15654,7 @@ function buildExcelBackup(){
              + '<th class="dt-sep">Marked out</th><th>DeskTime out</th><th>Difference</th>'
              + '<th class="dt-sep">Hours marked</th><th>DeskTime time</th>'
              + '<th>At the computer</th>'
-             + '<th class="dt-sep">Screenshots</th>'
+             + '<th class="dt-sep">On DeskTime</th>'
              + '</tr></thead>' + rows + '</table></div>'
              + '<div class="dt-note"><b>Hours marked</b> is this record’s own day, in to out — '
              + 'or, on a day worked from home or spent on a visit, the shift it is credited '
@@ -15627,9 +15671,12 @@ function buildExcelBackup(){
                     + 'averaged over the days both records knew about, so a month '
                     + 'mostly untracked does not flatter itself. ')
                  : '')
-             + '<b>Screenshots</b> opens DeskTime on that day, where the day’s '
-             + 'screenshots can be looked at and downloaded; they are kept on '
-             + 'DeskTime, behind that sign-in, so they cannot be drawn here. '
+             + '<b>On DeskTime</b> is two doors. <b>Day</b> opens that person’s own '
+             + 'DeskTime page for the day — arrival and leaving, the productivity '
+             + 'bar, and which applications the hours went to, which is what this '
+             + 'record cannot say. <b>Shots</b> opens the day’s screenshots, to be '
+             + 'looked at and downloaded there. Both are kept on DeskTime, behind '
+             + 'that sign-in, so neither can be drawn here. '
              + '<b>The record says</b> is this record’s own word for the day, so a '
              + 'row of dashes can be read as a Sunday or a day of leave rather than as somebody '
              + 'missing. '
@@ -21517,7 +21564,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){

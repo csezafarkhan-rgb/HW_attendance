@@ -402,28 +402,47 @@ function grab(src, name) {
     /DT_IMP = null;[\s\S]{0,80}DT_MONTH = null;[\s\S]{0,80}renderDeskTimePage\(\);/.test(APP));
 }
 
-/* ---- the screenshots, which are not ours to draw ----
-   DeskTime keeps the day's screenshots behind its own sign-in, so nothing here
-   can show one. A frame with a broken picture in it would be worse than a door,
-   and the door at least opens on the right day. */
+/* ---- the two doors onto DeskTime, neither of them ours to draw ----
+   What this record can say is how far apart the two readings of a day are. What
+   it cannot say is what the hours went to, and it cannot show a screenshot
+   either: both live behind DeskTime's own sign-in. A frame with a broken
+   picture in it would be worse than a door, and a door at least opens on the
+   right day - and, where the number is known, on the right person. */
 {
   const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
                          APP.indexOf('function dtWire('));
   const link = grab(APP, 'dtShotLink');
-  check('there is a column for the day\u2019s screenshots',
-    page.indexOf('>Screenshots<') > -1 && page.indexOf('What it saw') > -1);
-  check('and it opens DeskTime on the day being read, not on today',
-    /desktime\.com\/app\/screenshots\/' \+ shotEsc\(day\)/.test(link));
+  const dayl = grab(APP, 'dtDayLink');
+  check('there is a column for what DeskTime has on the day',
+    page.indexOf('>On DeskTime<') > -1 && page.indexOf('What it saw') > -1);
+  check('one door is that person\u2019s own DeskTime day, which is the page with the hours on it',
+    /app\/employee\/' \+ encodeURIComponent\(id\) \+ '\/' \+ day/.test(dayl)
+    && dayl.indexOf('>Day \u203a</a>') > -1);
+  check('and the other is the day\u2019s screenshots',
+    /desktime\.com\/app\/screenshots\/' \+ shotEsc\(day\)/.test(link)
+    && link.indexOf('>Shots \u203a</a>') > -1);
+  /* DeskTime never puts its own number in an export, so it is kept here. */
+  check('the number DeskTime files a person under is kept, and backed up',
+    /var deskTimeIds = \{\};/.test(APP)
+    && /function loadDeskTimeIds\(\)/.test(APP)
+    && /'deskTime','deskTimeNames','deskTimeIds',/.test(APP));
+  /* A person with no number stored is not a broken link: the day's list of
+     everybody is one press from the same place. */
+  check('a person with no number still gets a working door',
+    /app\/team-members\/' \+ day/.test(dayl)
+    && dayl.indexOf('has no DeskTime number stored here yet') > -1);
   check('in a tab of its own, with nothing of this page handed over',
-    link.indexOf('target="_blank" rel="noopener noreferrer"') > -1);
-  check('it names whose screenshots to look for, the page not taking a name',
-    /shotEsc\(dispName\(name\)\)/.test(link));
-  /* DeskTime takes no screenshots on a day it tracked nothing, and a link to an
-     empty page is a wasted press. */
-  check('only on a day DeskTime saw at all',
-    /seen \? dtShotLink\(day, DT_WHO\) : '/.test(page));
-  check('and the page says plainly why the picture is not here',
-    page.indexOf('behind that sign-in, so they cannot be drawn here') > -1);
+    link.indexOf('target="_blank" rel="noopener noreferrer"') > -1
+    && dayl.indexOf('target="_blank" rel="noopener noreferrer"') > -1);
+  check('it names whose day to look at, the page not taking a name',
+    /shotEsc\(dispName\(name\)\)/.test(link) && /shotEsc\(dispName\(name\)\)/.test(dayl));
+  /* The day is always worth opening. Screenshots are not: DeskTime takes none
+     on a day it tracked nothing, and a link to an empty page is a wasted press. */
+  check('the day opens on every row, the screenshots only where there are any',
+    /\+ dtDayLink\(day, DT_WHO\)/.test(page)
+    && /seen \? \('<i class="dt-shotsep">/.test(page));
+  check('and the page says plainly why neither picture is here',
+    page.indexOf('that sign-in, so neither can be drawn here') > -1);
 }
 
 /* ---- the week as a block, and the two things a reader can put away ---- */
