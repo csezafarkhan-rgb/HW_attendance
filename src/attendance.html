@@ -3988,6 +3988,11 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button id="empCalNext">›</button>
     <button id="empCalDensity" title="Switch between a dense month and full cells" style="width:auto;padding:0 12px;font-size:11.5px;font-weight:700;">⤢ Compact</button>
     </div>
+    <!-- The page was drawn once, when it was opened, and then stood still: a
+         day marked by the office, a request decided, a punch read off the
+         reader an hour later - none of it arrived until the page was loaded
+         again. This asks the server what it has now. -->
+    <button class="month-btn" id="empSyncBtn" title="Check for anything new">⟳ <span id="empSyncWhen">Sync</span></button>
     <div class="month-picker">
       <button class="month-btn" id="empCalOptsBtn" title="What each day shows">⚙</button>
       <div class="month-dropdown" id="empCalOptsDropdown" style="min-width:270px;"></div>
@@ -11937,6 +11942,7 @@ function buildExcelBackup(){
     var W = MAIL_CFG.defaults || {daily:{}, month:{}, leave:{}, holiday:{}, tasks:{}};
     W.month = W.month || {};
     W.tasks = W.tasks || {};
+    W.excused = W.excused || {};
     var text = function(saved, fallback){ return (saved && String(saved).trim()) ? saved : (fallback || ''); };
     var shown = visibleEmployees().length, all = EMPLOYEES.length;
     dd.innerHTML = '<div class="em-pane">'
@@ -12045,16 +12051,18 @@ function buildExcelBackup(){
             /* And the words themselves, which every other message here lets
                the office set. Left blank, the message uses the wording it
                comes with, shown as a placeholder rather than hidden. */
+            /* The wording it comes with is shown in the boxes, not behind
+               them: what is on screen is what goes out, and it can be edited
+               from there. The same bargain the other tabs strike. */
             + '<div class="em-lab">Subject <span>{who} {date} {n} {org}</span></div>'
             + '<div class="em-row"><input type="text" id="emExcSubject" value="'
-            +   mailEscape(ex.subject || '') + '" placeholder="Late excused · {who} · {date}"></div>'
+            +   mailEscape(text(ex.subject, (W.excused || {}).subject)) + '"></div>'
             + '<div class="em-lab">Message at the top</div>'
-            + '<div class="em-row"><textarea id="emExcIntro" rows="3" placeholder="'
-            +   mailEscape('Somebody has marked their own late arrival as excused and said why.')
-            +   '">' + mailEscape(ex.intro || '') + '</textarea></div>'
+            + '<div class="em-row"><textarea id="emExcIntro" rows="3">'
+            +   mailEscape(text(ex.intro, (W.excused || {}).intro)) + '</textarea></div>'
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emExcFooter" rows="2">'
-            +   mailEscape(ex.footer || '') + '</textarea></div>';
+            +   mailEscape(text(ex.footer, (W.excused || {}).footer)) + '</textarea></div>';
         })()
       + '</div>'
       /* ---- the leave message ---- */
@@ -19438,6 +19446,106 @@ function buildExcelBackup(){
   var EMP_CAL_TIMES = (function(){
     try{ return localStorage.getItem('hw_emp_cal_times') === '1'; }catch(e){ return false; }
   })();
+  /* On unless it has been turned off: a page that stands still while the
+     office marks the day is quietly wrong, and nobody thinks to reload it. */
+  var EMP_LIVE = (function(){
+    try{ return localStorage.getItem('hw_emp_live') !== '0'; }catch(e){ return true; }
+  })();
+  /* ---- what the server has now ----
+     The page is built once, from what the server had when it was opened, and
+     then nothing reaches it: a day the office marked, a request decided, a
+     punch read off the reader an hour later. All of it waited for a reload
+     nobody thought to do.
+
+     This asks again. The dataset is re-read and so are the handful of things
+     the employee's own page is built from, and the screen is redrawn only if
+     any of it actually changed - a page that redraws every minute regardless
+     is one that moves under the hand of whoever is typing into it. */
+  var EMP_SYNC_AT = 0, EMP_SYNC_BUSY = false;
+  function empSyncSig(){
+    var me = (viewRole && viewRole.name) || '';
+    var mine = RECORDS.filter(function(r){ return r.e === me; });
+    /* Only this person's own rows, the marks against them, and what they have
+       asked for: the three things their page is drawn from. */
+    var marks = ['overrides', 'manualRecords', 'halfDays', 'lateExcuses', 'earlyExcuses']
+      .map(function(n){
+        var m = (n === 'overrides') ? overrides
+              : (n === 'manualRecords') ? manualRecords
+              : (n === 'halfDays') ? halfDays
+              : (n === 'lateExcuses') ? lateExcuses : earlyExcuses;
+        return Object.keys(m || {}).filter(function(k){ return k.indexOf(me + '|') === 0; })
+          .map(function(k){ return k + JSON.stringify(m[k]); }).sort().join(',');
+      }).join('|');
+    var reqs = (leaveRequests || []).filter(function(r){ return r.empName === me; })
+      .map(function(r){ return r.id + r.status + (r.updatedAt || ''); }).sort().join(',');
+    return JSON.stringify(mine) + '#' + marks + '#' + reqs;
+  }
+  function empSync(quiet){
+    /* The employee's own page only. The office's grid has its own way of
+       taking in new data, and pulling the dataset out from under a half-typed
+       row there would be a different bug entirely. */
+    if(!(viewRole && viewRole.role === 'employee')) return Promise.resolve(false);
+    if(EMP_SYNC_BUSY) return Promise.resolve(false);
+    if(!(window.HWSync && window.HWSync.hydrateDataset)) return Promise.resolve(false);
+    EMP_SYNC_BUSY = true;
+    var before = empSyncSig();
+    var safe = function(fn){
+      try{ var p = fn(); return (p && p.then) ? p.catch(function(){}) : Promise.resolve(); }
+      catch(e){ return Promise.resolve(); }
+    };
+    return window.HWSync.hydrateDataset().then(function(d){
+      /* A browser holding edits of its own keeps them: adopting the server's
+         copy over the top is what that path is for, and it is not this one. */
+      if(d && DATASET_SOURCE === 'server' && (d.records || d.employees)) applyDataset(d);
+      return Promise.all([loadOverrides, loadManualRecords, loadHalfDays, loadLateExcuses,
+        loadEarlyExcuses, loadLeaveRequests, loadOfficialLeaves, loadDayShifts,
+        loadShiftAssignments, loadManualLeave, loadEmpNames, loadSelfMark].map(safe));
+    }).then(function(){
+      EMP_SYNC_AT = Date.now();
+      var changed = empSyncSig() !== before;
+      if(changed){
+        try{ redrawAfterDataset(); }catch(e){}
+        try{ renderMyRequests(); }catch(e){}
+      }
+      empSyncLabel();
+      if(!quiet) showUploadStatus(changed ? 'Updated with what the office has now.'
+                                          : 'Already up to date.', false);
+      EMP_SYNC_BUSY = false;
+      return changed;
+    }).catch(function(){
+      EMP_SYNC_BUSY = false;
+      if(!quiet) showUploadStatus('Could not reach the server just now.', true);
+      return false;
+    });
+  }
+  /* How long ago, in words, on the button itself. */
+  function empSyncLabel(){
+    var el = document.getElementById('empSyncWhen');
+    if(!el) return;
+    if(!EMP_SYNC_AT){ el.textContent = 'Sync'; return; }
+    var mins = Math.floor((Date.now() - EMP_SYNC_AT) / 60000);
+    el.textContent = mins < 1 ? 'Just now' : (mins === 1 ? '1 min ago' : (mins + ' min ago'));
+  }
+  (function(){
+    var b = document.getElementById('empSyncBtn');
+    if(!b) return;
+    b.addEventListener('click', function(){ empSync(false); });
+    /* Every minute, and only while this tab is in front: a page nobody is
+       looking at does not need to ask, and a phone in a pocket should not be
+       spending its battery on it. */
+    setInterval(function(){
+      if(!EMP_LIVE) return;
+      if(document.visibilityState !== 'visible') return;
+      empSync(true);
+    }, 60000);
+    setInterval(empSyncLabel, 30000);
+    /* Coming back to the tab after a while is exactly when it is most likely
+       to be out of date. */
+    document.addEventListener('visibilitychange', function(){
+      if(document.visibilityState !== 'visible' || !EMP_LIVE) return;
+      if(Date.now() - EMP_SYNC_AT > 60000) empSync(true);
+    });
+  })();
   (function(){
     var btn = document.getElementById('empCalOptsBtn');
     var dd  = document.getElementById('empCalOptsDropdown');
@@ -19448,7 +19556,21 @@ function buildExcelBackup(){
         +   (EMP_CAL_TIMES ? ' checked' : '') + '>'
         +   '<span>In, out and hours on every day</span></label>'
         + '<div class="em-note">Off by default — the colour and the marks say most of it. '
-        +   'Tap any day for the whole record.</div>';
+        +   'Tap any day for the whole record.</div>'
+        + '<div class="em-lab" style="margin-top:10px;padding-top:9px;border-top:1px solid var(--line);">'
+        +   'Keeping up to date</div>'
+        + '<label class="em-row"><input type="checkbox" id="empOptLive"'
+        +   (EMP_LIVE ? ' checked' : '') + '>'
+        +   '<span>Check for anything new on its own</span></label>'
+        + '<div class="em-note">Every minute, while this tab is open and in front. The page is '
+        +   'redrawn only when something has actually changed, so it will not move under your '
+        +   'hand. The ⟳ button checks at once either way.</div>';
+      var live = document.getElementById('empOptLive');
+      if(live) live.addEventListener('change', function(){
+        EMP_LIVE = live.checked;
+        try{ localStorage.setItem('hw_emp_live', EMP_LIVE ? '1' : '0'); }catch(_){}
+        if(EMP_LIVE) empSync(true);
+      });
       var chk = document.getElementById('empOptTimes');
       if(chk) chk.addEventListener('change', function(){
         EMP_CAL_TIMES = chk.checked;

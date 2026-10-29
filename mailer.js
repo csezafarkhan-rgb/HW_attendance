@@ -243,6 +243,19 @@ function clock(t) {
    the subject, the greeting and the sign-off, so a name or a date can be
    written into any of them. */
 const DEFAULT_TEXT = {
+  /* A late arrival somebody answered for themselves. The words are the
+     office's to change like every other message here, so the ones it comes
+     with are shown in the boxes rather than hidden behind them. */
+  /* A late arrival somebody answered for themselves. The words are the
+     office's to change like every other message here, so the ones it comes
+     with are shown in the boxes rather than hidden behind them. */
+  excused: {
+    subject: 'Late excused \u00b7 {who} \u00b7 {date}',
+    intro: 'Hello,\n\nSomebody has marked their own late arrival as excused and said why. '
+      + 'Nothing is being asked of you \u2014 it is already on the record, and can be '
+      + 'changed on the day itself if it is wrong.',
+    footer: 'Best regards,\n{org}'
+  },
   daily: {
     subject: 'Attendance \u00b7 {date}',
     intro: 'Hello,\n\nPlease find today\u2019s attendance record below.',

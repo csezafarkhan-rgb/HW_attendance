@@ -243,6 +243,15 @@ function grab(src, name) {
   check('and builds it from a real mark where there is one, an example where there is not',
     SRV.indexOf("x.v.by === 'self'") > -1
     && SRV.indexOf('A name from the record') > -1);
+  /* Shown in the boxes rather than behind them: what is on screen is what
+     goes out, and it can be edited from there. */
+  check('the wording it comes with is in the boxes, not a placeholder',
+    /id="emExcSubject" value="'\s*\+\s*mailEscape\(text\(ex\.subject, \(W\.excused \|\| \{\}\)\.subject\)\)/.test(APP)
+    && APP.indexOf('mailEscape(text(ex.intro, (W.excused || {}).intro))') > -1
+    && APP.indexOf('mailEscape(text(ex.footer, (W.excused || {}).footer))') > -1);
+  check('and those words are the ones the message itself falls back to',
+    /excused: \{[\s\S]{0,120}subject: 'Late excused/.test(require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'mailer.js'), 'utf8')));
   check('the panel says what the message is for',
     APP.indexOf('for reading, not for deciding') > -1);
 }
