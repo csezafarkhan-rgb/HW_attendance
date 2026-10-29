@@ -154,7 +154,7 @@ function grab(src, name) {
   check('the two readings of a day are shown side by side, both times and the hours',
     /Marked in<\/th><th>DeskTime in/.test(page)
     && /Marked out<\/th><th>DeskTime out/.test(page)
-    && /Hours marked<\/th><th>At work<\/th><th>DeskTime time/.test(page));
+    && /Hours marked<\/th><th>DeskTime time/.test(page));
   check('the figure DeskTime leads with is shown, and said to be the one it leads with',
     page.indexOf("class=\"dt-desk\"") > -1 && page.indexOf('seen.d') > -1
     && page.indexOf('the computer was actually in use') > -1);
@@ -166,21 +166,78 @@ function grab(src, name) {
     && page.indexOf('OV_CATS[ov.cat].label') > -1);
   check('and the hour they were due in, which is what late is measured from',
     page.indexOf('>Due in<') > -1 && /getShift\(DT_WHO, day\)/.test(page));
-  /* The four durations, which are four different things. */
-  check('the day’s length is given four ways, each said once',
-    /<th class="dt-sep">Hours marked<\/th><th>At work<\/th><th>DeskTime time<\/th>/.test(page)
-    && page.indexOf('<th>Productive</th><th>Idle</th>') > -1);
-  check('idle is the span less the time the computer was in use',
-    page.indexOf('(seen.w - seen.d)') > -1);
-  check('and each is explained, because none of them is obvious',
-    page.indexOf('in applications the office counts as work') > -1
-    && page.indexOf('the span less the') > -1);
+  /* Three durations, which are three different things. Productive time and
+     idle time were a fourth and a fifth, and the office found them noise: what
+     it reads a day by is how long somebody was here and how much of that the
+     computer was in use. */
+  /* Two figures and what they come to. DeskTime's own span from arriving to
+     leaving was a third: it measures the same thing the record already
+     measures, and worse - it is the machine's day, not the person's. */
+  check('the day is measured by the record and by the computer, and nothing else',
+    /<th class="dt-sep">Hours marked<\/th><th>DeskTime time<\/th>/.test(page)
+    && page.indexOf('At work') === -1
+    && page.indexOf('Productive') === -1 && page.indexOf('Idle') === -1);
+  check('and the group above them counts them and the share they come to',
+    /colspan="3">How long/.test(page)
+    && page.indexOf('<th>At the computer</th>') > -1);
+  check('each is explained, because none of them is obvious',
+    page.indexOf('this record’s own day, in to out') > -1
+    && page.indexOf('how long the computer was actually in use') > -1);
   /* Fourteen columns are four questions. */
   check('the columns are grouped under what they answer',
     /colspan="3">The day<[\s\S]{0,200}Arriving[\s\S]{0,120}Leaving[\s\S]{0,140}How long/.test(page));
   check('with a hairline between the groups, in the header and down the rows',
     /\.dt-table-cmp \.dt-sep\{ border-left:1px solid/.test(APP)
     && (page.match(/class="dt-sep"/g) || []).length >= 8);
+  /* Two figures side by side make the reader do the division. The bar does it,
+     and the eye finds the short ones without reading a number at all. */
+  check('the share of the day spent at the computer is drawn as well as counted',
+    /function dtUse\(work, desk\)/.test(APP) && /function dtUseBar\(pct\)/.test(APP)
+    && page.indexOf('dtUseBar(dtUse(markedMin, seen && seen.d))') > -1);
+  check('it is the computer’s time as a share of the marked day',
+    /Math\.round\(desk \/ work \* 100\)/.test(APP)
+    && page.indexOf('dtUseBar(dtUse(markedMin, seen && seen.d))') > -1);
+  check('a day missing either figure has no share to show',
+    /if\(!work \|\| !desk\) return null;/.test(APP));
+  check('under half is picked out, and the bands are said in the stylesheet',
+    /pct >= 75 \? 'hi' : \(pct >= 50 \? 'mid' : 'lo'\)/.test(APP)
+    && /\.dt-use\.lo \.dt-use-bar > span\{ background:#C9594F/.test(APP));
+  /* A day worked from home has no punches to measure, and read as a dash it
+     looked like a day that counted for nothing - next to a share of the
+     computer's time it could never be a share of. */
+  check('a day with no punches is credited the shift the record credits it',
+    page.indexOf('var worked = workedMinutes(DT_WHO, day);') > -1
+    && page.indexOf('markedMin = worked; credited = true;') > -1);
+  check('and says it was credited rather than measured',
+    page.indexOf('class="dt-credited"') > -1
+    && page.indexOf('Credited to the shift') > -1);
+  check('the figure comes from the same place the totals take it',
+    /function workedMinutes\(emp, dateStr\)[\s\S]{0,700}return owedMinutes\(emp, dateStr\);/.test(APP));
+  check('which is the whole shift on a weekday and the Saturday policy on a Saturday',
+    /function owedMinutes\(emp, dateStr\)[\s\S]{0,420}sp\.mode === 'WFH'\)  return Math\.round\(\(sp\.hours\|\|0\) \* 60\)/.test(APP));
+  check('a day nobody worked at all is still a dash',
+    page.indexOf('if(worked > 0)') > -1);
+
+  /* The thing it must not become. */
+  check('and the page says it is a question rather than a finding',
+    page.indexOf('a question rather than a finding') > -1
+    && page.indexOf('the keyboard to show for it') > -1);
+  check('the week says its own share too',
+    page.indexOf('dtUseBar(dtUse(wkMarked, wkDesk))') > -1);
+
+  /* A week is the unit the office counts in - hours owed, hours over - and the
+     attendance record is read that way. Thirty rows with nothing between them
+     is a wall to scan. */
+  check('the days are grouped into weeks, as the record is',
+    page.indexOf('class="dt-week"') > -1 && page.indexOf('Week of ') > -1);
+  check('a week is bounded the same way the record bounds one',
+    page.indexOf('mondayOf(day)') > -1 && /dow === 0 \|\| di === days\.length - 1/.test(page));
+  check('and the last week of a month is closed even though it ends mid-week',
+    /closeWeek\(\);\s*$/m.test(page) || page.lastIndexOf('closeWeek();') > page.indexOf('days.forEach'));
+  check('each week says what it came to, in the columns that measure it',
+    /wkMarked \+= markedMin/.test(page) && /wkDesk \+= seen\.d/.test(page));
+  check('an empty week is not drawn at all',
+    page.indexOf('if(!wkDays) return;') > -1);
   check('and the table scrolls inside the page rather than widening it',
     page.indexOf('<div class="dt-scroll">') > -1 && /\.dt-scroll\{ overflow-x:auto/.test(APP));
   check('the difference is DeskTime measured from the marked time',

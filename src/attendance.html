@@ -3076,6 +3076,34 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 /* Fourteen columns do not fit a laptop. The table scrolls inside the page
    rather than pushing the page sideways. */
 .dt-scroll{ overflow-x:auto; max-width:100%; padding-bottom:4px; }
+/* A figure the record credited rather than measured. Small, because it is a
+   footnote on the number beside it, not a thing of its own. */
+.dt-table-cmp .dt-credited{ font-size:9px; font-weight:700; letter-spacing:.04em;
+  color:var(--ink-soft); vertical-align:super; }
+/* The share of the day at the desk that was time at the computer, drawn as
+   well as counted: two figures side by side make the reader do the
+   division, and the bar does it for them. */
+.dt-use{ display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+.dt-use-bar{ display:inline-block; width:46px; height:7px; border-radius:4px;
+  background:#E1E7F0; overflow:hidden; }
+.dt-use-bar > span{ display:block; height:100%; border-radius:4px; }
+.dt-use b{ font-size:11.5px; font-weight:700; }
+.dt-use.hi .dt-use-bar > span{ background:#2F6FD0; }
+.dt-use.hi b{ color:#1F4E82; }
+.dt-use.mid .dt-use-bar > span{ background:#E0A93B; }
+.dt-use.mid b{ color:#8A5A00; }
+/* Under half: the one worth asking about. */
+.dt-use.lo .dt-use-bar > span{ background:#C9594F; }
+.dt-use.lo b{ color:#9A3B32; }
+.dt-nouse{ color:#C3CCDA; }
+/* What a week came to, closing it off the way the attendance record closes
+   one. A week is the unit the office counts in, and thirty rows with
+   nothing between them is a wall to scan. */
+.dt-table-cmp tr.dt-week td{ background:#EFF3F9; font-weight:700; font-size:11.5px;
+  color:var(--ink-soft); border-top:1px solid var(--line-dk);
+  border-bottom:1px solid var(--line-dk); }
+.dt-table-cmp tr.dt-week .dt-day{ color:var(--ink); }
+.dt-table-cmp tr.dt-week .dt-desk{ color:var(--ink); }
 /* The day the two records disagree about. Amber rather than red: it is a
    question to ask, not a finding. */
 .dt-table-cmp tr.dt-off{ background:#FFF7E8; }
@@ -14822,6 +14850,25 @@ function buildExcelBackup(){
     if(a === null || b === null || isNaN(a) || isNaN(b)) return null;
     return b - a;
   }
+  /* How much of the span at the desk the computer was actually in use. Two
+     figures side by side make the reader do the division; the bar does it, and
+     the eye finds the short ones without reading a number at all.
+
+     A long day with little use is the thing worth asking about - but it is a
+     question, not a finding: a day on the floor, in a meeting or out on a
+     visit is a working day with nothing on the keyboard to show for it. */
+  function dtUse(work, desk){
+    if(!work || !desk) return null;
+    return Math.max(0, Math.min(100, Math.round(desk / work * 100)));
+  }
+  function dtUseBar(pct){
+    if(pct === null) return '<span class="dt-nouse">—</span>';
+    var band = pct >= 75 ? 'hi' : (pct >= 50 ? 'mid' : 'lo');
+    return '<span class="dt-use ' + band + '" title="' + pct
+      + '% of the time at the desk was time at the computer">'
+      + '<span class="dt-use-bar"><span style="width:' + pct + '%;"></span></span>'
+      + '<b>' + pct + '%</b></span>';
+  }
   function dtSaid(mins){
     if(mins === null) return '';
     if(mins === 0) return 'same';           /* not "-0m", which reads as an error */
@@ -14931,7 +14978,23 @@ function buildExcelBackup(){
       return;
     }
     var rows = '', shownAny = false, both = 0, apart = 0, unmarked = 0;
-    dtDays(ym).forEach(function(day){
+    /* Grouped by week, the way the attendance record is read: a week is the
+       unit the office counts in - hours owed, hours over - and a month of
+       thirty rows with nothing between them is a wall to scan. Each week ends
+       with what it came to, and a hairline closes it. */
+    var days = dtDays(ym);
+    var wkMarked = 0, wkDesk = 0, wkDays = 0, wkFrom = '';
+    var closeWeek = function(){
+      if(!wkDays) return;
+      rows += '<tr class="dt-week"><td class="dt-day" colspan="3">Week of '
+        + shotEsc(fmtDayLong(wkFrom).replace(/,.*$/, '')) + '</td>'
+        + '<td class="dt-sep" colspan="6">' + wkDays + (wkDays === 1 ? ' day' : ' days') + '</td>'
+        + '<td class="dt-sep">' + (wkMarked ? shotEsc(fmtMin(wkMarked)) : '—') + '</td>'
+        + '<td class="dt-desk">' + (wkDesk ? shotEsc(fmtMin(wkDesk)) : '—') + '</td>'
+        + '<td class="dt-usecell">' + dtUseBar(dtUse(wkMarked, wkDesk)) + '</td></tr>';
+      wkMarked = 0; wkDesk = 0; wkDays = 0; wkFrom = '';
+    };
+    days.forEach(function(day, di){
       var seen = deskDay(DT_WHO, day);
       var rec = getRecord(DT_WHO, day) || {};
       var markedIn = rec['in'] || '', markedOut = rec.out || '';
@@ -14941,6 +15004,17 @@ function buildExcelBackup(){
       var gOut = dtGap(markedOut, seen && seen.o);
       var markedMin = (markedIn && markedOut) ? dtGap(markedIn, markedOut) : null;
       if(markedMin !== null && markedMin < 0) markedMin += 24 * 60;
+      /* A day worked from home, or out on a visit, has no punches to measure -
+         and read as a dash it looked like a day that counted for nothing, next
+         to a share of the computer's time it could never be a share of. The
+         record credits such a day its shift: the full day on a weekday, and
+         whatever that person's Saturday is set to on a Saturday. The same
+         figure is used here, from the same place the totals take it. */
+      var credited = false;
+      if(markedMin === null){
+        var worked = workedMinutes(DT_WHO, day);
+        if(worked > 0){ markedMin = worked; credited = true; }
+      }
       var late = gIn !== null && gIn > DT_GAP;
       if(gIn !== null) both++;
       if(late) apart++;
@@ -14954,10 +15028,6 @@ function buildExcelBackup(){
       var said = (ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].label)
         || STATUS_LABEL[rec.st] || (rec.st || '—');
       var due = (getShift(DT_WHO, day) || '').split('-')[0] || '';
-      /* The span from arriving to leaving, less the part the computer was
-         actually in use: a lunch, a meeting, an afternoon the machine sat
-         open on an empty desk. */
-      var idle = (seen && seen.w && seen.d) ? (seen.w - seen.d) : null;
       rows += '<tr' + (late ? ' class="dt-off"' : '') + '>'
         + '<td class="dt-day">' + shotEsc(fmtDayLong(day)) + '</td>'
         + '<td class="dt-said">' + shotEsc(said) + '</td>'
@@ -14968,17 +15038,29 @@ function buildExcelBackup(){
         + '<td class="dt-sep">' + (markedOut ? shotEsc(fmtTime(markedOut)) : '—') + '</td>'
         + '<td>' + ((seen && seen.o) ? shotEsc(fmtTime(seen.o)) : (seen ? 'still on' : '—')) + '</td>'
         + '<td class="dt-gap">' + (gOut === null ? '' : shotEsc(dtSaid(gOut))) + '</td>'
-        + '<td class="dt-sep">' + (markedMin === null ? '—' : shotEsc(fmtMin(markedMin))) + '</td>'
-        + '<td>' + ((seen && seen.w) ? shotEsc(fmtMin(seen.w)) : '—') + '</td>'
+        + '<td class="dt-sep">' + (markedMin === null ? '—'
+            : (shotEsc(fmtMin(markedMin))
+               + (credited ? '<span class="dt-credited" title="Credited to the shift: there are '
+                  + 'no punches on a day worked from home or spent on a visit"> cr</span>' : '')))
+          + '</td>'
         /* DeskTime's own figure for the day's work, which is not the span from
            arriving to leaving: it is the time the computer was actually in
            use. The span counts a lunch and an afternoon the machine sat idle;
            this does not, and it is the number the office reads. */
         + '<td class="dt-desk">' + ((seen && seen.d) ? shotEsc(fmtMin(seen.d)) : '—') + '</td>'
-        + '<td>' + ((seen && seen.p) ? shotEsc(fmtMin(seen.p)) : '—') + '</td>'
-        + '<td>' + (idle === null ? '—' : shotEsc(fmtMin(idle))) + '</td>'
+        + '<td class="dt-usecell">' + dtUseBar(dtUse(markedMin, seen && seen.d)) + '</td>'
         + '</tr>';
+      /* What the week came to, carried along as its days go by. */
+      if(!wkFrom) wkFrom = mondayOf(day);
+      wkDays++;
+      if(markedMin !== null) wkMarked += markedMin;
+      if(seen && seen.d) wkDesk += seen.d;
+      /* Sunday closes a week; so does the last day shown, or the final part
+         week would never be closed at all. */
+      var dow = new Date(day + 'T00:00:00').getDay();
+      if(dow === 0 || di === days.length - 1) closeWeek();
     });
+    closeWeek();
     box.innerHTML = head
       + (shownAny
           ? ('<div class="dt-sum">' + both + (both === 1 ? ' day' : ' days')
@@ -14993,19 +15075,23 @@ function buildExcelBackup(){
              + '<tr class="dt-grp"><th colspan="3">The day</th>'
              +   '<th class="dt-sep" colspan="3">Arriving</th>'
              +   '<th class="dt-sep" colspan="3">Leaving</th>'
-             +   '<th class="dt-sep" colspan="5">How long</th></tr>'
+             +   '<th class="dt-sep" colspan="3">How long</th></tr>'
              + '<tr>'
              + '<th>Day</th><th>The record says</th><th>Due in</th>'
              + '<th class="dt-sep">Marked in</th><th>DeskTime in</th><th>Difference</th>'
              + '<th class="dt-sep">Marked out</th><th>DeskTime out</th><th>Difference</th>'
-             + '<th class="dt-sep">Hours marked</th><th>At work</th><th>DeskTime time</th>'
-             + '<th>Productive</th><th>Idle</th>'
+             + '<th class="dt-sep">Hours marked</th><th>DeskTime time</th>'
+             + '<th>At the computer</th>'
              + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
-             + '<div class="dt-note"><b>At work</b> is DeskTime’s span from arriving to leaving; '
-             + '<b>DeskTime time</b> is the part of it the computer was actually in use, which is '
-             + 'the figure DeskTime itself leads with; <b>Productive</b> is the part of that spent '
-             + 'in applications the office counts as work, and <b>Idle</b> is the span less the '
-             + 'time in use. <b>The record says</b> is this record’s own word for the day, so a '
+             + '<div class="dt-note"><b>Hours marked</b> is this record’s own day, in to out — '
+             + 'or, on a day worked from home or spent on a visit, the shift it is credited '
+             + '(marked <b>cr</b>), since there are no punches to measure. '
+             + '<b>DeskTime time</b> is how long the computer was actually in use, which is the '
+             + 'figure DeskTime leads with, and <b>at the computer</b> is the second as a share of '
+             + 'the first. Under half is picked out, which is a question rather than a finding: a '
+             + 'day on the floor, in a meeting or out on a visit is a working day with nothing on '
+             + 'the keyboard to show for it. '
+             + '<b>The record says</b> is this record’s own word for the day, so a '
              + 'row of dashes can be read as a Sunday or a day of leave rather than as somebody '
              + 'missing. '
              + 'A difference is DeskTime minus what was marked: '
