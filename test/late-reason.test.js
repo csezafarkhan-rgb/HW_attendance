@@ -221,6 +221,14 @@ function grab(src, name) {
     && APP.indexOf("final: !!(document.getElementById('emExcFinal') || {}).checked") > -1);
   check('the box of addresses is shut while the first choice is taken',
     APP.indexOf('box.disabled = fin.checked;') > -1);
+  /* It lived at the foot of the attendance pane, below everything that pane is
+     about, and was not found. A late day answered for is its own message to
+     its own people, so it has a tab of its own. */
+  check('the setting has a tab of its own rather than a footnote on another',
+    APP.indexOf('data-em-tab="lt">Late<') > -1
+    && APP.indexOf('data-em-pane="lt"') > -1);
+  check('and the tab says what the two answers are before asking who hears',
+    /data-em-pane="lt"[\s\S]{0,420}leaves the minutes where they are[\s\S]{0,160}Only the second one is/.test(APP));
   check('the panel says what the message is for',
     APP.indexOf('for reading, not for deciding') > -1);
 }

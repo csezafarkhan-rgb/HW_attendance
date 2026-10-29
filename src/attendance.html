@@ -779,7 +779,7 @@ body{
   #requestsList .unreq-row .btn{ flex:1 1 auto !important; }
 }
 /* The Email panel: two things to send, then what goes out on its own. */
-.em-dropdown{ min-width:330px; }
+.em-dropdown{ min-width:330px; width:560px; max-width:calc(100vw - 32px); }
 .em-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
 .em-note{ font-size:11.5px; color:var(--ink-soft); padding:2px 4px 8px; }
 .em-go{ display:block; width:100%; text-align:left; margin-bottom:7px; padding:9px 12px; cursor:pointer;
@@ -835,7 +835,15 @@ body{
 .em-lab span{ font-weight:500; text-transform:none; letter-spacing:0; opacity:.8; }
 .em-row textarea{ flex:1 1 auto; min-width:0; padding:5px 8px; font-size:12px; font-family:inherit;
   border:1px solid #CFD8E5; border-radius:7px; resize:vertical; }
-.em-set{ max-height:52vh; overflow:auto; }
+/* The panel is as tall as whichever tab is open, so moving between them made
+   it jump - Work is six boxes, Month is two, and the whole window resized
+   under the pointer every time. It keeps one height now: short tabs leave
+   space at the foot, long ones scroll inside it. The tabs themselves stay put
+   at the top, which is the row being clicked. */
+.em-set{ height:52vh; min-height:300px; max-height:560px; overflow-y:auto; overflow-x:hidden; }
+/* The six panes are each as wide as their own content; one width for all of
+   them, so the panel does not widen and narrow either. */
+.em-dropdown [data-em-pane]{ width:100%; }
 .em-tabs{ display:flex; gap:4px; padding:2px 2px 6px; }
 .em-tab{ flex:1 1 0; padding:5px 8px; cursor:pointer; border:1px solid #DCE3ED; border-radius:8px;
   background:#F4F7FB; color:var(--ink-soft); font:600 11.5px/1.2 'Inter',sans-serif; }
@@ -2962,8 +2970,10 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-sum.quiet{ font-weight:600; color:var(--ink-soft); }
 .ed-sum.bad{ color:#B23A34; }
 .ed-sum:empty{ display:none; }
+/* Capped, because this card sits in a page as wide as the screen, and a
+   sentence stretched across 1500 pixels is read as several. */
 .ed-late{ margin-top:10px; padding:9px 11px; border-radius:9px; font-size:12px;
-  background:#FFF7E8; border:1px solid #F0DCB4; color:#6B4E12; }
+  max-width:680px; background:#FFF7E8; border:1px solid #F0DCB4; color:#6B4E12; }
 .ed-late.wait{ background:#EEF3FB; border-color:#CBD9EC; color:#24405F; }
 .ed-exc{ display:flex; align-items:center; gap:7px; margin:7px 0 2px; font-size:12.5px; font-weight:600; cursor:pointer; }
 .ed-exc input{ margin:0; cursor:pointer; }
@@ -2976,7 +2986,10 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-pick:hover{ border-color:#D9C890; }
 .ed-pick input{ margin:2px 0 0; cursor:pointer; flex:none; }
 .ed-pick .ed-hd{ font-size:12.5px; font-weight:600; }
-.ed-pick b{ display:inline; }
+/* `.ed-late b` further down makes every b in this card a block of its own,
+   which split "Late — personal" across two lines. Named with the card it
+   belongs to, so it outranks that rule rather than racing it. */
+.ed-late .ed-pick b{ display:inline; }
 .ed-pick .ed-sub{ margin-top:2px; font-size:11.5px; line-height:1.5; color:#6B5A33; font-weight:500; }
 .ed-pick.on{ border-color:#C9A227; background:#FFF6DF; }
 /* The one that takes the minutes off wears the colour this card already uses
@@ -11947,7 +11960,11 @@ function buildExcelBackup(){
       +   '<button type="button" class="em-tab" data-em-tab="lv">Leave</button>'
       +   '<button type="button" class="em-tab" data-em-tab="hol">Holiday</button>'
       +   '<button type="button" class="em-tab" data-em-tab="wk">Work</button>'
-      +   '<button type="button" class="em-tab" data-em-tab="mo">Month</button></div>'
+      +   '<button type="button" class="em-tab" data-em-tab="mo">Month</button>'
+      /* A late day answered for is its own message to its own people, and it
+         was living at the foot of the attendance pane, below everything that
+         pane is actually about. Nobody found it there. */
+      +   '<button type="button" class="em-tab" data-em-tab="lt">Late</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
       + '<div class="em-lab">To <span>blank: every Super Admin</span></div>'
@@ -11981,18 +11998,20 @@ function buildExcelBackup(){
       + '<label class="em-row"><input type="checkbox" id="emDaily"' + (s.daily !== false ? ' checked' : '') + '>'
       +   '<span>Every day at</span></label>'
       + '<div class="em-row em-indent"><input type="text" id="emAt" value="' + mailEscape(s.dailyAt || '19:30') + '" size="5"><span>India time</span></div>'
-      /* Somebody answering for their own late arrival. Nobody is being asked
-         for anything - the day is excused the moment they tick it - so this
-         keeps its own addresses rather than borrowing the list above: an
-         empty box means nobody wanted telling, and nothing is sent. */
+      + '</div>'
+      /* ---- a late day answered for ---- */
+      + '<div data-em-pane="lt" style="display:none;">'
+      + '<div class="em-note" style="padding-top:2px;">Somebody who came in late says which it '
+      +   'was from their own page: their own lateness, which leaves the minutes where they are, '
+      +   'or work having made them late, which takes the minutes off. Only the second one is '
+      +   'sent anywhere.</div>'
       + (function(){
           var ex = s.excused || {}, fin = ex.final !== false;
           /* Who gives the final word on leave, as that pane has it now. Shown
              rather than copied: the point of the first choice is that there is
              one list, not two that can drift apart. */
           var lv = (((s.leave || {}).to) || []);
-          return '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
-            +   'Late marked excused by the person themselves '
+          return '<div class="em-lab">Who is told about a day marked excused '
             +   '<span>for reading, not for deciding</span></div>'
             + '<label class="em-row"><input type="radio" name="emExcWho" id="emExcFinal"'
             +   (fin ? ' checked' : '') + '>'
@@ -19632,7 +19651,10 @@ function buildExcelBackup(){
           + opt('exc', '<b>Excused</b> — work made it so',
                 'A meeting, a visit that ran over, an errand for the office. '
                 + 'The minutes come off, and the office is told why.')
-          + '<div class="ed-need" id="edExcNeed"' + (chose === 'exc' ? '' : ' style="display:none;"') + '>'
+          /* Asked for when it is missing, not announced before anybody has
+             typed anything: a warning standing there from the start reads as
+             something already wrong. */
+          + '<div class="ed-need" id="edExcNeed" style="display:none;">'
           +   'A reason is needed for this one.</div>'
           + '<div class="ed-row" id="edExcRow"' + (chose ? '' : ' style="display:none;"') + '>'
           +   '<input type="text" id="edExcNote" maxlength="300" placeholder="'
@@ -19866,7 +19888,7 @@ function buildExcelBackup(){
         var note = document.getElementById('edExcNote'), save = document.getElementById('edExcSave');
         var tell = document.getElementById('edExcTell');
         if(row) row.style.display = '';
-        if(need) need.style.display = v === 'exc' ? '' : 'none';
+        if(need) need.style.display = 'none';
         if(note){
           note.placeholder = v === 'late' ? 'What was the reason? (optional)'
                                           : 'What was it — the meeting, the visit, the errand?';
@@ -19885,7 +19907,14 @@ function buildExcelBackup(){
          not. One takes nothing off the day, the other takes the minutes off
          and goes to the office, and an excuse with nothing written on it is
          what the office would have to come and ask about. */
-      if(picked === 'exc' && !note){ showUploadStatus('Say what the reason was first.', true); return; }
+      if(picked === 'exc' && !note){
+        var need = document.getElementById('edExcNeed');
+        if(need) need.style.display = '';
+        var nb = document.getElementById('edExcNote');
+        if(nb) nb.focus();
+        showUploadStatus('Say what the reason was first.', true);
+        return;
+      }
       /* No `pending`: both count from now. The office hears about an excused
          one rather than being asked, which is what they wanted. */
       var entry = { note: note, at: new Date().toISOString(), by: 'self' };
