@@ -15102,9 +15102,10 @@ function buildExcelBackup(){
       + (DT_IMP.skipped ? (DT_IMP.skipped + ' row' + (DT_IMP.skipped === 1 ? '' : 's')
           + ' had no arrival time on them — days DeskTime tracked nothing — and are '
           + 'left out, so they stay blank here rather than reading as nought hours. ') : '')
-      + (unknown ? ('The ' + (unknown === 1 ? 'name below is' : unknown + ' names below are')
-          + ' not names this record uses. Say who they are and it will remember, so the '
-          + 'next file needs no asking.')
+      + (unknown ? ((unknown === 1
+            ? 'The name below is not one this record uses. Say who it is'
+            : 'The ' + unknown + ' names below are not ones this record uses. Say who they are')
+          + ' and it will be remembered, so the next file needs no asking.')
         : 'Every name on it is one this record knows.') + '</p>'
       + lines
       + '<div class="dt-imp-go">'
@@ -15312,6 +15313,12 @@ function buildExcelBackup(){
       var said = (ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].label)
         || STATUS_LABEL[rec.st] || (rec.st || '—');
       var due = (getShift(DT_WHO, day) || '').split('-')[0] || '';
+      /* A week ends where the next day belongs to another one. Sunday used to
+         close it, which only worked on a Sunday that had a row of its own - and
+         Sunday is nobody’s working day here, so there was almost never a row to
+         close on and a month came out as one long week. */
+      var mon = mondayOf(day);
+      if(wkFrom && mon !== wkFrom) closeWeek();
       rows += '<tr' + (late ? ' class="dt-off"' : '') + '>'
         + '<td class="dt-day">' + shotEsc(fmtDayLong(day)) + '</td>'
         + '<td class="dt-said">' + shotEsc(said) + '</td>'
@@ -15335,16 +15342,12 @@ function buildExcelBackup(){
         + '<td class="dt-usecell">' + dtUseBar(dtUse(markedMin, seen && seen.d)) + '</td>'
         + '</tr>';
       /* What the week came to, carried along as its days go by. */
-      if(!wkFrom) wkFrom = mondayOf(day);
+      if(!wkFrom) wkFrom = mon;
       wkDays++;
       if(markedMin !== null) wkMarked += markedMin;
       if(seen && seen.d) wkDesk += seen.d;
-      /* Sunday closes a week; so does the last day shown, or the final part
-         week would never be closed at all. */
-      var dow = new Date(day + 'T00:00:00').getDay();
-      if(dow === 0 || di === days.length - 1) closeWeek();
     });
-    closeWeek();
+    closeWeek();                       // the last week, which nothing follows
     box.innerHTML = head
       + (shownAny
           ? ('<div class="dt-sum">' + both + (both === 1 ? ' day' : ' days')

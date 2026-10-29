@@ -231,7 +231,12 @@ function grab(src, name) {
   check('the days are grouped into weeks, as the record is',
     page.indexOf('class="dt-week"') > -1 && page.indexOf('Week of ') > -1);
   check('a week is bounded the same way the record bounds one',
-    page.indexOf('mondayOf(day)') > -1 && /dow === 0 \|\| di === days\.length - 1/.test(page));
+    page.indexOf('mondayOf(day)') > -1);
+  /* It used to close on drawing a Sunday, and Sunday is nobody's working day
+     here, so there was almost never a Sunday row to close on: a month came out
+     as one long week with a single total under it. */
+  check('and closes where the next day belongs to another week, not on a Sunday',
+    /if\(wkFrom && mon !== wkFrom\) closeWeek\(\);/.test(page) && !/dow === 0/.test(page));
   check('and the last week of a month is closed even though it ends mid-week',
     /closeWeek\(\);\s*$/m.test(page) || page.lastIndexOf('closeWeek();') > page.indexOf('days.forEach'));
   check('each week says what it came to, in the columns that measure it',
