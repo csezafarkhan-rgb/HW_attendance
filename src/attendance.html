@@ -3085,10 +3085,12 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-table-cmp .dt-gap{ font-weight:700; color:var(--ink-soft); }
 /* The figure the office reads first, so it is the one that is not grey. */
 .dt-table-cmp .dt-desk{ font-weight:700; }
-/* The time actually inside. Where it is the same as the day it is not news, so
-   it steps back rather than repeating itself in bold. */
+/* Two figures for one day, and the bar beside them is a share of one of them.
+   The one it is not steps back - it is still there to be read, but the eye is
+   not asked to work out which of the two the percentage came from. */
 .dt-table-cmp .dt-in{ color:var(--ink); }
-.dt-table-cmp .dt-in.dt-same{ color:#AEB8C7; }
+.dt-vs-marked .dt-table-cmp .dt-in{ color:#AEB8C7; font-weight:400; }
+.dt-vs-inside .dt-table-cmp .dt-mk{ color:#AEB8C7; font-weight:400; }
 .dt-vs{ display:block; font-style:normal; font-weight:600; text-transform:none;
   letter-spacing:0; color:#8FA0B8; font-size:9.5px; margin-top:1px; }
 /* The hairline between one question and the next. Thin enough to group
@@ -15212,7 +15214,7 @@ function buildExcelBackup(){
       + '<td class="dt-sep">' + clock(dtAvg(t.outSum, t.outN)) + '</td>'
       + '<td>' + clock(dtAvg(t.dOutSum, t.dOutN)) + '</td>'
       + '<td class="dt-gap">' + gap(t.gOutSum, t.gOutN) + '</td>'
-      + '<td class="dt-sep">' + (t.marked ? shotEsc(fmtMin(t.marked)) : '—') + '</td>'
+      + '<td class="dt-sep dt-mk">' + (t.marked ? shotEsc(fmtMin(t.marked)) : '—') + '</td>'
       + '<td class="dt-in">' + (t.inside ? shotEsc(fmtMin(t.inside)) : '—') + '</td>'
       + '<td class="dt-desk">' + (t.desk ? shotEsc(fmtMin(t.desk)) : '—') + '</td>'
       + '<td class="dt-usecell">' + dtUseBar(dtUse(t.base, t.desk)) + '</td>'
@@ -15245,7 +15247,7 @@ function buildExcelBackup(){
       + '<td class="dt-sep">' + (markedOut ? shotEsc(fmtTime(markedOut)) : '—') + '</td>'
       + '<td>' + ((seen && seen.o) ? shotEsc(fmtTime(seen.o)) : (seen ? 'still on' : '—')) + '</td>'
       + '<td class="dt-gap">' + (gOut === null ? '' : shotEsc(dtSaid(gOut))) + '</td>'
-      + '<td class="dt-sep">' + (markedMin === null ? '—'
+      + '<td class="dt-sep dt-mk">' + (markedMin === null ? '—'
           : (shotEsc(fmtMin(markedMin))
              + (f.credited ? '<span class="dt-credited" title="Credited to the shift: there are '
                 + 'no punches on a day worked from home or spent on a visit"> cr</span>' : '')))
@@ -15761,7 +15763,7 @@ function buildExcelBackup(){
       if(wkDays) rows += '<tr class="dt-week"><td class="dt-day" colspan="3">Week of '
         + shotEsc(fmtDayLong(wkFrom).replace(/,.*$/, '')) + '</td>'
         + '<td class="dt-sep" colspan="6">' + wkDays + (wkDays === 1 ? ' day' : ' days') + '</td>'
-        + '<td class="dt-sep">' + (wkMarked ? shotEsc(fmtMin(wkMarked)) : '—') + '</td>'
+        + '<td class="dt-sep dt-mk">' + (wkMarked ? shotEsc(fmtMin(wkMarked)) : '—') + '</td>'
         + '<td class="dt-in">' + (wkInside ? shotEsc(fmtMin(wkInside)) : '—') + '</td>'
         + '<td class="dt-desk">' + (wkDesk ? shotEsc(fmtMin(wkDesk)) : '—') + '</td>'
         + '<td class="dt-usecell">' + dtUseBar(dtUse(wkBase, wkDesk)) + '</td>'
@@ -15812,7 +15814,7 @@ function buildExcelBackup(){
       rows += '<tbody class="dt-mth"><tr class="dt-month">'
         + '<td class="dt-day" colspan="3">All of ' + shotEsc(monthLabel(ym)) + '</td>'
         + '<td class="dt-sep" colspan="6">' + moDays + (moDays === 1 ? ' day' : ' days') + '</td>'
-        + '<td class="dt-sep">' + (moMarked ? shotEsc(fmtMin(moMarked)) : '—') + '</td>'
+        + '<td class="dt-sep dt-mk">' + (moMarked ? shotEsc(fmtMin(moMarked)) : '—') + '</td>'
         + '<td class="dt-in">' + (moInside ? shotEsc(fmtMin(moInside)) : '—') + '</td>'
         + '<td class="dt-desk">' + (moDesk ? shotEsc(fmtMin(moDesk)) : '—') + '</td>'
         + '<td class="dt-usecell">' + dtUseBar(dtUse(moBase, moDesk)) + '</td>'
@@ -15885,7 +15887,11 @@ function buildExcelBackup(){
   }
   function dtWrapClass(){
     return 'dt-wrap' + (DT_WEEKS ? '' : ' dt-noweeks')
-                     + (DT_MONTHSUM ? '' : ' dt-nomonth');
+                     + (DT_MONTHSUM ? '' : ' dt-nomonth')
+                     /* Which of the two the share is of, so the other one can
+                        step back: both figures stay on the page, but only one
+                        of them is the one being divided by. */
+                     + (DT_BASE === 'inside' ? ' dt-vs-inside' : ' dt-vs-marked');
   }
   function dtWire(ym){
     var prev = document.getElementById('dtPrev'), next = document.getElementById('dtNext');

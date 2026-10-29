@@ -693,9 +693,15 @@ function grab(src, name) {
     /new Date\(day \+ 'T00:00:00'\)\.getDay\(\) === 6/.test(facts)
     && /var owed = owedMinutes\(name, day\);/.test(facts)
     && /if\(owed > 0\) worked = owed;/.test(facts));
-  check('where it is the same as the day it says so quietly rather than twice',
-    /f\.insideMin === markedMin \? ' dt-same' : ''/.test(dayrow)
-    && /\.dt-in\.dt-same\{ color:#AEB8C7; \}/.test(APP));
+  /* Two figures for one day, and the bar beside them is a share of one of
+     them. The one it is not steps back - still there to be read, but the eye
+     is not asked to work out which of the two the percentage came from. */
+  check('the figure the share is not of steps back, whichever that is',
+    /\.dt-vs-marked \.dt-table-cmp \.dt-in\{ color:#AEB8C7/.test(APP)
+    && /\.dt-vs-inside \.dt-table-cmp \.dt-mk\{ color:#AEB8C7/.test(APP));
+  check('and the wrapper says which, so no row has to be asked',
+    /\+ \(DT_BASE === 'inside' \? ' dt-vs-inside' : ' dt-vs-marked'\);/.test(APP)
+    && /<td class="dt-sep dt-mk">/.test(dayrow));
 
   /* Which figure the share is of. */
   check('the reader chooses what the computer\u2019s time is measured against',
