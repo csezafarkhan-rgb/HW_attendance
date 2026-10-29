@@ -1370,6 +1370,36 @@ process.env.SESSION_SECRET = SECRET;
   if (failed) process.exitCode = 1;
 })().catch(e => { console.error(e); process.exitCode = 1; });
 
+/* ---- nothing goes out on one press ----
+   Every button on the Email menu builds its message and hands it back to be
+   looked at; sending is a second press. Leave was the exception: a decision
+   reached the first approver the instant somebody's finger landed, with nobody
+   having read a word of it. */
+{
+  const srv = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  check('the leave button asks for a preview rather than a send',
+    /post\('\/api\/mail\/leave', \{ preview: true \}/.test(app));
+  check('and sends only from inside the preview window',
+    /'\/api\/mail\/leave', \{ preview: true \}[\s\S]{0,400}showPreview\(j[\s\S]{0,400}send:'preview'/.test(app));
+  check('the server builds it without sending when a preview is asked for',
+    /if \(preview\) return \{ ok: true, mails: built \};/.test(srv));
+  check('and holds every message behind that one press, not just the first',
+    /keepPreview\(req\.session\.userId, \{ mails: r\.mails \}\)/.test(srv));
+  check('the window says what else goes, and to whom',
+    /pv\.others && pv\.others\.length/.test(app) && /and ' \+ pv\.others\.length \+ ' more/.test(app));
+  check('pressing send posts the word alone, and what was read is what goes',
+    /body\.send === 'preview'[\s\S]{0,400}for \(const msg of held\.mails\)/.test(srv));
+  check('an expired preview is refused rather than rebuilt behind their back',
+    /that preview has expired - open it again/.test(srv));
+  /* The one button that is meant to send on the press is the test. */
+  check('every other message button on the menu previews first',
+    ['daily', 'month', 'holiday', 'tasks', 'leave'].every(k =>
+      app.indexOf("'/api/mail/" + k + "'") > -1
+      && /send:'preview'/.test(app.slice(app.indexOf("'/api/mail/" + k + "'"),
+                                         app.indexOf("'/api/mail/" + k + "'") + 1400))));
+}
+
 /* ---- what Outlook can draw ----
    Outlook renders mail with Word's engine. It ignores white-space:pre-line, so
    a signature typed on three lines arrived as one; it drops the margin on an

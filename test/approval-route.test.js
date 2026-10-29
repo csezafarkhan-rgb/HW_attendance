@@ -300,7 +300,9 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
     who(SOME, '').length === 0);
   /* The summary used to gate the whole arrangement on the default alone, so
      this is checked on the sender itself and not only on the helper. */
-  const sender = /async function sendLeaveEmail\(orgId\)[\s\S]*?\n\}/.exec(SRV)[0];
+  /* It takes options now, for the preview that builds a message and holds it
+     rather than sending it. */
+  const sender = /async function sendLeaveEmail\(orgId[^)]*\)[\s\S]*?\n\}/.exec(SRV)[0];
   check('the nightly summary asks whether anybody holds a first stage',
     /const approvers = firstApprovers\(route, fallback\);/.test(sender)
       && /if \(approvers\.length\) \{/.test(sender), sender.slice(0, 200));

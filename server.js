@@ -2610,7 +2610,8 @@ async function sendTasksEmail(orgId, day, opts) {
   return Object.assign({ to: to.length, cc: cc.length, people: wrote.length }, r);
 }
 
-async function sendLeaveEmail(orgId) {
+async function sendLeaveEmail(orgId, opts) {
+  const preview = !!(opts && opts.preview);
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
   const settings = await mailSettings(orgId);
   const first = await firstApproverOf(orgId, settings);
@@ -2640,7 +2641,13 @@ async function sendLeaveEmail(orgId) {
     legs.push({ stage: 0, to: await mailRecipients(orgId, settings, 'leave'),
                 cc: mailCc(settings, 'leave') });
   }
-  let addressed = 0, sent = 0, toN = 0, ccN = 0, failed = null;
+  /* Built first, sent after - and where a preview was asked for, not sent at
+     all. Leave is the one message that can be several: a stage with nobody
+     waiting at it builds nothing, and two stages with people at both build two
+     messages to two sets of people. So the preview holds all of them and says
+     how many, rather than showing one and quietly posting the rest. */
+  let addressed = 0;
+  const built = [];
   for (const leg of legs) {
     if (!leg.to.length) continue;
     addressed++;
@@ -2649,15 +2656,19 @@ async function sendLeaveEmail(orgId) {
     /* About one person: they are copied. About several: they are not, because
        a digest is everybody's business and nobody else's. */
     const alone = await ownersIfAlone(orgId, mail.names || [], leg.to, leg.cc);
-    const msg = { to: leg.to, cc: leg.cc.concat(alone), subject: mail.subject, html: mail.html };
-    const r = await mailer.send(msg);
-    await logMail(orgId, 'leave', msg, r);
-    if (r.ok) { sent++; toN += leg.to.length; ccN += leg.cc.length; }
-    else failed = failed || r;
+    built.push({ to: leg.to, cc: leg.cc.concat(alone), subject: mail.subject, html: mail.html });
   }
   if (!addressed) return { ok: false, error: NO_ADDRESS };
+  if (!built.length) return { ok: true, nothing: true };   // nothing waiting: no message
+  if (preview) return { ok: true, mails: built };
+  let sent = 0, toN = 0, ccN = 0, failed = null;
+  for (const msg of built) {
+    const r = await mailer.send(msg);
+    await logMail(orgId, 'leave', msg, r);
+    if (r.ok) { sent++; toN += msg.to.length; ccN += msg.cc.length; }
+    else failed = failed || r;
+  }
   if (!sent && failed) return failed;
-  if (!sent) return { ok: true, nothing: true };           // nothing waiting: no message
   return { ok: true, to: toN, cc: ccN, messages: sent };
 }
 
@@ -3786,7 +3797,31 @@ app.post('/api/mail/tasks', requireRole('admin'), async (req, res) => {
   res.status(out.ok ? 200 : 502).json(out);
 });
 app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {
-  const r = await sendLeaveEmail(req.session.orgId);
+  const body = req.body || {};
+  /* Pressing Send on the preview, which posts nothing but the word: the copy
+     held here is what goes, so what was read is what is sent. */
+  if (body.send === 'preview') {
+    const held = previews.get(req.session.userId);
+    if (!held || !held.mails) return res.status(410).json({ error: 'that preview has expired - open it again' });
+    previews.delete(req.session.userId);
+    let sent = 0, toN = 0, ccN = 0, failed = null;
+    for (const msg of held.mails) {
+      const r = await mailer.send(msg);
+      await logMail(req.session.orgId, 'leave', msg, r);
+      if (r.ok) { sent++; toN += msg.to.length; ccN += (msg.cc || []).length; }
+      else failed = failed || r;
+    }
+    if (!sent && failed) return res.status(502).json(failed);
+    return res.json({ ok: true, to: toN, cc: ccN, messages: sent });
+  }
+  const r = await sendLeaveEmail(req.session.orgId, { preview: !!body.preview });
+  if (body.preview && r.ok && r.mails) {
+    keepPreview(req.session.userId, { mails: r.mails });
+    const first = r.mails[0];
+    return res.json({ ok: true, preview: { subject: first.subject, html: first.html },
+                      to: first.to, cc: first.cc, messages: r.mails.length,
+                      others: r.mails.slice(1).map(x => ({ subject: x.subject, to: x.to })) });
+  }
   res.status(r.ok ? 200 : 502).json(r);
 });
 

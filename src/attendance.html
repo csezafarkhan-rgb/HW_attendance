@@ -11822,7 +11822,17 @@ function buildExcelBackup(){
       + '<div class="em-prev-top"><b>' + escapeHtml(pv.preview.subject) + '</b>'
       +   '<span>To ' + escapeHtml((pv.to || []).join(', '))
       +     (pv.attached === true ? ' · the record is attached'
-             : (pv.attached === false ? ' · without the picture' : '')) + '</span></div>'
+             : (pv.attached === false ? ' · without the picture' : '')) + '</span>'
+      /* One press can stand behind more than one message - leave is sent a
+         stage at a time, to different people. Showing one and posting the rest
+         unseen is the thing this window exists to prevent, so it says what
+         else goes and to whom. */
+      +   ((pv.others && pv.others.length)
+            ? ('<span>and ' + pv.others.length + ' more: '
+               + escapeHtml(pv.others.map(function(o){ return (o.to || []).join(', '); }).join(' · '))
+               + '</span>')
+            : '')
+      + '</div>'
       + '<iframe class="em-prev-body" sandbox=""></iframe>'
       + '<div class="em-prev-foot"><span class="em-prev-msg"></span>'
       +   '<button type="button" class="btn ghost" data-em-x>Not now</button>'
@@ -12758,11 +12768,31 @@ function buildExcelBackup(){
         });
       });
     };
+    /* Shown before it goes, like the record, the month, the work log and the
+       holiday reminder. This one pressed its own send: a decision went to the
+       first approver the instant somebody's finger landed, with nobody having
+       read a word of it. */
     var leaveBtn = document.getElementById('emSendLeave');
     if(leaveBtn) leaveBtn.onclick = function(){
-      post('/api/mail/leave', {}, leaveBtn, 'Sending…', function(j){
-        msg(j.nothing ? 'Nothing is waiting for a decision — no message sent.'
-                      : ('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es') + '.'));
+      post('/api/mail/leave', { preview: true }, leaveBtn, 'Building the message…', function(j){
+        if(j.nothing){ msg('Nothing is waiting for a decision — nothing to send.', true); return; }
+        msg('');
+        showPreview(j, function(done){
+          fetch('/api/mail/leave', {method:'POST', credentials:'same-origin',
+                                    headers:{'Content-Type':'application/json'},
+                                    body: JSON.stringify({send:'preview'})})
+            .then(function(r){ return r.json().then(function(x){ return {ok:r.ok, j:x}; }); })
+            .then(function(out){
+              if(!out.ok || (out.j && out.j.ok === false)){
+                done((out.j && (out.j.error || out.j.message)) || 'It did not go out.', true);
+                return;
+              }
+              done();
+              msg('Sent to ' + (out.j.to || 0) + ' address' + ((out.j.to === 1) ? '' : 'es')
+                  + ((out.j.messages > 1) ? (', in ' + out.j.messages + ' messages.') : '.'));
+            })
+            .catch(function(e){ done(e.message || 'It did not go out.', true); });
+        });
       });
     };
     /* The work log, shown before it is sent - like the attendance record, the
