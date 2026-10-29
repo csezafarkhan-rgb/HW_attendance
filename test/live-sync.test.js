@@ -122,6 +122,29 @@ function grab(src, name) {
     APP.indexOf('redrawn only when something has actually changed') > -1);
 }
 
+/* ---- the press says it is working ----
+   A button that takes a minute and says nothing gets pressed twice. The office
+   already had a notice for this, in the corner every other notice uses; the
+   employee's own button had none. */
+{
+  const sync = grab(APP, 'empSync');
+  check('a pressed sync shows the same notice the office gets',
+    /var bar = quiet \? null : syncProgress\('Reading the punch readers/.test(sync));
+  check('and the minute-by-minute check stays silent',
+    /empSync\(true\)/.test(APP) && /quiet \? null/.test(sync));
+  /* The readers answer to a helper on the office machine. Somebody marking
+     their day from that machine reaches it; anybody else does not, and the
+     knock gives up rather than holding the press for the minute a reader
+     takes. Either way the server is asked for everything it has. */
+  check('the readers are asked first, where they can be reached at all',
+    /askHelperToFetch\(false\)/.test(sync)
+    && /\.catch\(function\(\){ return null; }\)/.test(sync));
+  check('and what follows happens either way',
+    /return readers\.then\(function\(pull\){[\s\S]{0,400}hydrateDataset\(\)/.test(sync));
+  check('the notice is closed on the way out, whichever way that is',
+    (sync.match(/if\(bar\) bar\.done\(/g) || []).length === 2);
+}
+
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);

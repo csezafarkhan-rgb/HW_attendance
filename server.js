@@ -406,11 +406,14 @@ function mergeEmployeeManual(storedValue, incomingValue, name, selfMarkValue, sh
    that did not come from the person themselves is left exactly as it is. */
 const VISIT_DETAIL_MAX = 40;
 const VISIT_REASON_MAX = 200;
+/* Where somebody is today is not the same question as who types their in
+   time. Somebody who punches a card still goes out on a visit, and the office
+   cannot know they have until it is told - so this is not behind the
+   self-marking gate. It writes VISIT on days of their own and nothing else,
+   which is as narrow as it was when only self-markers could reach it. */
 function mergeEmployeeVisit(storedValue, incomingValue, name, selfMarkValue, shift) {
   const incoming = parseJson(incomingValue);
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
-  const marked = parseJson(selfMarkValue);
-  if (!marked || marked[name] !== true) return false;
   const parsed = parseJson(storedValue);
   const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
   const days = ownDays(shift);

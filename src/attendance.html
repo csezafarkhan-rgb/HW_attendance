@@ -20587,7 +20587,24 @@ function buildExcelBackup(){
       try{ var p = fn(); return (p && p.then) ? p.catch(function(){}) : Promise.resolve(); }
       catch(e){ return Promise.resolve(); }
     };
-    return window.HWSync.hydrateDataset().then(function(d){
+    /* Pressed rather than ticking: the same notice the office gets, in the same
+       corner, because a button that takes a minute and says nothing has been
+       pressed twice by then. The minute-by-minute check stays silent. */
+    var bar = quiet ? null : syncProgress('Reading the punch readers\u2026');
+    /* The readers answer to a helper on the office machine. Somebody marking
+       their day from that machine reaches it and the readers are read; anybody
+       else does not, and the knock gives up in three seconds rather than
+       holding the press for the minute a reader takes. Either way what follows
+       is the same: ask the server for everything it has now. */
+    var readers = quiet
+      ? Promise.resolve(null)
+      : Promise.resolve(askHelperToFetch(false)).catch(function(){ return null; });
+    return readers.then(function(pull){
+      if(bar) bar.stage((pull && pull.ok)
+        ? 'Readers read \u2014 taking in what the office has\u2026'
+        : 'Taking in what the office has\u2026');
+      return window.HWSync.hydrateDataset();
+    }).then(function(d){
       /* A browser holding edits of its own keeps them: adopting the server's
          copy over the top is what that path is for, and it is not this one. */
       if(d && DATASET_SOURCE === 'server' && (d.records || d.employees)) applyDataset(d);
@@ -20602,12 +20619,14 @@ function buildExcelBackup(){
         try{ renderMyRequests(); }catch(e){}
       }
       empSyncLabel();
+      if(bar) bar.done(true);
       if(!quiet) showUploadStatus(changed ? 'Updated with what the office has now.'
                                           : 'Already up to date.', false);
       EMP_SYNC_BUSY = false;
       return changed;
     }).catch(function(){
       EMP_SYNC_BUSY = false;
+      if(bar) bar.done(false);
       if(!quiet) showUploadStatus('Could not reach the server just now.', true);
       return false;
     });
@@ -20756,8 +20775,16 @@ function buildExcelBackup(){
     var plea = getLatePlea(name, day);
     var excused = getLateExcuse(name, day);
 
-    /* Nothing to offer: they punch a card and were not late. */
-    if(!mine && !isLate){ box.style.display = 'none'; box.innerHTML = ''; return; }
+    /* Where they are today and what hours they are working are not the same
+       question as who types the in time. Somebody who punches a card still
+       goes out on a visit and still works an odd day now and then, and both of
+       those are theirs to say - the office cannot know either until it is
+       told. They were behind the self-marking gate because they happened to be
+       drawn on the same card. */
+    var ownDay = visitRow(name, day) + shiftRow(name, day);
+    /* Nothing to offer at all: no card to type on, nothing to say about the
+       day, and they were not late. */
+    if(!mine && !isLate && !ownDay){ box.style.display = 'none'; box.innerHTML = ''; return; }
     box.style.display = '';
 
     /* One day to choose from is no choice, and the date is already written
@@ -20863,18 +20890,22 @@ function buildExcelBackup(){
         + '</div>'
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="ed-warn" id="edWarn" style="display:none"></div>'
-        + visitRow(name, day)
-        + shiftRow(name, day)
+        + ownDay
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
                   + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : '') + '.')
                : 'Nothing marked for this day yet.')
         + (ceiling ? (' Nothing later than ' + shotEsc(fmtTime(ceiling)) + ' — the day is still going.') : '')
         + '</div>';
-    } else if(rec['in']){
-      html += '<div class="wl-foot">In at <b>' + shotEsc(clockOf(rec['in']))
-        + '</b>' + (rec.out ? (', out at <b>' + shotEsc(clockOf(rec.out)) + '</b>') : '')
-        + ' — from the card reader.</div>';
+    } else {
+      /* A card reader's day, said back to them, and then the two things the
+         reader cannot know. */
+      if(rec['in']){
+        html += '<div class="wl-foot">In at <b>' + shotEsc(clockOf(rec['in']))
+          + '</b>' + (rec.out ? (', out at <b>' + shotEsc(clockOf(rec.out)) + '</b>') : '')
+          + ' — from the card reader.</div>';
+      }
+      html += ownDay;
     }
 
     if(isLate){

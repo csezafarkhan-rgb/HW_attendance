@@ -201,9 +201,24 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('and everybody else’s day is still there',
     !!kept['Rahul Mishra|' + TODAY] && !!kept[K], kept);
 
-  check('only those the office marked may write one',
-    ctx.mergeEmployeeVisit('{}', JSON.stringify({ ['Rahul Mishra|' + TODAY]:
-      { cat: 'VISIT', detail: 'Factory' } }), 'Rahul Mishra', '{}') === false);
+  /* Where somebody is today is not the same question as who types their in
+     time. Somebody who punches a card still goes out on a visit, and the
+     office cannot know they have until it is told - so this is not behind the
+     self-marking gate. It stays as narrow as it was: VISIT, on days of their
+     own, and nothing else. */
+  check('anybody may say where they are, marked for their own times or not',
+    (() => {
+      const out = parse(ctx.mergeEmployeeVisit('{}', JSON.stringify({ ['Rahul Mishra|' + TODAY]:
+        { cat: 'VISIT', detail: 'Factory' } }), 'Rahul Mishra', '{}'));
+      return !!out['Rahul Mishra|' + TODAY]
+        && out['Rahul Mishra|' + TODAY].by === 'self';
+    })());
+  check('and it is still a visit or nothing',
+    (() => {
+      const out = parse(ctx.mergeEmployeeVisit('{}', JSON.stringify({ ['Rahul Mishra|' + TODAY]:
+        { cat: 'LEAVE', detail: 'CL' } }), 'Rahul Mishra', '{}'));
+      return !out['Rahul Mishra|' + TODAY];
+    })());
 }
 
 /* ---- why they were late ----
@@ -311,7 +326,14 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   const card = APP.slice(APP.indexOf('function renderEmpDayCard('),
                          APP.indexOf('function renderEmployeeCalendar()'));
   check('their page offers in and out only to those marked for it',
-    /var mine = marksOwn\(name\);/.test(card) && /if\(!mine && !isLate\)/.test(card), card.slice(0, 80));
+    /var mine = marksOwn\(name\);/.test(card)
+    && /if\(mine\)\{/.test(card), card.slice(0, 80));
+  /* The visit and the day's hours are not that question, and were only behind
+     that gate because they happened to be drawn on the same card. */
+  check('but where they are and what hours they work are everybody’s to say',
+    /var ownDay = visitRow\(name, day\) \+ shiftRow\(name, day\);/.test(card)
+    && /if\(!mine && !isLate && !ownDay\)/.test(card)
+    && (card.match(/ownDay/g) || []).length >= 4);
   /* One day, and it is the working day: on a night shift that is the day the
      shift started, not the date on the calendar, or a shift worked through
      midnight would be filed under the morning it happened to end in. */
@@ -332,7 +354,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('and the box for the words only appears once one of them is chosen',
     /id="edExcRow"/.test(card) && /\(chose \? '' : ' style="display:none;"'\)/.test(card));
   check('and anybody late may give one, marked or not',
-    /} else if\(rec\['in'\]\)\{/.test(card) && /if\(isLate\)\{/.test(card));
+    /if\(rec\['in'\]\)\{/.test(card) && /if\(isLate\)\{/.test(card));
 }
 
 /* ---- what the card adds up, and where it sits ---- */
