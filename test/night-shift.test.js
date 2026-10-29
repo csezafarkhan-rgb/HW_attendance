@@ -149,10 +149,10 @@ const ok = s => { vm.runInContext('__v = validShift(' + JSON.stringify(s) + ')',
     /your shift started this day/.test(APP));
   /* The merges all judge it the same way, from one read of the shifts. */
   check('every merge is given the shift to judge it by',
-    (SRV.match(/const days = ownDays\(shift\);/g) || []).length === 3);
+    (SRV.match(/const days = ownDays\(shift\);/g) || []).length === 4);
   check('and the route reads it once for all of them',
     /let empShift = '';/.test(SRV)
-      && /\['manualRecords', 'overrides', 'lateExcuses'\]\.indexOf\(key\) > -1/.test(SRV));
+      && /\['manualRecords', 'overrides', 'lateExcuses', 'dayShifts'\]\.indexOf\(key\) > -1/.test(SRV));
 }
 
 const bad = results.filter(r => !r).length;

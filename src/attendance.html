@@ -2998,6 +2998,18 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-pick.on[data-pick="exc"] .ed-sub{ color:#1E5134; }
 .ed-need{ font-size:11px; font-weight:700; color:#8A5A00; margin-top:7px; }
 .ed-tell{ display:block; margin-top:8px; padding-top:8px; border-top:1px solid #EADFC2; }
+/* A mark that has been given, shown as settled rather than as a form left
+   half open. The minutes are off the day or they are not, and the office has
+   already been told which - there is nothing here to fill in. */
+.ed-set{ margin-top:8px; padding:9px 11px; border:1.5px solid #CBD9EC; border-radius:10px;
+  background:#F4F8FD; }
+.ed-late.ok .ed-set{ border-color:#A8D8BC; background:#F1FAF4; }
+.ed-set-what{ display:block; font-size:12.5px; }
+.ed-set-note{ margin-top:4px; font-size:13px; line-height:1.5; }
+.ed-set-note.quiet{ font-size:12px; color:var(--ink-soft); font-style:italic; }
+.ed-set-when{ margin-top:5px; font-size:11.5px; line-height:1.5; color:var(--ink-soft); }
+/* What changing it costs, said before it is allowed. */
+.ed-warn-line{ flex:1 1 220px; font-size:12px; font-weight:700; color:#8A5A00; }
 /* A block of settings that belongs to somebody other than whoever is picked
    above it. Fenced rather than merely spaced, because down a column of boxes
    a gap reads as nothing at all. */
@@ -11943,6 +11955,7 @@ function buildExcelBackup(){
     W.month = W.month || {};
     W.tasks = W.tasks || {};
     W.excused = W.excused || {};
+    W.shiftChange = W.shiftChange || {};
     var text = function(saved, fallback){ return (saved && String(saved).trim()) ? saved : (fallback || ''); };
     var shown = visibleEmployees().length, all = EMPLOYEES.length;
     dd.innerHTML = '<div class="em-pane">'
@@ -11982,7 +11995,7 @@ function buildExcelBackup(){
       /* A late day answered for is its own message to its own people, and it
          was living at the foot of the attendance pane, below everything that
          pane is actually about. Nobody found it there. */
-      +   '<button type="button" class="em-tab" data-em-tab="lt">Late</button></div>'
+      +   '<button type="button" class="em-tab" data-em-tab="lt">Late &amp; Shift</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
       + '<div class="em-lab">To <span>blank: every Super Admin</span></div>'
@@ -12019,10 +12032,10 @@ function buildExcelBackup(){
       + '</div>'
       /* ---- a late day answered for ---- */
       + '<div data-em-pane="lt" style="display:none;">'
-      + '<div class="em-note" style="padding-top:2px;">Somebody who came in late says which it '
-      +   'was from their own page: their own lateness, which leaves the minutes where they are, '
-      +   'or work having made them late, which takes the minutes off. Only the second one is '
-      +   'sent anywhere.</div>'
+      + '<div class="em-note" style="padding-top:2px;">Two things somebody can put on their own '
+      +   'day without being asked: a late arrival answered for, and the hours they are working '
+      +   'today. Both count the moment they are made. The same people are told about each, and '
+      +   'each is told in its own words.</div>'
       + (function(){
           var ex = s.excused || {}, fin = ex.final !== false;
           /* Who gives the final word on leave, as that pane has it now. Shown
@@ -12062,7 +12075,25 @@ function buildExcelBackup(){
             +   mailEscape(text(ex.intro, (W.excused || {}).intro)) + '</textarea></div>'
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emExcFooter" rows="2">'
-            +   mailEscape(text(ex.footer, (W.excused || {}).footer)) + '</textarea></div>';
+            +   mailEscape(text(ex.footer, (W.excused || {}).footer)) + '</textarea></div>'
+            /* The second message these addresses carry. A day somebody moved
+               their own hours for is not a day they were excused for being
+               late, and each should read as what it is. */
+            + (function(){
+                var sh = ex.shift || {}, D = W.shiftChange || {};
+                return '<div class="em-lab" style="margin-top:14px;padding-top:11px;'
+                  +   'border-top:1px solid var(--line);">When somebody sets their own hours for a day '
+                  +   '<span>the same people, a different message</span></div>'
+                  + '<div class="em-lab">Subject <span>{who} {date} {n} {org}</span></div>'
+                  + '<div class="em-row"><input type="text" id="emShSubject" value="'
+                  +   mailEscape(text(sh.subject, D.subject)) + '"></div>'
+                  + '<div class="em-lab">Message at the top</div>'
+                  + '<div class="em-row"><textarea id="emShIntro" rows="3">'
+                  +   mailEscape(text(sh.intro, D.intro)) + '</textarea></div>'
+                  + '<div class="em-lab">Note at the foot</div>'
+                  + '<div class="em-row"><textarea id="emShFooter" rows="2">'
+                  +   mailEscape(text(sh.footer, D.footer)) + '</textarea></div>';
+              })();
         })()
       + '</div>'
       /* ---- the leave message ---- */
@@ -12766,7 +12797,8 @@ function buildExcelBackup(){
       var on = document.querySelector('[data-em-tab].on');
       var kind = on ? on.getAttribute('data-em-tab') : 'att';
       post('/api/mail/test', { kind: kind }, testBtn, 'Sending…', function(r){
-        msg((r && r.demo) ? 'A copy of that message has been sent to you.' : 'Test message sent.');
+        msg((r && r.both) ? 'Both of that tab’s messages have been sent to you.'
+            : ((r && r.demo) ? 'A copy of that message has been sent to you.' : 'Test message sent.'));
       });
     };
     var saveBtn = document.getElementById('emSave');
@@ -12793,7 +12825,10 @@ function buildExcelBackup(){
                    to: list('emExcTo'), cc: list('emExcCc'),
                    subject: document.getElementById('emExcSubject').value.trim(),
                    intro: document.getElementById('emExcIntro').value,
-                   footer: document.getElementById('emExcFooter').value },
+                   footer: document.getElementById('emExcFooter').value,
+                   shift: { subject: document.getElementById('emShSubject').value.trim(),
+                            intro: document.getElementById('emShIntro').value,
+                            footer: document.getElementById('emShFooter').value } },
         leave: {
           to: list('emLvTo'), cc: list('emLvCc'),
           subject: document.getElementById('emLvSubject').value.trim(),
@@ -19448,6 +19483,10 @@ function buildExcelBackup(){
   })();
   /* On unless it has been turned off: a page that stands still while the
      office marks the day is quietly wrong, and nobody thinks to reload it. */
+  /* The day whose late mark is open for changing. A mark that has been given
+     is shown as settled; this is the one day somebody has asked to reopen,
+     and it is cleared the moment the change is saved or abandoned. */
+  var LATE_EDIT_DAY = null;
   var EMP_LIVE = (function(){
     try{ return localStorage.getItem('hw_emp_live') !== '0'; }catch(e){ return true; }
   })();
@@ -19467,11 +19506,12 @@ function buildExcelBackup(){
     var mine = RECORDS.filter(function(r){ return r.e === me; });
     /* Only this person's own rows, the marks against them, and what they have
        asked for: the three things their page is drawn from. */
-    var marks = ['overrides', 'manualRecords', 'halfDays', 'lateExcuses', 'earlyExcuses']
+    var marks = ['overrides', 'manualRecords', 'halfDays', 'lateExcuses', 'earlyExcuses', 'dayShifts']
       .map(function(n){
         var m = (n === 'overrides') ? overrides
               : (n === 'manualRecords') ? manualRecords
               : (n === 'halfDays') ? halfDays
+              : (n === 'dayShifts') ? dayShifts
               : (n === 'lateExcuses') ? lateExcuses : earlyExcuses;
         return Object.keys(m || {}).filter(function(k){ return k.indexOf(me + '|') === 0; })
           .map(function(k){ return k + JSON.stringify(m[k]); }).sort().join(',');
@@ -19770,6 +19810,7 @@ function buildExcelBackup(){
         + '<div class="ed-sum" id="edSum"></div>'
         + '<div class="ed-warn" id="edWarn" style="display:none"></div>'
         + visitRow(name, day)
+        + shiftRow(name, day)
         + '<div class="wl-foot" id="edSaid">'
         + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
                   + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : '') + '.')
@@ -19800,6 +19841,32 @@ function buildExcelBackup(){
         + '<b>' + minsSaid(late.late) + ' late on this day.</b>';
       if(excused && !selfExc){
         html += '<span>Excused by the office' + (excused.note ? (' — ' + shotEsc(excused.note)) : '') + '.</span>';
+      } else if(mine && LATE_EDIT_DAY !== day){
+        /* Once it is given it is on the record: the minutes are off the day,
+           or they are not, and the office has already been told which. So it
+           is shown as settled rather than left sitting in a half-open form
+           that invites a stray keystroke - and changing it is a decision of
+           its own, asked for before it is allowed. */
+        html += '<div class="ed-set">'
+          +   '<b class="ed-set-what">' + (chose === 'late' ? 'Late — personal'
+                                                            : 'Excused — work made it so') + '</b>'
+          +   (mine.note ? ('<div class="ed-set-note">“' + shotEsc(mine.note) + '”</div>')
+                         : '<div class="ed-set-note quiet">No reason written.</div>')
+          +   '<div class="ed-set-when">' + (chose === 'late'
+                ? 'The minutes stay on this day.'
+                : 'The minutes are off this day, and the office has been told.')
+          +     (mine.at ? (' Marked ' + shotEsc(whenShort(mine.at)) + '.') : '') + '</div>'
+          + '</div>'
+          + '<div class="ed-row" id="edLateAsk" style="display:none;">'
+          +   '<span class="ed-warn-line">Changing this changes the day again'
+          +     (chose === 'late' ? '' : ' — and the office is told again') + '. Go on?</span>'
+          +   '<button type="button" class="bk-btn primary" id="edLateGo">Yes, change it</button>'
+          +   '<button type="button" class="month-btn" id="edLateNo">Leave it</button>'
+          + '</div>'
+          + '<div class="ed-row" id="edLateBtns">'
+          +   '<button type="button" class="month-btn" id="edLateEdit">✎ Change it</button>'
+          +   '<button type="button" class="month-btn" id="edExcOff">Take it off</button>'
+          + '</div>';
       } else {
         /* One late day, two answers, and they do not cost the same. Their own
            lateness leaves the minutes where they are and writes down why, so
@@ -20067,6 +20134,26 @@ function buildExcelBackup(){
         if(tell) tell.textContent = edWhyTell(v, null);
       });
     });
+    /* Change it, with the asking in between. A browser's own confirm box
+       cannot be read inside this frame on a phone and says nothing about what
+       is actually at stake; this says it in the card. */
+    var lateEdit = document.getElementById('edLateEdit');
+    if(lateEdit) lateEdit.addEventListener('click', function(){
+      var ask = document.getElementById('edLateAsk'), btns = document.getElementById('edLateBtns');
+      if(ask) ask.style.display = '';
+      if(btns) btns.style.display = 'none';
+    });
+    var lateNo = document.getElementById('edLateNo');
+    if(lateNo) lateNo.addEventListener('click', function(){
+      var ask = document.getElementById('edLateAsk'), btns = document.getElementById('edLateBtns');
+      if(ask) ask.style.display = 'none';
+      if(btns) btns.style.display = '';
+    });
+    var lateGo = document.getElementById('edLateGo');
+    if(lateGo) lateGo.addEventListener('click', function(){
+      LATE_EDIT_DAY = day;
+      renderEmpDayCard();
+    });
     var excSave = document.getElementById('edExcSave');
     if(excSave) excSave.addEventListener('click', function(){
       var picked = (box.querySelector('input[name="edWhy"]:checked') || {}).value || '';
@@ -20091,6 +20178,7 @@ function buildExcelBackup(){
       lateExcuses[name + '|' + day] = entry;
       excSave.disabled = true;
       saveLateExcuses().then(function(){
+        LATE_EDIT_DAY = null;                   // settled again
         showUploadStatus(picked === 'late'
           ? 'Saved. The day still counts as late.'
           : 'Marked excused. The office has been told.', false);
@@ -20106,6 +20194,7 @@ function buildExcelBackup(){
     if(excOff) excOff.addEventListener('click', function(){
       if(!hadMine) return;
       delete lateExcuses[name + '|' + day];
+      LATE_EDIT_DAY = null;
       excOff.disabled = true;
       saveLateExcuses().then(function(){
         showUploadStatus('Taken off. The day counts as late, with nothing said about it.', false);
@@ -20174,6 +20263,35 @@ function buildExcelBackup(){
         if(vKind.value === '__other') vOther.focus();
       });
     }
+    /* Setting today's hours. It is written and told at once, like the late
+       mark: there is nothing here for anybody to agree to. */
+    var shPick = document.getElementById('edShiftPick');
+    var shSave = document.getElementById('edShiftSave');
+    var shWrite = function(v, saidWhat){
+      if(v) dayShifts[name + '|' + day] = v;
+      else delete dayShifts[name + '|' + day];
+      return saveDayShifts().then(function(){
+        showUploadStatus(saidWhat, false);
+        refreshActivePage(); renderEmpDayCard();
+      }).catch(function(e){
+        showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        renderEmpDayCard();
+      });
+    };
+    if(shSave) shSave.addEventListener('click', function(){
+      var v = shPick ? String(shPick.value || '') : '';
+      var had = getDayShift(name, day) || '';
+      if(v === had){ showUploadStatus(v ? 'Today is already set to those hours.'
+                                        : 'Today already counts as your usual hours.', false); return; }
+      shSave.disabled = true;
+      shWrite(v, v ? ('Today counts as ' + v + '. The office has been told.')
+                   : 'Back to your usual hours for today. The office has been told.');
+    });
+    var shClear = document.getElementById('edShiftClear');
+    if(shClear) shClear.addEventListener('click', function(){
+      shClear.disabled = true;
+      shWrite('', 'Back to your usual hours for today. The office has been told.');
+    });
     var vSave = document.getElementById('edVisitSave');
     if(vSave) vSave.addEventListener('click', function(){
       var kind = vKind ? vKind.value : '';
@@ -20214,6 +20332,43 @@ function buildExcelBackup(){
      typed. The purpose is optional - somebody on their way out of the door
      should not have to write an essay to record where they are going. */
   var VISIT_KINDS = ['Factory', 'Inspection', 'Client site', 'Supplier', 'Site survey'];
+  /* The hours somebody is working today, set by the person working them.
+
+     A shift is the measure every other figure on the day is taken against -
+     late, early, how much of the day is owed - so a day whose hours moved and
+     were never recorded reads as a day somebody was late for. The office was
+     the only one who could move them, which meant asking, and being asked
+     after the fact about a morning that had already happened.
+
+     It is the same bargain the late mark strikes: it counts at once, nobody
+     approves it, and the office is told. The standing shift is untouched -
+     this is the one-off a single day can carry. */
+  function shiftRow(name, day){
+    if(day !== todayISO_full) return '';        // the day they are actually in
+    var usual = shiftOn(name, day) || shiftBaseDefault(name) || '';
+    var own = getDayShift(name, day) || '';
+    var listed = allShifts();
+    if(own && listed.indexOf(own) < 0) listed = listed.concat([own]);
+    var opts = '<option value="">My usual' + (usual ? (' — ' + shotEsc(usual)) : '') + '</option>'
+      + listed.map(function(sh){
+          return '<option value="' + shotEsc(sh) + '"' + (own === sh ? ' selected' : '') + '>'
+            + shotEsc(sh) + '</option>';
+        }).join('');
+    return '<div class="ed-visit ed-shiftrow">'
+      + '<div class="lab">Hours I am working today</div>'
+      + '<div class="v-row">'
+      +   '<select id="edShiftPick">' + opts + '</select>'
+      +   '<button type="button" class="bk-btn primary" id="edShiftSave">'
+      +     (own ? 'Update' : 'Set for today') + '</button>'
+      +   (own ? '<button type="button" class="month-btn" id="edShiftClear">My usual</button>' : '')
+      + '</div>'
+      + '<div class="v-by">' + (own
+          ? ('Today counts as <b>' + shotEsc(own) + '</b>. Late and early are measured against '
+             + 'that, for this day only — your usual hours are unchanged, and the office has been told.')
+          : ('Pick the hours if they are not your usual ones today. It counts at once — nobody has '
+             + 'to agree to it — and the office is told. This day only.'))
+      + '</div></div>';
+  }
   function visitRow(name, day){
     var ov = overrides[name + '|' + day] || null;
     var isVisit = ov && ov.cat === 'VISIT';

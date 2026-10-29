@@ -265,8 +265,8 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 {
   /* Their times, their reason for being late, their tasks, their leave
      requests - and a day out on a visit, which is merged under guard. */
-  check('an employee may write those five things, and still nothing else',
-    /EMPLOYEE_WRITABLE = \['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses', 'overrides'\]/.test(SRC));
+  check('an employee may write those six things, and still nothing else',
+    /EMPLOYEE_WRITABLE = \['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses',\s*'overrides', 'dayShifts'\]/.test(SRC));
   check('they read only their own row of who marks their own attendance',
     /EMP_KEYED_BY_NAME = \[[\s\S]{0,120}'selfMark'\]/.test(SRC));
   check('and a day they marked late themselves does not count as excused in the daily message',

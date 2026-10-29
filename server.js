@@ -176,7 +176,8 @@ function canWrite(role) { return role === 'admin'; }
    day, only while it is today or yesterday, and only if the office has marked
    them as marking their own. Each of those is checked here rather than in the
    page, because the page is theirs to edit and this is not. */
-const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses', 'overrides'];
+const EMPLOYEE_WRITABLE = ['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses',
+                           'overrides', 'dayShifts'];
 function mayWriteSharedKey(role, key) {
   if (canWrite(role)) return true;
   return role === 'employee' && EMPLOYEE_WRITABLE.indexOf(key) > -1;
@@ -450,6 +451,63 @@ function mergeEmployeeVisit(storedValue, incomingValue, name, selfMarkValue, shi
    on counting, and an admin clearing that flag is what excuses the day. An
    entry the office has already accepted is left untouched - otherwise writing
    a new reason over it would quietly un-accept it. */
+/* The hours somebody is working today, set by the person working them.
+
+   A shift is the measure every other figure on their day is taken against:
+   whether they were late, whether they left early, how much of the day they
+   owe. So this is not a free hand - it is the same bargain the late mark
+   strikes. They may set it for a day that is theirs to set, their own name
+   and no other, and the office is told at once rather than asked first.
+
+   The standing shift is untouched. This writes the one-off a day can carry,
+   which is what the office itself writes when somebody's hours move for a
+   day, and it is undone by taking it off again. */
+function mergeEmployeeDayShifts(storedValue, incomingValue, name, shift) {
+  const incoming = parseJson(incomingValue);
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
+  const parsed = parseJson(storedValue);
+  const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  const days = ownDays(shift);
+  const mine = k => {
+    const i = String(k).lastIndexOf('|');
+    return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
+  };
+  /* Every row that is theirs to write is rebuilt from what they sent; every
+     other row in the map is left exactly as stored, because the page sends
+     the whole map and their copy of everybody else's is only as fresh as
+     their last read. */
+  Object.keys(out).forEach(k => { if (mine(k)) delete out[k]; });
+  Object.keys(incoming).forEach(k => {
+    if (!mine(k)) return;
+    const v = String(incoming[k] == null ? '' : incoming[k]).trim();
+    if (!v) return;                                   // taking it off is simply not writing it
+    const span = parseShiftSpan(v);
+    if (!span) return;                                // not a pair of times: not a shift
+    out[k] = v;
+  });
+  return JSON.stringify(out);
+}
+/* Which of their own days changed hands, for the message that follows. */
+function newlyOwnShifts(beforeText, afterText, name) {
+  const asMap = t => {
+    const v = parseJson(t);
+    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+  };
+  const was = asMap(beforeText), now = asMap(afterText), out = [];
+  const seen = {};
+  Object.keys(now).concat(Object.keys(was)).forEach(k => {
+    if (seen[k]) return;
+    seen[k] = true;
+    const i = String(k).lastIndexOf('|');
+    if (i < 1 || String(k).slice(0, i) !== name) return;
+    const day = String(k).slice(i + 1);
+    if (!DAY_RE.test(day)) return;
+    const before = String(was[k] || ''), after = String(now[k] || '');
+    if (before === after) return;
+    out.push({ empName: name, day, from: before, to: after });
+  });
+  return out;
+}
 const EXCUSE_MAX = 300;
 function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
   const incoming = parseJson(incomingValue);
@@ -1186,7 +1244,7 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   const baseVersion = (typeof base === 'number' && Number.isFinite(base)) ? base : null;
   let version = null;
   let requestsBefore = null;                 // for the email about a new request
-  let excusesBefore = null;                  // and the one about a late arrival answered for
+  let excusesBefore = null, shiftsBefore = null;                  // and the one about a late arrival answered for
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1197,11 +1255,11 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         [req.session.orgId, key]);
       const row = cur.rows[0];
       /* Which day is theirs to write depends on their shift: a night shift's
-         day turns over at its own start, not at midnight. Read here so the
-         three merges below all judge it the same way. */
+         day turns over at its own start, not at midnight. Read here so every
+         merge below judges it the same way. */
       let empShift = '';
       if (req.session.role === 'employee'
-          && ['manualRecords', 'overrides', 'lateExcuses'].indexOf(key) > -1) {
+          && ['manualRecords', 'overrides', 'lateExcuses', 'dayShifts'].indexOf(key) > -1) {
         const sa = await client.query(
           "SELECT value FROM kv WHERE org_id = $1 AND key = 'shiftAssignments' AND user_id IS NULL",
           [req.session.orgId]);
@@ -1232,6 +1290,12 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
                                           mark.rows[0] ? mark.rows[0].value : '{}', empShift);
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_visit' }); }
         if (merged === false) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
+        value = merged;
+      } else if (key === 'dayShifts' && req.session.role === 'employee') {
+        shiftsBefore = row ? row.value : '{}';
+        const merged = mergeEmployeeDayShifts(row ? row.value : '{}', value,
+                                              (req.user && req.user.name) || '', empShift);
+        if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_shift' }); }
         value = merged;
       } else if (key === 'lateExcuses' && req.session.role === 'employee') {
         excusesBefore = row ? row.value : '{}';
@@ -1319,6 +1383,12 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
   if (shared && key === 'lateExcuses' && excusesBefore !== null) {
     const fresh = newlySelfExcused(excusesBefore, value);
     if (fresh.length) notifySelfExcused(req.session.orgId, fresh.slice(0, 10));
+  }
+  /* And somebody who has moved their own hours for a day. The same bargain
+     and the same people: already on the record, sent for reading. */
+  if (shared && key === 'dayShifts' && shiftsBefore !== null) {
+    const moved = newlyOwnShifts(shiftsBefore, value, (req.user && req.user.name) || '');
+    if (moved.length) notifyShiftChange(req.session.orgId, moved.slice(0, 10));
   }
   /* And a day marked as leave straight on the grid, which is the same news
      arriving by another door. */
@@ -1773,7 +1843,8 @@ const MAIL_DEFAULTS = {
      instead of two lists to keep in step. Turn it off and the addresses below
      are used instead; with neither, nothing is sent rather than the news going
      somewhere nobody chose. */
-  excused: { final: true, to: [], cc: [], subject: '', intro: '', footer: '' }
+  excused: { final: true, to: [], cc: [], subject: '', intro: '', footer: '',
+             shift: { subject: '', intro: '', footer: '' } }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1847,7 +1918,14 @@ async function mailSettings(orgId) {
       .filter(x => EMAIL_RE.test(x)).slice(0, 20),
     cc: (Array.isArray(ex.cc) ? ex.cc : []).map(x => String(x).trim())
       .filter(x => EMAIL_RE.test(x)).slice(0, 20),
-    subject: clip(ex.subject, 200), intro: clip(ex.intro, 2000), footer: clip(ex.footer, 2000)
+    subject: clip(ex.subject, 200), intro: clip(ex.intro, 2000), footer: clip(ex.footer, 2000),
+    /* The same addresses, a different message: a day somebody moved their own
+       hours for is not a day they were excused for being late, and the office
+       wanted each to read as what it is. */
+    shift: (function () {
+      const sh = isPlainObject(ex.shift) ? ex.shift : {};
+      return { subject: clip(sh.subject, 200), intro: clip(sh.intro, 2000), footer: clip(sh.footer, 2000) };
+    })()
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
@@ -2953,6 +3031,44 @@ async function notifySelfExcused(orgId, marks) {
     console.error('the excused mark stands but its message failed:', e && e.message);
   }
 }
+/* Somebody has set their own hours for a day. The same people hear about it as
+   hear about an excused late mark - it is the same kind of news, made by the
+   same person about their own day - and the words are the office's own, kept
+   apart from the excused ones because what matters here is which hours. */
+async function notifyShiftChange(orgId, moves) {
+  try {
+    if (!mailer.ready() || !moves || !moves.length) return;
+    const settings = await mailSettings(orgId);
+    const to = settings.excused.final
+      ? (await mailRecipients(orgId, settings, 'leave')).slice()
+      : (settings.excused.to || []).slice();
+    if (!to.length) return;
+    const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
+    const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'shiftAssignments']);
+    const shownNames = parseJson(kv.empNames) || {};
+    const assigned = parseJson(kv.shiftAssignments) || {};
+    const words = (settings.excused.shift || {});
+    const items = moves.map(m => ({
+      name: shownNames[m.empName] || m.empName,
+      day: m.day,
+      /* What the day had before, which is the standing shift where the day
+         carried nothing of its own - the figure the office would otherwise
+         have to go and look up. */
+      from: m.from || shiftFor(assigned, m.empName) || '',
+      to: m.to
+    }));
+    const mail = mailer.shiftEmail({
+      orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl(),
+      subject: words.subject, intro: words.intro, footer: words.footer
+    });
+    if (!mail) return;
+    const msg = { to, cc, subject: mail.subject, html: mail.html };
+    const sent = await mailer.send(msg);
+    await logMail(orgId, 'shift', msg, sent);
+  } catch (e) {
+    console.error('the shift stands but its message failed:', e && e.message);
+  }
+}
 
 /* A day marked as leave on the grid with no request behind it is the same
    thing as a request, arriving by a different door: somebody is away and it has
@@ -3408,6 +3524,23 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
       footer: settings.excused.footer
     });
   }
+  /* The late tab carries two messages now, so a test of it shows both: the
+     same addresses, told about two different things in two different ways. */
+  let demo2 = null;
+  if (kind === 'lt') {
+    const settings = await mailSettings(req.session.orgId);
+    const kv = await sharedKeys(req.session.orgId, ['companyInfo', 'empNames', 'shiftAssignments']);
+    const shownNames = parseJson(kv.empNames) || {};
+    const me = (req.user && req.user.name) || 'A name from the record';
+    const words = settings.excused.shift || {};
+    demo2 = mailer.shiftEmail({
+      orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
+      items: [{ name: shownNames[me] || me, day: istParts().day,
+                from: shiftFor(parseJson(kv.shiftAssignments) || {}, me) || '9:30-6:30',
+                to: '11:00-8:00' }],
+      subject: words.subject, intro: words.intro, footer: words.footer
+    });
+  }
   const testMail = demo ? { to: [to], subject: demo.subject, html: demo.html } : {
     to: [to], subject: 'Attendance email is working',
     html: mailer.layout('Attendance', 'Test message', ['<p>This is the test message from the dashboard. '
@@ -3415,7 +3548,12 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   };
   const r = await mailer.send({ to, subject: testMail.subject, html: testMail.html });
   await logMail(req.session.orgId, demo ? 'excused' : 'test', testMail, r);
-  res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to, demo: !!demo }, r));
+  if (r.ok && demo2) {
+    const second = { to: [to], subject: demo2.subject, html: demo2.html };
+    const r2 = await mailer.send({ to, subject: second.subject, html: second.html });
+    await logMail(req.session.orgId, 'shift', second, r2);
+  }
+  res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to, demo: !!demo, both: !!demo2 }, r));
 });
 /* A message is looked at before it goes. The dashboard asks for a preview,
    which builds exactly what would be sent and holds it here; pressing Send

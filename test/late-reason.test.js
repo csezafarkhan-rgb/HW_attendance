@@ -72,6 +72,34 @@ function grab(src, name) {
     && APP.indexOf('Saved. The day still counts as late.') > -1);
   check('and it alone may be given without a word',
     APP.indexOf("if(picked === 'exc' && !note)") > -1);
+  /* Once it is given it is on the record - the minutes are off the day or they
+     are not, and the office has already been told which. So it is shown as
+     settled rather than left in a half-open form that invites a stray
+     keystroke, and changing it is a decision of its own. */
+  check('a mark already given is shown as settled, not as a form',
+    APP.indexOf('class="ed-set"') > -1
+    && /mine && LATE_EDIT_DAY !== day/.test(APP));
+  check('it says which of the two it was, and what that did to the day',
+    APP.indexOf("'Late \u2014 personal'") > -1
+    && APP.indexOf('The minutes are off this day, and the office has been told.') > -1);
+  check('their own words are shown back, and a blank note says it is blank',
+    /shotEsc\(mine\.note\)/.test(APP) && APP.indexOf('No reason written.') > -1);
+  /* A browser's own confirm box cannot be read inside this frame on a phone,
+     and says nothing about what is at stake. The card says it. */
+  check('changing it asks first, in the card rather than in a browser box',
+    APP.indexOf('id="edLateEdit"') > -1 && APP.indexOf('id="edLateAsk"') > -1
+    && APP.indexOf('Go on?') > -1
+    && APP.slice(APP.indexOf('id="edLateEdit"'), APP.indexOf('id="edLateEdit"') + 2500)
+         .indexOf('confirm(') === -1);
+  check('and the asking says what it will cost',
+    /Changing this changes the day again/.test(APP)
+    && /the office is told again/.test(APP));
+  check('saying no leaves it exactly as it was',
+    /id="edLateNo"[\s\S]{0,40}Leave it/.test(APP));
+  check('saying yes opens that one day and no other',
+    /lateGo[\s\S]{0,120}LATE_EDIT_DAY = day;/.test(APP));
+  check('and once saved or taken off it settles again',
+    (APP.match(/LATE_EDIT_DAY = null;/g) || []).length >= 2);
   check('an empty box is not a reason',
     APP.indexOf('Say what the reason was first.') > -1);
   /* The office ticking it writes an entry with no `pending` on it, which is
@@ -225,10 +253,19 @@ function grab(src, name) {
      about, and was not found. A late day answered for is its own message to
      its own people, so it has a tab of its own. */
   check('the setting has a tab of its own rather than a footnote on another',
-    APP.indexOf('data-em-tab="lt">Late<') > -1
+    APP.indexOf('data-em-tab="lt">Late &amp; Shift<') > -1
     && APP.indexOf('data-em-pane="lt"') > -1);
-  check('and the tab says what the two answers are before asking who hears',
-    /data-em-pane="lt"[\s\S]{0,420}leaves the minutes where they are[\s\S]{0,160}Only the second one is/.test(APP));
+  /* The tab carries two things somebody can put on their own day, and says so
+     before it asks who hears about them. */
+  check('and the tab says what it covers before asking who hears',
+    /data-em-pane="lt"[\s\S]{0,420}a late arrival answered for, and the hours they are working/.test(APP));
+  check('each of the two is told in its own words, to the same people',
+    APP.indexOf('id="emShSubject"') > -1 && APP.indexOf('id="emShIntro"') > -1
+    && APP.indexOf('id="emShFooter"') > -1
+    && APP.indexOf('the same people, a different message') > -1);
+  check('and the shift words are stored under the same setting',
+    /shift: \{ subject: document\.getElementById\('emShSubject'\)/.test(APP)
+    && /shift: \(function \(\) \{[\s\S]{0,260}clip\(sh\.subject, 200\)/.test(SRV));
   /* The wording, which every other message here lets the office set. */
   check('its words can be set like every other message’s',
     APP.indexOf('id="emExcSubject"') > -1 && APP.indexOf('id="emExcIntro"') > -1

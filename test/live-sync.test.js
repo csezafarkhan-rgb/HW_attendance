@@ -35,6 +35,7 @@ function grab(src, name) {
     RECORDS: [{ e: 'Asha', d: '2026-10-29', in: '09:52', st: 'PR' },
               { e: 'Ravi', d: '2026-10-29', in: '09:10', st: 'PR' }],
     overrides: {}, manualRecords: {}, halfDays: {}, lateExcuses: {}, earlyExcuses: {},
+    dayShifts: {},
     leaveRequests: [{ id: 'r1', empName: 'Asha', status: 'pending', updatedAt: 'x' }] };
   vm.createContext(ctx);
   vm.runInContext(grab(APP, 'empSyncSig'), ctx);

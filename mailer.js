@@ -249,6 +249,14 @@ const DEFAULT_TEXT = {
   /* A late arrival somebody answered for themselves. The words are the
      office's to change like every other message here, so the ones it comes
      with are shown in the boxes rather than hidden behind them. */
+  /* The same arrangement as the excused mark, and a different message: what
+     the office wants to see here is which hours, and which they were. */
+  shiftChange: {
+    subject: 'Shift changed \u00b7 {who} \u00b7 {date}',
+    intro: 'Hello,\n\nSomebody has set their own hours for a day. Nothing is being asked of '
+      + 'you \u2014 it is already on the record, and it is that one day only.',
+    footer: 'Best regards,\n{org}'
+  },
   excused: {
     subject: 'Late excused \u00b7 {who} \u00b7 {date}',
     intro: 'Hello,\n\nSomebody has marked their own late arrival as excused and said why. '
@@ -965,11 +973,55 @@ function resultPage(title, detail, ok, link) {
     + '</div></body>';
 }
 
+/* Somebody has moved their own hours for a day. Like the excused late mark
+   this is told, not asked: it is already the measure their day is taken
+   against. What the message has to carry is the thing the office would
+   otherwise have to go and look up - what the hours were before. */
+function shiftEmail(o) {
+  const items = (o.items || []).filter(Boolean);
+  if (!items.length) return null;
+  const one = items.length === 1;
+  const say = { n: String(items.length), org: o.orgName || 'Attendance',
+                who: items[0].name, date: fmtDay(items[0].day) };
+  const body = [];
+  const written = fillText(o.intro, say).trim();
+  body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+    + (written
+        ? esc(written).replace(/\n/g, '<br>')
+        : ((one ? 'Somebody has set their own hours for a day.'
+                : (items.length + ' people have set their own hours for a day.'))
+           + '<br><span style="color:' + SOFT + ';">Already on the record \u2014 nothing is being '
+           + 'asked of you. It is the one day only; the standing shift is untouched.</span>'))
+    + '</div>');
+  items.forEach(function (it) {
+    body.push('<div style="padding:10px 12px;margin-bottom:8px;border:1px solid ' + LINE + ';border-radius:10px;">'
+      + '<div style="font-size:13.5px;"><b>' + esc(it.name) + '</b>'
+      + '<span style="color:' + SOFT + ';"> \u00b7 ' + esc(fmtDay(it.day)) + '</span></div>'
+      + '<div style="font-size:13px;margin-top:6px;">'
+      + (it.to ? ('<b>' + esc(it.to) + '</b>') : '<b>back to their usual hours</b>')
+      + '<span style="color:' + SOFT + ';"> \u2014 '
+      + (it.from ? ('was ' + esc(it.from)) : 'the day had no hours of its own before') + '</span></div>'
+      + (it.note ? ('<div style="font-size:13px;margin-top:6px;">\u201c' + esc(it.note) + '\u201d</div>') : '')
+      + '</div>');
+  });
+  if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const foot = fillText(o.footer, say).trim();
+  if (foot) body.push('<div style="margin-top:14px;font-size:12.5px;color:' + SOFT
+    + ';line-height:1.6;">' + esc(foot).replace(/\n/g, '<br>') + '</div>');
+  const subject = fillText(o.subject, say).trim();
+  return {
+    subject: subject || (one
+      ? ('Shift changed \u00b7 ' + items[0].name + ' \u00b7 ' + fmtDay(items[0].day))
+      : ('Shift changed \u00b7 ' + items.length + ' days')),
+    html: layout(o.orgName || 'Attendance', one ? 'Hours set for a day' : 'Hours set for a day', body)
+  };
+}
+
 module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
+  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, shiftEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };
