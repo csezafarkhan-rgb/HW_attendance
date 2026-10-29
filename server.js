@@ -2220,9 +2220,14 @@ async function buildDailyEmail(orgId, day, opts) {
                            : (plea ? (' \u2014 they say: \u201c'
                                       + plea.slice(0, 160) + '\u201d')
                                    : (own ? ' \u2014 marked late by them' : ''))) });
-      /* So the card can mark the hour they came in. An excused lateness has
-         been answered for already and is left alone. */
-      if (rows[i] && !excuses[key]) { rows[i].late = came - start; }
+      /* So the card can mark the hour they came in. A lateness that has been
+         answered for keeps its hour and its measure - that is what the office
+         is reading the card for - and is marked as answered, which the card
+         shows in a different colour rather than leaving out. */
+      if (rows[i]) {
+        rows[i].late = came - start;
+        if (excuses[key]) rows[i].excused = true;
+      }
     }
   });
 

@@ -135,8 +135,16 @@ function grab(src, name) {
   check('and an excused day still reads as excused, not as waiting',
     /excuses\[key\] \? ' \\u2014 excused'\s*\n\s*: \(plea \?/.test(SRV));
   /* It still must not change the arithmetic: saying so is not granting it. */
-  check('saying so does not stop the minutes counting',
-    SRV.indexOf('if (rows[i] && !excuses[key]) { rows[i].late = came - start; }') > -1);
+  /* A lateness that was answered for keeps its hour and its measure on the
+     card - that is what the office reads the card for - and is marked as
+     answered, so it can be shown as what it is rather than left out. */
+  check('an excused lateness is still counted and still shown, marked as excused',
+    /rows\[i\]\.late = came - start;\s*if \(excuses\[key\]\) rows\[i\]\.excused = true;/.test(SRV));
+  check('and the card colours it apart rather than hiding it',
+    /r\.excused[\s\S]{0,160}background:#DCE8FB/.test(
+      require('fs').readFileSync(require('path').join(__dirname, '..', 'mailer.js'), 'utf8'))
+    && require('fs').readFileSync(require('path').join(__dirname, '..', 'mailer.js'), 'utf8')
+         .indexOf("' late, excused</span>'") > -1);
   check('and the tally still drops the waiting ones before counting',
     SRV.indexOf("(v.pending === true || v.kind === 'late')) return;") > -1);
 }

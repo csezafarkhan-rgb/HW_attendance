@@ -181,7 +181,12 @@ function testBanner(wouldHaveGone) {
 }
 
 function layout(title, subtitle, blocks) {
-  return '<!doctype html><html><body style="margin:0;padding:0;background:#F3F6FB;">'
+  /* The charset is declared in the message itself as well as in the headers
+     the sender sets: a client that guesses instead of reading them turns every
+     curly apostrophe into mojibake. */
+  return '<!doctype html><html><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+    + '<body style="margin:0;padding:0;background:#F3F6FB;">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F3F6FB;padding:24px 12px;">'
     + '<tr><td align="center">'
     + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:100%;background:#fff;'
@@ -448,11 +453,22 @@ function dailyEmail(o) {
              and measured without reading the list below. Only the late
              carry the longer text, and there are seldom more than one or
              two of them, so the card keeps its width. */
+          /* A late arrival that has been answered for is still a late
+             arrival - the hour it happened is the thing the office is reading
+             the card for - but it is not the same news as one nobody has
+             accounted for. It keeps its hour and its measure and wears the
+             blue this record already uses for a day that no longer counts
+             against somebody, with the word that makes it so. */
           const time = r.late
-            ? ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
-               + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>'
-               + '<span style="color:#7A5200;font-size:9.5px;"> - '
-               + minsSaid(r.late) + ' late</span>')
+            ? (r.excused
+                ? ('<span style="background:#DCE8FB;color:#143862;font-size:9.5px;'
+                   + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>'
+                   + '<span style="color:#143862;font-size:9.5px;"> - '
+                   + minsSaid(r.late) + ' late, excused</span>')
+                : ('<span style="background:#FFF3C4;color:#7A5200;font-size:9.5px;'
+                   + 'padding:0 3px;border-radius:3px;"> (' + esc(at) + ')</span>'
+                   + '<span style="color:#7A5200;font-size:9.5px;"> - '
+                   + minsSaid(r.late) + ' late</span>'))
             : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
           return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
                + (at ? time : '')
