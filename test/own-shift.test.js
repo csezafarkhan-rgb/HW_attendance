@@ -172,6 +172,40 @@ const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10
     /var marks = \['overrides', 'manualRecords', 'halfDays', 'lateExcuses', 'earlyExcuses', 'dayShifts'\]/.test(APP));
 }
 
-const bad = results.filter(x => !x).length;
-console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
-process.exit(bad ? 1 : 0);
+/* ---- the person it is about hears it too ----
+   A notice about what you did that you never see is one you cannot correct,
+   and the one person certain to know whether it is right is the one it is
+   about. Both messages copy them in. */
+check('the excused message copies the person whose day it is',
+  /cc\.push\.apply\(cc, await ownersOf\(orgId, marks\.map/.test(SRV));
+check('and so does the one about hours',
+  /cc\.push\.apply\(cc, await ownersOf\(orgId, moves\.map/.test(SRV));
+check('the panel says so, rather than leaving it to be discovered',
+  APP.indexOf('behind their back') > -1);
+
+const ctx3 = { console, Array, Set, String,
+  EMAIL_RE: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
+  employeeAddress: async (org, name) => ({ Asha: 'asha@hw.net', Ravi: 'RAVI@hw.net' })[name] || '' };
+vm.createContext(ctx3);
+/* grab() takes the function from its `function` keyword, and this one is
+   declared async - without that word its awaits are a syntax error. */
+vm.runInContext('async ' + grab(SRV, 'ownersOf'), ctx3);
+
+(async () => {
+  check('the person whose day it is is copied in',
+    (await ctx3.ownersOf(1, ['Asha'], ['office@hw.net'], [])).join() === 'asha@hw.net');
+  check('each of them once, however many days they marked',
+    (await ctx3.ownersOf(1, ['Asha', 'Ravi', 'Asha'], ['office@hw.net'], [])).join()
+      === 'asha@hw.net,ravi@hw.net');
+  check('somebody already being written to is not copied as well',
+    (await ctx3.ownersOf(1, ['Asha'], ['asha@hw.net'], [])).length === 0);
+  check('nor somebody already copied',
+    (await ctx3.ownersOf(1, ['Ravi'], ['office@hw.net'], ['ravi@hw.net'])).length === 0);
+  check('and somebody with no account to write to is simply not there',
+    (await ctx3.ownersOf(1, ['Nobody at all'], [], [])).length === 0);
+
+  const bad = results.filter(x => !x).length;
+  console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length)
+                  : ('\nALL PASS (' + results.length + ')'));
+  process.exit(bad ? 1 : 0);
+})();

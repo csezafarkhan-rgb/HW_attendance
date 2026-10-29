@@ -2858,6 +2858,21 @@ function legFor(settings, who, fallback, ccMap) {
 /* The person the leave belongs to, by their own account. Accounts are made
    with the employee's name against them, so that is what ties a request to an
    address; without an account there is nobody to write to. */
+/* The people a message about somebody's own day is copied to: the people who
+   made it. A notice about what you did that you never see is one you cannot
+   correct, and the one person certain to know whether it is right is the one
+   it is about. Anybody with no account, or no address on it, is simply not
+   there to copy. */
+async function ownersOf(orgId, names, to, cc) {
+  const out = [];
+  const seen = {};
+  (to || []).concat(cc || []).forEach(a => { seen[String(a).toLowerCase()] = true; });
+  for (const n of Array.from(new Set(names.filter(Boolean)))) {
+    const addr = (await employeeAddress(orgId, n)).toLowerCase();
+    if (addr && !seen[addr]) { seen[addr] = true; out.push(addr); }
+  }
+  return out;
+}
 async function employeeAddress(orgId, empName) {
   const r = await pool.query(
     `SELECT email FROM users WHERE org_id = $1 AND is_active
@@ -3016,6 +3031,8 @@ async function notifySelfExcused(orgId, marks) {
         late: (came != null && start != null && came - start > 0) ? (came - start) : null
       };
     });
+    /* And the people whose days these are. */
+    cc.push.apply(cc, await ownersOf(orgId, marks.map(m => m.empName), to, cc));
     const mail = mailer.excusedEmail({
       orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl(),
       /* The office's own words, the same ones the test shows it. */
@@ -3057,6 +3074,7 @@ async function notifyShiftChange(orgId, moves) {
       from: m.from || shiftFor(assigned, m.empName) || '',
       to: m.to
     }));
+    cc.push.apply(cc, await ownersOf(orgId, moves.map(m => m.empName), to, cc));
     const mail = mailer.shiftEmail({
       orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl(),
       subject: words.subject, intro: words.intro, footer: words.footer
