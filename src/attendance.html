@@ -3056,6 +3056,22 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-head{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
 .dt-empty{ padding:18px; border:1px dashed var(--line-dk); border-radius:12px;
   color:var(--ink-soft); font-size:12.5px; max-width:620px; line-height:1.55; }
+/* Reading a DeskTime export in. The file holds months at once and the names on
+   it are DeskTime’s, not this record’s, so the panel that takes it has to say
+   what it understood before anything is written. */
+.dt-imp{ margin:0 0 14px; padding:14px 16px; border:1px solid var(--line-dk);
+  border-radius:12px; background:var(--panel); max-width:660px; }
+.dt-imp h4{ margin:0 0 6px; font-size:13px; }
+.dt-imp p{ margin:0 0 10px; font-size:12px; color:var(--ink-soft); line-height:1.5; }
+.dt-imp .dt-imp-row{ display:flex; align-items:center; gap:10px; margin:6px 0;
+  font-size:12.5px; }
+.dt-imp .dt-imp-row b{ min-width:160px; }
+.dt-imp .dt-imp-row i{ color:var(--ink-soft); font-style:normal; font-size:11.5px; }
+.dt-imp select{ padding:4px 6px; border:1px solid var(--line-dk); border-radius:7px;
+  font:inherit; font-size:12px; background:var(--bg); color:var(--ink); min-width:190px; }
+.dt-imp .dt-imp-go{ margin-top:12px; display:flex; gap:8px; align-items:center; }
+.dt-imp-note{ font-size:12px; color:var(--ink-soft); margin-top:8px; line-height:1.5; }
+.dt-imp-bad{ color:#B42318; }
 .dt-table-cmp{ border-collapse:collapse; font-size:12px; background:var(--panel);
   border:1px solid var(--line); border-radius:10px; overflow:hidden; }
 .dt-table-cmp th{ background:#F2F5FA; color:var(--ink-soft); font-size:10.5px;
@@ -14946,6 +14962,264 @@ function buildExcelBackup(){
       .then(function(){ return true; })
       .catch(function(){ LEAVE_REC_SENT = ''; return false; });
   }
+  /* ---- reading a DeskTime export in ----
+     DeskTime’s own key is the account owner’s to give and has not been given, so
+     until it is, the figures come the way the office can actually get them: the
+     “Time at work” export, one file, months at a time.
+
+     Two things the file cannot be trusted to settle on its own. Its names are
+     DeskTime’s — Karan, Rahul, Himanshu jain — and this record’s are not, so a
+     name it cannot place is asked about rather than guessed at and dropped. And
+     a row with no arrival on it is a day DeskTime tracked nothing, which is not
+     the same as a day of nought hours: those rows are left out, so an untracked
+     day stays a dash rather than becoming a zero the page would then draw a bar
+     against. */
+  var DT_IMP = null;              // what the file said, waiting on names to be settled
+  /* "9:39:29" is a clock; "8:22:43" is a length. Same shape, different questions. */
+  function dtCsvClock(v){
+    var m = /^\s*(\d{1,2}):(\d{2})/.exec(String(v || ''));
+    if(!m) return '';
+    var h = +m[1];
+    if(h > 23) return '';
+    return ('0' + h).slice(-2) + ':' + m[2];
+  }
+  function dtCsvMins(v){
+    var m = /^\s*(\d+):(\d{2})(?::(\d{2}))?\s*$/.exec(String(v || ''));
+    if(!m) return 0;
+    return (+m[1]) * 60 + (+m[2]) + ((+m[3] || 0) >= 30 ? 1 : 0);
+  }
+  /* The name this record files them under, where it can be told. Anything else
+     comes back empty and is asked about. */
+  function dtRecName(raw){
+    var k = String(raw || '').trim();
+    if(!k) return '';
+    if(deskTimeNames[k]) return deskTimeNames[k];
+    var hit = '';
+    (ALL_EMPLOYEES || []).forEach(function(e){
+      if(!hit && e.name && e.name.toLowerCase() === k.toLowerCase()) hit = e.name;
+    });
+    return hit;
+  }
+  /* A guess for the panel to open on, never one it acts on by itself: the first
+     word of the DeskTime name against the first word of a record name. */
+  function dtGuessName(raw){
+    var first = String(raw || '').trim().split(/\s+/)[0].toLowerCase();
+    if(!first) return '';
+    var hit = '';
+    (ALL_EMPLOYEES || []).filter(stillHere).forEach(function(e){
+      if(hit) return;
+      if(String(e.name).trim().split(/\s+/)[0].toLowerCase() === first) hit = e.name;
+    });
+    return hit;
+  }
+  /* What the file holds, read but not yet written. */
+  function dtReadExport(text, fname){
+    var rows = parseCSVText(text || '');
+    if(rows.length < 2) return { ok:false, why:'There is nothing in this file.' };
+    var h = rows[0].map(function(x){ return String(x || '').trim(); });
+    var cDate = findCol(h, ['date']);
+    var cName = findCol(h, ['user name', 'employee', 'name']);
+    var cIn   = findCol(h, ['arrival']);
+    var cOut  = findCol(h, ['left time', 'left']);
+    var cDesk = findCol(h, ['total desktime', 'desktime']);
+    var cWork = findCol(h, ['total time at work', 'time at work']);
+    if(cDate < 0 || cName < 0 || cIn < 0 || cDesk < 0){
+      return { ok:false, why:'This does not look like a DeskTime “Time at work” '
+        + 'export — it has no “Date”, “User name”, “Arrival time” and “Total DeskTime” '
+        + 'columns between them. Nothing was changed.' };
+    }
+    var seen = {}, out = [], skipped = 0, from = '', to = '';
+    for(var r = 1; r < rows.length; r++){
+      var row = rows[r] || [];
+      var day = String(row[cDate] || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      var who = String(row[cName] || '').trim();
+      if(!who) continue;
+      var arrived = dtCsvClock(row[cIn]);
+      /* No arrival is a day DeskTime tracked nothing at all. Left out, so it
+         stays a dash on the page rather than becoming a nought-hour day. */
+      if(!arrived){ skipped++; continue; }
+      /* Counted only where there is something to count: a name DeskTime tracked
+         nothing for all month is not a name to be asked about. */
+      seen[who] = (seen[who] || 0) + 1;
+      if(!from || day < from) from = day;
+      if(!to || day > to) to = day;
+      out.push({ who: who, day: day, v: {
+        i: arrived,
+        o: cOut > -1 ? dtCsvClock(row[cOut]) : '',
+        w: cWork > -1 ? dtCsvMins(row[cWork]) : 0,
+        d: dtCsvMins(row[cDesk])
+      } });
+    }
+    if(!out.length){
+      return { ok:false, why:'This file has rows, but not one of them has an '
+        + 'arrival time on it, so there is nothing to read in.' };
+    }
+    return { ok:true, rows: out, people: seen, skipped: skipped,
+             from: from, to: to, file: String(fname || '') };
+  }
+  /* The panel: what was found, and a line for every name it could not place.
+     Nothing is written until the office has looked at this. */
+  function dtImportPanel(){
+    var box = document.getElementById('dtImpBox');
+    if(!box) return;
+    if(!DT_IMP){ box.innerHTML = ''; return; }
+    if(!DT_IMP.ok){
+      box.innerHTML = '<div class="dt-imp"><h4>That file was not read</h4>'
+        + '<p class="dt-imp-bad">' + shotEsc(DT_IMP.why) + '</p>'
+        + '<div class="dt-imp-go"><button type="button" class="month-btn" '
+        + 'id="dtImpNo">Close</button></div></div>';
+      dtImpWire();
+      return;
+    }
+    var names = Object.keys(DT_IMP.people).sort();
+    var opts = (ALL_EMPLOYEES || []).filter(stillHere);
+    var lines = names.map(function(n){
+      var known = dtRecName(n);
+      var pick = known || DT_IMP.pick[n] || '';
+      return '<div class="dt-imp-row"><b>' + shotEsc(n) + '</b>'
+        + '<i>' + DT_IMP.people[n] + (DT_IMP.people[n] === 1 ? ' day' : ' days') + '</i>'
+        + (known
+            ? ('<span>→ ' + shotEsc(dispName(known)) + '</span>')
+            : ('<select data-dt-map="' + shotEsc(n) + '">'
+               + '<option value="">Leave this one out</option>'
+               + opts.map(function(e){
+                   return '<option value="' + shotEsc(e.name) + '"'
+                     + (e.name === pick ? ' selected' : '') + '>'
+                     + shotEsc(dispName(e.name)) + '</option>';
+                 }).join('') + '</select>'))
+        + '</div>';
+    }).join('');
+    var unknown = names.filter(function(n){ return !dtRecName(n); }).length;
+    box.innerHTML = '<div class="dt-imp">'
+      + '<h4>' + DT_IMP.rows.length + ' day' + (DT_IMP.rows.length === 1 ? '' : 's')
+        + ' of DeskTime, ' + shotEsc(fmtDayLong(DT_IMP.from)) + ' to '
+        + shotEsc(fmtDayLong(DT_IMP.to)) + '</h4>'
+      + '<p>From “' + shotEsc(DT_IMP.file) + '”. '
+      + (DT_IMP.failed ? ('<span class="dt-imp-bad">' + DT_IMP.failed + ' of the files '
+          + 'could not be read and nothing from ' + (DT_IMP.failed === 1 ? 'it' : 'them')
+          + ' is here.</span> ') : '')
+      + (DT_IMP.skipped ? (DT_IMP.skipped + ' row' + (DT_IMP.skipped === 1 ? '' : 's')
+          + ' had no arrival time on them — days DeskTime tracked nothing — and are '
+          + 'left out, so they stay blank here rather than reading as nought hours. ') : '')
+      + (unknown ? ('The ' + (unknown === 1 ? 'name below is' : unknown + ' names below are')
+          + ' not names this record uses. Say who they are and it will remember, so the '
+          + 'next file needs no asking.')
+        : 'Every name on it is one this record knows.') + '</p>'
+      + lines
+      + '<div class="dt-imp-go">'
+      +   '<button type="button" class="month-btn" id="dtImpGo" '
+      +     'style="background:var(--brand);color:#fff;font-weight:700;">Read it in</button>'
+      +   '<button type="button" class="month-btn" id="dtImpNo">Not now</button>'
+      +   '<span class="dt-imp-note" id="dtImpSay"></span>'
+      + '</div></div>';
+    dtImpWire();
+  }
+  function dtImpWire(){
+    var no = document.getElementById('dtImpNo');
+    if(no) no.onclick = function(){ DT_IMP = null; dtImportPanel(); };
+    var go = document.getElementById('dtImpGo');
+    if(go) go.onclick = dtImportWrite;
+  }
+  /* And the writing. The mapping goes in first and on its own, so a name once
+     settled stays settled even if the figures fail to save. */
+  function dtImportWrite(){
+    if(!DT_IMP || !DT_IMP.ok) return;
+    var say = document.getElementById('dtImpSay');
+    var go = document.getElementById('dtImpGo');
+    if(go) go.disabled = true;
+    if(say) say.textContent = 'Reading it in…';
+    var mapped = 0;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-dt-map]'), function(sel){
+      var raw = sel.getAttribute('data-dt-map'), to = sel.value;
+      if(raw && to){ deskTimeNames[raw] = to; mapped++; }
+    });
+    var wrote = 0, left = {};
+    DT_IMP.rows.forEach(function(r){
+      var who = dtRecName(r.who);
+      if(!who){ left[r.who] = true; return; }
+      deskTime[who + '|' + r.day] = r.v;
+      wrote++;
+    });
+    var out = Object.keys(left);
+    (mapped ? saveDeskTimeNames() : Promise.resolve())
+      .then(function(){ return wrote ? saveDeskTime() : null; })
+      .then(function(){
+        DT_IMP = null;
+        DT_MONTH = null;
+        renderDeskTimePage();
+        var box = document.getElementById('dtImpBox');
+        if(box) box.innerHTML = '<div class="dt-imp"><h4>' + wrote + ' day'
+          + (wrote === 1 ? '' : 's') + ' read in</h4><p>'
+          + (mapped ? (mapped + ' name' + (mapped === 1 ? '' : 's') + ' remembered. ') : '')
+          + (out.length ? ('Left out: ' + shotEsc(out.join(', ')) + '.') : '')
+          + '</p><div class="dt-imp-go"><button type="button" class="month-btn" '
+          + 'id="dtImpNo">Close</button></div></div>';
+        dtImpWire();
+      })
+      .catch(function(e){
+        if(go) go.disabled = false;
+        if(say){
+          say.className = 'dt-imp-note dt-imp-bad';
+          say.textContent = 'That did not save: ' + ((e && e.message) || e);
+        }
+      });
+  }
+  /* DeskTime will not export a year in one go - it refuses the range - so a year
+     arrives as twelve files. Taking them one at a time would be twelve presses
+     and twelve panels, so the picker takes the lot and they are read as one.
+     Later files win on a day two of them both carry, which is what a re-export
+     of a month is for. */
+  function dtImportFiles(list){
+    var files = [].slice.call(list || []);
+    if(!files.length) return;
+    var box = document.getElementById('dtImpBox');
+    if(box) box.innerHTML = '<div class="dt-imp"><p>Reading '
+      + files.length + (files.length === 1 ? ' file' : ' files') + '\u2026</p></div>';
+    var one = function(f){
+      return new Promise(function(done){
+        var rd = new FileReader();
+        rd.onload = function(ev){
+          try{ done(dtReadExport(ev.target.result, f.name)); }
+          catch(err){ done({ ok:false, file:f.name,
+            why: 'That file could not be read: ' + ((err && err.message) || err) }); }
+        };
+        rd.onerror = function(){ done({ ok:false, file:f.name,
+          why:'That file could not be read.' }); };
+        rd.readAsText(f);
+      });
+    };
+    Promise.all(files.map(one)).then(function(reads){
+      var good = reads.filter(function(r){ return r && r.ok; });
+      if(!good.length){
+        DT_IMP = reads[0] || { ok:false, why:'Nothing in those files could be read.' };
+        dtImportPanel();
+        return;
+      }
+      /* One day for one person is one row, whichever file it came in. */
+      var seen = {}, people = {}, rows = [], skipped = 0, from = '', to = '';
+      good.forEach(function(r){
+        r.rows.forEach(function(x){
+          var k = x.who + '|' + x.day;
+          if(seen[k] === undefined){ seen[k] = rows.length; rows.push(x); }
+          else rows[seen[k]] = x;
+        });
+        skipped += r.skipped;
+        if(!from || r.from < from) from = r.from;
+        if(!to || r.to > to) to = r.to;
+      });
+      rows.forEach(function(x){ people[x.who] = (people[x.who] || 0) + 1; });
+      var names = good.map(function(r){ return r.file; });
+      var failed = reads.length - good.length;
+      DT_IMP = { ok:true, rows: rows, people: people, skipped: skipped,
+        from: from, to: to, files: good.length, failed: failed,
+        file: names.length === 1 ? names[0]
+              : (good.length + ' files, ' + names[0] + ' to ' + names[names.length - 1]) };
+      DT_IMP.pick = {};
+      Object.keys(DT_IMP.people).forEach(function(n){ DT_IMP.pick[n] = dtGuessName(n); });
+      dtImportPanel();
+    });
+  }
   function renderDeskTimePage(){
     var box = document.getElementById('deskTimeWrap');
     if(!box) return;
@@ -14969,7 +15243,17 @@ function buildExcelBackup(){
               + shotEsc(dispName(e.name)) + (n ? (' · ' + n + ' to look at') : '') + '</option>';
           }).join('')
       + '</select>'
-      + '</div>';
+      /* The file goes in here rather than through the backup door: this is one
+         data set, read on its own page, and nothing else on the record moves. */
+      + (canEdit()
+          ? ('<button type="button" class="month-btn" id="dtImpBtn" '
+             + 'title="Read in DeskTime ‘Time at work’ exports (.csv) — several at once">'
+             + '↑ Import an export</button>'
+             + '<input type="file" id="dtImpFile" accept=".csv,text/csv" multiple '
+             + 'style="display:none;"/>')
+          : '')
+      + '</div>'
+      + '<div id="dtImpBox"></div>';
     if(!any){
       box.innerHTML = head + '<div class="dt-empty">Nothing from DeskTime yet. '
         + 'It arrives either from DeskTime’s own key, once the account owner has given one, '
@@ -15115,6 +15399,12 @@ function buildExcelBackup(){
     if(prev) prev.onclick = function(){ step(-1); };
     if(next) next.onclick = function(){ if(!next.disabled) step(1); };
     if(who) who.onchange = function(){ DT_WHO = who.value; renderDeskTimePage(); };
+    var imp = document.getElementById('dtImpBtn'), file = document.getElementById('dtImpFile');
+    if(imp && file){
+      imp.onclick = function(){ file.value = ''; file.click(); };
+      file.onchange = function(){ dtImportFiles(file.files); };
+    }
+    dtImportPanel();
   }
   var WLOG_DAY = null;
   function renderWorkLogPage(){

@@ -278,6 +278,110 @@ function grab(src, name) {
     /function deskDay\(name, day\)[\s\S]{0,200}typeof v === 'object' && v\.i\)/.test(APP));
 }
 
+/* ---- reading a DeskTime export in ----
+   The account owner's API key has not been given, so until it is the figures
+   come the way the office can actually get them: DeskTime's own "Time at work"
+   export, read off a file. Two things such a file cannot settle on its own -
+   whose name is whose, and what an empty row means - and both are answered
+   here rather than guessed at. */
+{
+  const api = (() => {
+    const src = ['parseCSVText', 'findCol', 'dtCsvClock', 'dtCsvMins', 'dtReadExport']
+      .map(n => grab(APP, n)).join('\n');
+    return new Function(src + '\nreturn { read: dtReadExport, clock: dtCsvClock, mins: dtCsvMins };')();
+  })();
+  /* DeskTime's own header, verbatim from an export of this account. */
+  const HEAD = 'Date,"User name",Email,Team,"Arrival time","Left time",'
+    + '"Productive time (sum)","Unproductive time (sum)","Neutral time (sum)",'
+    + '"Offline time","Private time (sum)","Idle time (sum)","Total DeskTime",'
+    + '"Total time at work","Productivity %","Effectiveness %","Late (sum)",'
+    + '"Extra hours before work (sum)","Extra hours after work (sum)"';
+  const row = (d, who, i, o, desk, work) =>
+    [d, '"' + who + '"', 'x@y.z', '"T"', i, o, '', '', '', '', '', '',
+     desk, work, '', '', '', '', ''].join(',');
+  const CSV = [HEAD,
+    row('2026-10-01', 'Zafar', '9:39:29', '18:36:48', '8:22:43', '8:57:19'),
+    row('2026-10-02', 'Zafar', '14:04:36', '15:22:57', '1:18:21', '1:18:21'),
+    /* A day DeskTime tracked nothing: every figure on the row is empty. */
+    row('2026-10-03', 'Zafar', '', '', '', ''),
+    row('2026-10-01', 'Himanshu jain', '10:02:00', '19:00:00', '7:00:30', '8:58:00'),
+    /* Somebody with the agent installed and nothing tracked all month. */
+    row('2026-10-01', 'Nitish Kumar', '', '', '', '')].join('\n');
+
+  const r = api.read(CSV, 'hw-2026-10.csv');
+  check('an export is read as days, one per person per date',
+    r.ok && r.rows.length === 3, r.ok ? r.rows.length : r.why);
+  check('a clock is read as a clock, to the minute',
+    api.clock('9:39:29') === '09:39' && api.clock('18:36:48') === '18:36',
+    [api.clock('9:39:29'), api.clock('18:36:48')]);
+  /* 8:22:43 is a length and 18:36:48 a time of day, and the two look alike. */
+  check('and a length as minutes, rounding the half minute up',
+    api.mins('8:22:43') === 503 && api.mins('1:18:21') === 78
+    && api.mins('14:30:59') === 871,
+    [api.mins('8:22:43'), api.mins('1:18:21'), api.mins('14:30:59')]);
+  check('the two durations are kept apart: the span at work, and the time in use',
+    r.rows[0].v.w === 537 && r.rows[0].v.d === 503, r.rows[0].v);
+  /* The one that would quietly poison the page: a row with nothing on it is a
+     day DeskTime tracked nothing, and written in as nought it would draw a bar
+     saying none of the day was spent at the computer. */
+  check('a row with no arrival is left out, not stored as a day of nothing',
+    r.skipped === 2 && !r.rows.some(x => x.day === '2026-10-03'), r.skipped);
+  check('and a name with no tracked day at all is not a name to be asked about',
+    !('Nitish Kumar' in r.people) && r.people['Zafar'] === 2, r.people);
+  check('the file says what stretch it covers, which is what the panel leads with',
+    r.from === '2026-10-01' && r.to === '2026-10-02', [r.from, r.to]);
+  /* The wrong file is the likeliest mishap, and it must change nothing. */
+  check('a file that is not a DeskTime export is refused, by name',
+    (() => { const bad = api.read('a,b,c\n1,2,3', 'x.csv');
+      return !bad.ok && /Time at work/.test(bad.why); })());
+  check('and an export with rows but no arrival on any of them says so',
+    (() => { const none = api.read([HEAD,
+        row('2026-10-01', 'Zafar', '', '', '', '')].join('\n'), 'x.csv');
+      return !none.ok && /not one of them has an arrival/.test(none.why); })());
+
+  /* Names. DeskTime says Karan where the record says karan Ahuja, and a name
+     settled once is remembered, so the next file needs no asking. */
+  check('a name the record already knows needs no asking',
+    /function dtRecName\(raw\)[\s\S]{0,400}deskTimeNames\[k\]/.test(APP));
+  check('one it does not is guessed at for the panel, never acted on',
+    /function dtGuessName\(raw\)/.test(APP)
+    && APP.indexOf('Leave this one out') > -1);
+  check('what the office settles is remembered against the DeskTime name',
+    /deskTimeNames\[raw\] = to; mapped\+\+;/.test(APP));
+  check('and saved on its own, so a name stays settled even if the figures do not',
+    /\(mapped \? saveDeskTimeNames\(\) : Promise\.resolve\(\)\)/.test(APP));
+  check('a name left unmapped is left out and said so, not silently dropped',
+    APP.indexOf("'Left out: '") > -1
+    && /if\(!who\){ left\[r\.who\] = true; return; }/.test(APP));
+  /* Nothing is written until the office has seen what the file said. */
+  check('the file is read into a panel first and written only on a press',
+    /var DT_IMP = null;/.test(APP) && /if\(go\) go\.onclick = dtImportWrite;/.test(APP));
+  check('the button is the office’s, not everybody’s',
+    /\+ \(canEdit\(\)[\s\S]{0,200}id="dtImpBtn/.test(APP));
+  check('and takes a csv and nothing else',
+    APP.indexOf('accept=".csv,text/csv"') > -1);
+  /* A year does not come in one file: DeskTime refuses the range, so it comes
+     as twelve. Twelve presses and twelve panels would be the obvious way and
+     the wrong one. */
+  check('the picker takes several files at once',
+    APP.indexOf('multiple ') > -1
+    && /function dtImportFiles\(list\)/.test(APP)
+    && /dtImportFiles\(file\.files\)/.test(APP));
+  check('and they are read as one stretch, not one panel each',
+    /Promise\.all\(files\.map\(one\)\)/.test(APP));
+  /* The same month exported twice is the ordinary case, not an error: the
+     later file is the corrected one. */
+  check('a day two files both carry is kept once, the later file winning',
+    /if\(seen\[k\] === undefined\){ seen\[k\] = rows\.length; rows\.push\(x\); }/.test(APP)
+    && /else rows\[seen\[k\]\] = x;/.test(APP));
+  check('a file in the pile that cannot be read is named rather than passed over',
+    APP.indexOf('could not be read and nothing from ') > -1);
+  /* After it is in, the page is redrawn on the month the file ended in rather
+     than the one that happened to be open. */
+  check('the page comes back on what was just read in',
+    /DT_IMP = null;[\s\S]{0,80}DT_MONTH = null;[\s\S]{0,80}renderDeskTimePage\(\);/.test(APP));
+}
+
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);
