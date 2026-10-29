@@ -638,6 +638,16 @@ function grab(src, name) {
     /var fill = Math\.min\(100, pct\);/.test(bar)
     && /width:' \+ fill \+ '%/.test(bar)
     && /<b>' \+ pct \+ '%<\/b>/.test(bar));
+  /* Every bar is the same object at the same length; only the filled part of
+     it changes. The track used to be so pale that the unfilled remainder was
+     invisible, so a bar at a quarter and a bar at the whole read as two bars of
+     different widths rather than two readings of one measure. And a rounded
+     fill on a seven-pixel bar is mostly cap at low readings and mostly body at
+     high ones, which made them look different heights too. */
+  check('the track is visible, so a part-filled bar is still a whole bar',
+    /\.dt-use-bar\{[\s\S]{0,140}width:46px;[\s\S]{0,80}background:#C3CEDE/.test(APP));
+  check('and the fill is square, the corners being the track’s to turn',
+    /\.dt-use-bar > span\{ display:block; height:100%; border-radius:0;/.test(APP));
   check('and it is a band of its own, green rather than a warning',
     /pct > 100 \? 'over'/.test(bar)
     && /\.dt-use\.over \.dt-use-bar > span\{ background:#2E7D5B; \}/.test(APP));

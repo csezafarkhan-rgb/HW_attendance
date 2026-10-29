@@ -3116,8 +3116,13 @@ table.dash-table tr:hover td{background:#F7F9FC;}
    rather than as two readings of the same measure. The track is visible now,
    the corners are barely turned, and a small reading is still a bar. */
 .dt-use-bar{ display:inline-block; width:46px; height:7px; border-radius:2px;
-  background:#DCE3EE; overflow:hidden; vertical-align:middle; }
-.dt-use-bar > span{ display:block; height:7px; border-radius:2px; min-width:3px; }
+  background:#C3CEDE; overflow:hidden; vertical-align:middle; }
+/* Square ends, and the corners turned by the track clipping them rather than
+   by the fill itself. A rounded fill on a seven-pixel bar is mostly cap at low
+   readings and mostly body at high ones, so the same seven pixels came out
+   looking thin at a quarter and fat at the whole - which is the one thing a bar
+   must not do, since its only job is to be compared with the one above it. */
+.dt-use-bar > span{ display:block; height:100%; border-radius:0; min-width:2px; }
 .dt-use b{ font-size:11.5px; font-weight:700; }
 .dt-use.hi .dt-use-bar > span{ background:#2F6FD0; }
 .dt-use.hi b{ color:#1F4E82; }
