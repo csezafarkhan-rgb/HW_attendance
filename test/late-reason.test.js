@@ -229,6 +229,20 @@ function grab(src, name) {
     && APP.indexOf('data-em-pane="lt"') > -1);
   check('and the tab says what the two answers are before asking who hears',
     /data-em-pane="lt"[\s\S]{0,420}leaves the minutes where they are[\s\S]{0,160}Only the second one is/.test(APP));
+  /* The wording, which every other message here lets the office set. */
+  check('its words can be set like every other message’s',
+    APP.indexOf('id="emExcSubject"') > -1 && APP.indexOf('id="emExcIntro"') > -1
+    && APP.indexOf('id="emExcFooter"') > -1
+    && /subject: clip\(ex\.subject, 200\), intro: clip\(ex\.intro, 2000\)/.test(SRV));
+  check('and the message carries them, falling back to the ones it comes with',
+    /subject: settings\.excused\.subject, intro: settings\.excused\.intro/.test(SRV));
+  /* A test used to say "email is working" whichever tab was open. */
+  check('a test sends the message of the tab being looked at',
+    APP.indexOf("post('/api/mail/test', { kind: kind }") > -1
+    && /const kind = String\(\(req\.body && req\.body\.kind\)/.test(SRV));
+  check('and builds it from a real mark where there is one, an example where there is not',
+    SRV.indexOf("x.v.by === 'self'") > -1
+    && SRV.indexOf('A name from the record') > -1);
   check('the panel says what the message is for',
     APP.indexOf('for reading, not for deciding') > -1);
 }

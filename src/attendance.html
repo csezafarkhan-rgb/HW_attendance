@@ -11835,7 +11835,13 @@ function buildExcelBackup(){
     MAIL_CFG_WAIT = fetch('/api/mail', {credentials:'same-origin'})
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(j){ MAIL_CFG = j || {configured:false}; return MAIL_CFG; })
-      .catch(function(){ MAIL_CFG = {configured:false, error:true}; return MAIL_CFG; });
+      .catch(function(){ MAIL_CFG = {configured:false, error:true}; return MAIL_CFG; })
+      /* Let go of the promise once it has settled. Held on to, it answers
+         every later call with the answer it gave the first time - and a caller
+         that had just thrown the settings away to re-read them got back a
+         promise that resolved instantly without reading anything, asked
+         again, and again, forever. That is what froze the panel on Save. */
+      .then(function(cfg){ MAIL_CFG_WAIT = null; return cfg; });
     return MAIL_CFG_WAIT;
   }
   /* The addresses already known to this office, for the shifts panel to offer
@@ -11908,7 +11914,13 @@ function buildExcelBackup(){
     if(!dd) return;
     if(!MAIL_CFG){
       dd.innerHTML = '<div class="em-pane"><div class="em-note">Loading…</div></div>';
-      ensureMailCfg().then(renderEmailDropdown);
+      /* Drawn again only when there is something new to draw. Calling this
+         unconditionally is how one stale promise became an endless loop. */
+      ensureMailCfg().then(function(cfg){
+        if(cfg) renderEmailDropdown();
+        else dd.innerHTML = '<div class="em-pane"><div class="em-note">'
+          + 'Could not reach the server. Close this and open it again.</div></div>';
+      });
       return;
     }
     if(!MAIL_CFG.configured){
@@ -12029,7 +12041,20 @@ function buildExcelBackup(){
             + '<div class="em-row"><input type="text" id="emExcCc" placeholder="comma separated" value="'
             +   mailEscape((ex.cc || []).join(', ')) + '"></div>'
             + '<div class="em-note">A late day somebody marked excused on their own page. '
-            +   'Nobody is being asked to decide: the mark counts from the moment it is made.</div>';
+            +   'Nobody is being asked to decide: the mark counts from the moment it is made.</div>'
+            /* And the words themselves, which every other message here lets
+               the office set. Left blank, the message uses the wording it
+               comes with, shown as a placeholder rather than hidden. */
+            + '<div class="em-lab">Subject <span>{who} {date} {n} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emExcSubject" value="'
+            +   mailEscape(ex.subject || '') + '" placeholder="Late excused · {who} · {date}"></div>'
+            + '<div class="em-lab">Message at the top</div>'
+            + '<div class="em-row"><textarea id="emExcIntro" rows="3" placeholder="'
+            +   mailEscape('Somebody has marked their own late arrival as excused and said why.')
+            +   '">' + mailEscape(ex.intro || '') + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emExcFooter" rows="2">'
+            +   mailEscape(ex.footer || '') + '</textarea></div>';
         })()
       + '</div>'
       /* ---- the leave message ---- */
@@ -12042,7 +12067,10 @@ function buildExcelBackup(){
          the one who looks at every request first - hide it when nobody is and
          there is nowhere left to name them. */
       + (function(){
-          var fa = MAIL_CFG.firstApprover;
+          /* A first stage exists if anybody holds one, which need not be the
+             office's own approver: an address named against a single person
+             is a first stage for that person. */
+          var fa = MAIL_CFG.firstApprover || (anyFirstApprover() ? { name: 'A first approver' } : null);
           return '<div class="em-note" style="padding-top:0;">'
             + (fa
                 ? ('<b>' + mailEscape(fa.name) + '</b> sees every request first, '
@@ -12061,10 +12089,10 @@ function buildExcelBackup(){
         })()
       /* ---- the first word ---- */
       + (function(){
-          var fa = MAIL_CFG.firstApprover;
-          /* Shown whether or not anybody is named, because this is where
-             somebody is named: hiding it would leave no way to turn the two
-             stages on. */
+          /* Shown whether or not the office has a line of its own, because
+             this is where somebody is named: hiding it would leave no way to
+             turn the two stages on. */
+          var fa = MAIL_CFG.firstApprover || anyFirstApprover();
           return '<div data-lv-pane="first"' + (fa ? '' : ' style="display:none;"') + '>'
             + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is raised. '
             +   'Approving here does not grant the leave — it passes it on.</div>'
@@ -12085,22 +12113,13 @@ function buildExcelBackup(){
                     + mailEscape(dispName(e.name)) + '</option>';
                 }).join('') + '</select></div>'
             + '<div id="emLvWhoBox" style="display:none;margin-bottom:12px;"></div>'
-            /* Two To boxes and two Cc boxes, one under the other, and the pair
-               underneath is the office's own line rather than a second answer
-               for the person picked above. Read straight down they looked like
-               one question asked twice. They are fenced off now and say whose
-               they are. */
-            + '<div class="em-fence">'
-            + '<div class="em-lab">The office’s own first approver '
-            +   '<span>everybody with nobody named against them</span></div>'
-            + '<div class="em-lab" style="margin-top:6px;">To <span>whoever looks at it first '
-            +   '· empty means leave is granted in one stage</span></div>'
-            + '<div class="em-row"><input type="text" id="emLvFirstTo" placeholder="comma separated" value="'
-            +   mailEscape(((s.leave || {}).firstTo || []).join(', ')) + '"></div>'
-            + '<div class="em-lab">Cc</div>'
-            + '<div class="em-row"><input type="text" id="emLvFirstCc" placeholder="comma separated" value="'
-            +   mailEscape(((s.leave || {}).firstCc || []).join(', ')) + '"></div>'
-            + '</div>'
+            /* The office's own first-stage line used to sit here as a second
+               To and Cc, under the pair that answers for whoever is picked
+               above. Read straight down it was one question asked twice, and
+               in an office where everybody who needs a first approver has one
+               named against them it answered for nobody at all. It is out of
+               the panel; what is stored stays stored, and the save below
+               leaves it exactly as it was. */
             + '<div class="em-lab">Message at the top <span>blank: the wording it comes with '
             +   '\u00b7 {approver} is whoever this copy goes to</span></div>'
             + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
@@ -12351,13 +12370,20 @@ function buildExcelBackup(){
                          + mailEscape(lvWhoSharing(who).join(', ')) + '.</div>') : '')));
       lvWhoWire(name);
     }
-    /* The two office-wide boxes further down this pane, read as they stand
-       rather than as they were saved - somebody who types an address there and
-       then picks a name should see what they typed, not what it replaced. */
+    /* Whether anybody at all holds a first stage. The office's own line is one
+       way; an address named against a single person is another, and an office
+       that has only ever used the second still grants leave in two stages. */
+    function anyFirstApprover(){
+      return Object.keys(approvalRoute || {}).some(function(n){ return !!ownApprover(n); });
+    }
+    /* The office's own line. Its boxes are no longer on the panel, so this is
+       what was saved - which is what the message would use. */
     function lvFirstToText(){
       var el = document.getElementById('emLvFirstTo');
       var v = el ? String(el.value || '').trim() : '';
       if(v) return v;
+      var saved = (((MAIL_CFG.settings || {}).leave || {}).firstTo || []).join(', ');
+      if(saved) return saved;
       var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
       return (usual && usual.email) || '';
     }
@@ -12429,13 +12455,22 @@ function buildExcelBackup(){
         var own = ownApprover(name);
         var list = String(cc.value || '').split(',').map(function(a){ return a.trim(); })
           .filter(function(a){ return /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(a); });
+        /* Where they go through the office's own approver there is no box of
+           its own on the panel any more, so the list is kept against that
+           address like everybody else's rather than written into a box that
+           is not there. */
+        var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
+        var who = own || (usual && usual.email) || '';
+        if(!who){ cc.value = ''; return; }            // nobody holds the stage
         if(!own){
           var box = document.getElementById('emLvFirstCc');
-          if(box) box.value = list.join(', ');
-          cc.value = list.join(', ');
-          return;                      // the panel's own Save puts it away
+          if(box){
+            box.value = list.join(', ');
+            cc.value = list.join(', ');
+            return;                    // the panel's own Save puts it away
+          }
         }
-        var k = own.toLowerCase();
+        var k = who.toLowerCase();
         if(list.length) approverCc[k] = list; else delete approverCc[k];
         saveApproverCc().then(function(){ lvWhoRender(name); });
       };
@@ -12714,9 +12749,17 @@ function buildExcelBackup(){
         });
       });
     };
+    /* A test used to be a note saying email works, whichever tab was open.
+       What the office wants to see is the message itself — its own wording,
+       its own shape — sent to one address instead of to the people it would
+       really reach. So the tab being looked at goes with the request. */
     var testBtn = document.getElementById('emTest');
     if(testBtn) testBtn.onclick = function(){
-      post('/api/mail/test', {}, testBtn, 'Sending…', function(){ msg('Test message sent.'); });
+      var on = document.querySelector('[data-em-tab].on');
+      var kind = on ? on.getAttribute('data-em-tab') : 'att';
+      post('/api/mail/test', { kind: kind }, testBtn, 'Sending…', function(r){
+        msg((r && r.demo) ? 'A copy of that message has been sent to you.' : 'Test message sent.');
+      });
     };
     var saveBtn = document.getElementById('emSave');
     if(saveBtn) saveBtn.onclick = function(){
@@ -12739,7 +12782,10 @@ function buildExcelBackup(){
         footer: document.getElementById('emFooter').value,
         sections: sections,
         excused: { final: !!(document.getElementById('emExcFinal') || {}).checked,
-                   to: list('emExcTo'), cc: list('emExcCc') },
+                   to: list('emExcTo'), cc: list('emExcCc'),
+                   subject: document.getElementById('emExcSubject').value.trim(),
+                   intro: document.getElementById('emExcIntro').value,
+                   footer: document.getElementById('emExcFooter').value },
         leave: {
           to: list('emLvTo'), cc: list('emLvCc'),
           subject: document.getElementById('emLvSubject').value.trim(),
@@ -12786,6 +12832,7 @@ function buildExcelBackup(){
       storage.set('mailSettings', JSON.stringify(value), true).then(function(){
         saveBtn.disabled = false;
         MAIL_CFG = null;                       // read it back, recipients and all
+        MAIL_CFG_WAIT = null;                  // and really read it, not the last answer
         msg('Saved.');
         setTimeout(renderEmailDropdown, 400);
       }).catch(function(e){ saveBtn.disabled = false; msg(e.message || 'Not saved.', true); });

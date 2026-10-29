@@ -1773,7 +1773,7 @@ const MAIL_DEFAULTS = {
      instead of two lists to keep in step. Turn it off and the addresses below
      are used instead; with neither, nothing is sent rather than the news going
      somewhere nobody chose. */
-  excused: { final: true, to: [], cc: [] }
+  excused: { final: true, to: [], cc: [], subject: '', intro: '', footer: '' }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1846,7 +1846,8 @@ async function mailSettings(orgId) {
     to: (Array.isArray(ex.to) ? ex.to : []).map(x => String(x).trim())
       .filter(x => EMAIL_RE.test(x)).slice(0, 20),
     cc: (Array.isArray(ex.cc) ? ex.cc : []).map(x => String(x).trim())
-      .filter(x => EMAIL_RE.test(x)).slice(0, 20)
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    subject: clip(ex.subject, 200), intro: clip(ex.intro, 2000), footer: clip(ex.footer, 2000)
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
   return s;
@@ -2753,8 +2754,15 @@ function firstApprovers(route, fallback) {
 function legFor(settings, who, fallback, ccMap) {
   if (who === String(fallback || '').trim().toLowerCase()) {
     const to = ((settings.leave && settings.leave.firstTo) || []).slice();
-    return { stage: 1, approver: who, to,
-             cc: ((settings.leave && settings.leave.firstCc) || []).filter(a => to.indexOf(a) === -1) };
+    /* Its own Cc, and anything kept against this address the way every other
+       approver's copy list is kept - the panel has one box for both now. */
+    const extra = ((ccMap || {})[who] || []).map(a => String(a || '').trim().toLowerCase());
+    const seen = {}, cc = [];
+    ((settings.leave && settings.leave.firstCc) || []).concat(extra).forEach(a => {
+      const k = String(a || '').trim().toLowerCase();
+      if (EMAIL_RE.test(k) && to.indexOf(k) === -1 && !seen[k]) { seen[k] = true; cc.push(k); }
+    });
+    return { stage: 1, approver: who, to, cc };
   }
   /* An address named against one person could be written to and never copied:
      the office's Cc belongs to the office's own line, and there was nowhere
@@ -2931,7 +2939,10 @@ async function notifySelfExcused(orgId, marks) {
       };
     });
     const mail = mailer.excusedEmail({
-      orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl()
+      orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl(),
+      /* The office's own words, the same ones the test shows it. */
+      subject: settings.excused.subject, intro: settings.excused.intro,
+      footer: settings.excused.footer
     });
     if (!mail) return;
     const msg = { to, cc, subject: mail.subject, html: mail.html };
@@ -3363,14 +3374,48 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
     }
     to = fallback[0];
   }
-  const testMail = {
+  /* The tab the office is looking at, so what comes back is that message
+     rather than a note saying the wiring works. Built exactly as the real one
+     is, with the office's own wording, and addressed to the one person asking
+     instead of to the people it would really reach. */
+  const kind = String((req.body && req.body.kind) || '').trim();
+  let demo = null;
+  if (kind === 'lt') {
+    const settings = await mailSettings(req.session.orgId);
+    const kv = await sharedKeys(req.session.orgId, ['companyInfo', 'lateExcuses', 'empNames']);
+    const shownNames = parseJson(kv.empNames) || {};
+    /* A real one off the record if there is one, so the message is read with
+       the office's own names and words in it; a worked example otherwise,
+       which is the only honest thing to show when nothing has been marked. */
+    const marks = Object.keys(parseJson(kv.lateExcuses) || {})
+      .map(k => ({ k, v: (parseJson(kv.lateExcuses) || {})[k] }))
+      .filter(x => x.v && typeof x.v === 'object' && x.v.by === 'self'
+                   && x.v.pending !== true && x.v.kind !== 'late')
+      .slice(-1);
+    const items = marks.length
+      ? marks.map(x => {
+          const i = x.k.lastIndexOf('|');
+          const who = x.k.slice(0, i);
+          return { name: shownNames[who] || who, day: x.k.slice(i + 1),
+                   note: String(x.v.note || ''), late: null };
+        })
+      : [{ name: 'A name from the record', day: istParts().day,
+           note: 'the client call ran over from yesterday',
+           came: '09:52', shift: '9:30-6:30', late: 22 }];
+    demo = mailer.excusedEmail({
+      orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(), items,
+      subject: settings.excused.subject, intro: settings.excused.intro,
+      footer: settings.excused.footer
+    });
+  }
+  const testMail = demo ? { to: [to], subject: demo.subject, html: demo.html } : {
     to: [to], subject: 'Attendance email is working',
     html: mailer.layout('Attendance', 'Test message', ['<p>This is the test message from the dashboard. '
       + 'Daily summaries and leave requests will arrive here.</p>'])
   };
   const r = await mailer.send({ to, subject: testMail.subject, html: testMail.html });
-  await logMail(req.session.orgId, 'test', testMail, r);
-  res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to }, r));
+  await logMail(req.session.orgId, demo ? 'excused' : 'test', testMail, r);
+  res.status(r.ok ? 200 : 502).json(Object.assign({ sentTo: to, demo: !!demo }, r));
 });
 /* A message is looked at before it goes. The dashboard asks for a preview,
    which builds exactly what would be sent and holds it here; pressing Send

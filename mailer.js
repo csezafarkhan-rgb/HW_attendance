@@ -676,11 +676,19 @@ function excusedEmail(o) {
   if (!items.length) return null;
   const one = items.length === 1;
   const body = [];
+  /* The office's own words where it has written any, and the ones this message
+     comes with where it has not - the same bargain every other message here
+     strikes. {n} is how many are being reported. */
+  const say = { n: String(items.length), org: o.orgName || 'Attendance' };
+  const written = fillText(o.intro, say).trim();
   body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
-    + (one ? 'Somebody has marked their own late arrival as excused and said why.'
-           : (items.length + ' late arrivals have been marked as excused by the people themselves.'))
-    + '<br><span style="color:' + SOFT + ';">Already on the record — nothing is being asked of you. '
-    + 'The mark can be changed on the day itself if it is wrong.</span></div>');
+    + (written
+        ? esc(written).replace(/\n/g, '<br>')
+        : ((one ? 'Somebody has marked their own late arrival as excused and said why.'
+                : (items.length + ' late arrivals have been marked as excused by the people themselves.'))
+           + '<br><span style="color:' + SOFT + ';">Already on the record — nothing is being asked of you. '
+           + 'The mark can be changed on the day itself if it is wrong.</span>'))
+    + '</div>');
   items.forEach(function (it) {
     const late = (it.late != null && it.late > 0) ? minsSaid(it.late) + ' late' : 'late';
     body.push('<div style="padding:10px 12px;margin-bottom:8px;border:1px solid ' + LINE + ';border-radius:10px;">'
@@ -694,10 +702,15 @@ function excusedEmail(o) {
       + '</div>');
   });
   if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const foot = fillText(o.footer, say).trim();
+  if (foot) body.push('<div style="margin-top:14px;font-size:12.5px;color:' + SOFT
+    + ';line-height:1.6;">' + esc(foot).replace(/\n/g, '<br>') + '</div>');
+  const subject = fillText(o.subject, Object.assign({
+    who: items[0].name, date: fmtDay(items[0].day) }, say)).trim();
   return {
-    subject: one
+    subject: subject || (one
       ? ('Late excused · ' + items[0].name + ' · ' + fmtDay(items[0].day))
-      : ('Late excused · ' + items.length + ' marked'),
+      : ('Late excused · ' + items.length + ' marked')),
     html: layout(o.orgName || 'Attendance', one ? 'A late arrival answered for' : 'Late arrivals answered for', body)
   };
 }

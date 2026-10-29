@@ -155,11 +155,23 @@ function grab(src, name) {
   const pane = APP.slice(APP.indexOf('<div data-lv-pane="first"'),
                          APP.indexOf('<div data-lv-pane="final"'));
   check('the name comes first - it is the question this pane is asked',
-    pane.indexOf('emLvWho') < pane.indexOf('emLvFirstTo'),
-    [pane.indexOf('emLvWho'), pane.indexOf('emLvFirstTo')]);
-  check('and the addresses below it are the fallback for everybody it does not name',
-    pane.indexOf('emLvFirstTo') < pane.indexOf('emLvFirstCc')
-    && pane.indexOf('emLvFirstCc') < pane.indexOf('emLvFirstIntro'));
+    pane.indexOf('emLvWho') < pane.indexOf('emLvFirstIntro'),
+    [pane.indexOf('emLvWho'), pane.indexOf('emLvFirstIntro')]);
+  /* The office's own first-stage line used to sit under the pair that answers
+     for whoever is picked above, as a second To and Cc. Read straight down it
+     was one question asked twice, and where everybody who needs a first
+     approver has one named against them it answered for nobody. It is out of
+     the panel; what was stored stays stored and the save leaves it alone. */
+  check('and there is only one To and one Cc on it, the picked person’s own',
+    pane.indexOf('id="emLvFirstTo"') === -1 && pane.indexOf('id="emLvFirstCc"') === -1
+    && APP.indexOf('id="emLvWhoTo"') > -1 && APP.indexOf('id="emLvWhoCc"') > -1);
+  check('what was stored for it is kept rather than wiped by a save that cannot see it',
+    /firstTo: document\.getElementById\('emLvFirstTo'\)[\s\S]{0,140}\(\(MAIL_CFG\.settings \|\| \{\}\)\.leave \|\| \{\}\)\.firstTo/.test(APP));
+  /* And the pane that names people cannot hide itself when the office has no
+     line of its own, or there would be nowhere left to name anybody. */
+  check('the pane is shown when anybody at all holds a first stage',
+    /var fa = MAIL_CFG\.firstApprover \|\| anyFirstApprover\(\);/.test(APP)
+    && /function anyFirstApprover\(\)\{[\s\S]{0,200}ownApprover\(n\)/.test(APP));
   /* A card-punch row renamed to say what it is should read that way here too,
      rather than showing the key its records are filed under. */
   check('a name is shown the way the rest of the page shows it',
