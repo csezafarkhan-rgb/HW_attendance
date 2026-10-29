@@ -1400,6 +1400,54 @@ process.env.SESSION_SECRET = SECRET;
                                          app.indexOf("'/api/mail/" + k + "'") + 1400))));
 }
 
+/* ---- a word with the decision ----
+   A refusal has always had a box: a reason the person who asked should hear.
+   Approving had none, so a first approver's yes arrived as a bare name, and
+   anything they knew about why it should go through - that the week is
+   covered, that it was agreed in person - had to be said in a separate mail or
+   not at all. */
+{
+  const m = require('../mailer.js');
+  const srv = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  const first = m.confirmPage({ action: 'approve', firstStage: true,
+    summary: 'the request in the email', postTo: '/e/t' });
+  const fin = m.confirmPage({ action: 'approve', firstStage: false, who: 'Keshav Garg',
+    summary: 'x', postTo: '/e/t' });
+  const rej = m.confirmPage({ action: 'reject', who: 'Keshav Garg', summary: 'x', postTo: '/e/t' });
+
+  check('a first approver can say a word with their yes',
+    /name="note"/.test(first) && /A word for the management with your approval/.test(first));
+  check('and it is plainly optional',
+    /\(optional\)/.test(first));
+  check('the hint says the sort of thing that helps',
+    /The week is covered/.test(first));
+  /* Who reads it depends on which decision it is. */
+  check('a final approver is writing to the person who asked',
+    /A word for Keshav Garg with your approval/.test(fin));
+  check('and a refusal still is too',
+    /A word for Keshav Garg, if you want to give one/.test(rej));
+  check('the page is told which stage it is confirming',
+    /firstStage: p\.s === 1/.test(srv));
+  /* The plumbing it lands in. */
+  check('a first approver’s word is kept as the recommendation’s own',
+    /if \(note\) req\.recommendNote = note;/.test(srv));
+  check('and the message to the management carries it',
+    /req\.recommendNote/.test(require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'mailer.js'), 'utf8')));
+  check('the page that follows says the note went with it',
+    /Your note goes with it\./.test(srv));
+  /* These pages are opened from an email, in whatever browser is to hand, and
+     they never said what they were written in: "Approve · Attendance"
+     arrived as "Approve Â· Attendance". */
+  check('every page an email link opens says its own charset',
+    [m.confirmPage({ action: 'approve', firstStage: true, summary: 'x', postTo: '#' }),
+     m.resultPage('t', 'd', true),
+     m.passwordPage({ kind: 'invite', link: 'https://x', name: 'A' })]
+      .every(h => /<meta charset="utf-8">/.test(h)));
+  check('an empty box decides it on its own, as before',
+    /clip\(\(req\.body && req\.body\.note\) \|\| '', 500\)\.trim\(\)/.test(srv));
+}
+
 /* ---- what Outlook can draw ----
    Outlook renders mail with Word's engine. It ignores white-space:pre-line, so
    a signature typed on three lines arrived as one; it drops the margin on an

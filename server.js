@@ -3425,7 +3425,8 @@ async function applyEmailDecision(p, note) {
         notifyRecommended(p.org, req);
         return { ok: true, title: 'Passed on for approval',
                  detail: summary + ' goes to a super admin for the final word. '
-                       + 'Nothing is on the record until they give it.' };
+                       + 'Nothing is on the record until they give it.'
+                       + (note ? ' Your note goes with it.' : '') };
       }
       req.status = p.act === 'approve' ? 'approved' : 'rejected';
       req.updatedAt = now;
@@ -3591,6 +3592,9 @@ app.get('/e/:token', mailActionLimiter, async (req, res) => {
   res.send(mailer.confirmPage({
     action: p.act, unrequested: p.k === 'unreq', summary: what,
     who: p.k === 'unreq' ? p.e : '',
+    /* Whose word this is decides who reads it: a first approver is writing to
+       the management, anybody else to the person who asked. */
+    firstStage: p.s === 1,
     postTo: '/e/' + req.params.token
   }));
 });

@@ -1089,7 +1089,8 @@ function confirmPage(o) {
   const act = o.action === 'approve' ? 'Approve' : 'Reject';
   const warn = o.action === 'reject' && o.unrequested
     ? '<p style="color:#B3261E;">Rejecting removes the day from the attendance record.</p>' : '';
-  return '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
+  return '<!doctype html><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<title>' + esc(act) + ' · Attendance</title>'
     + '<body style="margin:0;background:#F3F6FB;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">'
     + '<div style="max-width:460px;margin:40px auto;background:#fff;border:1px solid ' + LINE + ';border-radius:14px;padding:22px;">'
@@ -1097,15 +1098,30 @@ function confirmPage(o) {
     + '<p style="color:' + SOFT + ';font-size:14px;line-height:1.5;margin:0 0 14px;">' + esc(o.summary) + '</p>'
     + warn
     + '<form method="POST" action="' + esc(o.postTo) + '">'
-    /* A refusal usually has a reason, and the person who asked should hear it.
-       Optional: an empty box sends the refusal on its own, as before. */
-    + (o.action === 'reject'
-        ? ('<label style="display:block;font-size:12.5px;color:' + SOFT + ';margin:0 0 6px;">'
-           + 'A word for ' + esc(o.who || 'them') + ', if you want to give one (optional)</label>'
-           + '<textarea name="note" rows="3" maxlength="500" placeholder="e.g. We are short-handed that week"'
-           + ' style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid ' + LINE + ';'
-           + 'border-radius:9px;font:inherit;font-size:13px;resize:vertical;margin-bottom:12px;"></textarea>')
-        : '')
+    /* A decision usually has a reason, and whoever it lands on should hear it.
+       Who that is depends on the decision: a refusal is read by the person who
+       asked, a first approver's yes by the management who give the final word,
+       and a final yes by the person again. Optional in every case - an empty
+       box decides it on its own, as before.
+
+       The first approver had no box at all. Their yes arrived as a bare name,
+       and anything they knew about why it should go through - that the week is
+       covered, that it was agreed in person - had to be said in a separate
+       mail or not at all. */
+    + (function () {
+        const whose = o.action === 'reject'
+          ? ('A word for ' + esc(o.who || 'them') + ', if you want to give one')
+          : (o.firstStage
+              ? 'A word for the management with your approval, if you want to give one'
+              : ('A word for ' + esc(o.who || 'them') + ' with your approval, if you want to give one'));
+        const hint = o.action === 'reject' ? 'e.g. We are short-handed that week'
+          : (o.firstStage ? 'e.g. The week is covered, Rahul is in' : 'e.g. Enjoy the break');
+        return '<label style="display:block;font-size:12.5px;color:' + SOFT + ';margin:0 0 6px;">'
+          + whose + ' (optional)</label>'
+          + '<textarea name="note" rows="3" maxlength="500" placeholder="' + esc(hint) + '"'
+          + ' style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid ' + LINE + ';'
+          + 'border-radius:9px;font:inherit;font-size:13px;resize:vertical;margin-bottom:12px;"></textarea>';
+      })()
     + '<button type="submit" style="border:0;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;color:#fff;'
     + 'background:' + (o.action === 'approve' ? '#137A3B' : '#B3261E') + ';cursor:pointer;">Yes, ' + esc(act.toLowerCase()) + '</button>'
     + '</form></div></body>';
@@ -1145,7 +1161,8 @@ function passwordPage(o) {
       + ' style="width:100%;box-sizing:border-box;padding:10px;border:1px solid ' + LINE + ';border-radius:9px;'
       + 'font:inherit;font-size:14px;margin-bottom:12px;">';
   };
-  return '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
+  return '<!doctype html><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<title>Set your password</title>'
     + '<body style="margin:0;background:#F3F6FB;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">'
     + '<div style="max-width:420px;margin:40px auto;background:#fff;border:1px solid ' + LINE + ';border-radius:14px;padding:22px;">'
@@ -1162,7 +1179,8 @@ function passwordPage(o) {
 }
 
 function resultPage(title, detail, ok, link) {
-  return '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">'
+  return '<!doctype html><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<title>' + esc(title) + '</title>'
     + '<body style="margin:0;background:#F3F6FB;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:' + INK + ';">'
     + '<div style="max-width:460px;margin:40px auto;background:#fff;border:1px solid ' + LINE + ';border-radius:14px;padding:22px;">'
