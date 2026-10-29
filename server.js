@@ -472,12 +472,21 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
      or take back, which is how a mark made by mistake is undone. */
   const byOffice = k => { const v = out[k]; return !!v && typeof v === 'object' && v.by !== 'self'; };
   Object.keys(out).forEach(k => { if (mine(k) && !byOffice(k)) delete out[k]; });
+  /* Two answers a late day can be given, and only one of them takes the
+     minutes off. `kind: 'late'` is their own lateness - traffic, something at
+     home - and excuses nothing, so it may be given with no reason at all.
+     Anything else is work having made them late, which does take the minutes
+     off, and that one is not accepted without a reason: an excuse with nothing
+     written on it is what the office would have to come and ask about. */
   Object.keys(incoming).forEach(k => {
     if (!mine(k) || byOffice(k)) return;
     const v = incoming[k];
+    const own = !!v && v.kind === 'late';
     const note = String((v && v.note) || '').trim().slice(0, EXCUSE_MAX);
-    if (!note) return;
-    out[k] = { note, at: new Date().toISOString(), by: 'self' };
+    if (!note && !own) return;
+    const row = { note, at: new Date().toISOString(), by: 'self' };
+    if (own) row.kind = 'late';
+    out[k] = row;
   });
   return JSON.stringify(out);
 }
@@ -1755,12 +1764,16 @@ const MAIL_DEFAULTS = {
      way it goes once a day: both paths claim the same job. */
   tasks: { on: false, auto: false, at: '19:30',
            to: [], cc: [], subject: '', intro: '', footer: '' },
-  /* Somebody answering for their own late arrival is told to whoever the
+  /* Somebody marking their own late arrival excused is told to whoever the
      office wants reading it. It is a different thing from every list above:
-     nobody is being asked for anything, so there is no falling back to the
-     attendance list - an empty TO means nobody wanted telling, and nothing is
-     sent rather than the news going somewhere nobody chose. */
-  excused: { to: [], cc: [] }
+     nobody is being asked for anything.
+
+     `final` means the people who give the final word on leave, read from that
+     list as it stands rather than copied - set it there once and this follows,
+     instead of two lists to keep in step. Turn it off and the addresses below
+     are used instead; with neither, nothing is sent rather than the news going
+     somewhere nobody chose. */
+  excused: { final: true, to: [], cc: [] }
 };
 const NO_ADDRESS = 'No admin account has an email address on it. Add one in Users, or type an address in the box below.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1829,6 +1842,7 @@ async function mailSettings(orgId) {
   };
   const ex = isPlainObject(s.excused) ? s.excused : {};
   s.excused = {
+    final: ex.final !== false,
     to: (Array.isArray(ex.to) ? ex.to : []).map(x => String(x).trim())
       .filter(x => EMAIL_RE.test(x)).slice(0, 20),
     cc: (Array.isArray(ex.cc) ? ex.cc : []).map(x => String(x).trim())
@@ -2079,7 +2093,10 @@ async function buildDailyEmail(orgId, day, opts) {
   const excuses = {};
   Object.keys(allExcuses).forEach(k => {
     const v = allExcuses[k];
-    if (v && typeof v === 'object' && v.pending === true) return;
+    /* Work having made them late takes the minutes off. Their own lateness,
+       written down, does not - and neither does the older shape, a reason that
+       waited on the office. */
+    if (v && typeof v === 'object' && (v.pending === true || v.kind === 'late')) return;
     excuses[k] = v;
   });
   const threshold = Number(parseJson(kv.lateThresholdMin)) || Number(kv.lateThresholdMin) || 10;
@@ -2115,13 +2132,15 @@ async function buildDailyEmail(orgId, day, opts) {
          answered for and never read. The message carries it in their words,
          which is where the office already looks every evening. */
       const said = allExcuses[key];
-      const plea = (said && typeof said === 'object' && said.pending === true
-                    && String(said.note || '').trim()) ? String(said.note).trim() : '';
+      const own = !!said && typeof said === 'object'
+                  && (said.pending === true || said.kind === 'late');
+      const plea = (own && String(said.note || '').trim()) ? String(said.note).trim() : '';
       late.push({ name: shown,
                   detail: 'in ' + mailer.clock(rec['in']) + ' (' + mailer.minsSaid(came - start) + ' late)'
                         + (excuses[key] ? ' \u2014 excused'
-                           : (plea ? (' \u2014 reason waiting: \u201c'
-                                      + plea.slice(0, 160) + '\u201d') : '')) });
+                           : (plea ? (' \u2014 they say: \u201c'
+                                      + plea.slice(0, 160) + '\u201d')
+                                   : (own ? ' \u2014 marked late by them' : ''))) });
       /* So the card can mark the hour they came in. An excused lateness has
          been answered for already and is left alone. */
       if (rows[i] && !excuses[key]) { rows[i].late = came - start; }
@@ -2849,7 +2868,11 @@ function newlySelfExcused(beforeText, afterText) {
   const was = asMap(beforeText), now = asMap(afterText), out = [];
   Object.keys(now).forEach(k => {
     const v = now[k];
-    if (!v || typeof v !== 'object' || v.by !== 'self' || v.pending === true) return;
+    /* Only the mark that takes the minutes off is news. Somebody writing down
+       that they were late for their own reasons has taken nothing off the day,
+       and the office reads those in the evening message with everything else. */
+    if (!v || typeof v !== 'object' || v.by !== 'self'
+        || v.pending === true || v.kind === 'late') return;
     const old = was[k];
     if (old && typeof old === 'object' && old.by === 'self' && old.note === v.note) return;
     const i = String(k).lastIndexOf('|');
@@ -2869,7 +2892,13 @@ async function notifySelfExcused(orgId, marks) {
   try {
     if (!mailer.ready() || !marks || !marks.length) return;
     const settings = await mailSettings(orgId);
-    const to = (settings.excused.to || []).slice();
+    /* The people who give the final word on leave, read from that list as it
+       stands. The office asked for this to reach the management who decide
+       leave, and keeping a second copy of their addresses here would mean two
+       lists to keep in step and one of them quietly wrong. */
+    const to = settings.excused.final
+      ? (await mailRecipients(orgId, settings, 'leave')).slice()
+      : (settings.excused.to || []).slice();
     if (!to.length) return;
     const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'dayShifts', 'shiftAssignments',

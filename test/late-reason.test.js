@@ -38,6 +38,7 @@ function grab(src, name) {
     'Asha|2026-10-05': { note: 'train was cancelled', at: '2026-10-05T04:10:00Z', by: 'self', pending: true },
     'Ravi|2026-10-05': { note: 'approved - client call ran over', at: '2026-10-05T05:00:00Z' }
   };
+  vm.runInContext(grab(APP, 'lateIsOwned'), ctx);
   vm.runInContext(grab(APP, 'getLateExcuse'), ctx);
   vm.runInContext(grab(APP, 'getLatePlea'), ctx);
 
@@ -61,8 +62,16 @@ function grab(src, name) {
     && APP.indexOf("by: 'self', pending: true }") === -1);
   check('and the person is told it has counted and that the office knows',
     APP.indexOf('Marked excused. The office has been told.') > -1);
-  check('a reason already sent can be changed rather than sent twice',
-    APP.indexOf('id="edPleaEdit"') > -1);
+  check('a mark of their own can be taken off again',
+    APP.indexOf('id="edExcOff"') > -1
+    && APP.indexOf('Taken off. The day counts as late, with nothing said about it.') > -1);
+  /* The other answer: their own lateness, written down, which excuses nothing
+     and so may be given with nothing written at all. */
+  check('their own lateness is kept apart from work having made them late',
+    APP.indexOf("if(picked === 'late') entry.kind = 'late';") > -1
+    && APP.indexOf('Saved. The day still counts as late.') > -1);
+  check('and it alone may be given without a word',
+    APP.indexOf("if(picked === 'exc' && !note)") > -1);
   check('an empty box is not a reason',
     APP.indexOf('Say what the reason was first.') > -1);
   /* The office ticking it writes an entry with no `pending` on it, which is
@@ -81,13 +90,13 @@ function grab(src, name) {
 {
   check("the day's own card shows what was said, before deciding",
     APP.indexOf('plea-wait') > -1 && APP.indexOf('Still counting as late') > -1);
-  check('and the month grid marks the day as sent rather than silent',
-    APP.indexOf("(plN ? ' \\u00b7 sent' : '')") > -1 || APP.indexOf("' · sent'") > -1);
+  check('and the month grid says a day was answered for rather than silent',
+    /plN \? ' .{0,8} said why'/.test(APP));
   /* The gap this closes: the evening message said how late somebody was and
      never that they had answered for it, so the only way to find a waiting
      reason was to open that one day by hand. */
   check('the evening message carries a waiting reason',
-    SRV.indexOf('reason waiting:') > -1);
+    SRV.indexOf('they say:') > -1 && SRV.indexOf('marked late by them') > -1);
   check('it reads the waiting ones, which the counting deliberately drops',
     SRV.indexOf('const said = allExcuses[key];') > -1
     && SRV.indexOf("said.pending === true") > -1);
@@ -101,7 +110,7 @@ function grab(src, name) {
   check('saying so does not stop the minutes counting',
     SRV.indexOf('if (rows[i] && !excuses[key]) { rows[i].late = came - start; }') > -1);
   check('and the tally still drops the waiting ones before counting',
-    SRV.indexOf('if (v && typeof v === \'object\' && v.pending === true) return;') > -1);
+    SRV.indexOf("(v.pending === true || v.kind === 'late')) return;") > -1);
 }
 
 /* ---- nobody can answer for anybody else ---- */
@@ -185,11 +194,16 @@ function grab(src, name) {
      message anybody falls back into receiving. */
   const notify = SRV.slice(SRV.indexOf('async function notifySelfExcused'),
                            SRV.indexOf('/* A day marked as leave on the grid'));
-  check('it goes to the addresses named for it',
-    notify.indexOf('settings.excused.to') > -1);
-  check('with nobody named, nothing is sent rather than it going to the usual list',
-    notify.indexOf('if (!to.length) return;') > -1
-    && notify.indexOf('mailRecipients(') === -1);
+  /* Either the people who give the final word on leave, read from that list as
+     it stands rather than copied, or addresses the office sets here. Not both,
+     and never a list nobody chose. */
+  check('it can go to the people who give the final word on leave',
+    notify.indexOf('settings.excused.final') > -1
+    && notify.indexOf("mailRecipients(orgId, settings, 'leave')") > -1);
+  check('or to addresses of its own where the office would rather',
+    notify.indexOf('(settings.excused.to || []).slice()') > -1);
+  check('and with nobody on either, nothing is sent at all',
+    notify.indexOf('if (!to.length) return;') > -1);
   check('nobody is copied twice',
     notify.indexOf('.filter(a => to.indexOf(a) < 0)') > -1);
   check('how late they were is read off the record, not taken from the page',
@@ -200,10 +214,13 @@ function grab(src, name) {
     notify.indexOf('the excused mark stands but its message failed') > -1);
   /* The setting is a real setting, kept and validated like the rest. */
   check('the addresses are validated like every other address box',
-    /s\.excused = \{\s*to: \(Array\.isArray\(ex\.to\)/.test(SRV));
-  check('and the panel has somewhere to type them',
-    APP.indexOf('id="emExcTo"') > -1 && APP.indexOf('id="emExcCc"') > -1
-    && APP.indexOf("excused: { to: list('emExcTo'), cc: list('emExcCc') }") > -1);
+    /s\.excused = \{\s*final: ex\.final !== false,\s*to: \(Array\.isArray\(ex\.to\)/.test(SRV));
+  check('and the panel has the choice, with somewhere to type the other one',
+    APP.indexOf('id="emExcFinal"') > -1 && APP.indexOf('id="emExcTo"') > -1
+    && APP.indexOf('id="emExcCc"') > -1
+    && APP.indexOf("final: !!(document.getElementById('emExcFinal') || {}).checked") > -1);
+  check('the box of addresses is shut while the first choice is taken',
+    APP.indexOf('box.disabled = fin.checked;') > -1);
   check('the panel says what the message is for',
     APP.indexOf('for reading, not for deciding') > -1);
 }

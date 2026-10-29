@@ -269,8 +269,8 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /EMPLOYEE_WRITABLE = \['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses', 'overrides'\]/.test(SRC));
   check('they read only their own row of who marks their own attendance',
     /EMP_KEYED_BY_NAME = \[[\s\S]{0,120}'selfMark'\]/.test(SRC));
-  check('and a waiting excuse does not count as excused in the daily message',
-    /if \(v && typeof v === 'object' && v\.pending === true\) return;/.test(SRC));
+  check('and a day they marked late themselves does not count as excused in the daily message',
+    /if \(v && typeof v === 'object' && \(v\.pending === true \|\| v\.kind === 'late'\)\) return;/.test(SRC));
   /* Both merges are reached from the write, and only for an employee. */
   check('the guards are wired into the save, for employees only',
     /key === 'manualRecords' && req\.session\.role === 'employee'/.test(SRC)
@@ -286,8 +286,11 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   /* The one rule the whole feature rests on: an excuse somebody wrote about
      themselves does not cancel their own lateness until the office says so.
      Everything that reckons lateness goes through getLateExcuse. */
-  check('a waiting excuse is not an excuse',
-    /function getLateExcuse\(emp, d\)\{[\s\S]{0,200}?pending === true\) \? null/.test(APP),
+  /* Two answers, one of which excuses nothing: their own lateness written
+     down, and the older shape that waited on the office. */
+  check('a day they marked late themselves is not an excuse',
+    /function lateIsOwned\(v\)\{ return !!v && \(v\.pending === true \|\| v\.kind === 'late'\); \}/.test(APP)
+    && /function getLateExcuse\(emp, d\)\{[\s\S]{0,160}?lateIsOwned\(v\) \? null/.test(APP),
     (/function getLateExcuse[\s\S]{0,160}/.exec(APP) || [])[0]);
   check('but it can still be read, to be shown and decided on',
     /function getLatePlea\(emp, d\)\{/.test(APP));
@@ -322,11 +325,12 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /days\.length > 1 \? days\.map/.test(card));
   check('a day typed in counts for lateness the same as one punched',
     /forLate = \(man && man\['in'\]\)/.test(card));
-  check('the tick says what it does, and that nobody has to agree to it',
-    /Nobody has to approve it\./.test(card)
-    && /takes the minutes off this day and tells the office why/.test(card));
-  check('and the box for the words only appears once it is ticked',
-    /id="edExcRow"/.test(card) && /selfExc \? '' : ' style="display:none;"'/.test(card));
+  check('the card says what each choice does, and that nobody has to agree to it',
+    /Nobody has to approve either one\./.test(card)
+    && /The minutes come off, and the office is told why/.test(card)
+    && /The minutes stand\. A note is optional/.test(card));
+  check('and the box for the words only appears once one of them is chosen',
+    /id="edExcRow"/.test(card) && /\(chose \? '' : ' style="display:none;"'\)/.test(card));
   check('and anybody late may give one, marked or not',
     /} else if\(rec\['in'\]\)\{/.test(card) && /if\(isLate\)\{/.test(card));
 }
@@ -477,8 +481,8 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /var dur = rec\.out \? \(toMin\(rec\.out\) - toMin\(rec\['in'\]\)\) : 0;/.test(cal));
   check('and the corner letter is spelled out beneath it',
     /minsSaid\(leN\.late\|\|0\)\) \+ ' late'/.test(cal));
-  check('an excused one says so, and one still waiting says that instead',
-    /lxN \? ' \u00b7 excused' : \(plN \? ' \u00b7 sent' : ''\)/.test(cal));
+  check('an excused one says so, and one they answered for says that instead',
+    /lxN \? ' \u00b7 excused' : \(plN \? ' \u00b7 said why' : ''\)/.test(cal));
   /* The words sit beside the letter they explain, not somewhere else. */
   check('and the note rides in the badge row, left of the letter',
     /ec-marks[\s\S]{0,140}ec-notes[\s\S]{0,120}\+ marks/.test(cal),
@@ -542,7 +546,7 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /Saved\. The office sees it on the record/.test(APP)
       && /Marked excused\. The office has been told\./.test(APP));
   check('and taking that mark off says what it costs them',
-    /Taken off\. The day counts as late again\./.test(APP));
+    /Taken off\. The day counts as late, with nothing said about it\./.test(APP));
 }
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

@@ -2967,6 +2967,30 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-late.wait{ background:#EEF3FB; border-color:#CBD9EC; color:#24405F; }
 .ed-exc{ display:flex; align-items:center; gap:7px; margin:7px 0 2px; font-size:12.5px; font-weight:600; cursor:pointer; }
 .ed-exc input{ margin:0; cursor:pointer; }
+/* One late day, two answers. They are offered as two cards rather than as a
+   tick, because they do not cost the same thing and a tick cannot say so: one
+   leaves the minutes where they are, the other takes them off and tells the
+   office. Each says underneath what it costs. */
+.ed-pick{ display:flex; align-items:flex-start; gap:9px; margin-top:8px; padding:9px 11px;
+  border:1.5px solid #EADFC2; border-radius:10px; background:#FFFCF4; cursor:pointer; }
+.ed-pick:hover{ border-color:#D9C890; }
+.ed-pick input{ margin:2px 0 0; cursor:pointer; flex:none; }
+.ed-pick .ed-hd{ font-size:12.5px; font-weight:600; }
+.ed-pick b{ display:inline; }
+.ed-pick .ed-sub{ margin-top:2px; font-size:11.5px; line-height:1.5; color:#6B5A33; font-weight:500; }
+.ed-pick.on{ border-color:#C9A227; background:#FFF6DF; }
+/* The one that takes the minutes off wears the colour this card already uses
+   for a day that no longer counts against them. */
+.ed-pick.on[data-pick="exc"]{ border-color:#6FAE85; background:#EFF9F2; }
+.ed-pick.on[data-pick="exc"] .ed-sub{ color:#1E5134; }
+.ed-need{ font-size:11px; font-weight:700; color:#8A5A00; margin-top:7px; }
+.ed-tell{ display:block; margin-top:8px; padding-top:8px; border-top:1px solid #EADFC2; }
+/* A block of settings that belongs to somebody other than whoever is picked
+   above it. Fenced rather than merely spaced, because down a column of boxes
+   a gap reads as nothing at all. */
+.em-fence{ margin-top:14px; padding:10px 12px 2px; border:1px solid var(--line-dk);
+  border-radius:10px; background:#FAFBFD; }
+.em-fence .em-lab:first-child{ margin-top:0; }
 .ed-late.ok{ background:#ECF8F0; border-color:#A8D8BC; color:#14532D; }
 .plea-wait{ margin:0 0 10px; padding:9px 11px; border-radius:9px; font-size:12px;
   background:#EEF3FB; border:1px solid #CBD9EC; color:#24405F; line-height:1.45; }
@@ -8898,13 +8922,41 @@ function buildExcelBackup(){
      lateness asks this, so the waiting ones go on counting as late until then.
      getLatePlea is for the places that want to show a reason rather than act
      on it. */
+  /* A note against a late day is one of two things, and only one of them takes
+     the minutes off.
+
+     "Excused" is work having made them late - a meeting, a visit that ran
+     over - and the day stops counting as late. "Late" is their own: traffic,
+     something at home. The minutes stand, and the note is only so that next
+     month nobody has to remember why.
+
+     `pending` is the older shape, from when a reason waited for the office to
+     accept it. Nothing writes it now; it is still read as not excusing, so
+     the days that carry it keep the meaning they were given. */
+  function lateIsOwned(v){ return !!v && (v.pending === true || v.kind === 'late'); }
+  /* What the card says has happened, or would happen. Said in one place
+     because it is written twice - once into the card and once when the choice
+     changes under the hand - and two copies would drift. */
+  function edWhyTell(chose, saved){
+    if(chose === 'late'){
+      return saved && saved.kind === 'late'
+        ? 'Saved. The minutes stay on the day — the note is only so that nobody has to remember why.'
+        : 'The minutes stay on the day. The note is for the record, so next month nobody has to remember why.';
+    }
+    if(chose === 'exc'){
+      return saved && saved.kind !== 'late'
+        ? 'Marked excused. The minutes are off this day and the office has been told.'
+        : 'The minutes come off this day, and the office is sent a note for reading — they are told, not asked.';
+    }
+    return 'Say which it was. Either one counts from the moment you save it.';
+  }
   function getLateExcuse(emp, d){
     var v = lateExcuses[emp+'|'+d];
-    return (v && v.pending === true) ? null : (v || null);
+    return lateIsOwned(v) ? null : (v || null);
   }
   function getLatePlea(emp, d){
     var v = lateExcuses[emp+'|'+d];
-    return (v && v.pending === true) ? v : null;
+    return lateIsOwned(v) ? v : null;
   }
   /* Who types their own in and out, rather than touching a card reader. Kept
      against the name, so an employee's page can be told about them and nobody
@@ -11933,14 +11985,33 @@ function buildExcelBackup(){
          for anything - the day is excused the moment they tick it - so this
          keeps its own addresses rather than borrowing the list above: an
          empty box means nobody wanted telling, and nothing is sent. */
-      + '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
-      +   'Late marked excused by the person themselves '
-      +   '<span>for reading, not for deciding · empty means nobody is told</span></div>'
-      + '<div class="em-row"><input type="text" id="emExcTo" placeholder="comma separated" value="'
-      +   mailEscape(((s.excused || {}).to || []).join(', ')) + '"></div>'
-      + '<div class="em-lab">Cc</div>'
-      + '<div class="em-row"><input type="text" id="emExcCc" placeholder="comma separated" value="'
-      +   mailEscape(((s.excused || {}).cc || []).join(', ')) + '"></div>'
+      + (function(){
+          var ex = s.excused || {}, fin = ex.final !== false;
+          /* Who gives the final word on leave, as that pane has it now. Shown
+             rather than copied: the point of the first choice is that there is
+             one list, not two that can drift apart. */
+          var lv = (((s.leave || {}).to) || []);
+          return '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
+            +   'Late marked excused by the person themselves '
+            +   '<span>for reading, not for deciding</span></div>'
+            + '<label class="em-row"><input type="radio" name="emExcWho" id="emExcFinal"'
+            +   (fin ? ' checked' : '') + '>'
+            +   '<span>The people who give the final word on leave'
+            +     '<span style="display:block;font-size:11px;color:var(--ink-soft);">'
+            +     (lv.length ? (mailEscape(lv.join(', ')) + ' — kept in step with that list')
+                             : 'nobody named on the Leave tab yet — nothing would be sent')
+            +     '</span></span></label>'
+            + '<label class="em-row"><input type="radio" name="emExcWho" id="emExcOwn"'
+            +   (fin ? '' : ' checked') + '><span>These addresses instead</span></label>'
+            + '<div class="em-row"><input type="text" id="emExcTo" placeholder="comma separated"'
+            +   (fin ? ' disabled' : '') + ' value="'
+            +   mailEscape((ex.to || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Cc</div>'
+            + '<div class="em-row"><input type="text" id="emExcCc" placeholder="comma separated" value="'
+            +   mailEscape((ex.cc || []).join(', ')) + '"></div>'
+            + '<div class="em-note">A late day somebody marked excused on their own page. '
+            +   'Nobody is being asked to decide: the mark counts from the moment it is made.</div>';
+        })()
       + '</div>'
       /* ---- the leave message ---- */
       + '<div data-em-pane="lv" style="display:none;">'
@@ -11995,13 +12066,22 @@ function buildExcelBackup(){
                     + mailEscape(dispName(e.name)) + '</option>';
                 }).join('') + '</select></div>'
             + '<div id="emLvWhoBox" style="display:none;margin-bottom:12px;"></div>'
-            + '<div class="em-lab">To <span>whoever looks at it first '
+            /* Two To boxes and two Cc boxes, one under the other, and the pair
+               underneath is the office's own line rather than a second answer
+               for the person picked above. Read straight down they looked like
+               one question asked twice. They are fenced off now and say whose
+               they are. */
+            + '<div class="em-fence">'
+            + '<div class="em-lab">The office’s own first approver '
+            +   '<span>everybody with nobody named against them</span></div>'
+            + '<div class="em-lab" style="margin-top:6px;">To <span>whoever looks at it first '
             +   '· empty means leave is granted in one stage</span></div>'
             + '<div class="em-row"><input type="text" id="emLvFirstTo" placeholder="comma separated" value="'
             +   mailEscape(((s.leave || {}).firstTo || []).join(', ')) + '"></div>'
             + '<div class="em-lab">Cc</div>'
             + '<div class="em-row"><input type="text" id="emLvFirstCc" placeholder="comma separated" value="'
             +   mailEscape(((s.leave || {}).firstCc || []).join(', ')) + '"></div>'
+            + '</div>'
             + '<div class="em-lab">Message at the top <span>blank: the wording it comes with '
             +   '\u00b7 {approver} is whoever this copy goes to</span></div>'
             + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
@@ -12352,6 +12432,19 @@ function buildExcelBackup(){
         lvWhoRender(pick.value);
       };
     })();
+    /* The box of addresses belongs to the second choice, so it is shut while
+       the first one is taken: a list nobody is using should not look like one
+       somebody forgot to fill in. */
+    (function(){
+      var fin = document.getElementById('emExcFinal'), own = document.getElementById('emExcOwn');
+      var box = document.getElementById('emExcTo');
+      if(!fin || !own || !box) return;
+      var sync = function(){
+        box.disabled = fin.checked;
+        if(!fin.checked) box.focus();
+      };
+      fin.onchange = sync; own.onchange = sync;
+    })();
     var more = document.getElementById('emMore'), set = document.getElementById('emSet');
     if(more && set) more.onclick = function(){
       var open = set.style.display !== 'none';
@@ -12626,7 +12719,8 @@ function buildExcelBackup(){
         intro: document.getElementById('emIntro').value,
         footer: document.getElementById('emFooter').value,
         sections: sections,
-        excused: { to: list('emExcTo'), cc: list('emExcCc') },
+        excused: { final: !!(document.getElementById('emExcFinal') || {}).checked,
+                   to: list('emExcTo'), cc: list('emExcCc') },
         leave: {
           to: list('emLvTo'), cc: list('emLvCc'),
           subject: document.getElementById('emLvSubject').value.trim(),
@@ -18299,8 +18393,13 @@ function buildExcelBackup(){
       var plea = getLatePlea(emp, dateStr);
       lateExcuseHtml = '<div class="override-section" style="border-top:1px dashed var(--line-dk);margin-top:16px;padding-top:14px;">'+
         '<label class="lbl">Late arrival</label>'+
-        (plea ? ('<div class="plea-wait"><b>'+shotEsc(dispName(emp))+' says:</b> \u201c'+shotEsc(plea.note)+'\u201d'+
-                 '<span>Sent '+shotEsc(whenShort(plea.at))+'. Still counting as late \u2014 tick below to excuse it.</span></div>') : '')+
+        /* Their own account of it, which is not a request. They marked the day
+           late themselves and wrote down why; the minutes stand unless the
+           office takes them off, which is the tick below. */
+        (plea ? ('<div class="plea-wait"><b>'+shotEsc(dispName(emp))+' says:</b> '
+                 + (plea.note ? ('\u201c'+shotEsc(plea.note)+'\u201d') : 'nothing \u2014 marked it as their own')
+                 + '<span>Marked late by them '+shotEsc(whenShort(plea.at))
+                 + '. Still counting as late \u2014 tick below if the office excuses it anyway.</span></div>') : '')+
         '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;font-weight:600;"><input type="checkbox" id="lateExcuseChk" '+(lx?'checked':'')+'/> Excuse this late arrival</label>'+
         '<textarea class="ov-reason" id="lateExcuseNote" placeholder="Reason, e.g. approved — client meeting ran late yesterday">'+(lx&&lx.note?lx.note:(plea&&plea.note?plea.note:''))+'</textarea>'+
         '<button class="btn primary" id="lateExcuseSave" style="width:100%;">Save</button>'+
@@ -19505,27 +19604,46 @@ function buildExcelBackup(){
          simply late needs nothing written about it, and asking anyway made
          every late day look like a question. */
       var selfExc = excused && excused.by === 'self';
+      /* Their own mark, whichever of the two it is. The office's own excuse is
+         not theirs to change, so it is shown and nothing else. */
+      var mine = selfExc ? excused : ((plea && (plea.by === 'self' || plea.pending === true)) ? plea : null);
+      var chose = mine ? (mine.kind === 'late' ? 'late' : 'exc') : '';
       html += '<div class="ed-late' + (excused ? ' ok' : (plea ? ' wait' : '')) + '">'
         + '<b>' + minsSaid(late.late) + ' late on this day.</b>';
       if(excused && !selfExc){
         html += '<span>Excused by the office' + (excused.note ? (' — ' + shotEsc(excused.note)) : '') + '.</span>';
-      } else if(plea){
-        html += '<span>Your reason is with the office: “' + shotEsc(plea.note) + '”'
-          + ' — the minutes count until it is accepted.</span>'
-          + '<div class="ed-row"><button type="button" class="month-btn" id="edPleaEdit">Change it</button></div>';
       } else {
-        html += '<label class="ed-exc"><input type="checkbox" id="edExcChk"'
-          + (selfExc ? ' checked' : '') + '> Excused — there was a reason for it</label>'
-          + '<div class="ed-row" id="edExcRow"' + (selfExc ? '' : ' style="display:none;"') + '>'
-          +   '<input type="text" id="edExcNote" maxlength="300" placeholder="What was the reason?" value="'
-          +   (selfExc ? shotEsc(excused.note || '') : '') + '">'
+        /* One late day, two answers, and they do not cost the same. Their own
+           lateness leaves the minutes where they are and writes down why, so
+           that next month nobody has to remember. Work having made them late
+           takes the minutes off and tells the office, which is why that one
+           cannot be given without a reason.
+
+           Both count the moment they are saved. Nobody is asked. */
+        var opt = function(v, title, sub){
+          return '<label class="ed-pick' + (chose === v ? ' on' : '') + '" data-pick="' + v + '">'
+            + '<input type="radio" name="edWhy" value="' + v + '"' + (chose === v ? ' checked' : '') + '>'
+            + '<div><div class="ed-hd">' + title + '</div>'
+            + '<div class="ed-sub">' + sub + '</div></div></label>';
+        };
+        html += '<span>Which was it? Nobody has to approve either one.</span>'
+          + opt('late', '<b>Late</b> — personal',
+                'Ran late, traffic, something at home. The minutes stand. A note is optional.')
+          + opt('exc', '<b>Excused</b> — work made it so',
+                'A meeting, a visit that ran over, an errand for the office. '
+                + 'The minutes come off, and the office is told why.')
+          + '<div class="ed-need" id="edExcNeed"' + (chose === 'exc' ? '' : ' style="display:none;"') + '>'
+          +   'A reason is needed for this one.</div>'
+          + '<div class="ed-row" id="edExcRow"' + (chose ? '' : ' style="display:none;"') + '>'
+          +   '<input type="text" id="edExcNote" maxlength="300" placeholder="'
+          +   (chose === 'late' ? 'What was the reason? (optional)'
+                                : 'What was it — the meeting, the visit, the errand?') + '" value="'
+          +   shotEsc(mine ? (mine.note || '') : '') + '">'
           +   '<button type="button" class="bk-btn primary" id="edExcSave">'
-          +   (selfExc ? 'Save' : 'Mark it') + '</button></div>'
-          + '<span>' + (selfExc
-               ? ('You marked this excused. It is on the record and the office has been told.'
-                  + ' Untick it if that was a mistake.')
-               : 'Nobody has to approve it. Ticking it takes the minutes off this day and tells the office why.')
-          + '</span>';
+          +   (chose === 'late' ? 'Save' : 'Mark it excused') + '</button>'
+          +   (mine ? '<button type="button" class="month-btn" id="edExcOff">Take it off</button>' : '')
+          + '</div>'
+          + '<span class="ed-tell" id="edExcTell">' + edWhyTell(chose, mine) + '</span>';
       }
       html += '</div>';
     }
@@ -19733,39 +19851,69 @@ function buildExcelBackup(){
        to write, because an excuse with no reason on it is what the office
        would have to come and ask about. Unticking takes their own mark away
        again, and the day counts as late from that moment. */
-    var excChk = document.getElementById('edExcChk');
-    if(excChk) excChk.addEventListener('change', function(){
-      var row = document.getElementById('edExcRow');
-      if(row) row.style.display = excChk.checked ? '' : 'none';
-      if(excChk.checked){
-        var box = document.getElementById('edExcNote');
-        if(box) box.focus();
-        return;
-      }
-      var had = lateExcuses[name + '|' + day];
-      if(!had || had.by !== 'self') return;            // the office's mark is not theirs to lift
-      delete lateExcuses[name + '|' + day];
-      saveLateExcuses().then(function(){
-        showUploadStatus('Taken off. The day counts as late again.', false);
-        refreshActivePage(); renderEmpDayCard();
-      }).catch(function(e){
-        showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
-        renderEmpDayCard();
+    /* Choosing changes the card under the hand rather than redrawing it: the
+       box may already have words in it, and a redraw would take them away
+       mid-sentence. Nothing is written until Save. */
+    var had = lateExcuses[name + '|' + day];
+    var hadMine = (had && (had.by === 'self' || had.pending === true)) ? had : null;
+    Array.prototype.forEach.call(box.querySelectorAll('input[name="edWhy"]'), function(r){
+      r.addEventListener('change', function(){
+        var v = r.value;
+        Array.prototype.forEach.call(box.querySelectorAll('.ed-pick'), function(p){
+          p.classList.toggle('on', p.getAttribute('data-pick') === v);
+        });
+        var row = document.getElementById('edExcRow'), need = document.getElementById('edExcNeed');
+        var note = document.getElementById('edExcNote'), save = document.getElementById('edExcSave');
+        var tell = document.getElementById('edExcTell');
+        if(row) row.style.display = '';
+        if(need) need.style.display = v === 'exc' ? '' : 'none';
+        if(note){
+          note.placeholder = v === 'late' ? 'What was the reason? (optional)'
+                                          : 'What was it — the meeting, the visit, the errand?';
+          note.focus();
+        }
+        if(save) save.textContent = v === 'late' ? 'Save' : 'Mark it excused';
+        if(tell) tell.textContent = edWhyTell(v, null);
       });
     });
     var excSave = document.getElementById('edExcSave');
     if(excSave) excSave.addEventListener('click', function(){
+      var picked = (box.querySelector('input[name="edWhy"]:checked') || {}).value || '';
       var note = ((document.getElementById('edExcNote')||{}).value || '').trim();
-      if(!note){ showUploadStatus('Say what the reason was first.', true); return; }
-      /* No `pending`: it counts from now. The office hears about it rather
-         than being asked, which is what they wanted. */
-      lateExcuses[name + '|' + day] = { note: note, at: new Date().toISOString(), by: 'self' };
+      if(!picked){ showUploadStatus('Say which it was first.', true); return; }
+      /* Their own lateness may go unexplained; work having made them late may
+         not. One takes nothing off the day, the other takes the minutes off
+         and goes to the office, and an excuse with nothing written on it is
+         what the office would have to come and ask about. */
+      if(picked === 'exc' && !note){ showUploadStatus('Say what the reason was first.', true); return; }
+      /* No `pending`: both count from now. The office hears about an excused
+         one rather than being asked, which is what they wanted. */
+      var entry = { note: note, at: new Date().toISOString(), by: 'self' };
+      if(picked === 'late') entry.kind = 'late';
+      lateExcuses[name + '|' + day] = entry;
       excSave.disabled = true;
       saveLateExcuses().then(function(){
-        showUploadStatus('Marked excused. The office has been told.', false);
+        showUploadStatus(picked === 'late'
+          ? 'Saved. The day still counts as late.'
+          : 'Marked excused. The office has been told.', false);
         refreshActivePage(); renderEmpDayCard();
       }).catch(function(e){
         excSave.disabled = false;
+        showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+      });
+    });
+    /* Taking their own mark off again. The office's mark is not theirs to
+       lift, so the button is only there when the mark is their own. */
+    var excOff = document.getElementById('edExcOff');
+    if(excOff) excOff.addEventListener('click', function(){
+      if(!hadMine) return;
+      delete lateExcuses[name + '|' + day];
+      excOff.disabled = true;
+      saveLateExcuses().then(function(){
+        showUploadStatus('Taken off. The day counts as late, with nothing said about it.', false);
+        refreshActivePage(); renderEmpDayCard();
+      }).catch(function(e){
+        excOff.disabled = false;
         showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
       });
     });
@@ -19858,11 +20006,6 @@ function buildExcelBackup(){
       }).catch(function(e){
         said('That did not clear (' + ((e && e.message) || 'no answer') + ').', true);
       });
-    });
-    var pleaEdit = document.getElementById('edPleaEdit');
-    if(pleaEdit) pleaEdit.addEventListener('click', function(){
-      delete lateExcuses[name + '|' + day];
-      saveLateExcuses().then(function(){ renderEmpDayCard(); });
     });
   }
   /* A day spent out on a visit, said by the person who spent it.
@@ -20126,7 +20269,7 @@ function buildExcelBackup(){
         if(isLate(name, rec)){
           notes += '<span class="ecn '+(lxN ? 'ok' : (plN ? 'wait' : 'late'))+'">'
             + escapeHtml(minsSaid(leN.late||0)) + ' late'
-            + (lxN ? ' · excused' : (plN ? ' · sent' : '')) + '</span>';
+            + (lxN ? ' · excused' : (plN ? ' · said why' : '')) + '</span>';
         }
         if(isEarly(name, rec)){
           notes += '<span class="ecn '+(exN ? 'ok' : 'early')+'">left '
