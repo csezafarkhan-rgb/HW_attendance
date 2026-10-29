@@ -2332,6 +2332,9 @@ async function buildLeaveEmail(orgId, stage, forApprover) {
     built.names = Array.from(new Set(
       pending.map(p => p.req && p.req.empName)
         .concat(unreq.map(u => u.req && u.req.empName)).filter(Boolean)));
+    /* And which of them were passed on by somebody, so a first approver can be
+       copied on the message their own yes caused. */
+    built.reqs = pending.map(p => p.req).filter(Boolean);
   }
   return built;
 }
@@ -2668,7 +2671,13 @@ async function sendLeaveEmail(orgId, opts) {
     /* About one person: they are copied. About several: they are not, because
        a digest is everybody's business and nobody else's. */
     const alone = await ownersIfAlone(orgId, mail.names || [], leg.to, leg.cc);
-    built.push({ to: leg.to, cc: leg.cc.concat(alone), subject: mail.subject, html: mail.html });
+    /* Anybody whose yes put a request in this message is copied on it, whatever
+       else the message holds: it is the answer to their own recommendation, and
+       being named in its heading is not the same as being told. */
+    const passed = notAlready(await recommenderOf(orgId, settings, mail.reqs || []),
+                              leg.to, leg.cc.concat(alone));
+    built.push({ to: leg.to, cc: leg.cc.concat(alone).concat(passed),
+                 subject: mail.subject, html: mail.html });
   }
   if (!addressed) return { ok: false, error: NO_ADDRESS };
   if (!built.length) return { ok: true, nothing: true };   // nothing waiting: no message
@@ -2980,6 +2989,44 @@ async function leaveRecordFor(orgId, empName, req) {
    several people is a different thing: copying somebody on it would hand them
    everybody else's leave, which is not theirs to read. So a group of one is
    copied and a group of several is not. */
+/* The address that passed a request on. A first approver's yes is the reason
+   the management is being written to at all, and until now they were told
+   nothing of what became of it - their name was in the heading of a message
+   they never saw. Copied, like the person who asked.
+
+   The name on the request is a name, not an address, so the address is worked
+   out the way the first stage is worked out everywhere else: the approver named
+   against that person, or the office's own where nobody is. */
+async function recommenderOf(orgId, settings, reqs) {
+  const live = (reqs || []).filter(r => r && r.status === 'recommended' && r.empName);
+  if (!live.length) return [];
+  const first = await firstApproverOf(orgId, settings);
+  const fallback = (first && first.email) || '';
+  const route = await approvalRouteOf(orgId);
+  const seen = {}, out = [];
+  for (const r of live) {
+    /* Whoever actually pressed it, by the name the button carried and the
+       accounts' own roll - which is the right answer even where the office has
+       since pointed that person's leave somewhere else, or named nobody at all.
+       Only failing that is the stage read off the route as a stand-in. */
+    const byName = await employeeAddress(orgId, r.recommendedBy || '');
+    const who = byName || approverFor(route, r.empName, fallback) || '';
+    const k = String(who).toLowerCase();
+    if (k && !seen[k]) { seen[k] = true; out.push(k); }
+  }
+  return out;
+}
+/* The same, minus anybody already written to or copied. */
+function notAlready(list, to, cc) {
+  const seen = {};
+  (to || []).concat(cc || []).forEach(a => { seen[String(a || '').toLowerCase()] = true; });
+  return (list || []).filter(a => {
+    const k = String(a || '').toLowerCase();
+    if (!k || seen[k]) return false;
+    seen[k] = true;
+    return true;
+  });
+}
 async function ownersIfAlone(orgId, names, to, cc) {
   const distinct = Array.from(new Set((names || []).filter(Boolean)));
   if (distinct.length !== 1) return [];
@@ -3055,6 +3102,10 @@ async function notifyRecommended(orgId, req) {
     });
     const cc = mailCc(settings, 'leave').concat(
       await ownersOf(orgId, [req.empName], to, mailCc(settings, 'leave')));
+    /* And whoever passed it on, so a first approver sees what became of their
+       own recommendation rather than reading their name in a heading they
+       were never shown. */
+    cc.push.apply(cc, notAlready(await recommenderOf(orgId, settings, [req]), to, cc));
     const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
     await logMail(orgId, 'request', { to, cc, subject: mail.subject, html: mail.html }, r);
   } catch (e) {

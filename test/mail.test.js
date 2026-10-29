@@ -977,6 +977,12 @@ process.env.SESSION_SECRET = SECRET;
       onward && { to: onward.to, subject: onward.subject });
     check('the employee is not told yet, because it is not settled',
       !(onward.to || []).some(a => /keshav/.test(a)), onward && onward.to);
+    /* A first approver's yes is the whole reason the management is being
+       written to, and their name is in the heading of it. Until now that was
+       all they got: the answer to their own recommendation went past them. */
+    check('and whoever passed it on is copied, their name being in its heading',
+      (onward.cc || []).indexOf('karan@homeweavers.net') > -1,
+      onward && onward.cc);
 
     /* The second word grants it, and the record is written. */
     const stage2 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve', s: 2 }, SECRET);

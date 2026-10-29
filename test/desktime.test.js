@@ -150,6 +150,7 @@ function grab(src, name) {
      a month of days, and a year of months - so the reading is checked where
      it lives rather than where it happens to be printed. */
   const facts = grab(APP, 'dtFacts');
+  const dayrow = grab(APP, 'dtDayRow');
   check('there is a page for it, and a tab to reach it by',
     APP.indexOf('id="page-desktime"') > -1 && APP.indexOf('data-page="desktime"') > -1
     && APP.indexOf("if(currentPage === 'desktime') renderDeskTimePage();") > -1);
@@ -158,7 +159,7 @@ function grab(src, name) {
   check('the two readings of a day are shown side by side, both times and the hours',
     /Marked in<\/th><th>DeskTime in/.test(page)
     && /Marked out<\/th><th>DeskTime out/.test(page)
-    && /Hours marked<\/th><th>DeskTime time/.test(page));
+    && /Hours marked<\/th>[\s\S]{0,220}DeskTime time/.test(page));
   check('the figure DeskTime leads with is shown, and said to be the one it leads with',
     page.indexOf("class=\"dt-desk\"") > -1 && page.indexOf('seen.d') > -1
     && page.indexOf('the computer was actually in use') > -1);
@@ -178,12 +179,13 @@ function grab(src, name) {
      leaving was a third: it measures the same thing the record already
      measures, and worse - it is the machine's day, not the person's. */
   check('the day is measured by the record and by the computer, and nothing else',
-    /<th class="dt-sep">Hours marked<\/th><th>DeskTime time<\/th>/.test(page)
+    /<th class="dt-sep">Hours marked<\/th>/.test(page)
+    && /<th>DeskTime time<\/th>/.test(page)
     && page.indexOf('At work') === -1
     && page.indexOf('Productive') === -1 && page.indexOf('Idle') === -1);
   check('and the group above them counts them and the share they come to',
-    /colspan="3">How long/.test(page)
-    && page.indexOf('<th>At the computer</th>') > -1);
+    /colspan="4">How long/.test(page)
+    && page.indexOf('At the computer<i class="dt-vs">') > -1);
   check('each is explained, because none of them is obvious',
     page.indexOf('this record’s own day, in to out') > -1
     && page.indexOf('how long the computer was actually in use') > -1);
@@ -197,10 +199,10 @@ function grab(src, name) {
      and the eye finds the short ones without reading a number at all. */
   check('the share of the day spent at the computer is drawn as well as counted',
     /function dtUse\(work, desk\)/.test(APP) && /function dtUseBar\(pct\)/.test(APP)
-    && page.indexOf('dtUseBar(dtUse(markedMin, seen && seen.d))') > -1);
-  check('it is the computer’s time as a share of the marked day',
+    && dayrow.indexOf('dtUseBar(dtUse(dtBase(f), seen && seen.d))') > -1);
+  check('it is the computer’s time as a share of the day it is set against',
     /Math\.round\(desk \/ work \* 100\)/.test(APP)
-    && page.indexOf('dtUseBar(dtUse(markedMin, seen && seen.d))') > -1);
+    && dayrow.indexOf('dtUseBar(dtUse(dtBase(f), seen && seen.d))') > -1);
   check('a day missing either figure has no share to show',
     /if\(!work \|\| !desk\) return null;/.test(APP));
   check('under half is picked out, and the bands are said in the stylesheet',
@@ -213,8 +215,8 @@ function grab(src, name) {
     facts.indexOf('var worked = workedMinutes(name, day);') > -1
     && facts.indexOf('markedMin = worked; credited = true;') > -1);
   check('and says it was credited rather than measured',
-    page.indexOf('class="dt-credited"') > -1
-    && page.indexOf('Credited to the shift') > -1);
+    dayrow.indexOf('class="dt-credited"') > -1
+    && dayrow.indexOf('Credited to the shift') > -1);
   check('the figure comes from the same place the totals take it',
     /function workedMinutes\(emp, dateStr\)[\s\S]{0,700}return owedMinutes\(emp, dateStr\);/.test(APP));
   check('which is the whole shift on a weekday and the Saturday policy on a Saturday',
@@ -227,7 +229,7 @@ function grab(src, name) {
     page.indexOf('a question rather than a finding') > -1
     && page.indexOf('the keyboard to show for it') > -1);
   check('the week says its own share too',
-    page.indexOf('dtUseBar(dtUse(wkMarked, wkDesk))') > -1);
+    page.indexOf('dtUseBar(dtUse(wkBase, wkDesk))') > -1);
 
   /* A week is the unit the office counts in - hours owed, hours over - and the
      attendance record is read that way. Thirty rows with nothing between them
@@ -245,20 +247,30 @@ function grab(src, name) {
     /closeWeek\(\);\s*$/m.test(page) || page.lastIndexOf('closeWeek();') > page.indexOf('days.forEach'));
   check('each week says what it came to, in the columns that measure it',
     /wkMarked \+= markedMin/.test(page) && /wkDesk \+= seen\.d/.test(page));
-  check('an empty week is not drawn at all',
-    page.indexOf('if(!wkDays) return;') > -1);
+  /* A week of nothing but dates gets no total line - there is nothing to total
+     - but it is still closed, or its block would run on into the next week and
+     the grouping would stop meaning anything. */
+  check('a week with nothing in it gets no total, but is still closed',
+    page.indexOf('if(wkDays) rows +=') > -1
+    && /var openWeek = function\(\)\{ rows \+= '<tbody class="dt-wk">'; wkOpen = true; \};/.test(page)
+    && page.indexOf('if(!wkOpen) return;') > -1);
   check('and the table scrolls inside the page rather than widening it',
     page.indexOf('<div class="dt-scroll">') > -1 && /\.dt-scroll\{ overflow-x:auto/.test(APP));
   check('the difference is DeskTime measured from the marked time',
     /function dtGap\(marked, seen\)[\s\S]{0,260}return b - a;/.test(APP));
   check('and is said with a sign, so later and earlier cannot be confused',
     /mins > 0 \? '\+' : '(\\\\u2212|−)'/.test(APP));
-  /* A day neither record knows about is not a row. */
-  check('a day with nothing on either side is left out',
-    facts.indexOf('if(!seen && !markedIn && !hol) return null;') > -1);
-  /* Except a company holiday, which is the answer to “why is there nothing
-     here” - and dropping the row dropped the answer. */
-  check('unless the office closed that day, which is a thing worth saying',
+  /* A day nothing knows about is not a row. The record counts as something
+     that knows: a day from home has no punches and DeskTime may have seen
+     nothing, but the record credits it a shift, so dropping the row dropped
+     those hours off the month's own total too. */
+  check('a day nothing at all knows about is left out',
+    facts.indexOf('if(!seen && !markedIn && !hol && !ov && !rec.st) return null;') > -1);
+  check('but a day the record speaks for is a row, punches or no punches',
+    /var ov = getOverride\(name, day\);\r?\n    if\(!seen/.test(facts));
+  /* A company holiday is the answer to “why is there nothing here” - and
+     dropping the row dropped the answer. */
+  check('the office being closed is one such thing worth saying',
     /var hol = getOfficialLeave\(day\);/.test(facts)
     && /if\(hol\) said = hol\.name/.test(facts)
     && /tr\.dt-hol td{ background:#F1EBFB/.test(APP));
@@ -268,7 +280,7 @@ function grab(src, name) {
   check('a day somebody worked through the closure says both things',
     /hol\.name \+ \(ov && OV_CATS\[ov\.cat\]/.test(facts));
   check('a day they are still working is said so rather than left blank',
-    page.indexOf("'still on'") > -1);
+    dayrow.indexOf("'still on'") > -1);
   check('two times that agree say so, rather than reading as an error',
     /if\(mins === 0\) return 'same';/.test(APP));
   /* Somebody at a computer with no mark against them at all is not a
@@ -413,6 +425,7 @@ function grab(src, name) {
                          APP.indexOf('function dtWire('));
   const link = grab(APP, 'dtShotLink');
   const dayl = grab(APP, 'dtDayLink');
+  const dayrow = grab(APP, 'dtDayRow');
   check('there is a column for what DeskTime has on the day',
     page.indexOf('>On DeskTime<') > -1 && page.indexOf('What it saw') > -1);
   check('one door is that person\u2019s own DeskTime day, which is the page with the hours on it',
@@ -439,8 +452,8 @@ function grab(src, name) {
   /* The day is always worth opening. Screenshots are not: DeskTime takes none
      on a day it tracked nothing, and a link to an empty page is a wasted press. */
   check('the day opens on every row, the screenshots only where there are any',
-    /\+ dtDayLink\(day, DT_WHO\)/.test(page)
-    && /seen \? \('<i class="dt-shotsep">/.test(page));
+    /\+ dtDayLink\(day, name\)/.test(dayrow)
+    && /seen \? \('<i class="dt-shotsep">/.test(dayrow));
   check('and the page says plainly why neither picture is here',
     page.indexOf('that sign-in, so neither can be drawn here') > -1);
 }
@@ -504,7 +517,7 @@ function grab(src, name) {
   check('a difference is averaged only over days both records knew about',
     /if\(f\.gIn !== null\)\{ t\.both\+\+; t\.gInN\+\+; t\.gInSum \+= f\.gIn; \}/.test(tally));
   check('the year reads the same columns as the month, which is the point',
-    /dt-usecell[\s\S]{0,140}dtUseBar\(dtUse\(t\.marked, t\.desk\)\)/.test(span)
+    /dt-usecell[\s\S]{0,140}dtUseBar\(dtUse\(t\.base, t\.desk\)\)/.test(span)
     && /Arriving'[\s\S]{0,90}on average/.test(page));
   check('and the count beside a name follows the scale it is shown at',
     /year \? dtLateYear\(e\.name, yr\) : dtLateDays\(e\.name, ym\)/.test(page));
@@ -512,6 +525,185 @@ function grab(src, name) {
      would point at rows that are not there. */
   check('the month\u2019s own controls are not offered in the year view',
     page.indexOf('+ (year ? \'\' : (\'<label class="dt-chk"') > -1);
+}
+
+/* ---- opening a month from the year ----
+   Twelve rows is the whole point of the year view, until one of them raises a
+   question - and then the answer is that month's days, under the row that
+   prompted it rather than a page away. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
+  const body = grab(APP, 'dtYearBody');
+  check('a month in the year view can be opened and closed',
+    /var DT_OPEN = \{\};/.test(APP) && body.indexOf('data-dt-open="') > -1);
+  check('the turn says which way it goes',
+    /open \? '\u25be' : '\u25b8'/.test(body)
+    && /open \? 'Close this month' : 'Open this month/.test(body));
+  check('and its days are drawn under it, by the same builder a month uses',
+    /if\(open\)\{[\s\S]{0,260}dtDayRow\(DT_WHO, day, f, 'dt-sub'\)/.test(body));
+  check('set in from the month they belong to, so twelve rows still read as twelve',
+    /tr\.dt-sub \.dt-day\{ padding-left:26px/.test(APP));
+  /* The row is the handle, not a six-pixel chevron - but a link inside it is
+     still a link. */
+  check('the whole row opens it, except where the press was on a door',
+    /tr\.onclick = function\(e\)\{/.test(wire)
+    && wire.indexOf("e.target.closest('a')") > -1
+    && /tr\.dt-mrow\{ cursor:pointer; \}/.test(APP));
+  check('more than one month can be open at once',
+    /if\(DT_OPEN\[k\]\) delete DT_OPEN\[k\]; else DT_OPEN\[k\] = true;/.test(wire));
+  /* What was open belonged to the year that was on the page. */
+  check('another year starts closed, and so does coming back to months',
+    /DT_OPEN = \{\};                  \/\/ another year/.test(wire)
+    && /DT_YEAR = ym\.slice\(0, 4\);\s*\}\s*DT_OPEN = \{\};/.test(wire));
+}
+
+/* ---- Sunday ----
+   Nobody's working day here. A Sunday only ever has a row because somebody
+   opened a laptop on one, and then it sits in the middle of a week with no
+   shift to measure against and a share of the computer's time that is a share
+   of nothing. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
+  const shown = grab(APP, 'dtDaysShown');
+  check('Sundays can be hidden, and are by default',
+    /var DT_NOSUN = dtPref\('nosun', true\);/.test(APP)
+    && page.indexOf('id="dtSunChk"') > -1);
+  check('at either distance, a year of months being counted the same way',
+    !/\(year \? '' : \([\s\S]{0,400}dtSunChk/.test(page));
+  check('the filter is one function, so nothing reads a different set of days',
+    /return DT_NOSUN \? d\.filter\(function\(x\)\{ return !dtIsSunday\(x\); \}\) : d;/.test(shown)
+    && page.indexOf('var days = dtDaysShown(ym);') > -1
+    && /dtTally\(DT_WHO, dtDaysShown\(ym\)\)/.test(APP)
+    && /dtDaysShown\(ym\)\.forEach/.test(APP));
+  /* The thing that would make it a lie: a row taken off the page but left in
+     the figure above it. */
+  check('a hidden Sunday is out of the totals too, so the column adds up',
+    /su\.onchange = function\(\)\{[\s\S]{0,220}renderDeskTimePage\(\);/.test(wire)
+    && page.indexOf('Sundays are out, of the rows and of the figures both') > -1);
+  check('and the count beside a name counts the same days',
+    /function dtLateDays\(name, ym\)\{[\s\S]{0,120}dtDaysShown\(ym\)\.forEach/.test(APP));
+  check('it is remembered in this browser, like the others',
+    /localStorage\.setItem\('hw\.dt\.nosun'/.test(APP));
+}
+
+/* ---- the month keeps its dates ----
+   A month that stopped at today read as a month that ended there: the thirtieth
+   and the thirty-first were simply not on it, and a reader looking for a date
+   could not tell a day with nothing on it from a day the page had not reached. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const days = grab(APP, 'dtDays');
+  const blank = grab(APP, 'dtBlankRow');
+  check('every day of the month is a day, the ones still ahead included',
+    !/if\(iso > todayISO_full\) break;/.test(days)
+    && /for\(var d = 1; d <= last; d\+\+\) out\.push/.test(days));
+  check('a date with nothing against it is drawn quietly rather than dropped',
+    /class="dt-none"/.test(blank) && /tr\.dt-none td\{ color:var\(--ink-soft\)/.test(APP));
+  check('and a day still ahead says so, rather than reading as a day with nothing on it',
+    /day > todayISO_full \? 'not yet' : '\u2014'/.test(blank));
+  /* It is a date, not a reading: nothing it does should move a figure. */
+  check('it goes into no total and makes no month look fuller',
+    /if\(!f\)\{ rows \+= dtBlankRow\(day\); return; \}/.test(page));
+  /* The week boundary is read off the day before anything is drawn, so a date
+     with nothing against it lands in its own week like any other. */
+  check('but it belongs to its week, so the blocks still hold the month',
+    /var mon = mondayOf\(day\);[\s\S]{0,8}if\(wkFrom && mon !== wkFrom\) closeWeek\(\);[\s\S]{0,8}if\(!wkFrom\){ openWeek\(\); wkFrom = mon; }[\s\S]{0,8}var f = dtFacts/.test(page));
+  check('and a month opened from the year keeps its dates the same way',
+    /rows \+= f \? dtDayRow\(DT_WHO, day, f, 'dt-sub'\) : dtBlankRow\(day\);/.test(APP));
+}
+
+/* ---- more computer than day ----
+   The share was capped at a hundred, and a hundred is not the top of this. A day
+   from home is credited nine hours whatever happens on it, and the computer can
+   be in use for longer; reading that back as "100%" hid the one thing worth
+   knowing about such a day. */
+{
+  const use = grab(APP, 'dtUse');
+  const bar = grab(APP, 'dtUseBar');
+  check('a day with more computer in it than the record credits says so',
+    !/Math\.min\(100, Math\.round/.test(use)
+    && /return Math\.max\(0, Math\.round\(desk \/ work \* 100\)\);/.test(use));
+  check('the bar can only be full, so the number carries the rest',
+    /var fill = Math\.min\(100, pct\);/.test(bar)
+    && /width:' \+ fill \+ '%/.test(bar)
+    && /<b>' \+ pct \+ '%<\/b>/.test(bar));
+  check('and it is a band of its own, green rather than a warning',
+    /pct > 100 \? 'over'/.test(bar)
+    && /\.dt-use\.over \.dt-use-bar > span\{ background:#2E7D5B; \}/.test(APP));
+  check('which says what it means, since a share over the whole needs saying',
+    /longer than the day '/.test(bar) && /this record credits/.test(bar));
+}
+
+/* ---- the time actually inside ----
+   Hours marked is the first punch to the last, and it counts an afternoon spent
+   out of the building as time at work. The card reader knows better: every
+   departure and every return is a punch. For somebody in and out all day the
+   two figures are hours apart, and which of them the computer's time should be
+   a share of depends on the job - so it is asked rather than assumed. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
+  const facts = grab(APP, 'dtFacts');
+  const dayrow = grab(APP, 'dtDayRow');
+  const inside = grab(APP, 'dtInside');
+  const api = new Function(grab(APP, 'toMin') + '\n' + inside + '\nreturn dtInside;')();
+
+  check('there is a column for the time actually inside',
+    page.indexOf("'Total in time</th>'") > -1
+    && page.indexOf('less the time spent out of the building') > -1);
+  /* The arithmetic, against punches of the shape this office's reader writes. */
+  check('a day never left is the whole day',
+    api('09:00 18:00') === 540);
+  check('a trip out is taken off',
+    api('09:00 13:00 14:00 18:00') === 480);
+  check('and so is every trip, not only the first',
+    api('09:00:in(IN) 11:00:out(OUT) 11:20:in(IN) 13:00:out(OUT) 14:00:in(IN) 18:00:out(OUT)') === 460);
+  check('the labels are believed where the reader writes them',
+    api('09:00(in) 13:00(out) 14:00(in) 18:00(out)') === 480);
+  check('tapping twice on the way in is one arrival',
+    api('09:00(in) 09:02(in) 18:00(out)') === 540);
+  check('a shift across midnight is a shift, not a negative day',
+    api('22:00 06:00') === 480);
+  check('one punch measures nothing',
+    api('09:00') === null && api('') === null);
+  /* The record worked this out at import and the rest of the page uses that
+     figure; two versions of it would be one answer too many. */
+  check('the record\u2019s own duration is preferred, the punches being the fallback',
+    /var insideMin = rec\.dur \? toMin\(rec\.dur\) : null;/.test(facts)
+    && /insideMin = dtInside\(rec\.praw\);/.test(facts));
+  check('and a day with no punches falls back to the day itself',
+    /if\(insideMin === null && markedIn && markedOut\) insideMin = markedMin;/.test(facts));
+  check('where it is the same as the day it says so quietly rather than twice',
+    /f\.insideMin === markedMin \? ' dt-same' : ''/.test(dayrow)
+    && /\.dt-in\.dt-same\{ color:#AEB8C7; \}/.test(APP));
+
+  /* Which figure the share is of. */
+  check('the reader chooses what the computer\u2019s time is measured against',
+    page.indexOf('id="dtBaseSel"') > -1
+    && page.indexOf('Against hours marked') > -1
+    && page.indexOf('Against total in time') > -1);
+  check('and the column header says which, so a screenshot of it is not ambiguous',
+    /At the computer<i class="dt-vs">vs '/.test(page));
+  check('the choice is one function, so a day, a week, a month and a year agree',
+    /function dtBase\(f\)\{/.test(APP)
+    && /dtUseBar\(dtUse\(dtBase\(f\), seen && seen\.d\)\)/.test(dayrow)
+    && page.indexOf('dtUseBar(dtUse(wkBase, wkDesk))') > -1
+    && page.indexOf('dtUseBar(dtUse(moBase, moDesk))') > -1
+    && /dtUseBar\(dtUse\(t\.base, t\.desk\)\)/.test(grab(APP, 'dtSpanRow')));
+  /* A day from home has no inside time to take, and dropping it would empty the
+     column for everybody who works from home. */
+  check('a day with nothing to take falls back rather than going blank',
+    /if\(DT_BASE === 'inside'\) return \(f\.insideMin === null \? f\.markedMin : f\.insideMin\);/.test(APP));
+  check('it changes the figures, so it redraws rather than repaints',
+    /bs\.onchange = function\(\)\{[\s\S]{0,200}renderDeskTimePage\(\);/.test(wire));
+  check('and is remembered in this browser, like the rest',
+    /localStorage\.setItem\('hw\.dt\.base', DT_BASE\);/.test(APP));
 }
 
 const bad = results.filter(x => !x).length;
