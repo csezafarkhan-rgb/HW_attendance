@@ -4871,6 +4871,7 @@ function attachDismiss(el){
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
     'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames',
+    'leaveRecord',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
   /* Kept per person rather than for the office: what this account has already
@@ -14809,6 +14810,65 @@ function buildExcelBackup(){
     });
     return n;
   }
+  /* ---- the leave record, published for the messages ----
+     The first approver decides from an email, with nothing in front of them
+     but the dates somebody asked for. What they need is the year behind it:
+     what is left of each kind, what has already gone, and when.
+
+     The arithmetic for that lives here, in computeLeaveMatrix, and it is the
+     most rule-heavy thing in this file - joining dates, accrual, part days,
+     deductions, months entered by hand. Writing it a second time on the server
+     would be two versions of the truth, and one of them quietly wrong. So the
+     page publishes what it already worked out, with the date it was worked
+     out on, and the message reads it rather than recomputing it. A figure that
+     is out of date then says so instead of pretending. */
+  function leaveRecordSnapshot(){
+    var r2 = function(v){ return Math.round((+v || 0) * 100) / 100; };
+    var out = { at: new Date().toISOString(), asOf: leaveAsOfMonth || null, people: {} };
+    (ALL_EMPLOYEES || []).filter(stillHere).forEach(function(e){
+      var m;
+      try{ m = computeLeaveMatrix(e.name, { allMonths: true }); }catch(err){ return; }
+      if(!m) return;
+      /* Only the days that moved the balance, and only this year: a record is
+         read to answer "how much, and when", not to be an archive. */
+      var days = (m.detail || []).filter(function(x){ return x && x.type === 'leave'; })
+        .map(function(x){
+          return { d: x.d, k: x.kind, n: Math.round((+x.days || 0) * 100) / 100,
+                   why: String(x.note || '').slice(0, 60) };
+        }).sort(function(a, b){ return a.d < b.d ? -1 : 1; });
+      out.people[e.name] = {
+        year: m.year,
+        cl: { left: r2(m.clRem), used: r2(m.clTaken), of: r2(m.clAssign) },
+        sl: { left: r2(m.slRem), used: r2(m.slTaken), of: r2(m.slAssign) },
+        all: { left: r2(m.afterDed), used: r2(m.clTaken + m.slTaken),
+               of: r2(m.clAssign + m.slAssign) },
+        charged: r2(m.totalDed),
+        months: m.clM.map(function(cl, i){
+          return [Math.round(cl * 100) / 100, Math.round((m.slM[i] || 0) * 100) / 100];
+        }),
+        days: days
+      };
+    });
+    return out;
+  }
+  /* Written when it has changed and not oftener: this is a side effect of
+     drawing a page, and a save on every redraw would be a write a second. */
+  var LEAVE_REC_SENT = '';
+  function publishLeaveRecord(){
+    if(!(viewRole && viewRole.role === 'admin')) return Promise.resolve(false);
+    if(typeof canEdit === 'function' && !canEdit()) return Promise.resolve(false);
+    var snap;
+    try{ snap = leaveRecordSnapshot(); }catch(e){ return Promise.resolve(false); }
+    if(!snap || !Object.keys(snap.people).length) return Promise.resolve(false);
+    /* The time it was taken changes every time; what it says about anybody
+       does not. Compare the record without it. */
+    var sig = JSON.stringify(snap.people);
+    if(sig === LEAVE_REC_SENT) return Promise.resolve(false);
+    LEAVE_REC_SENT = sig;
+    return storage.set('leaveRecord', JSON.stringify(snap), true)
+      .then(function(){ return true; })
+      .catch(function(){ LEAVE_REC_SENT = ''; return false; });
+  }
   function renderDeskTimePage(){
     var box = document.getElementById('deskTimeWrap');
     if(!box) return;
@@ -20760,6 +20820,9 @@ function buildExcelBackup(){
     // Settings arrive after the first paint, and the leave figures depend on
     // them - joining dates in particular. Redraw once they are in.
     try{ if(currentPage === 'leave') renderLeavePage(); }catch(e){}
+    /* The figures the messages quote, written once the data they are made
+       from has all arrived. */
+    try{ publishLeaveRecord(); }catch(e){ console.warn('leave record', e); }
     // Manual entries are user data and are never removed automatically. This
     // used to drop any incomplete manual entry that collided with an imported
     // record, which quietly erased hand-entered attendance for staff who don't

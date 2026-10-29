@@ -350,6 +350,155 @@ const KIND_NAME = {
 function kindName(t) { return KIND_NAME[t] || String(t || 'Leave'); }
 
 /* One request, with its two buttons. `links` is {approve, reject}. */
+/* ---- the year behind one request ----
+   An approver reading this has the dates and nothing else; the decision is in
+   the year behind them. Three cards say what is left and out of what - a
+   figure on its own says nothing, since 3.08 is generous or nearly spent
+   depending - twelve boxes say what sort of year it has been, and the table
+   says exactly how much went where.
+
+   Every part of it is a table with a bgcolor, because this is read in Outlook
+   as often as anywhere else and Word's engine draws little else. */
+function leaveRecordBlock(o) {
+  const rec = o && o.record;
+  const away = (o && o.away) || [], waiting = (o && o.alsoWaiting) || [];
+  if (!rec && !away.length && !waiting.length) return '';
+  const SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const FULL = ['January','February','March','April','May','June','July','August',
+                'September','October','November','December'];
+  const n2 = v => (Math.round((Number(v) || 0) * 100) / 100);
+  const dash = '<span style="color:#C3CCDA;">&ndash;</span>';
+  const out = [];
+
+  if (rec) {
+    /* What is left, out of what, with the part already used drawn as a bar:
+       the eye takes the ratio before it reads either number. */
+    const card = (label, b, colour, tint) => {
+      const of = n2(b.of), used = n2(b.used);
+      const pct = of > 0 ? Math.max(2, Math.min(100, Math.round(used / of * 100))) : 2;
+      return '<td width="33%" valign="top" bgcolor="' + tint + '" style="background:' + tint
+        + ';border:1px solid ' + LINE + ';border-radius:10px;padding:10px 12px;">'
+        + '<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+        +   'color:' + SOFT + ';">' + esc(label) + '</div>'
+        + '<div style="margin-top:3px;"><span style="font-size:21px;font-weight:700;color:' + INK
+        +   ';">' + n2(b.left).toFixed(2) + '</span>'
+        +   '<span style="font-size:12px;color:' + SOFT + ';"> left of ' + of.toFixed(2) + '</span></div>'
+        + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        +   'style="margin-top:7px;border-collapse:collapse;"><tr>'
+        +   '<td width="' + pct + '%" bgcolor="' + colour + '" style="background:' + colour
+        +     ';height:7px;font-size:0;line-height:0;">&nbsp;</td>'
+        +   '<td bgcolor="#DCE4EF" style="background:#DCE4EF;height:7px;font-size:0;line-height:0;">'
+        +     '&nbsp;</td></tr></table>'
+        + '<div style="font-size:11px;color:' + SOFT + ';margin-top:5px;">' + used.toFixed(2)
+        +   ' used so far</div></td>';
+    };
+    out.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="5" border="0"><tr>'
+      + card('Casual', rec.cl || {}, BLUE, '#F4F8FF')
+      + card('Sick', rec.sl || {}, '#8FB4E8', '#F4F8FF')
+      + card('All leave', rec.all || {}, '#E0A93B', '#FFF9EC')
+      + '</tr></table>');
+
+    const months = Array.isArray(rec.months) ? rec.months : [];
+    const dayOf = {};
+    (rec.days || []).forEach(d => {
+      const mi = Number(String(d.d).slice(5, 7)) - 1;
+      if (!(mi >= 0 && mi < 12)) return;
+      (dayOf[mi] = dayOf[mi] || []).push(d);
+    });
+    /* The day and the month, without the year: the heading says which year
+       this is, and repeating it on every date is noise in a narrow cell. */
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const shortDay = iso => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+      return m ? (Number(m[3]) + ' ' + MON[Number(m[2]) - 1]) : String(iso || '');
+    };
+    const said = mi => (dayOf[mi] || []).map(d => shortDay(d.d)
+      + (Number(d.n) === 0.5 ? ' &frac12;' : '')).join(', ');
+
+    /* The glance. A year reads faster as twelve squares than as twelve rows. */
+    out.push(label('The year at a glance'));
+    let grid = '<table role="presentation" width="100%" cellpadding="0" cellspacing="4" border="0">';
+    for (let row = 0; row < 3; row++) {
+      grid += '<tr>';
+      for (let c = 0; c < 4; c++) {
+        const i = row * 4 + c, pair = months[i] || [0, 0], d = n2(pair[0] + pair[1]), on = d > 0;
+        grid += '<td width="25%" align="center" bgcolor="' + (on ? '#EAF2FE' : '#FAFBFD')
+          + '" style="background:' + (on ? '#EAF2FE' : '#FAFBFD') + ';border:1px solid '
+          + (on ? '#C8DCF7' : LINE) + ';border-radius:8px;padding:7px 4px;">'
+          + '<div style="font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:'
+          + SOFT + ';">' + SHORT[i] + '</div>'
+          + '<div style="font-size:16px;font-weight:700;color:' + (on ? INK : '#C9D2DE') + ';">'
+          + (on ? d : '&ndash;') + '</div>'
+          + '<div style="font-size:10px;color:' + SOFT + ';">' + (on ? said(i) : '&nbsp;')
+          + '</div></td>';
+      }
+      grid += '</tr>';
+    }
+    out.push(grid + '</table>');
+
+    /* The figures, for the months anything happened in. */
+    const td = extra => 'padding:6px 8px;border:1px solid ' + LINE + ';font-size:12.5px;' + (extra || '');
+    let rows = '', totCl = 0, totSl = 0;
+    months.forEach((pair, i) => {
+      const cl = n2(pair[0]), sl = n2(pair[1]);
+      totCl += cl; totSl += sl;
+      if (!(cl || sl)) return;
+      rows += '<tr><td style="' + td() + '"><b>' + FULL[i] + '</b></td>'
+        + '<td align="center" style="' + td() + '">' + (cl || dash) + '</td>'
+        + '<td align="center" style="' + td() + '">' + (sl || dash) + '</td>'
+        + '<td align="center" style="' + td() + '"><b>' + n2(cl + sl) + '</b></td>'
+        + '<td style="' + td('color:' + SOFT + ';') + '">' + (said(i) || '&nbsp;') + '</td></tr>';
+    });
+    if (rows) {
+      out.push(label('Month by month'));
+      const head = ['Month', 'Casual', 'Sick', 'Days', 'Which days'];
+      const foot = (c, a) => '<td bgcolor="#FFF9EC" align="' + a + '" style="background:#FFF9EC;'
+        + td() + '">' + c + '</td>';
+      out.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        + 'style="border-collapse:collapse;"><tr>'
+        + head.map((h, i) => '<td bgcolor="#F2F6FC" align="' + (i > 0 && i < 4 ? 'center' : 'left')
+            + '" style="background:#F2F6FC;padding:5px 8px;border:1px solid ' + LINE
+            + ';font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:'
+            + SOFT + ';">' + h + '</td>').join('') + '</tr>'
+        + rows
+        + '<tr>' + foot('<b>Year so far</b>', 'left') + foot('<b>' + n2(totCl) + '</b>', 'center')
+        + foot('<b>' + n2(totSl) + '</b>', 'center') + foot('<b>' + n2(totCl + totSl) + '</b>', 'center')
+        + foot('<span style="color:' + SOFT + ';">of ' + n2((rec.all || {}).of).toFixed(2)
+            + ' earned</span>', 'left') + '</tr></table>');
+    } else {
+      out.push('<div style="font-size:12.5px;color:' + SOFT + ';margin-top:8px;">'
+        + 'No leave taken this year.</div>');
+    }
+  }
+
+  /* The two things an approver cannot see from the request itself. */
+  if (away.length || waiting.length) {
+    out.push('<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#FFF7E8;'
+      + 'border:1px solid #F0DCB4;color:#6B4E12;font-size:12.5px;">'
+      + (away.length ? ('<b>' + esc(away.slice(0, 6).join(', '))
+          + (away.length > 6 ? (' and ' + (away.length - 6) + ' more') : '')
+          + (away.length === 1 ? ' is' : ' are') + ' already off then.</b>') : '')
+      + (waiting.length ? ('<div style="font-size:11.5px;margin-top:' + (away.length ? '2px' : '0')
+          + ';">Also waiting from them: '
+          + waiting.map(w => esc(w.dates + ', ' + String(w.kind).toLowerCase())).join(' &middot; ')
+          + '.</div>') : '')
+      + '</div>');
+  }
+  if (rec && o.asOf) {
+    out.push('<div style="font-size:11px;color:' + SOFT + ';margin-top:7px;">Days and dates from the '
+      + 'record. Balances as the dashboard had them on ' + esc(fmtDay(String(o.asOf).slice(0, 10)))
+      + '.</div>');
+  }
+  return '<div style="margin:12px 0 2px;padding-top:10px;border-top:1px solid ' + LINE + ';">'
+    + '<div style="font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;'
+    +   'color:' + SOFT + ';margin-bottom:7px;">Their leave record'
+    +   (rec && rec.year ? (' &middot; ' + esc(rec.year)) : '') + '</div>'
+    + out.join('') + '</div>';
+}
+function label(t) {
+  return '<div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;'
+    + 'color:' + SOFT + ';margin:14px 0 6px;">' + esc(t) + '</div>';
+}
 function requestCard(req, links, heading) {
   /* Leave can be granted in two stages: one person looks at every request first
      and says whether it should go forward, and a super admin then grants it.
@@ -374,7 +523,12 @@ function requestCard(req, links, heading) {
     +   (req.message ? ('<br>“' + esc(String(req.message).slice(0, 300)) + '”') : '')
     + '</div>'
     + recommended
-    + (links ? (button(links.approve, 'Approve', 'approve') + button(links.reject, 'Reject', 'reject')) : '')
+    /* The year behind the request, where the message carries one. A digest of
+       several people does not: it would be one of these a person. */
+    + (req.leaveRecord ? leaveRecordBlock(req.leaveRecord) : '')
+    + (links ? ('<div style="margin-top:12px;">'
+        + button(links.approve, 'Approve', 'approve')
+        + button(links.reject, 'Reject', 'reject') + '</div>') : '')
     + '</div>';
 }
 
@@ -1066,7 +1220,7 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, shiftEmail, requestCard, confirmPage, resultPage, clock, minsSaid,
+  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, shiftEmail, leaveRecordBlock, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

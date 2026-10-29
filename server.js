@@ -2689,8 +2689,10 @@ async function notifyNewRequests(orgId, added) {
       const who = approverFor(route, r.empName, fallback);
       const leg = who ? legFor(settings, who, fallback, ccMap) : finalLeg;
       if (!leg.to.length) continue;
+      /* The year behind this one request, for whoever has to decide it. */
+      const withRecord = Object.assign({}, r, { leaveRecord: await leaveRecordFor(orgId, r.empName, r) });
       const mail = mailer.requestEmail({
-        orgName: orgNameOf(kv.companyInfo), req: r,
+        orgName: orgNameOf(kv.companyInfo), req: withRecord,
         links: await requestLinks(orgId, r.id, who ? 1 : 0, who),
         siteUrl: mailer.baseUrl(),
         heading: who ? 'A request for you to look at first'
@@ -2882,6 +2884,75 @@ function legFor(settings, who, fallback, ccMap) {
    correct, and the one person certain to know whether it is right is the one
    it is about. Anybody with no account, or no address on it, is simply not
    there to copy. */
+/* ---- the year behind one request ----
+   An approver deciding from an email has the dates and nothing else. What
+   turns that into a decision is the year behind it: what is left of each kind
+   of leave, what has gone already, and when.
+
+   The arithmetic belongs to the dashboard - joining dates, accrual, part days,
+   deductions, months entered by hand - and writing it again here would be two
+   versions of the truth. So the page publishes what it worked out and this
+   reads it, with the date it was taken, which is why the message says "as the
+   dashboard had them". The days around the request are worked out here,
+   because they are a question about everybody rather than about one person. */
+async function leaveRecordFor(orgId, empName, req) {
+  try {
+    const kv = await sharedKeys(orgId, ['leaveRecord', 'leaveRequests', 'overrides',
+                                        'halfDays', 'empNames']);
+    const snap = parseJson(kv.leaveRecord) || {};
+    const mine = (snap.people || {})[empName] || null;
+    const shown = parseJson(kv.empNames) || {};
+    const requests = parseJson(kv.leaveRequests) || [];
+    const overrides = parseJson(kv.overrides) || {};
+    const halfDays = parseJson(kv.halfDays) || {};
+    /* The days this request covers, so the rest can be said about them. */
+    const days = [];
+    if (req && DAY_RE.test(String(req.dateFrom || ''))) {
+      const to = DAY_RE.test(String(req.dateTo || '')) ? req.dateTo : req.dateFrom;
+      for (let d = new Date(req.dateFrom + 'T00:00:00Z'); days.length < 60; d.setUTCDate(d.getUTCDate() + 1)) {
+        const iso = d.toISOString().slice(0, 10);
+        days.push(iso);
+        if (iso >= to) break;
+      }
+    }
+    /* Anybody else already away on one of those days - the fact most likely to
+       turn a yes into a no, and the one nobody can see from the request. */
+    const away = {};
+    days.forEach(day => {
+      Object.keys(overrides).forEach(k => {
+        const v = overrides[k];
+        if (!v || v.cat !== 'LEAVE') return;
+        const name = k.slice(0, k.lastIndexOf('|'));
+        if (k.slice(k.lastIndexOf('|') + 1) === day && name !== empName) away[name] = true;
+      });
+      Object.keys(halfDays).forEach(k => {
+        const name = k.slice(0, k.lastIndexOf('|'));
+        if (k.slice(k.lastIndexOf('|') + 1) === day && name !== empName) away[name] = true;
+      });
+      requests.forEach(r => {
+        if (!r || r.status !== 'approved' || r.empName === empName) return;
+        if (r.leaveType === 'PUNCH' || r.leaveType === 'WFH' || r.leaveType === 'VISIT') return;
+        if (String(r.dateFrom) <= day && String(r.dateTo || r.dateFrom) >= day) away[r.empName] = true;
+      });
+    });
+    /* And anything else of their own still waiting, which an approver saying
+       yes to this one should know about. */
+    const alsoWaiting = requests.filter(r => r && r.empName === empName && r.status === 'pending'
+      && (!req || r.id !== req.id) && r.leaveType !== 'PUNCH')
+      .slice(0, 4)
+      .map(r => ({ dates: mailer.dateRange(r.dateFrom, r.dateTo),
+                   kind: mailer.kindName(r.leaveType), raised: String(r.createdAt || '').slice(0, 10) }));
+    if (!mine && !Object.keys(away).length && !alsoWaiting.length) return null;
+    return {
+      record: mine, asOf: snap.at || '', 
+      away: Object.keys(away).map(n => shown[n] || n).sort(),
+      alsoWaiting
+    };
+  } catch (e) {
+    console.error('leave record for the message failed:', e && e.message);
+    return null;                        // a message without it is better than none
+  }
+}
 /* The same, but only where the message is about one person. A digest naming
    several people is a different thing: copying somebody on it would hand them
    everybody else's leave, which is not theirs to read. So a group of one is
@@ -2952,7 +3023,8 @@ async function notifyRecommended(orgId, req) {
     if (!claimed.rows.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
     const mail = mailer.requestEmail({
-      orgName: orgNameOf(kv.companyInfo), req,
+      orgName: orgNameOf(kv.companyInfo),
+      req: Object.assign({}, req, { leaveRecord: await leaveRecordFor(orgId, req.empName, req) }),
       links: linksFor({ k: 'req', org: orgId, id: req.id, s: 2 }),
       siteUrl: mailer.baseUrl(),
       heading: 'Approved by ' + (req.recommendedBy || 'the first approver') + ', waiting on you',
