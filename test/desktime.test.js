@@ -159,7 +159,7 @@ function grab(src, name) {
   check('the two readings of a day are shown side by side, both times and the hours',
     /Marked in<\/th><th>DeskTime in/.test(page)
     && /Marked out<\/th><th>DeskTime out/.test(page)
-    && /Hours marked<\/th>[\s\S]{0,220}DeskTime time/.test(page));
+    && /Hours marked<\/th>[\s\S]{0,1200}DeskTime time<\/th>/.test(page));
   check('the figure DeskTime leads with is shown, and said to be the one it leads with',
     page.indexOf("class=\"dt-desk\"") > -1 && page.indexOf('seen.d') > -1
     && page.indexOf('the computer was actually in use') > -1);
@@ -179,16 +179,20 @@ function grab(src, name) {
      leaving was a third: it measures the same thing the record already
      measures, and worse - it is the machine's day, not the person's. */
   check('the day is measured by the record and by the computer, and nothing else',
-    /<th class="dt-sep">Hours marked<\/th>/.test(page)
-    && /<th>DeskTime time<\/th>/.test(page)
+    page.indexOf("Hours marked</th>'") > -1
+    && page.indexOf("DeskTime time</th>'") > -1
     && page.indexOf('At work') === -1
     && page.indexOf('Productive') === -1 && page.indexOf('Idle') === -1);
   check('and the group above them counts them and the share they come to',
     /colspan="4">How long/.test(page)
     && page.indexOf('At the computer<i class="dt-vs">') > -1);
-  check('each is explained, because none of them is obvious',
-    page.indexOf('this record’s own day, in to out') > -1
-    && page.indexOf('how long the computer was actually in use') > -1);
+  /* The block of prose under the table is gone - it was four hundred words
+     nobody read. What it said is kept on the headings it was about, where a
+     reader meets it at the moment the column raises the question. */
+  check('each is explained, on the heading it is about',
+    page.indexOf('This record’s own day, in to out') > -1
+    && page.indexOf('How long the computer was actually in use') > -1
+    && page.indexOf('.dt-note') === -1);
   /* Fourteen columns are four questions. */
   check('the columns are grouped under what they answer',
     /The day[\s\S]{0,300}Arriving[\s\S]{0,220}Leaving[\s\S]{0,240}How long/.test(page));
@@ -295,8 +299,9 @@ function grab(src, name) {
     /var DT_GAP = 15;/.test(APP) && facts.indexOf('gIn > DT_GAP') > -1
     && /tr\.dt-off\{ background:#FFF7E8/.test(APP));
   /* The thing this must not become: a machine for accusing people. */
-  check('the page says plainly what it is not',
-    page.indexOf('not which of them is right') > -1);
+  check('the page says plainly what it is not, on the column that invites it',
+    page.indexOf('which of them is right') > -1
+    && page.indexOf('a question rather than a finding') > -1);
   check('and carries the count of days worth asking about beside each name',
     /function dtLateDays\(name, ym\)/.test(APP) && page.indexOf("' to look at'") > -1);
   check('nothing stored yet reads as nothing stored, not as nobody being here',
@@ -455,7 +460,7 @@ function grab(src, name) {
     /\+ dtDayLink\(day, name\)/.test(dayrow)
     && /seen \? \('<i class="dt-shotsep">/.test(dayrow));
   check('and the page says plainly why neither picture is here',
-    page.indexOf('that sign-in, so neither can be drawn here') > -1);
+    page.indexOf('so neither can be drawn here') > -1);
 }
 
 /* ---- the week as a block, and the two things a reader can put away ---- */
@@ -583,7 +588,8 @@ function grab(src, name) {
      the figure above it. */
   check('a hidden Sunday is out of the totals too, so the column adds up',
     /su\.onchange = function\(\)\{[\s\S]{0,220}renderDeskTimePage\(\);/.test(wire)
-    && page.indexOf('Sundays are out, of the rows and of the figures both') > -1);
+    && page.indexOf('Out of the rows and ') > -1
+    && page.indexOf('out of the figures both') > -1);
   check('and the count beside a name counts the same days',
     /function dtLateDays\(name, ym\)\{[\s\S]{0,120}dtDaysShown\(ym\)\.forEach/.test(APP));
   check('it is remembered in this browser, like the others',
@@ -656,7 +662,7 @@ function grab(src, name) {
 
   check('there is a column for the time actually inside',
     page.indexOf("'Total in time</th>'") > -1
-    && page.indexOf('less the time spent out of the building') > -1);
+    && page.indexOf('less whatever was spent out of the building') > -1);
   /* The arithmetic, against punches of the shape this office's reader writes. */
   check('a day never left is the whole day',
     api('09:00 18:00') === 540);
@@ -678,7 +684,15 @@ function grab(src, name) {
     /var insideMin = rec\.dur \? toMin\(rec\.dur\) : null;/.test(facts)
     && /insideMin = dtInside\(rec\.praw\);/.test(facts));
   check('and a day with no punches falls back to the day itself',
-    /if\(insideMin === null && markedIn && markedOut\) insideMin = markedMin;/.test(facts));
+    /if\(insideMin === null && markedMin !== null\) insideMin = markedMin;/.test(facts));
+  /* A Saturday is an assignment, not a measurement. The hours typed against one
+     were being read off DeskTime and typed back in, which made the share come
+     out at a hundred per cent every Saturday by construction - the same number
+     on both sides of the division. */
+  check('a Saturday is credited the hours it is assigned, not the hours typed on it',
+    /new Date\(day \+ 'T00:00:00'\)\.getDay\(\) === 6/.test(facts)
+    && /var owed = owedMinutes\(name, day\);/.test(facts)
+    && /if\(owed > 0\) worked = owed;/.test(facts));
   check('where it is the same as the day it says so quietly rather than twice',
     /f\.insideMin === markedMin \? ' dt-same' : ''/.test(dayrow)
     && /\.dt-in\.dt-same\{ color:#AEB8C7; \}/.test(APP));

@@ -3075,9 +3075,11 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-table-cmp{ border-collapse:collapse; font-size:12px; background:var(--panel);
   border:1px solid var(--line); border-radius:10px; overflow:hidden; }
 .dt-table-cmp th{ background:#F2F5FA; color:var(--ink-soft); font-size:10.5px;
-  text-transform:uppercase; letter-spacing:.04em; padding:8px 10px; text-align:left;
+  text-transform:uppercase; letter-spacing:.04em; padding:6px 10px; text-align:left;
   border-bottom:1px solid var(--line-dk); white-space:nowrap; }
-.dt-table-cmp td{ padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+/* Thirty of these to a month and the month should fit on a screen: the rows
+   are as tall as their text and no taller. */
+.dt-table-cmp td{ padding:3px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
 .dt-table-cmp tr:last-child td{ border-bottom:none; }
 .dt-table-cmp .dt-day{ font-weight:700; }
 .dt-table-cmp .dt-gap{ font-weight:700; color:var(--ink-soft); }
@@ -3148,7 +3150,7 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-table-cmp tbody.dt-mth, .dt-table-cmp tbody.dt-yr{ border:1px solid var(--brand); }
 /* A month seen from the year: an ordinary row, but there are only twelve of
    them, so they are given the room a day does not need. */
-.dt-table-cmp tr.dt-mrow td{ padding:9px 10px; font-size:12.5px; }
+.dt-table-cmp tr.dt-mrow td{ padding:6px 10px; font-size:12.5px; }
 .dt-table-cmp tr.dt-mrow .dt-day{ font-weight:800; }
 /* A month that can be opened says so, and the whole row is the handle. */
 .dt-table-cmp tr.dt-mrow{ cursor:pointer; }
@@ -3189,7 +3191,6 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .dt-table-cmp tr.dt-off .dt-gap{ color:#8A5A00; }
 .dt-sum{ margin-bottom:8px; font-size:12.5px; color:var(--ink-soft); }
 .dt-sum b{ color:var(--ink); }
-.dt-note{ margin-top:10px; font-size:11.5px; color:var(--ink-soft); line-height:1.6; max-width:760px; }
 /* Dark green, with the words in white over it. The pale version read as part
    of the page and was missed; this one is plainly a notice, and every piece of
    text on it clears 7:1 against the background. */
@@ -15116,6 +15117,18 @@ function buildExcelBackup(){
     var credited = false;
     if(markedMin === null){
       var worked = workedMinutes(name, day);
+      /* A Saturday is an assignment, not a measurement. The office owes four
+         hours on one - whatever that person's policy says - and an hours figure
+         typed against the day does not change what the day is worth. Those
+         figures were being read off DeskTime and typed back in, which made the
+         share of the day spent at the computer come out at a hundred per cent
+         every Saturday by construction: the same number on both sides of the
+         division. Against the four hours the day is actually owed, a Saturday
+         says something. */
+      if(new Date(day + 'T00:00:00').getDay() === 6){
+        var owed = owedMinutes(name, day);
+        if(owed > 0) worked = owed;
+      }
       if(worked > 0){ markedMin = worked; credited = true; }
     }
     /* What the record itself says the day was, so a row of dashes is read
@@ -15132,7 +15145,9 @@ function buildExcelBackup(){
        from home, a visit - it is the day itself, which is the shift credited. */
     var insideMin = rec.dur ? toMin(rec.dur) : null;
     if(insideMin === null || isNaN(insideMin)) insideMin = dtInside(rec.praw);
-    if(insideMin === null && markedIn && markedOut) insideMin = markedMin;
+    /* A credited day has no building to have been out of, so the time inside is
+       the day itself - the four hours of a Saturday included. */
+    if(insideMin === null && markedMin !== null) insideMin = markedMin;
     return { seen: seen, rec: rec, markedIn: markedIn, markedOut: markedOut,
       insideMin: insideMin,
       gIn: gIn, gOut: gOut, markedMin: markedMin, credited: credited, hol: hol,
@@ -15707,7 +15722,8 @@ function buildExcelBackup(){
       +     'Against total in time</option>'
       + '</select>'
       + '<label class="dt-chk" title="Sunday is nobody’s working day here, and a '
-      +   'laptop opened on one has no shift to measure against">'
+      +   'laptop opened on one has no shift to measure against. Out of the rows and '
+      +   'out of the figures both, so what is counted is what is shown.">'
       +   '<input type="checkbox" id="dtSunChk"' + (DT_NOSUN ? ' checked' : '') + '>'
       +   'Hide Sundays</label>'
       + '</div>'
@@ -15825,51 +15841,43 @@ function buildExcelBackup(){
              + '<tr>'
              + (year
                  ? '<th colspan="2">Month</th><th>Days</th>'
-                 : '<th>Day</th><th>The record says</th><th>Due in</th>')
-             + '<th class="dt-sep">Marked in</th><th>DeskTime in</th><th>Difference</th>'
-             + '<th class="dt-sep">Marked out</th><th>DeskTime out</th><th>Difference</th>'
-             + '<th class="dt-sep">Hours marked</th>'
-             + '<th title="Hours marked less the time spent out of the building">'
+                 : '<th>Day</th>'
+                   + '<th title="This record’s own word for the day, so a row of dashes '
+                   +   'can be read as a Sunday or a day of leave rather than as somebody '
+                   +   'missing.">The record says</th><th>Due in</th>')
+             /* The block of prose under the table is gone; what it said is kept
+                on the headings it was about, where a reader meets it at the
+                moment the column raises the question rather than four hundred
+                words later. */
+             + '<th class="dt-sep">Marked in</th><th>DeskTime in</th>'
+             + '<th title="DeskTime minus what was marked. +1h 30m means the computer '
+             +   'stirred an hour and a half after the marked time. Days more than '
+             +   DT_GAP + ' minutes apart are picked out.">Difference</th>'
+             + '<th class="dt-sep">Marked out</th><th>DeskTime out</th>'
+             + '<th title="DeskTime minus what was marked. Days more than ' + DT_GAP
+             +   ' minutes apart are picked out.">Difference</th>'
+             + '<th class="dt-sep" title="This record’s own day, in to out — or, where '
+             +   'there are no punches, the hours the day is credited (marked cr). A '
+             +   'Saturday is credited the hours it is assigned, not the hours typed '
+             +   'against it.">Hours marked</th>'
+             + '<th title="Hours marked less whatever was spent out of the building: the '
+             +   'card reader marks every departure and every return, and the time '
+             +   'between a going-out and a coming-back was not spent here.">'
              +   'Total in time</th>'
-             + '<th>DeskTime time</th>'
-             + '<th>At the computer<i class="dt-vs">vs '
+             + '<th title="How long the computer was actually in use, which is the figure '
+             +   'DeskTime leads with — not the span from arriving to leaving.">'
+             +   'DeskTime time</th>'
+             + '<th title="The computer’s time as a share of the day beside it. Under half '
+             +   'is picked out, which is a question rather than a finding: a day on the '
+             +   'floor, in a meeting or out on a visit is a working day with nothing on '
+             +   'the keyboard to show for it. This says what the two records say, not '
+             +   'which of them is right.">'
+             +   'At the computer<i class="dt-vs">vs '
              +   (DT_BASE === 'inside' ? 'total in time' : 'hours marked') + '</i></th>'
-             + '<th class="dt-sep">On DeskTime</th>'
+             + '<th class="dt-sep" title="Both are kept on DeskTime, behind that sign-in, '
+             +   'so neither can be drawn here.">On DeskTime</th>'
              + '</tr></thead>' + rows + '</table></div>'
-             + '<div class="dt-note"><b>Hours marked</b> is this record’s own day, in to out — '
-             + 'or, on a day worked from home or spent on a visit, the shift it is credited '
-             + '(marked <b>cr</b>), since there are no punches to measure. '
-             + '<b>Total in time</b> is that day less whatever was spent out of the building: '
-             + 'the card reader marks every departure and every return, and the time between '
-             + 'a going-out and a coming-back was not spent here. '
-             + '<b>DeskTime time</b> is how long the computer was actually in use, which is the '
-             + 'figure DeskTime leads with, and <b>at the computer</b> is the second as a share of '
-             + 'the first. Under half is picked out, which is a question rather than a finding: a '
-             + 'day on the floor, in a meeting or out on a visit is a working day with nothing on '
-             + 'the keyboard to show for it. '
-             + (year
-                 ? ('<b>Arriving</b> and <b>leaving</b> are averaged over the days '
-                    + 'the month had something on them, since a sum of clock times '
-                    + 'means nothing; <b>how long</b> is added up. A difference is '
-                    + 'averaged over the days both records knew about, so a month '
-                    + 'mostly untracked does not flatter itself. ')
-                 : '')
-             + (DT_NOSUN ? ('Sundays are out, of the rows and of the figures both, '
-                 + 'so what is counted is what is shown. ') : '')
-             + '<b>On DeskTime</b> is two doors. <b>Day</b> opens that person’s own '
-             + 'DeskTime page for the day — arrival and leaving, the productivity '
-             + 'bar, and which applications the hours went to, which is what this '
-             + 'record cannot say. <b>Shots</b> opens the day’s screenshots, to be '
-             + 'looked at and downloaded there. Both are kept on DeskTime, behind '
-             + 'that sign-in, so neither can be drawn here. '
-             + '<b>The record says</b> is this record’s own word for the day, so a '
-             + 'row of dashes can be read as a Sunday or a day of leave rather than as somebody '
-             + 'missing. '
-             + 'A difference is DeskTime minus what was marked: '
-             + '<b>+1h 30m</b> means the computer stirred an hour and a half after the marked time. '
-             + 'Days more than ' + DT_GAP + ' minutes apart are picked out. '
-             + 'A day away from the desk is not a day away from work — this says what the two '
-             + 'records say, not which of them is right.</div>')
+             )
           : '<div class="dt-empty">Nothing for ' + shotEsc(dispName(DT_WHO))
             + (year ? ' in this year' : ' in this month') + ', from either record.</div>');
     box.className = dtWrapClass();
