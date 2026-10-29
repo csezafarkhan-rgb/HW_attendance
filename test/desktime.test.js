@@ -146,6 +146,10 @@ function grab(src, name) {
 /* ---- the page ---- */
 {
   const page = APP.slice(APP.indexOf('function renderDeskTimePage('), APP.indexOf('function dtWire('));
+  /* What a day comes to is worked out in dtFacts and drawn in two places -
+     a month of days, and a year of months - so the reading is checked where
+     it lives rather than where it happens to be printed. */
+  const facts = grab(APP, 'dtFacts');
   check('there is a page for it, and a tab to reach it by',
     APP.indexOf('id="page-desktime"') > -1 && APP.indexOf('data-page="desktime"') > -1
     && APP.indexOf("if(currentPage === 'desktime') renderDeskTimePage();") > -1);
@@ -162,10 +166,10 @@ function grab(src, name) {
      Sunday, a day of leave, or somebody who simply does not punch. The record's
      own word for the day sits beside it so it can be read that way. */
   check('the record’s own word for the day is shown beside it',
-    page.indexOf('The record says') > -1 && page.indexOf('STATUS_LABEL[rec.st]') > -1
-    && page.indexOf('OV_CATS[ov.cat].label') > -1);
+    page.indexOf('The record says') > -1 && facts.indexOf('STATUS_LABEL[rec.st]') > -1
+    && facts.indexOf('OV_CATS[ov.cat].label') > -1);
   check('and the hour they were due in, which is what late is measured from',
-    page.indexOf('>Due in<') > -1 && /getShift\(DT_WHO, day\)/.test(page));
+    page.indexOf('>Due in<') > -1 && /getShift\(name, day\)/.test(facts));
   /* Three durations, which are three different things. Productive time and
      idle time were a fourth and a fifth, and the office found them noise: what
      it reads a day by is how long somebody was here and how much of that the
@@ -185,7 +189,7 @@ function grab(src, name) {
     && page.indexOf('how long the computer was actually in use') > -1);
   /* Fourteen columns are four questions. */
   check('the columns are grouped under what they answer',
-    /colspan="3">The day<[\s\S]{0,200}Arriving[\s\S]{0,120}Leaving[\s\S]{0,140}How long/.test(page));
+    /The day[\s\S]{0,300}Arriving[\s\S]{0,220}Leaving[\s\S]{0,240}How long/.test(page));
   check('with a hairline between the groups, in the header and down the rows',
     /\.dt-table-cmp \.dt-sep\{ border-left:1px solid/.test(APP)
     && (page.match(/class="dt-sep"/g) || []).length >= 8);
@@ -206,8 +210,8 @@ function grab(src, name) {
      looked like a day that counted for nothing - next to a share of the
      computer's time it could never be a share of. */
   check('a day with no punches is credited the shift the record credits it',
-    page.indexOf('var worked = workedMinutes(DT_WHO, day);') > -1
-    && page.indexOf('markedMin = worked; credited = true;') > -1);
+    facts.indexOf('var worked = workedMinutes(name, day);') > -1
+    && facts.indexOf('markedMin = worked; credited = true;') > -1);
   check('and says it was credited rather than measured',
     page.indexOf('class="dt-credited"') > -1
     && page.indexOf('Credited to the shift') > -1);
@@ -216,7 +220,7 @@ function grab(src, name) {
   check('which is the whole shift on a weekday and the Saturday policy on a Saturday',
     /function owedMinutes\(emp, dateStr\)[\s\S]{0,420}sp\.mode === 'WFH'\)  return Math\.round\(\(sp\.hours\|\|0\) \* 60\)/.test(APP));
   check('a day nobody worked at all is still a dash',
-    page.indexOf('if(worked > 0)') > -1);
+    facts.indexOf('if(worked > 0)') > -1);
 
   /* The thing it must not become. */
   check('and the page says it is a question rather than a finding',
@@ -251,7 +255,18 @@ function grab(src, name) {
     /mins > 0 \? '\+' : '(\\\\u2212|−)'/.test(APP));
   /* A day neither record knows about is not a row. */
   check('a day with nothing on either side is left out',
-    page.indexOf('if(!seen && !markedIn) return;') > -1);
+    facts.indexOf('if(!seen && !markedIn && !hol) return null;') > -1);
+  /* Except a company holiday, which is the answer to “why is there nothing
+     here” - and dropping the row dropped the answer. */
+  check('unless the office closed that day, which is a thing worth saying',
+    /var hol = getOfficialLeave\(day\);/.test(facts)
+    && /if\(hol\) said = hol\.name/.test(facts)
+    && /tr\.dt-hol td{ background:#F1EBFB/.test(APP));
+  check('and it is picked out in the violet the attendance record files it under',
+    /tr\.holiday-row \.date-col{background:#6E4BB8/.test(APP)
+    && /tr\.dt-hol \.dt-day{ box-shadow:inset 3px 0 0 #6E4BB8/.test(APP));
+  check('a day somebody worked through the closure says both things',
+    /hol\.name \+ \(ov && OV_CATS\[ov\.cat\]/.test(facts));
   check('a day they are still working is said so rather than left blank',
     page.indexOf("'still on'") > -1);
   check('two times that agree say so, rather than reading as an error',
@@ -265,7 +280,7 @@ function grab(src, name) {
   check('and the month says how many days the two records both know about',
     page.indexOf('both records know about') > -1);
   check('days far apart are picked out, by a measure said once',
-    /var DT_GAP = 15;/.test(APP) && page.indexOf('gIn > DT_GAP') > -1
+    /var DT_GAP = 15;/.test(APP) && facts.indexOf('gIn > DT_GAP') > -1
     && /tr\.dt-off\{ background:#FFF7E8/.test(APP));
   /* The thing this must not become: a machine for accusing people. */
   check('the page says plainly what it is not',
@@ -385,6 +400,99 @@ function grab(src, name) {
      than the one that happened to be open. */
   check('the page comes back on what was just read in',
     /DT_IMP = null;[\s\S]{0,80}DT_MONTH = null;[\s\S]{0,80}renderDeskTimePage\(\);/.test(APP));
+}
+
+/* ---- the screenshots, which are not ours to draw ----
+   DeskTime keeps the day's screenshots behind its own sign-in, so nothing here
+   can show one. A frame with a broken picture in it would be worse than a door,
+   and the door at least opens on the right day. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const link = grab(APP, 'dtShotLink');
+  check('there is a column for the day\u2019s screenshots',
+    page.indexOf('>Screenshots<') > -1 && page.indexOf('What it saw') > -1);
+  check('and it opens DeskTime on the day being read, not on today',
+    /desktime\.com\/app\/screenshots\/' \+ shotEsc\(day\)/.test(link));
+  check('in a tab of its own, with nothing of this page handed over',
+    link.indexOf('target="_blank" rel="noopener noreferrer"') > -1);
+  check('it names whose screenshots to look for, the page not taking a name',
+    /shotEsc\(dispName\(name\)\)/.test(link));
+  /* DeskTime takes no screenshots on a day it tracked nothing, and a link to an
+     empty page is a wasted press. */
+  check('only on a day DeskTime saw at all',
+    /seen \? dtShotLink\(day, DT_WHO\) : '/.test(page));
+  check('and the page says plainly why the picture is not here',
+    page.indexOf('behind that sign-in, so they cannot be drawn here') > -1);
+}
+
+/* ---- the week as a block, and the two things a reader can put away ---- */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
+  check('a week is drawn as a block, with a hairline round it',
+    page.indexOf('rows += \'<tbody class="dt-wk">\'') > -1
+    && /tbody\.dt-wk\{ border:1px solid/.test(APP));
+  check('and air between it and the next',
+    page.indexOf('dt-wkgap') > -1 && /tbody\.dt-wkgap td\{ height:9px/.test(APP));
+  /* Put away, not thrown away: the block stays drawn, the total stops. */
+  check('the week totals can be put away without losing the grouping',
+    /\.dt-noweeks \.dt-table-cmp tr\.dt-week\{ display:none; \}/.test(APP)
+    && page.indexOf('id="dtWeekChk"') > -1);
+  check('and the month\u2019s own line is a second thing to ask for',
+    page.indexOf('id="dtMonthChk"') > -1
+    && /\.dt-nomonth \.dt-table-cmp tbody\.dt-mth\{ display:none; \}/.test(APP));
+  /* Neither redraws the month: the rows are the same rows either way, and a
+     redraw would lose where the reader was. */
+  check('both are a class on the wrapper rather than a redraw',
+    /function dtWrapClass\(\)\{/.test(APP)
+    && wire.indexOf('box.className = dtWrapClass();') > -1
+    && !/dtWeekChk[\s\S]{0,320}renderDeskTimePage\(\);/.test(wire));
+  check('and each is remembered in this browser, being one reader\u2019s own',
+    /localStorage\.setItem\('hw\.dt\.weeks'/.test(APP)
+    && /localStorage\.setItem\('hw\.dt\.month'/.test(APP)
+    && /function dtPref\(key, dflt\)\{/.test(APP));
+  check('the month total is off until it is asked for, the week totals on',
+    /var DT_WEEKS = dtPref\('weeks', true\);/.test(APP)
+    && /var DT_MONTHSUM = dtPref\('month', false\);/.test(APP));
+}
+
+/* ---- the year, a month to a row ----
+   A month answers "what happened on the eighth". A year answers "which months
+   were thin", and that is twelve rows rather than three hundred. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
+  const body = grab(APP, 'dtYearBody');
+  const tally = grab(APP, 'dtTally');
+  const span = grab(APP, 'dtSpanRow');
+  check('the page can be read a year at a time',
+    /var DT_SCALE = 'month';/.test(APP) && page.indexOf('id="dtScale"') > -1);
+  check('and the picker then steps years, not months',
+    /if\(DT_SCALE === 'year'\)\{[\s\S]{0,200}DT_YEAR = String/.test(wire));
+  check('a month with nothing in it is left out, not drawn as twelve dashes',
+    /if\(!t\.days\) continue;/.test(body));
+  check('and the year\u2019s own line closes it',
+    /'All of ' \+ year/.test(body) && body.indexOf('tbody class="dt-yr"') > -1);
+  /* A sum of clock times means nothing; a sum of durations is the figure. */
+  check('arriving and leaving are averaged, how long is added up',
+    /t\.marked \+= f\.markedMin/.test(tally)
+    && /t\.inSum \+= mi/.test(tally)
+    && /function dtAvg\(sum, n\)\{ return n \? \(sum \/ n\) : null; \}/.test(APP));
+  /* Averaging a gap over days that had no gap would flatter it. */
+  check('a difference is averaged only over days both records knew about',
+    /if\(f\.gIn !== null\)\{ t\.both\+\+; t\.gInN\+\+; t\.gInSum \+= f\.gIn; \}/.test(tally));
+  check('the year reads the same columns as the month, which is the point',
+    /dt-usecell[\s\S]{0,140}dtUseBar\(dtUse\(t\.marked, t\.desk\)\)/.test(span)
+    && /Arriving'[\s\S]{0,90}on average/.test(page));
+  check('and the count beside a name follows the scale it is shown at',
+    /year \? dtLateYear\(e\.name, yr\) : dtLateDays\(e\.name, ym\)/.test(page));
+  /* The week and month controls belong to a month view; in a year view they
+     would point at rows that are not there. */
+  check('the month\u2019s own controls are not offered in the year view',
+    page.indexOf('+ (year ? \'\' : (\'<label class="dt-chk"') > -1);
 }
 
 const bad = results.filter(x => !x).length;

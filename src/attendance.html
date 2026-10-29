@@ -3116,10 +3116,43 @@ table.dash-table tr:hover td{background:#F7F9FC;}
    one. A week is the unit the office counts in, and thirty rows with
    nothing between them is a wall to scan. */
 .dt-table-cmp tr.dt-week td{ background:#EFF3F9; font-weight:700; font-size:11.5px;
-  color:var(--ink-soft); border-top:1px solid var(--line-dk);
-  border-bottom:1px solid var(--line-dk); }
+  color:var(--ink-soft); border-top:1px solid var(--line-dk); }
 .dt-table-cmp tr.dt-week .dt-day{ color:var(--ink); }
 .dt-table-cmp tr.dt-week .dt-desk{ color:var(--ink); }
+/* A week is a block, and a block reads as one when it is drawn as one: a
+   hairline round it, and air between it and the next. The line is what makes
+   the grouping survive the total row being put away. */
+.dt-table-cmp tbody.dt-wk{ border:1px solid var(--line-dk); }
+.dt-table-cmp tbody.dt-wkgap td{ height:9px; padding:0; border:none;
+  background:transparent; }
+/* Put away, not thrown away: the weeks stay drawn, the totals stop. */
+.dt-noweeks .dt-table-cmp tr.dt-week{ display:none; }
+.dt-nomonth .dt-table-cmp tbody.dt-mth{ display:none; }
+/* What the month came to, under everything, in the record's own blue rather
+   than a week's grey - it is the figure the others add up to. */
+.dt-table-cmp tbody.dt-mth, .dt-table-cmp tbody.dt-yr{ border:1px solid var(--brand); }
+/* A month seen from the year: an ordinary row, but there are only twelve of
+   them, so they are given the room a day does not need. */
+.dt-table-cmp tr.dt-mrow td{ padding:9px 10px; font-size:12.5px; }
+.dt-table-cmp tr.dt-mrow .dt-day{ font-weight:800; }
+.dt-table-cmp tr.dt-month td{ background:#E8EFFC; font-weight:800; font-size:12px;
+  color:var(--ink); border-top:1px solid var(--brand); }
+/* A company holiday, in the violet the attendance record already files them
+   under, so one page is read the way the other is. */
+.dt-table-cmp tr.dt-hol td{ background:#F1EBFB; }
+.dt-table-cmp tr.dt-hol .dt-said{ color:#5B3FA0; font-weight:700; font-style:italic; }
+.dt-table-cmp tr.dt-hol .dt-day{ box-shadow:inset 3px 0 0 #6E4BB8; }
+/* The two things a reader turns off, said as what they are rather than as a
+   button that might do something. */
+.dt-chk{ display:inline-flex; align-items:center; gap:5px; font-size:12px;
+  color:var(--ink-soft); cursor:pointer; user-select:none; padding:4px 2px; }
+.dt-chk input{ margin:0; cursor:pointer; }
+/* The day's screenshots, which live on DeskTime and are only readable there.
+   A link out, so the row the office is reading is the row it lands on. */
+.dt-shot{ color:var(--brand); font-weight:700; text-decoration:none;
+  white-space:nowrap; }
+.dt-shot:hover{ text-decoration:underline; }
+.dt-table-cmp tr.dt-week .dt-shotcell{ color:transparent; }
 /* The day the two records disagree about. Amber rather than red: it is a
    question to ask, not a finding. */
 .dt-table-cmp tr.dt-off{ background:#FFF7E8; }
@@ -14834,6 +14867,24 @@ function buildExcelBackup(){
      this does not correct one with the other - it sets them side by side and
      says how far apart they are. */
   var DT_MONTH = null, DT_WHO = null;
+  /* Whether the week totals are shown. A view preference, one reader's own, so
+     it is kept in this browser rather than written to the record. */
+  function dtPref(key, dflt){
+    try{
+      var v = localStorage.getItem('hw.dt.' + key);
+      return v === null ? dflt : (v === 'on');
+    }catch(e){ return dflt; }
+  }
+  var DT_WEEKS = dtPref('weeks', true);
+  /* A month at a time is the reading this page was built for. A year at a time
+     is a different question - not “what happened on the eighth” but “which months
+     were thin” - and it is the same four questions asked of twelve rows. */
+  var DT_SCALE = 'month';
+  var DT_YEAR = null;
+  /* The month's own line, off until it is asked for: most reading here is one
+     week against the next, and a figure for the whole month is a different
+     question. */
+  var DT_MONTHSUM = dtPref('month', false);
   var DT_GAP = 15;                       // minutes before a difference is worth a colour
   function dtMonthNow(){
     if(DT_MONTH) return DT_MONTH;
@@ -14885,6 +14936,119 @@ function buildExcelBackup(){
       + '<span class="dt-use-bar"><span style="width:' + pct + '%;"></span></span>'
       + '<b>' + pct + '%</b></span>';
   }
+  /* Where the day's screenshots are. They are DeskTime's and they stay there:
+     the images sit behind that account's own sign-in, so nothing here can draw
+     one, and the honest thing is a door rather than a frame with a broken
+     picture in it. DeskTime's page takes the day in its address, which is the
+     part that matters - it opens on the day being read rather than on today,
+     and the person's row is one press from there. */
+  function dtShotLink(day, name){
+    return '<a class="dt-shot" target="_blank" rel="noopener noreferrer" href="'
+      + 'https://desktime.com/app/screenshots/' + shotEsc(day) + '" title="'
+      + 'Opens DeskTime on ' + shotEsc(fmtDayLong(day)) + ', where '
+      + shotEsc(dispName(name)) + '’s screenshots for the day can be looked at '
+      + 'and downloaded">Look ›</a>';
+  }
+  /* Everything one day of one person comes to, worked out in one place because
+     the month view and the year view both need it and two copies of this would
+     be two answers. Null where no record knows the day at all. */
+  function dtFacts(name, day){
+    var seen = deskDay(name, day);
+    var rec = getRecord(name, day) || {};
+    var markedIn = rec['in'] || '', markedOut = rec.out || '';
+    /* A company holiday is a day the record has something to say about even
+       where neither instrument does - and it is the answer to “why is there
+       nothing here”, so dropping the row was dropping the answer. */
+    var hol = getOfficialLeave(day);
+    if(!seen && !markedIn && !hol) return null;
+    var gIn = dtGap(markedIn, seen && seen.i);
+    var gOut = dtGap(markedOut, seen && seen.o);
+    var markedMin = (markedIn && markedOut) ? dtGap(markedIn, markedOut) : null;
+    if(markedMin !== null && markedMin < 0) markedMin += 24 * 60;
+    /* A day worked from home, or out on a visit, has no punches to measure -
+       and read as a dash it looked like a day that counted for nothing, next
+       to a share of the computer's time it could never be a share of. The
+       record credits such a day its shift: the full day on a weekday, and
+       whatever that person's Saturday is set to on a Saturday. The same
+       figure is used here, from the same place the totals take it. */
+    var credited = false;
+    if(markedMin === null){
+      var worked = workedMinutes(name, day);
+      if(worked > 0){ markedMin = worked; credited = true; }
+    }
+    /* What the record itself says the day was, so a row of dashes is read
+       as a Sunday or a day of leave rather than as somebody missing. */
+    var ov = getOverride(name, day);
+    var said = (ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].label)
+      || STATUS_LABEL[rec.st] || (rec.st || '—');
+    /* The holiday is named, and where somebody worked through it the day is
+       both things and says both. */
+    if(hol) said = hol.name + (ov && OV_CATS[ov.cat] ? (' · ' + OV_CATS[ov.cat].label) : '');
+    return { seen: seen, rec: rec, markedIn: markedIn, markedOut: markedOut,
+      gIn: gIn, gOut: gOut, markedMin: markedMin, credited: credited, hol: hol,
+      said: said, due: (getShift(name, day) || '').split('-')[0] || '',
+      late: gIn !== null && gIn > DT_GAP };
+  }
+  /* A number of minutes read back as a time of day, for an average arrival. */
+  function dtClockOf(mins){
+    if(mins === null || mins === undefined || isNaN(mins)) return '';
+    var m = Math.round(mins) % (24 * 60);
+    if(m < 0) m += 24 * 60;
+    return ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2);
+  }
+  /* A run of days added up: what the record credited, what the computer was in
+     use for, and the arriving and leaving averaged rather than summed, since a
+     sum of clock times means nothing. Only days both records know about go into
+     a difference - averaging a gap over days that had no gap would flatter it. */
+  function dtTally(name, days){
+    var t = { days:0, marked:0, desk:0, both:0, apart:0, unmarked:0,
+              inN:0, inSum:0, dInN:0, dInSum:0, gInN:0, gInSum:0,
+              outN:0, outSum:0, dOutN:0, dOutSum:0, gOutN:0, gOutSum:0 };
+    days.forEach(function(day){
+      var f = dtFacts(name, day);
+      if(!f) return;
+      t.days++;
+      if(f.markedMin !== null) t.marked += f.markedMin;
+      if(f.seen && f.seen.d) t.desk += f.seen.d;
+      if(f.gIn !== null){ t.both++; t.gInN++; t.gInSum += f.gIn; }
+      if(f.late) t.apart++;
+      if(f.seen && !f.markedIn) t.unmarked++;
+      if(f.gOut !== null){ t.gOutN++; t.gOutSum += f.gOut; }
+      var mi = f.markedIn ? toMin(f.markedIn) : null;
+      if(mi !== null && !isNaN(mi)){ t.inN++; t.inSum += mi; }
+      var di = (f.seen && f.seen.i) ? toMin(f.seen.i) : null;
+      if(di !== null && !isNaN(di)){ t.dInN++; t.dInSum += di; }
+      var mo = f.markedOut ? toMin(f.markedOut) : null;
+      if(mo !== null && !isNaN(mo)){ t.outN++; t.outSum += mo; }
+      var dou = (f.seen && f.seen.o) ? toMin(f.seen.o) : null;
+      if(dou !== null && !isNaN(dou)){ t.dOutN++; t.dOutSum += dou; }
+    });
+    return t;
+  }
+  function dtAvg(sum, n){ return n ? (sum / n) : null; }
+  /* One row of a year: a month, or the year itself. The columns are the same
+     columns, which is the point - the reader is asking the same four questions
+     of a longer run. */
+  function dtSpanRow(label, t, cls, title){
+    var clock = function(v){ var c = dtClockOf(v); return c ? shotEsc(fmtTime(c)) : '—'; };
+    var gap = function(sum, n){
+      if(!n) return '';
+      return shotEsc(dtSaid(Math.round(sum / n)));
+    };
+    return '<tr class="' + cls + '"' + (title ? (' title="' + shotEsc(title) + '"') : '') + '>'
+      + '<td class="dt-day" colspan="2">' + shotEsc(label) + '</td>'
+      + '<td>' + t.days + (t.days === 1 ? ' day' : ' days') + '</td>'
+      + '<td class="dt-sep">' + clock(dtAvg(t.inSum, t.inN)) + '</td>'
+      + '<td>' + clock(dtAvg(t.dInSum, t.dInN)) + '</td>'
+      + '<td class="dt-gap">' + gap(t.gInSum, t.gInN) + '</td>'
+      + '<td class="dt-sep">' + clock(dtAvg(t.outSum, t.outN)) + '</td>'
+      + '<td>' + clock(dtAvg(t.dOutSum, t.dOutN)) + '</td>'
+      + '<td class="dt-gap">' + gap(t.gOutSum, t.gOutN) + '</td>'
+      + '<td class="dt-sep">' + (t.marked ? shotEsc(fmtMin(t.marked)) : '—') + '</td>'
+      + '<td class="dt-desk">' + (t.desk ? shotEsc(fmtMin(t.desk)) : '—') + '</td>'
+      + '<td class="dt-usecell">' + dtUseBar(dtUse(t.marked, t.desk)) + '</td>'
+      + '<td class="dt-shotcell">—</td></tr>';
+  }
   function dtSaid(mins){
     if(mins === null) return '';
     if(mins === 0) return 'same';           /* not "-0m", which reads as an error */
@@ -14901,6 +15065,15 @@ function buildExcelBackup(){
       var g = dtGap(rec['in'], seen.i);
       if(g !== null && g > DT_GAP) n++;
     });
+    return n;
+  }
+  function dtLateYear(name, year){
+    var n = 0;
+    for(var m = 1; m <= 12; m++){
+      var ym = year + '-' + ('0' + m).slice(-2);
+      if(ym > todayISO_full.slice(0, 7)) break;
+      n += dtLateDays(name, ym);
+    }
     return n;
   }
   /* ---- the leave record, published for the messages ----
@@ -15221,10 +15394,40 @@ function buildExcelBackup(){
       dtImportPanel();
     });
   }
+  /* The year, a month to a row, with what it all came to underneath. Months
+     with nothing in them are left out rather than drawn as twelve dashes: an
+     empty month is already said by its absence, and a wall of blank rows is
+     the thing this view exists to avoid. */
+  function dtYearBody(year){
+    var rows = '', shown = 0, all = { days:0, marked:0, desk:0, both:0, apart:0,
+      unmarked:0, inN:0, inSum:0, dInN:0, dInSum:0, gInN:0, gInSum:0,
+      outN:0, outSum:0, dOutN:0, dOutSum:0, gOutN:0, gOutSum:0 };
+    for(var m = 1; m <= 12; m++){
+      var ym = year + '-' + ('0' + m).slice(-2);
+      if(ym > todayISO_full.slice(0, 7)) break;
+      var t = dtTally(DT_WHO, dtDays(ym));
+      if(!t.days) continue;
+      shown++;
+      Object.keys(all).forEach(function(k){ all[k] += t[k]; });
+      rows += '<tbody class="dt-wk">'
+        + dtSpanRow(monthLabel(ym).replace(/\s+\d{4}$/, ''), t, 'dt-mrow',
+            t.apart ? (t.apart + ' day' + (t.apart === 1 ? '' : 's') + ' more than '
+              + DT_GAP + ' minutes apart') : '')
+        + '</tbody><tbody class="dt-wkgap"><tr><td colspan="13"></td></tr></tbody>';
+    }
+    if(!shown) return { rows:'', all: all, shown: 0 };
+    /* The year's own line is the whole point of the view, so it is not one of
+       the things that can be put away. */
+    rows += '<tbody class="dt-yr">'
+      + dtSpanRow('All of ' + year, all, 'dt-month', '') + '</tbody>';
+    return { rows: rows, all: all, shown: shown };
+  }
   function renderDeskTimePage(){
     var box = document.getElementById('deskTimeWrap');
     if(!box) return;
     var ym = dtMonthNow();
+    var yr = DT_YEAR || ym.slice(0, 4);
+    var year = DT_SCALE === 'year';
     var people = dtPeople();
     if(!DT_WHO || !people.some(function(e){ return e.name === DT_WHO; })) {
       DT_WHO = (people[0] || {}).name || '';
@@ -15232,14 +15435,28 @@ function buildExcelBackup(){
     var any = Object.keys(deskTime).length;
     var head = '<div class="dt-head">'
       + '<div class="month-picker" style="display:flex;align-items:center;gap:6px;">'
-      +   '<button type="button" class="month-btn" id="dtPrev" title="The month before">‹</button>'
-      +   '<b style="min-width:130px;text-align:center;">' + shotEsc(monthLabel(ym)) + '</b>'
-      +   '<button type="button" class="month-btn" id="dtNext" title="The month after"'
-      +     (ym >= todayISO_full.slice(0, 7) ? ' disabled' : '') + '>›</button>'
+      +   '<button type="button" class="month-btn" id="dtPrev" title="'
+      +     (year ? 'The year before' : 'The month before') + '">‹</button>'
+      +   '<b style="min-width:130px;text-align:center;">'
+      +     shotEsc(year ? yr : monthLabel(ym)) + '</b>'
+      +   '<button type="button" class="month-btn" id="dtNext" title="'
+      +     (year ? 'The year after' : 'The month after') + '"'
+      +     ((year ? (yr >= todayISO_full.slice(0, 4))
+                   : (ym >= todayISO_full.slice(0, 7))) ? ' disabled' : '') + '>›</button>'
       + '</div>'
+      /* The same page at a different distance. A month answers “what happened
+         on the eighth”; a year answers “which months were thin”, and that is
+         twelve rows rather than three hundred. */
+      + '<button type="button" class="month-btn" id="dtScale" title="'
+      +   (year ? 'Back to one month at a time'
+               : 'Every month of the year on one page, and what the year came to')
+      +   '">' + (year ? '← A month at a time' : 'The whole year →') + '</button>'
       + '<select id="dtWho" class="month-btn" style="min-width:180px;">'
       +   people.map(function(e){
-            var n = dtLateDays(e.name, ym);
+            /* The count beside a name is for what is on the page: a year view
+               saying “2 to look at” about one month would be a lie about the
+               year it is showing. */
+            var n = year ? dtLateYear(e.name, yr) : dtLateDays(e.name, ym);
             return '<option value="' + shotEsc(e.name) + '"' + (e.name === DT_WHO ? ' selected' : '') + '>'
               + shotEsc(dispName(e.name)) + (n ? (' · ' + n + ' to look at') : '') + '</option>';
           }).join('')
@@ -15253,22 +15470,42 @@ function buildExcelBackup(){
              + '<input type="file" id="dtImpFile" accept=".csv,text/csv" multiple '
              + 'style="display:none;"/>')
           : '')
+      /* The totals are useful until they are not - reading one person's habit
+         down a column, a line of them every six rows is in the way - and the
+         month's own line answers a different question again. Both are the
+         reader's to set, and both are said as what they are. */
+      + (year ? '' : ('<label class="dt-chk" title="What each week came to, under its days">'
+          +   '<input type="checkbox" id="dtWeekChk"' + (DT_WEEKS ? ' checked' : '') + '>'
+          +   'Week totals</label>'
+          + '<label class="dt-chk" title="One line for the whole month, under everything">'
+          +   '<input type="checkbox" id="dtMonthChk"' + (DT_MONTHSUM ? ' checked' : '') + '>'
+          +   'Month total</label>'))
       + '</div>'
       + '<div id="dtImpBox"></div>';
     if(!any){
       box.innerHTML = head + '<div class="dt-empty">Nothing from DeskTime yet. '
         + 'It arrives either from DeskTime’s own key, once the account owner has given one, '
         + 'or by being read off DeskTime and written in here.</div>';
-      dtWire(ym);
+      box.className = dtWrapClass();
+    dtWire(ym);
       return;
     }
     var rows = '', shownAny = false, both = 0, apart = 0, unmarked = 0;
+    if(year){
+      var yb = dtYearBody(yr);
+      rows = yb.rows; shownAny = yb.shown > 0;
+      both = yb.all.both; apart = yb.all.apart; unmarked = yb.all.unmarked;
+    } else {
     /* Grouped by week, the way the attendance record is read: a week is the
        unit the office counts in - hours owed, hours over - and a month of
        thirty rows with nothing between them is a wall to scan. Each week ends
        with what it came to, and a hairline closes it. */
     var days = dtDays(ym);
     var wkMarked = 0, wkDesk = 0, wkDays = 0, wkFrom = '';
+    var moMarked = 0, moDesk = 0, moDays = 0;
+    /* Each week is its own tbody, which is what the hairline is drawn round,
+       and a blank one between them is the air. */
+    var openWeek = function(){ rows += '<tbody class="dt-wk">'; };
     var closeWeek = function(){
       if(!wkDays) return;
       rows += '<tr class="dt-week"><td class="dt-day" colspan="3">Week of '
@@ -15276,50 +15513,33 @@ function buildExcelBackup(){
         + '<td class="dt-sep" colspan="6">' + wkDays + (wkDays === 1 ? ' day' : ' days') + '</td>'
         + '<td class="dt-sep">' + (wkMarked ? shotEsc(fmtMin(wkMarked)) : '—') + '</td>'
         + '<td class="dt-desk">' + (wkDesk ? shotEsc(fmtMin(wkDesk)) : '—') + '</td>'
-        + '<td class="dt-usecell">' + dtUseBar(dtUse(wkMarked, wkDesk)) + '</td></tr>';
+        + '<td class="dt-usecell">' + dtUseBar(dtUse(wkMarked, wkDesk)) + '</td>'
+        + '<td class="dt-shotcell">—</td></tr>'
+        + '</tbody><tbody class="dt-wkgap"><tr><td colspan="13"></td></tr></tbody>';
       wkMarked = 0; wkDesk = 0; wkDays = 0; wkFrom = '';
     };
     days.forEach(function(day, di){
-      var seen = deskDay(DT_WHO, day);
-      var rec = getRecord(DT_WHO, day) || {};
-      var markedIn = rec['in'] || '', markedOut = rec.out || '';
-      if(!seen && !markedIn) return;                 // a day neither record knows about
+      var f = dtFacts(DT_WHO, day);
+      if(!f) return;                                 // a day nothing knows about
       shownAny = true;
-      var gIn = dtGap(markedIn, seen && seen.i);
-      var gOut = dtGap(markedOut, seen && seen.o);
-      var markedMin = (markedIn && markedOut) ? dtGap(markedIn, markedOut) : null;
-      if(markedMin !== null && markedMin < 0) markedMin += 24 * 60;
-      /* A day worked from home, or out on a visit, has no punches to measure -
-         and read as a dash it looked like a day that counted for nothing, next
-         to a share of the computer's time it could never be a share of. The
-         record credits such a day its shift: the full day on a weekday, and
-         whatever that person's Saturday is set to on a Saturday. The same
-         figure is used here, from the same place the totals take it. */
-      var credited = false;
-      if(markedMin === null){
-        var worked = workedMinutes(DT_WHO, day);
-        if(worked > 0){ markedMin = worked; credited = true; }
-      }
-      var late = gIn !== null && gIn > DT_GAP;
+      var seen = f.seen, markedIn = f.markedIn, markedOut = f.markedOut;
+      var gIn = f.gIn, gOut = f.gOut, markedMin = f.markedMin;
+      var credited = f.credited, hol = f.hol, said = f.said, due = f.due, late = f.late;
       if(gIn !== null) both++;
       if(late) apart++;
       /* A day DeskTime saw and the record did not: somebody at a computer with
          no mark against them at all. Not a difference - there is nothing to
          take a difference from - and worth its own count. */
       if(seen && !markedIn) unmarked++;
-      /* What the record itself says the day was, so a row of dashes is read
-         as a Sunday or a day of leave rather than as somebody missing. */
-      var ov = getOverride(DT_WHO, day);
-      var said = (ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].label)
-        || STATUS_LABEL[rec.st] || (rec.st || '—');
-      var due = (getShift(DT_WHO, day) || '').split('-')[0] || '';
       /* A week ends where the next day belongs to another one. Sunday used to
          close it, which only worked on a Sunday that had a row of its own - and
          Sunday is nobody’s working day here, so there was almost never a row to
          close on and a month came out as one long week. */
       var mon = mondayOf(day);
       if(wkFrom && mon !== wkFrom) closeWeek();
-      rows += '<tr' + (late ? ' class="dt-off"' : '') + '>'
+      if(!wkFrom) openWeek();
+      rows += '<tr' + (hol ? ' class="dt-hol"' : (late ? ' class="dt-off"' : ''))
+        + (hol && hol.note ? (' title="' + shotEsc(hol.note) + '"') : '') + '>'
         + '<td class="dt-day">' + shotEsc(fmtDayLong(day)) + '</td>'
         + '<td class="dt-said">' + shotEsc(said) + '</td>'
         + '<td>' + (due ? shotEsc(fmtTime(due)) : '—') + '</td>'
@@ -15340,14 +15560,29 @@ function buildExcelBackup(){
            this does not, and it is the number the office reads. */
         + '<td class="dt-desk">' + ((seen && seen.d) ? shotEsc(fmtMin(seen.d)) : '—') + '</td>'
         + '<td class="dt-usecell">' + dtUseBar(dtUse(markedMin, seen && seen.d)) + '</td>'
+        /* Only where DeskTime saw the day at all: it takes no screenshots on a
+           day it tracked nothing, and a link to an empty page is a wasted press. */
+        + '<td class="dt-shotcell">' + (seen ? dtShotLink(day, DT_WHO) : '—') + '</td>'
         + '</tr>';
-      /* What the week came to, carried along as its days go by. */
+      /* What the week came to, carried along as its days go by - and the month
+         with it, since it is the same addition over a longer run. */
       if(!wkFrom) wkFrom = mon;
       wkDays++;
-      if(markedMin !== null) wkMarked += markedMin;
-      if(seen && seen.d) wkDesk += seen.d;
+      moDays++;
+      if(markedMin !== null){ wkMarked += markedMin; moMarked += markedMin; }
+      if(seen && seen.d){ wkDesk += seen.d; moDesk += seen.d; }
     });
     closeWeek();                       // the last week, which nothing follows
+    if(moDays){
+      rows += '<tbody class="dt-mth"><tr class="dt-month">'
+        + '<td class="dt-day" colspan="3">All of ' + shotEsc(monthLabel(ym)) + '</td>'
+        + '<td class="dt-sep" colspan="6">' + moDays + (moDays === 1 ? ' day' : ' days') + '</td>'
+        + '<td class="dt-sep">' + (moMarked ? shotEsc(fmtMin(moMarked)) : '—') + '</td>'
+        + '<td class="dt-desk">' + (moDesk ? shotEsc(fmtMin(moDesk)) : '—') + '</td>'
+        + '<td class="dt-usecell">' + dtUseBar(dtUse(moMarked, moDesk)) + '</td>'
+        + '<td class="dt-shotcell">—</td></tr></tbody>';
+    }
+    }
     box.innerHTML = head
       + (shownAny
           ? ('<div class="dt-sum">' + both + (both === 1 ? ' day' : ' days')
@@ -15359,17 +15594,24 @@ function buildExcelBackup(){
                 day was, when it started, when it ended, how long it ran. The
                 header says so and a hairline keeps them apart. */
              + '<div class="dt-scroll"><table class="dt-table-cmp"><thead>'
-             + '<tr class="dt-grp"><th colspan="3">The day</th>'
-             +   '<th class="dt-sep" colspan="3">Arriving</th>'
-             +   '<th class="dt-sep" colspan="3">Leaving</th>'
-             +   '<th class="dt-sep" colspan="3">How long</th></tr>'
+             + '<tr class="dt-grp"><th colspan="3">'
+             +   (year ? 'The month' : 'The day') + '</th>'
+             +   '<th class="dt-sep" colspan="3">Arriving'
+             +     (year ? ', on average' : '') + '</th>'
+             +   '<th class="dt-sep" colspan="3">Leaving'
+             +     (year ? ', on average' : '') + '</th>'
+             +   '<th class="dt-sep" colspan="3">How long</th>'
+             +   '<th class="dt-sep">What it saw</th></tr>'
              + '<tr>'
-             + '<th>Day</th><th>The record says</th><th>Due in</th>'
+             + (year
+                 ? '<th colspan="2">Month</th><th>Days</th>'
+                 : '<th>Day</th><th>The record says</th><th>Due in</th>')
              + '<th class="dt-sep">Marked in</th><th>DeskTime in</th><th>Difference</th>'
              + '<th class="dt-sep">Marked out</th><th>DeskTime out</th><th>Difference</th>'
              + '<th class="dt-sep">Hours marked</th><th>DeskTime time</th>'
              + '<th>At the computer</th>'
-             + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+             + '<th class="dt-sep">Screenshots</th>'
+             + '</tr></thead>' + rows + '</table></div>'
              + '<div class="dt-note"><b>Hours marked</b> is this record’s own day, in to out — '
              + 'or, on a day worked from home or spent on a visit, the shift it is credited '
              + '(marked <b>cr</b>), since there are no punches to measure. '
@@ -15378,6 +15620,16 @@ function buildExcelBackup(){
              + 'the first. Under half is picked out, which is a question rather than a finding: a '
              + 'day on the floor, in a meeting or out on a visit is a working day with nothing on '
              + 'the keyboard to show for it. '
+             + (year
+                 ? ('<b>Arriving</b> and <b>leaving</b> are averaged over the days '
+                    + 'the month had something on them, since a sum of clock times '
+                    + 'means nothing; <b>how long</b> is added up. A difference is '
+                    + 'averaged over the days both records knew about, so a month '
+                    + 'mostly untracked does not flatter itself. ')
+                 : '')
+             + '<b>Screenshots</b> opens DeskTime on that day, where the day’s '
+             + 'screenshots can be looked at and downloaded; they are kept on '
+             + 'DeskTime, behind that sign-in, so they cannot be drawn here. '
              + '<b>The record says</b> is this record’s own word for the day, so a '
              + 'row of dashes can be read as a Sunday or a day of leave rather than as somebody '
              + 'missing. '
@@ -15387,13 +15639,23 @@ function buildExcelBackup(){
              + 'A day away from the desk is not a day away from work — this says what the two '
              + 'records say, not which of them is right.</div>')
           : '<div class="dt-empty">Nothing for ' + shotEsc(dispName(DT_WHO))
-            + ' in this month, from either record.</div>');
+            + (year ? ' in this year' : ' in this month') + ', from either record.</div>');
+    box.className = dtWrapClass();
     dtWire(ym);
+  }
+  function dtWrapClass(){
+    return 'dt-wrap' + (DT_WEEKS ? '' : ' dt-noweeks')
+                     + (DT_MONTHSUM ? '' : ' dt-nomonth');
   }
   function dtWire(ym){
     var prev = document.getElementById('dtPrev'), next = document.getElementById('dtNext');
     var who = document.getElementById('dtWho');
     var step = function(by){
+      if(DT_SCALE === 'year'){
+        DT_YEAR = String((+(DT_YEAR || ym.slice(0, 4))) + by);
+        renderDeskTimePage();
+        return;
+      }
       var y = +ym.slice(0, 4), m = +ym.slice(5, 7) + by;
       if(m < 1){ m = 12; y--; } else if(m > 12){ m = 1; y++; }
       DT_MONTH = y + '-' + ('0' + m).slice(-2);
@@ -15402,11 +15664,44 @@ function buildExcelBackup(){
     if(prev) prev.onclick = function(){ step(-1); };
     if(next) next.onclick = function(){ if(!next.disabled) step(1); };
     if(who) who.onchange = function(){ DT_WHO = who.value; renderDeskTimePage(); };
+    var sc = document.getElementById('dtScale');
+    if(sc) sc.onclick = function(){
+      if(DT_SCALE === 'year'){
+        DT_SCALE = 'month';
+        /* Back into the year that was being read, not the one the page opened
+           on: a reader who stepped to 2025 and went back to months expects
+           2025. */
+        if(DT_YEAR && DT_YEAR !== ym.slice(0, 4)){
+          DT_MONTH = (DT_YEAR === todayISO_full.slice(0, 4))
+            ? todayISO_full.slice(0, 7) : (DT_YEAR + '-12');
+        }
+      } else {
+        DT_SCALE = 'year';
+        DT_YEAR = ym.slice(0, 4);
+      }
+      renderDeskTimePage();
+    };
     var imp = document.getElementById('dtImpBtn'), file = document.getElementById('dtImpFile');
     if(imp && file){
       imp.onclick = function(){ file.value = ''; file.click(); };
       file.onchange = function(){ dtImportFiles(file.files); };
     }
+    /* Shown or put away without redrawing the month: the rows are the same
+       rows either way, and a redraw would lose where the reader was. */
+    var wk = document.getElementById('dtWeekChk');
+    if(wk) wk.onchange = function(){
+      DT_WEEKS = wk.checked;
+      try{ localStorage.setItem('hw.dt.weeks', DT_WEEKS ? 'on' : 'off'); }catch(e){}
+      var box = document.getElementById('deskTimeWrap');
+      if(box) box.className = dtWrapClass();
+    };
+    var mo = document.getElementById('dtMonthChk');
+    if(mo) mo.onchange = function(){
+      DT_MONTHSUM = mo.checked;
+      try{ localStorage.setItem('hw.dt.month', DT_MONTHSUM ? 'on' : 'off'); }catch(e){}
+      var box = document.getElementById('deskTimeWrap');
+      if(box) box.className = dtWrapClass();
+    };
     dtImportPanel();
   }
   var WLOG_DAY = null;
