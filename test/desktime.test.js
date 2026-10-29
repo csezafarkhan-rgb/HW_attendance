@@ -467,7 +467,7 @@ function grab(src, name) {
     page.indexOf('rows += \'<tbody class="dt-wk">\'') > -1
     && /tbody\.dt-wk\{ border:1px solid/.test(APP));
   check('and air between it and the next',
-    page.indexOf('dt-wkgap') > -1 && /tbody\.dt-wkgap td\{ height:9px/.test(APP));
+    page.indexOf('dt-wkgap') > -1 && /tbody\.dt-wkgap td\{ height:4px/.test(APP));
   /* Put away, not thrown away: the block stays drawn, the total stops. */
   check('the week totals can be put away without losing the grouping',
     /\.dt-noweeks \.dt-table-cmp tr\.dt-week\{ display:none; \}/.test(APP)
