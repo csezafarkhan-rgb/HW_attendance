@@ -5604,6 +5604,11 @@ function offerImportFile(file, stamp){
   /* Show the undo offer on load, so a bad import can still be reversed after a
      refresh or on the next visit. */
   try{ setTimeout(function(){ try{ renderUndoImport(); }catch(e){} try{ renderImportHistory(); }catch(e){} }, 400); }catch(e){}
+  /* Two of these are wanted outside this closure: the employee's own sync asks
+     the same readers and wants the same notice in the same corner. Handed out
+     rather than copied, so there is one of each and they cannot drift apart.
+     They were simply unreachable from there, and calling one threw. */
+  window.HWReaders = { progress: syncProgress, ask: askHelperToFetch };
 })();
   /* ------------------------------------------------------------------
      Signatures, one per admin.
@@ -20594,19 +20599,26 @@ function buildExcelBackup(){
     };
     /* Pressed rather than ticking: the same notice the office gets, in the same
        corner, because a button that takes a minute and says nothing has been
-       pressed twice by then. The minute-by-minute check stays silent. */
-    var bar = quiet ? null : syncProgress('Reading the punch readers\u2026');
+       pressed twice by then. The minute-by-minute check stays silent.
+
+       Both of these live in the folder-watching closure and are handed out
+       from it; asked for by name they are not there at all. */
+    var RD = window.HWReaders || {};
+    var bar = (quiet || typeof RD.progress !== 'function')
+      ? null : RD.progress('Reading the punch readers\u2026');
     /* The readers answer to a helper on the office machine. Somebody marking
        their day from that machine reaches it and the readers are read; anybody
        else does not, and the knock gives up in three seconds rather than
        holding the press for the minute a reader takes. Either way what follows
        is the same: ask the server for everything it has now. */
-    /* Built this way round because askHelperToFetch can throw on the spot - a
-       blocked fetch to a local address does - and a throw there escaped the
-       whole press rather than being caught as a failed knock. */
-    var readers = quiet ? Promise.resolve(null) : new Promise(function(done){
-      try{ done(askHelperToFetch(false)); }catch(e){ done(null); }
-    }).catch(function(){ return null; });
+    /* Built this way round because the knock can throw on the spot - a blocked
+       fetch to a local address does - and a throw there escaped the whole press
+       rather than being caught as a failed knock. */
+    var readers = (quiet || typeof RD.ask !== 'function')
+      ? Promise.resolve(null)
+      : new Promise(function(done){
+          try{ done(RD.ask(false)); }catch(e){ done(null); }
+        }).catch(function(){ return null; });
     return readers.then(function(pull){
       if(bar) bar.stage((pull && pull.ok)
         ? 'Readers read \u2014 taking in what the office has\u2026'

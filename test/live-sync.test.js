@@ -80,10 +80,21 @@ function grab(src, name) {
   check('and none of the ways it declines are silent',
     fn.indexOf('Already checking') > -1
     && fn.indexOf('This page cannot reach the server from here.') > -1);
+  /* The notice and the knock live in the closure that watches the import
+     folder. Called by name from out here they are not there at all, and the
+     press died on the first of them with “syncProgress is not a function” -
+     which is why the button looked broken. They are handed out of it now, so
+     there is one of each rather than a copy that can drift. */
+  check('the notice and the knock are handed out of the closure that owns them',
+    /window\.HWReaders = { progress: syncProgress, ask: askHelperToFetch };/.test(APP));
+  check('and asked for by that name, with a working page either way',
+    /var RD = window\.HWReaders \|\| {};/.test(fn)
+    && /typeof RD\.progress !== 'function'/.test(fn)
+    && /typeof RD\.ask !== 'function'/.test(fn));
   /* askHelperToFetch can throw on the spot - a blocked fetch to a local
      address does - and that throw escaped the whole press. */
   check('a knock that throws is a failed knock, not a dead button',
-    /new Promise\(function\(done\)\{\s*\r?\n?\s*try\{ done\(askHelperToFetch\(false\)\); \}catch\(e\)\{ done\(null\); \}/.test(fn));
+    /try\{ done\(RD\.ask\(false\)\); \}catch\(e\)\{ done\(null\); \}/.test(fn));
   /* A browser holding edits of its own keeps them: adopting the server's copy
      over the top is a different path, with its own merge. */
   check('a copy with edits of its own is not overwritten',
@@ -149,15 +160,15 @@ function grab(src, name) {
 {
   const sync = grab(APP, 'empSync');
   check('a pressed sync shows the same notice the office gets',
-    /var bar = quiet \? null : syncProgress\('Reading the punch readers/.test(sync));
+    /RD\.progress\('Reading the punch readers/.test(sync));
   check('and the minute-by-minute check stays silent',
-    /empSync\(true\)/.test(APP) && /quiet \? null/.test(sync));
+    /empSync\(true\)/.test(APP) && /quiet \|\| typeof RD\.progress/.test(sync));
   /* The readers answer to a helper on the office machine. Somebody marking
      their day from that machine reaches it; anybody else does not, and the
      knock gives up rather than holding the press for the minute a reader
      takes. Either way the server is asked for everything it has. */
   check('the readers are asked first, where they can be reached at all',
-    /askHelperToFetch\(false\)/.test(sync)
+    /RD\.ask\(false\)/.test(sync)
     && /\.catch\(function\(\){ return null; }\)/.test(sync));
   check('and what follows happens either way',
     /return readers\.then\(function\(pull\){[\s\S]{0,400}hydrateDataset\(\)/.test(sync));
