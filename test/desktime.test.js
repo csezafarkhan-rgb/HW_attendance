@@ -771,6 +771,15 @@ function grab(src, name) {
      401 to every nightly run, silently, for as long as it took somebody to
      notice the figures were not moving. A key on a query string is also a key
      in every log it passes through. */
+  /* DeskTime nests the people under the company rather than listing them.
+     Read as one level, nine people came back as one item whose keys were the
+     nine employee ids, and nothing was written. */
+  check('the people are found however deep DeskTime files them',
+    /const looksLikePerson = v =>/.test(SRV)
+    && /const list = flatten\(body\.employees, 0\);/.test(SRV));
+  check('and a folder is told from a person by what is on it',
+    /v\.name !== undefined \|\| v\.employeeName !== undefined/.test(SRV)
+    && /if \(depth > 3\) return \[\];/.test(SRV));
   check('the key is sent the way DeskTime asks for it, in a header',
     /'X-API-Key': key/.test(SRV)
     && !/fetch\(DESKTIME_API \+ '\?apiKey=/.test(SRV));

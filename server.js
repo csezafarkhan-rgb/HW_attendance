@@ -4087,14 +4087,28 @@ async function pullDeskTime(orgId, day) {
   }
   if (!body || typeof body !== 'object') return { ok: false, error: 'not_json', status, said: text.slice(0, 200) };
   if (body.error) return { ok: false, error: 'desktime_said', status, said: String(body.error).slice(0, 200) };
-  const raw = body.employees;
-  const list = Array.isArray(raw) ? raw
-             : (raw && typeof raw === 'object') ? Object.keys(raw).map(k => raw[k])
-             : [];
-  /* What the first record actually carried, reported back with the result.
-     The field names here are DeskTime's and cannot be checked against a live
-     account until there is a key; this is how they get checked in one look
-     rather than by guesswork. */
+  /* DeskTime nests the people under the company rather than listing them:
+     { employees: { "<companyId>": { "<employeeId>": { name, arrivedTime, … } } } }.
+     Read as one level it found a single item whose keys were the nine employee
+     ids - nine people seen as one, and nothing written.
+
+     So it goes down until it finds things that look like people rather than
+     like more folders. A record is one with a name on it, or a time; a folder
+     is anything else, and is opened. */
+  const looksLikePerson = v => !!v && typeof v === 'object' && !Array.isArray(v)
+    && (v.name !== undefined || v.employeeName !== undefined || v.fullName !== undefined
+        || v.arrivedTime !== undefined || v.arrived !== undefined);
+  const flatten = (v, depth) => {
+    if (!v || typeof v !== 'object') return [];
+    if (looksLikePerson(v)) return [v];
+    if (depth > 3) return [];
+    const kids = Array.isArray(v) ? v : Object.keys(v).map(k => v[k]);
+    return kids.reduce((out, k) => out.concat(flatten(k, depth + 1)), []);
+  };
+  const list = flatten(body.employees, 0);
+  /* What a record actually carried, reported back with the result. The field
+     names are DeskTime's; this is how they get checked in one look rather than
+     by guesswork. */
   const fields = list[0] && typeof list[0] === 'object' ? Object.keys(list[0]).slice(0, 25) : [];
   const kv = await sharedKeys(orgId, ['deskTime', 'deskTimeNames']);
   const store = parseJson(kv.deskTime) || {};
