@@ -21,8 +21,13 @@ const listOf = name => {
   // Every shared setting the page reads through storage.get should be in the backup.
   const read = new Set([...src.matchAll(/storage\.get\('([A-Za-z_]+)'/g)].map(m => m[1]));
   const notBacked = [...read].filter(k => BACKUP_KEYS.indexOf(k) === -1);
-  check('every setting the dashboard stores is in the backup (except server status and read receipts)',
-    notBacked.every(k => k === 'deviceStatus' || k === 'notifSeenAt' || k === 'perfAlertsSeen' || k === 'alertsCleared'), notBacked);
+  /* DeskTime's own key is deliberately not among them. The backup is a file
+     the office downloads and keeps, and a key that opens somebody else's
+     account does not belong in it: losing it to a restore costs one paste,
+     and the alternative costs rather more. */
+  const NOT_BACKED = ['deviceStatus', 'notifSeenAt', 'perfAlertsSeen', 'alertsCleared', 'deskTimeKey'];
+  check('every setting the dashboard stores is in the backup (except server status, read receipts and the DeskTime key)',
+    notBacked.every(k => NOT_BACKED.indexOf(k) > -1), notBacked);
   check('the wrapper keys of an old snapshot are never restored', ['json', 'fname', 'n'].every(k => SKIP.indexOf(k) > -1), SKIP);
 
   const ls = { hw_leave_hidden: '["2026-01"]', hw_side_w: '260' };
@@ -83,8 +88,12 @@ const listOf = name => {
   const re = /storage\.set\(\s*'([A-Za-z0-9_]+)'/g;
   let m; while ((m = re.exec(app))) saved.add(m[1]);
   const missed = [...saved].filter(k => keys.indexOf(k) === -1
-    && mine.indexOf(k) === -1 && skip.indexOf(k) === -1);
-  check('every setting the page saves is one the backup takes', missed.length === 0, missed);
+    && mine.indexOf(k) === -1 && skip.indexOf(k) === -1
+    && k !== 'deskTimeKey');
+  check('every setting the page saves is one the backup takes, bar the one secret',
+    missed.length === 0, missed);
+  check('and that one is a secret, kept out on purpose',
+    keys.indexOf('deskTimeKey') === -1 && /storage\.set\('deskTimeKey'/.test(app));
   check('the mail settings among them, which it used to leave behind',
     keys.indexOf('mailSettings') > -1);
 

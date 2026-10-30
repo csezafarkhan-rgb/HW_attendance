@@ -741,6 +741,39 @@ function grab(src, name) {
     /localStorage\.setItem\('hw\.dt\.base', DT_BASE\);/.test(APP));
 }
 
+/* ---- letting DeskTime send it by itself ----
+   Exporting, waiting, downloading and reading in is four steps for a figure
+   that changes every day. The nightly pull was built and never reachable:
+   there was nowhere to put the key it needs. */
+{
+  const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
+                         APP.indexOf('function dtWire('));
+  const panel = grab(APP, 'dtAutoPanel');
+  const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
+  check('the key DeskTime needs has somewhere to be put',
+    page.indexOf('id="dtAutoBtn"') > -1
+    && panel.indexOf('id="dtKeyBox"') > -1
+    && /storage\.set\('deskTimeKey', v, true\)/.test(panel));
+  /* A key is a key: the box says one is on file, never what it is. */
+  check('and it is never read back out to be looked at',
+    /DT_AUTO = { set: !!\(res && String\(res\.value \|\| ''\)\.trim\(\)\) };/.test(wire)
+    && /type=\"password\"/.test(panel));
+  check('only the office can set it, and employees cannot read it',
+    !/EMPLOYEE_WRITABLE = \[[^\]]*deskTimeKey/.test(SRV)
+    && !/EMP_READABLE = \[[^\]]*deskTimeKey/.test(SRV));
+  check('with one on file it can be asked at once, not only at night',
+    /\/api\/desktime\/pull/.test(panel)
+    && panel.indexOf('id="dtPullBtn"') > -1);
+  check('and what comes back is drawn without a reload',
+    /loadDeskTime\(\)\.then\(function\(\){ DT_MONTH = null; renderDeskTimePage\(\); }\)/.test(panel));
+  check('a refused key says which of the ways it failed',
+    /no_key/.test(panel) && /desktime_said/.test(panel) && /unreachable/.test(panel));
+  /* The import stays: it is the way in without a key, and the key is the
+     account owner's to give. */
+  check('and reading an export in is still there beside it',
+    page.indexOf('id="dtImpBtn"') > -1);
+}
+
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);
