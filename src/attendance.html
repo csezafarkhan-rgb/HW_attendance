@@ -10088,10 +10088,7 @@ function buildExcelBackup(){
         hwConfirm({
           title: verb + ' ' + n + ' request' + (n === 1 ? '' : 's') + '?',
           message: {
-            approve:   (picked.some(function(r){ return awaitsFirstApproval(r) && iAmFirstApprover(); })
-                         ? 'The ones waiting on your first approval are passed on for the final word; '
-                           + 'nothing is written on the record for those. The rest have their days written in.'
-                         : 'Their days are written into the attendance record.'),
+            approve:   'Their days are written into the attendance record.',
             reject:    'Each is marked rejected, and the person sees that decision.',
             archive:   'They move out of this list into the Archive tab. Their decisions stay as they are.',
             unarchive: 'They come back out of the archive into the list.'
@@ -10108,16 +10105,6 @@ function buildExcelBackup(){
           picked.forEach(function(req){
             if(act === 'approve'){
               if(req.status === 'approved') return;
-              /* The same rule the single card follows: for whoever holds the
-                 first stage, a yes passes it on. Otherwise a careless
-                 Select-all would grant in one what two stages exist to stop. */
-              if(awaitsFirstApproval(req) && iAmFirstApprover()){
-                req.status = 'recommended';
-                req.recommendedBy = (viewRole && (viewRole.name || viewRole.username)) || '';
-                req.recommendedAt = new Date().toISOString();
-                req.updatedAt = req.recommendedAt;
-                return;
-              }
               req.status = 'approved';
               req.approvedBy = (viewRole && viewRole.username) || '';
               req.updatedAt = new Date().toISOString();
@@ -10480,13 +10467,9 @@ function buildExcelBackup(){
            stays beside it rather than being taken away: they may be the only
            admin the office has, and a stage nobody can get past is worse than
            one that can be stepped over in the open. */
-        var mineFirst = awaitsFirstApproval(req) && iAmFirstApprover();
         actionsHtml =
           '<div class="req-actions">'+
-            (mineFirst
-              ? '<button class="btn primary" data-act="recommend" data-id="'+req.id+'">Pass on for approval</button>'+
-                '<button class="btn ghost" data-act="approve" data-id="'+req.id+'">Approve outright</button>'
-              : '<button class="btn primary" data-act="approve" data-id="'+req.id+'">Approve</button>')+
+            '<button class="btn primary" data-act="approve" data-id="'+req.id+'">Approve</button>'+
             '<button class="btn ghost" data-act="reject" data-id="'+req.id+'">Reject</button>'+
             '<button class="btn ghost" data-act="query" data-id="'+req.id+'">Raise Query</button>'+
           '</div>';
@@ -10517,15 +10500,11 @@ function buildExcelBackup(){
         + escapeHtml(req.recommendedBy) + ':</strong> '
         + (req.recommendNote ? req.recommendNote.replace(/</g,'&lt;') : 'passed on for final approval.')
         + '</div>';
-      /* And where it has not been through that stage yet, whose stage it is -
-         so Approve on this card is a decision taken knowingly rather than one
-         that looks like the only thing on offer. */
-      if(awaitsFirstApproval(req)) noteHtml += '<div class="req-note"><strong>First approval:</strong> '
-        + (iAmFirstApprover()
-            ? 'yours to pass on. Approving outright grants it without the stage you hold.'
-            : 'waiting on ' + escapeHtml((firstApproverInfo() || {}).name
-                || (firstApproverInfo() || {}).email || 'the first approver') + '.')
-        + '</div>';
+      /* A request passed on before approval became one word is still sitting
+         at it, and it is the management's to finish. */
+      if(req.status === 'recommended') noteHtml += '<div class="req-note"><strong>Passed on:</strong> '
+        + escapeHtml(req.recommendedBy || 'a first approver')
+        + ' approved this when leave took two words. Approving here settles it.</div>';
       if(req.adminNote) noteHtml += '<div class="req-note"><strong>Admin:</strong> '+req.adminNote.replace(/</g,'&lt;')+'</div>';
       if(req.employeeReply) noteHtml += '<div class="req-note"><strong>'+escapeHtml(req.empName)+':</strong> '+req.employeeReply.replace(/</g,'&lt;')+'</div>';
       return '<div class="req-card st-'+statusCls+(reqIsArchived(req)?' is-arch':'')+'">'+
@@ -10601,42 +10580,12 @@ function buildExcelBackup(){
               saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); refreshActivePage(); });
             });
           };
-          /* Granting a request that has not been through the stage it is set
-             to go through is allowed - somebody has to be able to act when
-             the first approver is away - but it is not done by accident. */
-          if(awaitsFirstApproval(req)){
-            var fa = firstApproverInfo() || {};
-            hwConfirm({
-              title: 'Grant this without the first approval?',
-              message: dispName(req.empName) + '’s leave is set to go through '
-                     + (iAmFirstApprover() ? 'the first stage you hold'
-                                           : escapeHtml(fa.name || fa.email || 'the first approver'))
-                     + ', and has not been. Granting it here skips that stage, and the days go '
-                     + 'straight onto the record.',
-              items: [fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req)],
-              confirmLabel: 'Grant it anyway'
-            }).then(function(ok){ if(ok) grant(); });
-            return;
-          }
+          /* There was a guard here, and a second button beside Approve: a
+             request set to go through a first approver could be passed on, or
+             granted anyway with a warning that the stage was being skipped.
+             There is no stage to skip now - whoever a request reaches is
+             whoever decides it - so Approve is the only thing Approve does. */
           grant();
-        } else if(act === 'recommend'){
-          /* The first word, which decides nothing on the record: the days are
-             written only when the final word is given. */
-          hwConfirm({
-            title: 'Pass ' + dispName(req.empName) + '’s request on?',
-            message: 'It goes to a super admin for the final word. Nothing is on the record until they give it.',
-            items: [fmtDateRange(req.dateFrom, req.dateTo) + ' · ' + reqTypeText(req)],
-            input: { placeholder: 'A note for whoever gives the final word (optional)' },
-            confirmLabel: 'Pass it on'
-          }).then(function(note){
-            if(note === false) return;
-            req.status = 'recommended';
-            req.recommendedBy = (viewRole && (viewRole.name || viewRole.username)) || '';
-            req.recommendedAt = new Date().toISOString();
-            req.updatedAt = req.recommendedAt;
-            if(note) req.recommendNote = note;
-            saveLeaveRequests().then(function(){ renderRequestsPage(); renderReqBadge(); refreshActivePage(); });
-          });
         } else if(act === 'reject'){
           // In-page, not prompt(): a suppressed dialog returned null and Raise Query did nothing.
           hwConfirm({ title: 'Reject ' + dispName(req.empName) + '’s request?',
@@ -12165,15 +12114,14 @@ function buildExcelBackup(){
     var mine = String((MAIL_CFG && MAIL_CFG.you) || '').trim().toLowerCase();
     return !!mine && mine === String(fa.email).trim().toLowerCase();
   }
-  /* A request still waiting on the first stage: somebody holds that stage,
-     this person's leave goes through it, and it has not been passed on. */
-  function awaitsFirstApproval(req){
-    if(!req) return false;
-    var fa = firstApproverInfo();
-    if(!fa || !fa.email) return false;
-    if(!needsFirstApproval(req.empName)) return false;
-    return req.status === 'pending' || req.status === 'query';
-  }
+  /* There was a stage before the final one, and a request could be waiting at
+     it. There is no before any more: whoever a request reaches is whoever
+     decides it, so nothing waits on a stage and nothing is passed on.
+
+     Kept as a constant false rather than torn out, because the one thing it
+     still has to do is let a request that was passed on before the change be
+     granted now, and saying so in one place beats hunting the callers. */
+  function awaitsFirstApproval(req){ return false; }
   function renderEmailDropdown(){
     var dd = document.getElementById('emailDropdown'), d0 = dd;
     if(!dd) return;
@@ -12358,22 +12306,29 @@ function buildExcelBackup(){
           /* A first stage exists if anybody holds one, which need not be the
              office's own approver: an address named against a single person
              is a first stage for that person. */
-          var fa = MAIL_CFG.firstApprover || (anyFirstApprover() ? { name: 'A first approver' } : null);
+          var fa = MAIL_CFG.firstApprover || (anyFirstApprover() ? { name: 'their own approver' } : null);
+          /* These were numbered, one after the other, because a request went
+             through both. It goes through one now - so they are not two stages
+             but two sets of people, and which of them a request reaches is set
+             per person under Shifts. */
           return '<div class="em-note" style="padding-top:0;">'
             + (fa
-                ? ('<b>' + mailEscape(fa.name) + '</b> sees every request first, '
-                   + 'before the final approval is asked for.')
-                : ('Leave is granted in one stage. Put an address under '
-                   + '<b>First approval</b> to have somebody look at each request before it is granted.'))
+                ? ('One approval settles a request. Who gives it depends on the '
+                   + 'person: anybody with their own approver named under <b>Shifts</b> '
+                   + 'goes to them, and everybody else goes to the management. '
+                   + 'The two messages below are for those two.')
+                : ('Every request goes to the management below, and their word '
+                   + 'settles it. To send one person’s leave somewhere else '
+                   + 'instead, name their approver under <b>Shifts</b>.'))
             + '</div>'
-            /* The tab names the stage, not whoever holds it: the address can
-               change, and a tab labelled with yesterday's name is worse than
-               one labelled with what it is for. */
+            /* The tab names the people, not a number: there is no first and
+               second any more, and a tab labelled with somebody's name is worse
+               than one labelled with what it is for. */
             + '<div class="em-tabs">'
             +   '<button type="button" class="em-tab' + (fa ? ' on' : '') + '" data-lv-tab="first">'
-            +     '1. First approval</button>'
+            +     'Their own approver</button>'
             +   '<button type="button" class="em-tab' + (fa ? '' : ' on') + '" data-lv-tab="final">'
-            +     '2. Final approval</button></div>';
+            +     'The management</button></div>';
         })()
       /* ---- the first word ---- */
       + (function(){
@@ -12382,8 +12337,9 @@ function buildExcelBackup(){
              turn the two stages on. */
           var fa = MAIL_CFG.firstApprover || anyFirstApprover();
           return '<div data-lv-pane="first"' + (fa ? '' : ' style="display:none;"') + '>'
-            + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is raised. '
-            +   'Approving here does not grant the leave — it passes it on.</div>'
+            + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is '
+            +   'raised, to the approver named against that person. Their word settles it — '
+            +   'nobody is asked again.</div>'
             /* Who holds the stage is set against each person, over in the
                Shifts panel, and the words are set here - so neither screen
                ever showed one person's arrangement whole. Pick a name and
@@ -12394,7 +12350,7 @@ function buildExcelBackup(){
                asked of this pane - whose leave goes to whom - and the boxes
                below it are the fallback for everybody it does not name. */
             + '<div class="em-lab">One person at a time '
-            +   '<span>who gets the first word about them, and what they read</span></div>'
+            +   '<span>who approves their leave, and what that person reads</span></div>'
             + '<div class="em-row"><select id="emLvWho"><option value="">Pick a name…</option>'
             +   lvWhoPeople().map(function(e){
                   return '<option value="' + mailEscape(e.name) + '">'
@@ -12418,12 +12374,14 @@ function buildExcelBackup(){
       + '<div data-lv-pane="final"' + (MAIL_CFG.firstApprover ? ' style="display:none;"' : '') + '>'
       + '<div class="em-note" style="padding-top:2px;">'
       +   (MAIL_CFG.firstApprover
-            ? ('Goes out once the first approval is given, and carries the name of whoever gave it. '
-               + 'This is the word that puts the day on the record.')
-            : 'Goes out the moment a request is raised, and grants it outright.')
+            ? ('Goes to these people for anybody who has no approver of their own, '
+               + 'the moment a request is raised. Their word settles it and puts the '
+               + 'day on the record.')
+            : 'Goes out the moment a request is raised. Their word settles it.')
       + '</div>'
       + '<div class="em-lab">To <span>'
-      +   (MAIL_CFG.firstApprover ? 'who gives the final word' : 'blank: the same as the attendance message')
+      +   (MAIL_CFG.firstApprover ? 'who decides for everybody else'
+                                 : 'blank: the same as the attendance message')
       +   '</span></div>'
       + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
       +   mailEscape(((s.leave || {}).to || []).join(', ')) + '"></div>'

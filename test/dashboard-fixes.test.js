@@ -218,28 +218,33 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
      boxes can be taken for the other. */
   {
     const menu = grab('renderEmailDropdown');
-    /* The tab names the stage, not the person: whoever holds the first word can
-       change in Users, and a tab labelled with yesterday's name is worse than
-       one labelled with what it is for. */
-    check('the tabs are named for the stages, not for whoever holds them',
-      menu.indexOf('1. First approval') > -1 && menu.indexOf('2. Final approval') > -1
-        && menu.indexOf("'1. ' + mailEscape(fa.name)") === -1, menu.indexOf('1. First approval'));
-    check('the Leave tab offers a stage each, in order',
+    /* The tab names the people it reaches, not the person who happens to hold
+       it: an approver can change in Users, and a tab labelled with yesterday's
+       name is worse than one labelled with what it is for. */
+    check('the tabs are named for who decides, not for whoever holds them',
+      menu.indexOf('Their own approver') > -1 && menu.indexOf('The management') > -1
+        && menu.indexOf("mailEscape(fa.name) + '</b> sees every request") === -1,
+      menu.indexOf('Their own approver'));
+    check('the Leave tab offers one each, in order',
       menu.indexOf('data-lv-tab="first"') > -1
         && menu.indexOf('data-lv-tab="first"') < menu.indexOf('data-lv-tab="final"'),
       [menu.indexOf('data-lv-tab="first"'), menu.indexOf('data-lv-tab="final"')]);
-    check('each stage keeps its own addresses',
+    check('each keeps its own addresses',
       ['emLvFirstTo', 'emLvFirstCc', 'emLvFirstIntro'].every(id => menu.indexOf(id) > -1)
         && ['emLvTo', 'emLvCc', 'emLvIntro'].every(id => menu.indexOf(id) > -1), menu.length);
-    check('the final stage is the one folded away to begin with',
+    check('the management pane is the one folded away where approvers are named',
       /data-lv-pane="final"' \+ \(MAIL_CFG\.firstApprover \? ' style="display:none;"'/.test(menu));
-    /* Both tabs are always there. The first is where somebody is named as the
-       one who looks at every request; hide it when nobody is and there is
-       nowhere left to name them. */
-    check('both stages are offered whether or not anybody is named',
+    /* Both tabs are always there. They are no longer a first and a second:
+       one approval settles a request, and the tabs are the two sets of people
+       it can reach - the approver named against a person, or the management
+       for everybody else. Hiding either would leave nowhere to set it. */
+    check('both sets of people are offered whether or not anybody is named',
       menu.indexOf("if(!fa) return ''") === -1
-        && /Leave is granted in one stage/.test(menu)
-        && /Put an address under/.test(menu), menu.indexOf('one stage'));
+        && /Their own approver/.test(menu)
+        && /The management/.test(menu)
+        && /name their approver under/.test(menu), menu.indexOf('own approver'));
+    check('and neither is called a stage any more',
+      !/1\. First approval/.test(menu) && !/2\. Final approval/.test(menu));
 
     /* Switching between the stages must not disturb the panel's own tabs. */
     const wiring = menu.slice(menu.indexOf('data-lv-tab]'));

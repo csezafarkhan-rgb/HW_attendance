@@ -158,43 +158,41 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
   as('priya@allyconnect.in', 'priya@allyconnect.in');
   check('the account signing in as the first approver is recognised as them',
     ask('iAmFirstApprover') === true);
-  check('a pending request from a two-stage person is waiting on that stage',
-    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === true);
-  check('and a query likewise', ask('awaitsFirstApproval', req('Zafar Khan', 'query')) === true);
-  check('one already passed on is not',
-    ask('awaitsFirstApproval', req('Zafar Khan', 'recommended')) === false);
-  check('nor is one from somebody set to skip the stage',
-    ask('awaitsFirstApproval', req('Aman Gupta', 'pending')) === false);
-  check('nor an approved one', ask('awaitsFirstApproval', req('Zafar Khan', 'approved')) === false);
+  /* A request used to wait at a first stage before the management saw it.
+     There is no before any more: whoever a request reaches is whoever decides
+     it, so nothing waits on a stage, nothing is passed on, and Approve is the
+     only thing Approve does. */
+  check('nothing waits on a first stage, whoever raised it',
+    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === false
+    && ask('awaitsFirstApproval', req('Zafar Khan', 'query')) === false
+    && ask('awaitsFirstApproval', req('Aman Gupta', 'pending')) === false);
 
   as('zafar@allyconnect.in', 'priya@allyconnect.in');
   check('anybody else is not the first approver',
     ask('iAmFirstApprover') === false);
-  check('but the request is still waiting on that stage, whoever is looking',
-    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === true);
-
-  /* The whole arrangement rests on somebody being named. With nobody there,
-     nothing is waiting on a first stage and Approve means what it always did. */
-  as('zafar@allyconnect.in', '');
-  check('with no first approver named, nothing waits on a first stage',
-    ask('awaitsFirstApproval', req('Zafar Khan', 'pending')) === false);
-  check('and nobody is the first approver', ask('iAmFirstApprover') === false);
 
   /* Case and stray spaces in an address must not decide who holds a stage. */
   as('  PRIYA@AllyConnect.in ', 'priya@allyconnect.in');
-  check('the address is matched without regard to case or spacing',
+  check('the address is still matched without regard to case or spacing',
     ask('iAmFirstApprover') === true);
 
-  check('the page offers a pass-on button at all', /data-act="recommend"/.test(APP));
+  check('the page offers no pass-on button', !/data-act="recommend"/.test(APP));
+  check('and no second Approve beside the first',
+    !/Approve outright/.test(APP) && !/Pass on for approval/.test(APP));
   /* The panel's box, and the page reading it the way the server does. */
   check('the panel has a box for a per-person approver', /data-appr-emp=/.test(APP));
   check('and the page reads one out of the map the same way',
     /function ownApprover\(name\)/.test(APP));
-  check('an address is never mistaken for the word that skips the stage',
+  check('an address is never mistaken for the word that sends it to the management',
     /v !== 'final' && v\.indexOf\('@'\) > -1/.test(APP));
-  check('and the bulk approve passes on rather than grants, for them',
-    /awaitsFirstApproval\(req\) && iAmFirstApprover\(\)[\s\S]{0,200}recommended/.test(APP));
-  check('the server hears about a pass-on made from the portal',
+  check('the bulk approve grants, for everybody alike',
+    !/awaitsFirstApproval\(req\) && iAmFirstApprover\(\)[\s\S]{0,200}recommended/.test(APP));
+  /* One raised before the change can still be sitting at that stage, and the
+     management still has to be able to finish it. */
+  check('a request passed on before the change is still understood',
+    /req\.status === 'recommended'/.test(APP)
+    && /approved this when leave took two words/.test(APP));
+  check('and the server still hears about one',
     /newlyRecommended\(requestsBefore, value\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8')));
 }
