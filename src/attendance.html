@@ -1032,6 +1032,8 @@ body{
 /* The unit is given a width of its own, otherwise "min/wk" being wider than
    "min" pushed its box left and the three boxes no longer shared an edge. */
 #viewOptsDropdown .mrow.num .u{ font-style:normal; display:inline-block; min-width:44px; }
+#viewOptsDropdown .opt-note{ font-size:10.5px; color:var(--ink-soft); line-height:1.45;
+  padding:2px 10px 6px; max-width:240px; }
 #viewOptsDropdown .mrow.num input{ width:52px; padding:3px 5px; border:1px solid var(--line-dk); border-radius:6px; font-size:12px; }
 #viewOptsDropdown .opt-sep{ border-top:1px solid var(--line); margin:6px 2px; }
 .month-dropdown .actions{display:flex;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);}
@@ -3855,6 +3857,15 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <label class="mrow num" title="Time away from the desk allowed for lunch"><span>Lunch</span><span><input type="number" id="lunchBreakInput" min="0" max="240" value="45"/><i class="u">min</i></span></label>
       <label class="mrow num" title="The first short break of the day"><span>Break 1</span><span><input type="number" id="break1Input" min="0" max="120" value="15"/><i class="u">min</i></span></label>
       <label class="mrow num" title="The second short break of the day"><span>Break 2</span><span><input type="number" id="break2Input" min="0" max="120" value="0"/><i class="u">min</i></span></label>
+      <div class="opt-sep"></div>
+      <!-- Set once and never again, which is what a setting is. It sat on the
+           DeskTime page as a panel that opened over the figures, where the one
+           thing anybody wants is the figures. -->
+      <label class="mrow num" title="DeskTime's own key, from desktime.com/app/api. With one on file the record asks DeskTime for itself every few minutes.">
+        <span>DeskTime key</span>
+        <span><input type="password" id="dtKeyInput" autocomplete="off" placeholder="not set"
+          style="width:120px;"/></span></label>
+      <div class="opt-note" id="dtKeySaid"></div>
       <div class="opt-sep"></div>
       <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
     </div>
@@ -11777,6 +11788,38 @@ function buildExcelBackup(){
       if(dd) dd.classList.remove('open');
       if(currentPage === 'leave') exportLeaveExcel(); else exportGridExcel();
     });
+    /* DeskTime's own key. Set once and never again, which is why it is here
+       among the settings rather than in a panel over the figures.
+
+       It is written and never read back: the box says whether one is on file,
+       not what it is. */
+    var dk = document.getElementById('dtKeyInput');
+    if(dk){
+      var dkSaid = function(t, bad){
+        var e = document.getElementById('dtKeySaid');
+        if(!e) return;
+        e.textContent = t || '';
+        e.style.color = bad ? '#B42318' : 'var(--ink-soft)';
+      };
+      storage.get('deskTimeKey', true).then(function(res){
+        var on = !!(res && String(res.value || '').trim());
+        dk.placeholder = on ? 'on file' : 'not set';
+        dkSaid(on ? 'DeskTime is asked for itself every few minutes.'
+                  : 'Without one, figures come in by Import. Get it from desktime.com/app/api.');
+      }).catch(function(){});
+      dk.addEventListener('change', function(){
+        var v = (dk.value || '').trim();
+        if(!v) return;
+        dkSaid('Saving…');
+        storage.set('deskTimeKey', v, true).then(function(){
+          dk.value = '';
+          dk.placeholder = 'on file';
+          dkSaid('Saved. DeskTime is asked for itself every few minutes from now.');
+        }).catch(function(e){
+          dkSaid('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        });
+      });
+    }
     var lt = document.getElementById('lateThreshInput');
     var et = document.getElementById('earlyThreshInput');
     var lv = document.getElementById('leverageInput');
@@ -15534,95 +15577,7 @@ function buildExcelBackup(){
   }
   /* The panel: what was found, and a line for every name it could not place.
      Nothing is written until the office has looked at this. */
-  /* Whether DeskTime's own key is on file, and when it last brought anything
-     in. The key itself is never read back out: the box says it is set, not
-     what it is. */
-  var DT_AUTO = null;
-  function dtAutoPanel(){
-    var box = document.getElementById('dtImpBox');
-    if(!box || !DT_AUTO) return;
-    var on = !!DT_AUTO.set;
-    box.innerHTML = '<div class="dt-imp">'
-      + '<h4>' + (on ? 'DeskTime sends it by itself' : 'Let DeskTime send it by itself')
-      +   '</h4>'
-      + '<p>' + (on
-          ? ('A key is on file, so the record asks DeskTime for yesterday and for the day '
-             + 'that is running, once a night. Nothing has to be exported or read in.')
-          : ('With DeskTime’s own key the record asks it for yesterday and for the day '
-             + 'that is running, once a night, and the exports stop being needed. The key '
-             + 'is the account owner’s to give — Settings → Integrations on DeskTime.'))
-      + '</p>'
-      + '<div class="dt-imp-row"><b>DeskTime key</b>'
-      +   '<input type="password" id="dtKeyBox" autocomplete="off" '
-      +     'placeholder="' + (on ? 'on file — paste a new one to replace it' : 'paste it here')      +     '" style="flex:1;min-width:220px;padding:5px 8px;border:1px solid var(--line-dk);'
-      +     'border-radius:7px;font:inherit;font-size:12px;">'
-      +   '<button type="button" class="month-btn" id="dtKeySave">Save</button>'
-      + '</div>'
-      + (on ? ('<div class="dt-imp-row"><b>Bring it in now</b>'
-              + '<button type="button" class="month-btn" id="dtPullBtn">'
-              +   'Ask DeskTime for the last 7 days</button>'
-              + '<i id="dtPullSaid"></i></div>') : '')
-      + '<div class="dt-imp-go">'
-      +   '<button type="button" class="month-btn" id="dtImpNo">Close</button>'
-      +   '<span class="dt-imp-note" id="dtKeySaid"></span>'
-      + '</div></div>';
-    var no = document.getElementById('dtImpNo');
-    if(no) no.onclick = function(){ DT_AUTO = null; dtImportPanel(); };
-    var said = function(t, bad){
-      var e = document.getElementById('dtKeySaid');
-      if(!e) return;
-      e.className = 'dt-imp-note' + (bad ? ' dt-imp-bad' : '');
-      e.textContent = t;
-    };
-    var sv = document.getElementById('dtKeySave');
-    if(sv) sv.onclick = function(){
-      var box2 = document.getElementById('dtKeyBox');
-      var v = (box2 && box2.value || '').trim();
-      if(!v){ said('Paste the key first.', true); return; }
-      sv.disabled = true;
-      said('Saving…');
-      storage.set('deskTimeKey', v, true).then(function(){
-        if(box2) box2.value = '';
-        DT_AUTO = { set: true };
-        dtAutoPanel();
-        said('Saved. The first pull happens tonight, or press the button above.');
-      }).catch(function(e){
-        sv.disabled = false;
-        said('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
-      });
-    };
-    var pull = document.getElementById('dtPullBtn');
-    if(pull) pull.onclick = function(){
-      var tell = document.getElementById('dtPullSaid');
-      pull.disabled = true;
-      if(tell) tell.textContent = 'Asking…';
-      var to = todayISO_full;
-      var from = new Date(to + 'T00:00:00');
-      from.setDate(from.getDate() - 6);
-      fetch('/api/desktime/pull', { method:'POST', credentials:'same-origin',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ from: isoOf(from), to: to }) })
-        .then(function(r){ return r.json().catch(function(){ return {}; }); })
-        .then(function(j){
-          pull.disabled = false;
-          if(j && j.ok && j.wrote){
-            if(tell) tell.textContent = j.wrote + ' day' + (j.wrote === 1 ? '' : 's') + ' in.';
-            loadDeskTime().then(function(){ DT_MONTH = null; renderDeskTimePage(); });
-            return;
-          }
-          var why = (j && j.results && j.results[0] && j.results[0].error) || (j && j.error) || '';
-          if(tell) tell.textContent = why === 'no_key' ? 'No key on file yet.'
-            : why === 'desktime_said' ? 'DeskTime refused the key.'
-            : why === 'unreachable' ? 'DeskTime could not be reached.'
-            : (j && j.ok) ? 'Nothing new.' : ('That did not work (' + (why || 'no answer') + ').');
-        }).catch(function(e){
-          pull.disabled = false;
-          if(tell) tell.textContent = 'That did not work (' + ((e && e.message) || 'no answer') + ').';
-        });
-    };
-  }
   function dtImportPanel(){
-    if(DT_AUTO) return dtAutoPanel();
     var box = document.getElementById('dtImpBox');
     if(!box) return;
     if(!DT_IMP){ box.innerHTML = ''; return; }
@@ -15869,12 +15824,11 @@ function buildExcelBackup(){
              + '↑ Import an export</button>'
              + '<input type="file" id="dtImpFile" accept=".csv,text/csv" multiple '
              + 'style="display:none;"/>'
-             /* Exporting, waiting, downloading and reading in is four steps for
-                a figure that changes every day. DeskTime will hand it over
-                itself, given its own key - and then none of the four happen
-                again. */
-             + '<button type="button" class="month-btn" id="dtAutoBtn" '
-             + 'title="Let DeskTime send it by itself, every night">↻ Automatic</button>')
+             /* One button, and it is the one anybody would press: bring it up
+                to date. The key behind it is a setting, and lives with the
+                settings. */
+             + '<button type="button" class="month-btn" id="dtPullBtn" '
+             + 'title="Ask DeskTime for the last few days now">↻ Update now</button>')
           : '')
       /* The totals are useful until they are not - reading one person's habit
          down a column, a line of them every six rows is in the way - and the
@@ -16116,7 +16070,7 @@ function buildExcelBackup(){
     };
     var imp = document.getElementById('dtImpBtn'), file = document.getElementById('dtImpFile');
     if(imp && file){
-      imp.onclick = function(){ DT_AUTO = null; file.value = ''; file.click(); };
+      imp.onclick = function(){ file.value = ''; file.click(); };
       file.onchange = function(){ dtImportFiles(file.files); };
     }
     /* Shown or put away without redrawing the month: the rows are the same
@@ -16150,14 +16104,45 @@ function buildExcelBackup(){
       var box = document.getElementById('deskTimeWrap');
       if(box) box.className = dtWrapClass();
     };
-    var auto = document.getElementById('dtAutoBtn');
-    if(auto) auto.onclick = function(){
-      /* Whether a key is on file is a yes or a no, and the key itself never
-         comes back out of the store to be looked at. */
-      storage.get('deskTimeKey', true).then(function(res){
-        DT_AUTO = { set: !!(res && String(res.value || '').trim()) };
-        dtAutoPanel();
-      }).catch(function(){ DT_AUTO = { set: false }; dtAutoPanel(); });
+    /* One button, and the only thing it does is bring the figures up to date.
+       A week at a time, because a day that was missed should not need noticing
+       before it is fetched. */
+    var pull = document.getElementById('dtPullBtn');
+    if(pull) pull.onclick = function(){
+      var was = pull.textContent;
+      pull.disabled = true;
+      pull.textContent = '↻ Asking DeskTime…';
+      var to = todayISO_full;
+      var from = new Date(to + 'T00:00:00');
+      from.setDate(from.getDate() - 6);
+      fetch('/api/desktime/pull', { method:'POST', credentials:'same-origin',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ from: isoOf(from), to: to }) })
+        .then(function(r){ return r.json().catch(function(){ return {}; }); })
+        .then(function(j){
+          pull.disabled = false;
+          pull.textContent = was;
+          var why = (j && j.results && j.results[0] && j.results[0].error) || (j && j.error) || '';
+          if(why === 'no_key'){
+            showUploadStatus('No DeskTime key yet — put one in under ⚙ Options. '
+              + 'It is on desktime.com/app/api.', true);
+            return;
+          }
+          if(j && j.ok){
+            showUploadStatus(j.wrote
+              ? (j.wrote + ' day' + (j.wrote === 1 ? '' : 's') + ' brought in from DeskTime.')
+              : 'DeskTime had nothing new.', false);
+            loadDeskTime().then(function(){ DT_MONTH = null; renderDeskTimePage(); });
+            return;
+          }
+          showUploadStatus(why === 'desktime_said' ? 'DeskTime refused the key.'
+            : why === 'unreachable' ? 'DeskTime could not be reached.'
+            : ('That did not work (' + (why || 'no answer') + ').'), true);
+        }).catch(function(e){
+          pull.disabled = false;
+          pull.textContent = was;
+          showUploadStatus('That did not work (' + ((e && e.message) || 'no answer') + ').', true);
+        });
     };
     dtImportPanel();
   }

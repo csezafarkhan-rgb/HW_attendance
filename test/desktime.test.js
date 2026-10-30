@@ -748,46 +748,37 @@ function grab(src, name) {
 {
   const page = APP.slice(APP.indexOf('function renderDeskTimePage('),
                          APP.indexOf('function dtWire('));
-  const panel = grab(APP, 'dtAutoPanel');
   const wire = APP.slice(APP.indexOf('function dtWire('), APP.indexOf('var WLOG_DAY'));
-  check('the key DeskTime needs has somewhere to be put',
-    page.indexOf('id="dtAutoBtn"') > -1
-    && panel.indexOf('id="dtKeyBox"') > -1
-    && /storage\.set\('deskTimeKey', v, true\)/.test(panel));
+  /* The key is set once and never again, which is what a setting is. It sat on
+     the DeskTime page as a panel that opened over the figures, where the one
+     thing anybody wants is the figures. */
+  check('the key lives with the settings, not over the figures',
+    APP.indexOf('id="dtKeyInput"') > -1
+    && APP.indexOf('viewOptsDropdown') > -1
+    && APP.indexOf('id="dtKeyBox"') === -1);
+  check('and the page keeps one button, which brings the figures up to date',
+    page.indexOf('id="dtPullBtn"') > -1 && page.indexOf('id="dtAutoBtn"') === -1
+    && /\/api\/desktime\/pull/.test(wire));
   /* A key is a key: the box says one is on file, never what it is. */
-  check('and it is never read back out to be looked at',
-    /DT_AUTO = { set: !!\(res && String\(res\.value \|\| ''\)\.trim\(\)\) };/.test(wire)
-    && /type=\"password\"/.test(panel));
+  check('it is written and never read back out to be looked at',
+    /storage\.set\('deskTimeKey', v, true\)/.test(APP)
+    && /dk\.placeholder = on \? 'on file' : 'not set';/.test(APP)
+    && /id="dtKeyInput" autocomplete="off"/.test(APP));
   check('only the office can set it, and employees cannot read it',
     !/EMPLOYEE_WRITABLE = \[[^\]]*deskTimeKey/.test(SRV)
     && !/EMP_READABLE = \[[^\]]*deskTimeKey/.test(SRV));
-  check('with one on file it can be asked at once, not only at night',
-    /\/api\/desktime\/pull/.test(panel)
-    && panel.indexOf('id="dtPullBtn"') > -1);
-  check('and what comes back is drawn without a reload',
-    /loadDeskTime\(\)\.then\(function\(\){ DT_MONTH = null; renderDeskTimePage\(\); }\)/.test(panel));
-  /* DeskTime authenticates on a header. The pull asked with ?apiKey= - a guess
-     written before there was a key to try it against - and would have answered
-     401 to every nightly run, silently, for as long as it took somebody to
-     notice the figures were not moving. A key on a query string is also a key
-     in every log it passes through. */
-  /* DeskTime nests the people under the company rather than listing them.
-     Read as one level, nine people came back as one item whose keys were the
-     nine employee ids, and nothing was written. */
-  check('the people are found however deep DeskTime files them',
-    /const looksLikePerson = v =>/.test(SRV)
-    && /const list = flatten\(body\.employees, 0\);/.test(SRV));
-  check('and a folder is told from a person by what is on it',
-    /v\.name !== undefined \|\| v\.employeeName !== undefined/.test(SRV)
-    && /if \(depth > 3\) return \[\];/.test(SRV));
-  check('the key is sent the way DeskTime asks for it, in a header',
-    /'X-API-Key': key/.test(SRV)
-    && !/fetch\(DESKTIME_API \+ '\?apiKey=/.test(SRV));
-  check('a refused key says which of the ways it failed',
-    /no_key/.test(panel) && /desktime_said/.test(panel) && /unreachable/.test(panel));
-  /* The import stays: it is the way in without a key, and the key is the
-     account owner's to give. */
-  check('and reading an export in is still there beside it',
+  check('what comes back is drawn without a reload',
+    /loadDeskTime\(\)\.then\(function\(\){ DT_MONTH = null; renderDeskTimePage\(\); }\)/.test(wire));
+  check('and a refused key says which of the ways it failed',
+    /no_key/.test(wire) && /desktime_said/.test(wire) && /unreachable/.test(wire));
+  /* Every few minutes, not once a night: the figures are worth having while
+     the day is still running. */
+  check('the pull runs on the same clock as everything else, not nightly',
+    /const DAILY_CHECK_MS = 5 \* 60 \* 1000;/.test(SRV)
+    && /await pullDeskTime\(org\.id, day\);/.test(SRV));
+  /* The import stays: the way in without a key, and the way to reach a stretch
+     of days the running pull does not cover. */
+  check('reading an export in is still there beside it',
     page.indexOf('id="dtImpBtn"') > -1);
 }
 
