@@ -16513,13 +16513,12 @@ function buildExcelBackup(){
        unbreakable item as wide as the sentence, and this one stretched the
        whole panel to fit it. */
     html += '<div class="shf-note">'+
-      '<b>First approval</b> on a row means that person’s leave goes to a '+
-      'first approver before a super admin grants it. Unticked, it goes straight '+
-      'for the final word. The box beside it names who gives that first approval '+
-      'for them — leave it blank and it goes to whoever is named under '+
-      'Email → Leave, which is what everybody had before.'+
-      '<i>Where nobody is named under Email → Leave, and nobody is named on a '+
-      'row either, all leave is granted in one stage.</i>'+
+      '<b>Their own approver</b> on a row means that person’s leave goes to the '+
+      'address beside it, and that person’s word settles it. Unticked, it goes to '+
+      'the management under Email → Leave, and their word settles it. Either way '+
+      'it takes one approval — whoever it reaches is whoever decides it.'+
+      '<i>Leave the box blank and it goes to whoever is named under '+
+      'Email → Leave for everybody.</i>'+
       '</div>';
     html += '<div class="shf-list">';
     /* Everybody on a slot together, earliest start first. A flat list of
@@ -16586,10 +16585,10 @@ function buildExcelBackup(){
              whose - one person may report to somebody outside the usual line,
              and routing the whole company through them to serve that one
              person is not an answer. */
-          '<label class="shf-self" title="Their leave goes to a first approver before a super admin grants it. Unticked, it goes straight for the final word.">'+
+          '<label class="shf-self" title="Their leave goes to the approver named beside this, who settles it. Unticked, it goes to the management instead.">'+
             '<input type="checkbox" data-first-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
               (needsFirstApproval(e.name) ? ' checked' : '')+'>'+
-            '<span>First approval</span>'+
+            '<span>Own approver</span>'+
           '</label>'+
           (function(){
             /* Picked from the addresses on file, the way the shift beside it
@@ -16607,7 +16606,7 @@ function buildExcelBackup(){
             opts += '<option value="__other"'+(other?' selected':'')+'>Other…</option>';
             var hide = needsFirstApproval(e.name) ? '' : 'display:none;';
             return '<select class="shf-appr" data-appr-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
-                   ' title="Who gives the first approval for this person. “The usual one” is whoever is named under Email → Leave."'+
+                   ' title="Who approves this person’s leave. “The usual one” is whoever is named under Email → Leave."'+
                    ' style="'+hide+'">'+opts+'</select>'+
                    '<input type="email" class="shf-appr shf-appr-other" data-appr-other="'+e.name.replace(/"/g,'&quot;')+'"'+
                    ' value="'+(other?cur.replace(/"/g,'&quot;'):'')+'" placeholder="their address"'+
@@ -16757,8 +16756,8 @@ function buildExcelBackup(){
       return saveApprovalRoute().then(function(){
         el.disabled = false;
         showUploadStatus(val
-          ? (dispName(name) + '’s first approval now goes to ' + val + '.')
-          : (dispName(name) + '’s first approval goes to the usual approver again.'), false);
+          ? (dispName(name) + '’s leave is now approved by ' + val + '.')
+          : (dispName(name) + '’s leave goes to the usual approver again.'), false);
       }).catch(function(e){
         el.disabled = false;
         showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
