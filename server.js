@@ -1686,6 +1686,87 @@ app.post('/api/employees', requireAuth, bigJson, async (req, res) => {
 
 /* Live sync: clients poll this with the last id they saw. Cheap enough to hit
    every few seconds; returns immediately with nothing when idle. */
+/* ---------------- clocking in and out ----------------
+   A typed time is a claim. The server took any time up to the present moment,
+   so somebody arriving at ten to twelve could write half past nine and the
+   record kept it - the only answer being that the office was shown, afterwards,
+   how long after the fact it had been typed. That is a report of backdating,
+   not a defence against it.
+
+   Here nothing is typed. The time is this server's own clock at the moment the
+   press arrives, so a mark cannot be older than the request that made it, and
+   the browser's clock - which is the person's to set - never comes into it.
+
+   What it writes is what the card wrote: the same manualRecords entry, so
+   every total, late mark and export downstream carries on unchanged. */
+app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, res) => {
+  if (req.session.role !== 'employee') return res.status(403).json({ error: 'not_an_employee' });
+  const which = String((req.body && req.body.which) || '').trim();
+  if (which !== 'in' && which !== 'out') return res.status(400).json({ error: 'bad_which' });
+  const orgId = req.session.orgId;
+  const name = String((req.user && req.user.name) || '').trim();
+  if (!name) return res.status(400).json({ error: 'no_name' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    /* The same gate the typed card had: only those the office has marked may
+       put their own day on the record at all. */
+    const mark = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'selfMark' AND user_id IS NULL", [orgId]);
+    const marked = parseJson(mark.rows[0] ? mark.rows[0].value : '{}') || {};
+    if (marked[name] !== true) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
+    /* Which day this belongs to is the shift's question, not the calendar's: a
+       night shift started yesterday is still yesterday's day until it ends. */
+    const sa = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'shiftAssignments' AND user_id IS NULL", [orgId]);
+    const day = ownDays(shiftFor(parseJson(sa.rows[0] ? sa.rows[0].value : '{}'), name,
+                                 new Date(Date.now() + IST_MS).toISOString().slice(0, 10)))[0];
+    const key = name + '|' + day;
+    const row = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'manualRecords' AND user_id IS NULL FOR UPDATE", [orgId]);
+    const store = parseJson(row.rows[0] ? row.rows[0].value : '{}') || {};
+    const had = (store[key] && typeof store[key] === 'object') ? store[key] : null;
+    const nowIst = new Date(Date.now() + IST_MS);
+    const hhmm = String(nowIst.getUTCHours()).padStart(2, '0') + ':'
+               + String(nowIst.getUTCMinutes()).padStart(2, '0');
+    const nowIso = new Date().toISOString();
+    /* Pressing the same button twice is a slip, not a correction: the first
+       time stands and the second press is told so rather than quietly moving
+       an arrival later. */
+    if (which === 'in' && had && had['in']) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'already_in', at: had['in'] });
+    }
+    if (which === 'out') {
+      if (!had || !had['in']) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'not_in_yet' }); }
+      if (had.out) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'already_out', at: had.out }); }
+    }
+    const next = {
+      'in': which === 'in' ? hhmm : (had ? had['in'] : ''),
+      out: which === 'out' ? hhmm : (had ? had.out : ''),
+      st: 'PR', by: 'self', at: nowIso,
+      /* Written at the same moment it happened, which is the whole point: the
+         gap the office was shown is nought by construction. */
+      inAt: which === 'in' ? nowIso : ((had && had.inAt) || ''),
+      outAt: which === 'out' ? nowIso : ((had && had.outAt) || '')
+    };
+    store[key] = next;
+    await client.query(
+      `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'manualRecords', $2, $3)
+       ON CONFLICT (org_id, key) WHERE user_id IS NULL
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1,
+                     updated_by = EXCLUDED.updated_by`,
+      [orgId, JSON.stringify(store), req.session.userId]);
+    await logChange(client, orgId, 'manualRecords', null, req.session.userId);
+    await client.query('COMMIT');
+    res.json({ ok: true, day, 'in': next['in'], out: next.out, which, at: hhmm });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (e2) { /* the error below is the one that matters */ }
+    console.error('clock failed:', e && e.message);
+    res.status(500).json({ error: 'clock_failed' });
+  } finally { client.release(); }
+});
+
 /* ---------------- the office PC ----------------
    The office PC has no user and no session. It proves itself with SYNC_TOKEN, a
    long random value set in Render's environment and kept in a file on that PC,

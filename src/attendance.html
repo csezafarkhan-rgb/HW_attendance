@@ -3047,6 +3047,31 @@ table.dash-table tr:hover td{background:#F7F9FC;}
   padding:5px 7px; }
 .wl-tuck:hover{ background:#DCE8FB; border-color:#9DBEEF; color:#143862; }
 .wl-tuck:focus-visible{ outline:2px solid #7FB0E8; outline-offset:1px; }
+/* ---- clocking in and out ----
+   One thing on the card at a time, and it is the size of a thing meant to be
+   pressed with a thumb on the way through a door. */
+.ck{ margin:4px 0 2px; }
+.ck-lab{ font-size:10.5px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--ink-soft); margin-bottom:8px; }
+.ck-now{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.ck-now b{ font-size:26px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; }
+.ck-now span{ font-size:12.5px; color:var(--ink-soft); }
+.ck-go{ display:block; width:100%; max-width:420px; border:none; border-radius:12px; color:#fff;
+  font:inherit; font-size:19px; font-weight:800; padding:18px 16px; cursor:pointer; }
+.ck-go.in{ background:#2E7D5B; }
+.ck-go.in:hover{ background:#26684B; }
+.ck-go.out{ background:var(--brand); }
+.ck-go:disabled{ opacity:.65; cursor:default; }
+.ck-why{ font-size:12px; color:var(--ink-soft); line-height:1.55; margin-top:10px; max-width:460px; }
+.ck-set{ border:1px solid #CFE6D8; background:#F7FBF8; border-radius:12px; padding:14px 16px;
+  max-width:460px; }
+.ck-set .ck-lab{ color:#2E7D5B; }
+.ck-times{ font-size:22px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums;
+  display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.ck-times i{ font-style:normal; color:var(--ink-soft); font-weight:600; }
+.ck-times em{ font-style:normal; font-size:15px; font-weight:800; color:#2E7D5B; }
+.ck-fix{ border:none; background:none; padding:0; font:inherit; font-size:12px; color:var(--brand);
+  text-decoration:underline; cursor:pointer; }
 /* The line that cannot be tucked holds the space one would take, so every box
    on the card starts in the same place. */
 .wl-tuck-gap{ flex:none; width:26px; }
@@ -20542,6 +20567,9 @@ function buildExcelBackup(){
      is shown as settled; this is the one day somebody has asked to reopen,
      and it is cleared the moment the change is saved or abandoned. */
   var LATE_EDIT_DAY = null;
+  /* The card's own clock, cleared and restarted with every redraw so a page
+     left open all day holds one of them rather than a hundred. */
+  var CK_TIMER = null;
   var EMP_LIVE = (function(){
     try{ return localStorage.getItem('hw_emp_live') !== '0'; }catch(e){ return true; }
   })();
@@ -20804,6 +20832,24 @@ function buildExcelBackup(){
   function empDayWindow(){
     return [empWorkingDay()];
   }
+  /* How long a day ran, in to out, a shift through midnight included. */
+  function ckRan(a, b){
+    var x = toMin(a), y = toMin(b);
+    if(x === null || y === null || isNaN(x) || isNaN(y)) return null;
+    var d = y - x;
+    if(d < 0) d += 24 * 60;
+    return d;
+  }
+  /* How long they have been in, said the way somebody would say it. Counted
+     from the mark rather than from the moment it was written, which are the
+     same moment now and will stay so. */
+  function ckSince(markedIn){
+    var m = ckRan(markedIn, nowHHMM());
+    if(m === null) return '';
+    if(m < 1) return 'just now';
+    return (m < 60 ? (m + 'm') : (Math.floor(m / 60) + 'h ' + ('0' + (m % 60)).slice(-2) + 'm'))
+      + ' so far';
+  }
   function renderEmpDayCard(openFor){
     EMP_EDIT = { 'in': openFor === 'in', out: openFor === 'out' };
     var box = document.getElementById('empDayCard');
@@ -20851,101 +20897,57 @@ function buildExcelBackup(){
       + '<div class="wl-nav">' + dayBtns + '</div></div>';
 
     if(mine){
-      /* Nothing later than now, on today. A day is marked as it happens, so a
-         time that has not come round yet is a slip or a guess either way - and
-         the server refuses it too, whatever the box allows. */
-      var ceiling = (day === todayISO_full) ? nowHHMM() : '';
-      /* One field a time: the digits, and the half of the day as two buttons
-         joined to the same border so it reads as one control. */
-      var nowBtn = function(which){
-        return ceiling
-          ? ('<button type="button" class="ed-now" data-now="' + which + '"'
-             + ' title="Use the time now">↻ Now</button>')
-          : '';
-      };
-      /* Saved, and not deliberately opened again. */
-      var settled = function(which){
-        return !!(man && man[which] && !EMP_EDIT[which]);
-      };
-      /* The same mark the office is shown, shown here too. Somebody should not
-         learn from a meeting that their day carries a flag on somebody else's
-         screen - and seeing it is what makes it fair to have. */
-      var flagged = selfEntryFlagged(name, day);
-      var field = function(which, lbl, val){
-        var cur = to12(val);
-        var shut = settled(which);
-        var chips = usualTimes(name, which).map(function(t, i){
-          var c = to12(t);
-          return '<button type="button" class="chip' + (i === 0 ? ' sug' : '') + '"'
-            + ' data-chip="' + which + '" data-t="' + t + '">'
-            + (i === 0 ? '★ ' : '') + shotEsc(fmtTime(t))
-            + (i === 0 ? ' · usual' : '') + '</button>';
-        }).join('');
-        return '<div class="fieldwrap' + (shut ? ' shut' : '') + '" data-tf="' + which + '">'
-          + '<div class="lab">' + lbl
-          +   (shut ? ' <span class="lk">✓ saved</span>' : '')
-          +   ((shut && which === 'in' && flagged)
-                ? (' <span class="lk late" data-flagpop tabindex="0" role="button"'
-                   + ' aria-expanded="false" aria-label="Why this is marked late">'
-                   + '⚠ late entry'
-                   + '<span class="lk-pop" role="tooltip"><b>⚠ Marked late.</b> In time '
-                   + shotEsc(fmtTime(man['in'])) + ', typed at ' + shotEsc(fmtTime(flagged.typed))
-                   + (flagged.sameDay ? '' : ' the next day')
-                   + ' — ' + shotEsc(minsSaid(flagged.gap)) + ' after the time claimed. '
-                   + 'The office sees the same thing. Nothing is wrong with a late entry; '
-                   + 'it is the gap that is on the record, not a verdict.</span>'
-                   + '</span>') : '')
-          + '</div>'
-          + '<div class="ed-boxrow">'
-          + '<div class="tf">'
-          +   '<span class="ico" aria-hidden="true">◷</span>'
-          +   '<input id="ed' + (which === 'in' ? 'In' : 'Out') + '" inputmode="numeric"'
-          +     ' maxlength="5" autocomplete="off" spellcheck="false"'
-          +     (shut ? ' readonly tabindex="-1"' : '')
-          +     ' aria-label="' + lbl + ' time" value="' + shotEsc(cur.t) + '">'
-          +   '<div class="ampm" role="group" aria-label="' + lbl + ' morning or afternoon">'
-          +     '<button type="button" data-ap="AM"' + (shut ? ' disabled' : '')
-          +       (cur.mer === 'AM' ? ' class="on"' : '') + '>AM</button>'
-          +     '<button type="button" data-ap="PM"' + (shut ? ' disabled' : '')
-          +       (cur.mer === 'PM' ? ' class="on"' : '') + '>PM</button>'
-          +   '</div>'
-          + '</div>'
-          + (shut
-              ? ('<button type="button" class="ed-now ed-edit" data-unlock="' + which + '"'
-                 + ' title="Change the ' + lbl.toLowerCase() + ' time already saved">✎ Edit</button>')
-              : nowBtn(which))
-          + '</div>'
-          + ((chips && !shut) ? ('<div class="chips">' + chips + '</div>') : '')
+      /* ---- clocking in, clocking out ----
+
+         There were two boxes, four buttons for the half of the day, a row of
+         suggested times, Save and Clear: nine things to work to record one
+         arrival. And a typed time is a claim - the server took any time up to
+         the present moment, so arriving at ten to twelve one could write half
+         past nine and the record kept it. The answer was to show the office
+         how long after the fact it had been typed, which reports backdating
+         rather than preventing it.
+
+         One button now, and it is the only thing on the card: Clock in before
+         the day, Clock out during it, and what the day came to after. The time
+         is the server's own at the moment the press lands, so there is nothing
+         to type and nothing to put earlier. A real mistake goes to the office
+         as a request, which is where a correction belonged anyway. */
+      var inAt = (man && man['in']) || '';
+      var outAt = (man && man.out) || '';
+      /* Only their own marks are theirs to add to. A day the office entered is
+         shown and left alone. */
+      var theirs = !man || man.by === 'self';
+      var ran = (inAt && outAt) ? ckRan(inAt, outAt) : null;
+      html += '<div class="ck">';
+      if(!theirs){
+        html += '<div class="ck-set"><div class="ck-lab">On the record</div>'
+          + '<div class="ck-times">' + (inAt ? shotEsc(fmtTime(inAt)) : '—')
+          + ' <i>→</i> ' + (outAt ? shotEsc(fmtTime(outAt)) : '—') + '</div>'
+          + '<div class="ck-why">Entered by the office.</div></div>';
+      } else if(!inAt){
+        html += '<div class="ck-lab">Before you start</div>'
+          + '<div class="ck-now"><b id="ckClock">' + shotEsc(fmtTime(nowHHMM())) + '</b>'
+          +   '<span>your usual start is ' + shotEsc(fmtTime((getShift(name, day) || '').split('-')[0] || '')) + '</span></div>'
+          + '<button type="button" class="ck-go in" id="ckIn">Clock in</button>'
+          + '<div class="ck-why">The time is taken when you press, from the office clock. '
+          +   'There is nothing to type.</div>';
+      } else if(!outAt){
+        html += '<div class="ck-lab">While you are in</div>'
+          + '<div class="ck-now"><b>In at ' + shotEsc(fmtTime(inAt)) + '</b>'
+          +   '<span id="ckSince">' + shotEsc(ckSince(inAt)) + '</span></div>'
+          + '<button type="button" class="ck-go out" id="ckOut">Clock out</button>';
+      } else {
+        html += '<div class="ck-set"><div class="ck-lab">Done for the day</div>'
+          + '<div class="ck-times">' + shotEsc(fmtTime(inAt)) + ' <i>→</i> '
+          +   shotEsc(fmtTime(outAt))
+          +   (ran !== null ? ('<em>' + shotEsc(fmtMin(ran)) + '</em>') : '') + '</div>'
+          + '<div class="ck-why">Something wrong? Ask the office to correct it — '
+          +   '<button type="button" class="ck-fix" id="ckFix">raise a request</button>.</div>'
           + '</div>';
-      };
-      /* The two times read across rather than down, a hairline between them:
-         one is the start of the day and one is the end of it, and stacked they
-         took the height of the card for what is two numbers. */
-      html += '<div class="ed-two">'
-        + field('in', 'In', shown['in'])
-        + '<div class="ed-split" aria-hidden="true"></div>'
-        + field('out', 'Out', shown.out)
-        + '<div class="ed-acts">'
-        +   '<button type="button" class="bk-btn primary ed-save" id="edSave">Save</button>'
-        /* Clear used to wipe the whole day, settled time and all, on one press
-           with nothing asked - straight through the lock. It empties the boxes
-           that are still open now, and writes nothing: a settled time is only
-           reachable through Edit, which asks first. */
-        +   ((!settled('in') || !settled('out'))
-              ? ('<button type="button" class="month-btn ed-clear" id="edClear"'
-                 + ' title="Empty the boxes that are still open">Clear</button>')
-              : '')
-        + '</div>'
-        + '</div>'
-        + '<div class="ed-sum" id="edSum"></div>'
-        + '<div class="ed-warn" id="edWarn" style="display:none"></div>'
+      }
+      html += '</div>'
         + ownDay
-        + '<div class="wl-foot" id="edSaid">'
-        + (man ? ('Saved' + (man.by === 'self' ? ' by you' : ' by the office')
-                  + (man.at ? (' · ' + shotEsc(whenShort(man.at))) : '') + '.')
-               : 'Nothing marked for this day yet.')
-        + (ceiling ? (' Nothing later than ' + shotEsc(fmtTime(ceiling)) + ' — the day is still going.') : '')
-        + '</div>';
+        + '<div class="wl-foot" id="edSaid"></div>';
     } else {
       /* A card reader's day, said back to them, and then the two things the
          reader cannot know. */
@@ -21221,6 +21223,66 @@ function buildExcelBackup(){
         var sv = document.getElementById('edSave');
         if(sv) sv.focus();
       });
+    });
+    /* One press, one request, and the server decides the time. The button is
+       shut the moment it is pressed: a second press is a slip, and the server
+       refuses it anyway, but it should not be possible to make. */
+    var ckPress = function(btn, which, saying){
+      if(!btn) return;
+      btn.addEventListener('click', function(){
+        btn.disabled = true;
+        var was = btn.textContent;
+        btn.textContent = saying;
+        fetch('/api/clock', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ which: which }) })
+          .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){
+            if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+            return j;
+          }); }).then(function(r){
+          /* Taken straight from the answer rather than guessed at here: the
+             time on the record is the server's, and the card should show that
+             and nothing else. */
+          var key = name + '|' + (r && r.day ? r.day : day);
+          manualRecords[key] = { 'in': (r && r['in']) || '', out: (r && r.out) || '',
+            st: 'PR', by: 'self', at: new Date().toISOString() };
+          refreshActivePage();
+          renderEmpDayCard();
+          said(which === 'in' ? ('Clocked in at ' + fmtTime((r && r['in']) || '') + '.')
+                              : ('Clocked out at ' + fmtTime((r && r.out) || '') + '.'));
+        }).catch(function(e){
+          btn.disabled = false;
+          btn.textContent = was;
+          var why = (e && e.message) || '';
+          said(/already_in/.test(why) ? 'You are already clocked in for this day.'
+             : /not_in_yet/.test(why) ? 'Clock in first.'
+             : /already_out/.test(why) ? 'This day is already finished.'
+             : /not_self_marked/.test(why) ? 'The office has not marked you to type your own day.'
+             : ('That did not go through (' + (why || 'no answer') + ').'), true);
+        });
+      });
+    };
+    ckPress(document.getElementById('ckIn'), 'in', 'Clocking in\u2026');
+    ckPress(document.getElementById('ckOut'), 'out', 'Clocking out\u2026');
+    /* The clock on the card and the time in it move on their own, so neither
+       is stale by the time somebody looks up at it. */
+    var ckTick = function(){
+      var c = document.getElementById('ckClock');
+      if(c) c.textContent = fmtTime(nowHHMM());
+      var sn = document.getElementById('ckSince');
+      if(sn && man && man['in']) sn.textContent = ckSince(man['in']);
+    };
+    if(CK_TIMER) clearInterval(CK_TIMER);
+    if(document.getElementById('ckClock') || document.getElementById('ckSince')){
+      CK_TIMER = setInterval(ckTick, 20000);
+    }
+    var fix = document.getElementById('ckFix');
+    if(fix) fix.addEventListener('click', function(){
+      /* The correction path the office already has, opened on the kind of
+         request this is, rather than a second way of writing a time. */
+      var b = document.getElementById('requestLeaveBtn');
+      if(b) b.click();
+      else said('Open + New Request and raise a “Forgot to punch” for this day.', false);
     });
     var save = document.getElementById('edSave');
     if(save) save.addEventListener('click', function(){
@@ -21584,36 +21646,6 @@ function buildExcelBackup(){
     else if(h === 12 && d.length >= 3 && !said){ /* 12:xx stands as given */ }
     if(h < 1 || h > 12) return null;
     return { t: pad2(h) + ':' + pad2(mm), mer: mer };
-  }
-  /* The times this person actually uses for that end of the day, newest months
-     first and rounded to five minutes - a chip for each, the commonest starred.
-     Offering "9:30, because that is when you always arrive" beats offering a
-     tidy round number nobody uses. */
-  function usualTimes(name, which){
-    var seen = {}, total = 0;
-    var take = function(t){
-      var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
-      if(!m) return;
-      var mins = (+m[1]) * 60 + (+m[2]);
-      mins = Math.round(mins / 5) * 5;
-      var key = pad2(Math.floor(mins / 60) % 24) + ':' + pad2(mins % 60);
-      seen[key] = (seen[key] || 0) + 1; total++;
-    };
-    try{
-      RECORDS.forEach(function(r){
-        if(r.e !== name) return;
-        take(which === 'in' ? r['in'] : r.out);
-      });
-      Object.keys(manualRecords).forEach(function(k){
-        if(k.slice(0, k.lastIndexOf('|')) !== name) return;
-        var v = manualRecords[k] || {};
-        take(which === 'in' ? v['in'] : v.out);
-      });
-    }catch(e){}
-    if(!total) return [];
-    return Object.keys(seen)
-      .sort(function(a, b){ return seen[b] - seen[a] || (a < b ? -1 : 1); })
-      .slice(0, 3);
   }
   function nowHHMM(){
     var d = new Date();

@@ -371,111 +371,88 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('and the box at fault is marked, not just the sentence',
     /if\(F\.out\) F\.out\.mark\(true\);/.test(card)
       && /Did you mean PM\?/.test(card));
-  /* Picking 2:49 PM out of a spinner is a dozen taps for a time the machine
-     already knows, and punching in is when somebody is most in a hurry. */
-  check('each box can take the time now in one press',
-    /: nowBtn\(which\)\)/.test(card) && /f\.set\(nowHHMM\(\)\);/.test(card));
-  /* Two numbers took the height of the card stacked. They read across now,
-     with a hairline saying where the one ends and the other begins. */
-  check('the two times read across, divided by a rule',
-    /html \+= '<div class="ed-two">'/.test(card)
-      && /<div class="ed-split" aria-hidden="true"><\/div>/.test(card)
-      && /\.ed-two \.ed-split\{[^}]*width:1px/.test(APP));
-  check('and Save sits at the end of that row',
-    /<div class="ed-acts">[\s\S]{0,160}id="edSave"/.test(card));
+  /* ---- clocking in, clocking out ----
+     Two boxes, four buttons for the half of the day, a row of suggested times,
+     Save and Clear: nine things to work to record one arrival. And a typed
+     time is a claim - the server took any time up to the present moment, so
+     arriving at ten to twelve one could write half past nine and the record
+     kept it. The answer was to show the office how long after the fact it had
+     been typed, which reports backdating rather than preventing it.
 
-  /* ---- a time already saved is settled ----
-     An open box with a time in it invites a nudge. Once it is saved it reads
-     back instead, and opening it again is a press and an answer. */
-  check('a saved time reads back rather than sitting in an open box',
-    /var settled = function\(which\)\{[\s\S]{0,120}man\[which\] && !EMP_EDIT\[which\]/.test(card)
-      && /\(shut \? ' readonly tabindex="-1"' : ''\)/.test(card));
-  check('its half-of-the-day buttons are shut too, and its chips put away',
-    /\(shut \? ' disabled' : ''\)/.test(card)
-      && /\(\(chips && !shut\) \?/.test(card));
-  check('and it offers a way to change it',
-    /class="ed-now ed-edit" data-unlock="/.test(card));
-  check('which asks first, and says what the office will see',
-    /hwConfirm\(\{[\s\S]{0,320}Change the ' \+ lbl \+ ' time you already saved\?/.test(card)
-      && /moment you change it/.test(card));
-  check('and only the one field asked for is opened',
-    /renderEmpDayCard\(which\);/.test(card)
-      && /EMP_EDIT = \{ 'in': openFor === 'in', out: openFor === 'out' \};/.test(APP));
-  /* Saving draws the card again with nothing opened, so a save shuts the box
-     it came from. */
-  check('a save settles it again',
-    /function renderEmpDayCard\(openFor\)\{/.test(APP));
+     One button now, and it is the only thing on the card. */
+  check('the card is one button, in the state the day is in',
+    /id="ckIn">Clock in</.test(card) && /id="ckOut">Clock out</.test(card)
+    && /if\(!inAt\)\{/.test(card) && /else if\(!outAt\)\{/.test(card));
+  check('and nothing is typed: the boxes, the halves of the day and Save are gone',
+    card.indexOf('id="edIn"') === -1 && card.indexOf('data-ap="AM"') === -1
+    && card.indexOf('id="edSave"') === -1 && card.indexOf('data-chip=') === -1);
+  /* The whole point of the change: the time cannot be older than the press. */
+  check('the time is the server\u2019s own, not a number the browser sent',
+    (() => {
+      const route = SRC.slice(SRC.indexOf("app.post('/api/clock'"),
+                              SRC.indexOf("app.post('/api/clock'") + 3000);
+      /* One thing is read from the request, and it is not a time. */
+      const reads = (route.match(/req\.body[^;]*/g) || []);
+      return /const nowIst = new Date\(Date\.now\(\) \+ IST_MS\);/.test(route)
+        && reads.length === 1 && /which/.test(reads[0])
+        && !/TIME_RE/.test(route);
+    })());
+  check('and the card asks for nothing but which button was pressed',
+    /JSON\.stringify\(\{ which: which \}\)/.test(card));
+  /* The gap the office was shown exists to catch a backdated claim. Clocked,
+     the mark and the moment it was written are the same moment. */
+  check('the moment it happened is the moment it was written',
+    /inAt: which === 'in' \? nowIso :/.test(SRC)
+    && /outAt: which === 'out' \? nowIso :/.test(SRC));
+  /* The same gate the typed card had, and the same day rule: a night shift
+     started yesterday is still yesterday's day. */
+  check('only those the office marked may clock at all',
+    /if \(marked\[name\] !== true\)[\s\S]{0,80}not_self_marked/.test(SRC));
+  check('and the day is the shift\u2019s question, not the calendar\u2019s',
+    /const day = ownDays\(shiftFor\(/.test(SRC));
+  /* Pressing twice is a slip. Letting the second press through would move an
+     arrival later, which is the one direction a mistake must not go. */
+  check('a second press on the same button is refused, not taken',
+    /if \(which === 'in' && had && had\['in'\]\)[\s\S]{0,120}already_in/.test(SRC)
+    && /if \(!had \|\| !had\['in'\]\)[\s\S]{0,80}not_in_yet/.test(SRC)
+    && /if \(had\.out\)[\s\S]{0,80}already_out/.test(SRC));
+  check('and the card says which of those happened, in words',
+    /already_in/.test(card) && /You are already clocked in/.test(card)
+    && /Clock in first\./.test(card));
+  /* Read in one query and written in the same transaction, or two presses
+     landing together would each write over the other's half of the day. */
+  check('the day is read and written under one lock',
+    (() => {
+      const route = SRC.slice(SRC.indexOf("app.post('/api/clock'"),
+                              SRC.indexOf("app.post('/api/clock'") + 4600);
+      return /await client\.query\('BEGIN'\)/.test(route)
+        && /FOR UPDATE/.test(route)
+        && /INSERT INTO kv/.test(route)
+        && /await client\.query\('COMMIT'\)/.test(route);
+    })());
+  /* It writes what the card wrote, so nothing downstream has to know. */
+  check('what it writes is the entry the typed card wrote',
+    /st: 'PR', by: 'self', at: nowIso,/.test(SRC));
+  /* A day the office entered is theirs, and a correction is a request - which
+     is the path the office already had. */
+  check('a day the office entered is shown, not added to',
+    /var theirs = !man \|\| man\.by === 'self';/.test(card)
+    && /Entered by the office\./.test(card));
+  check('and a mistake goes where corrections already went',
+    /id="ckFix"/.test(card) && /requestLeaveBtn/.test(card));
+  /* A page left open all day should hold one clock, not a hundred. */
+  check('the clock on the card moves, and only one of it runs',
+    /if\(CK_TIMER\) clearInterval\(CK_TIMER\);/.test(card)
+    && /CK_TIMER = setInterval\(ckTick, 20000\);/.test(card));
+  check('and a shift through midnight is still one day\u2019s work',
+    /if\(d < 0\) d \+= 24 \* 60;/.test(APP.slice(APP.indexOf('function ckRan('),
+                                               APP.indexOf('function ckRan(') + 400)));
 
-  /* ---- a time well behind the clock says so, before the office does ---- */
-  check('typing a time long past warns about the gap being recorded',
-    /var warnBack = function\(\)\{/.test(card)
-      && /if\(gap > selfFlagMin\(\)\)\{/.test(card)
-      && /The office is shown the time you typed it/.test(card));
-  check('and the warning rides along with everything that reads the pair',
-    /tell = function\(\)\{ var r = tellTimes\(\); warnBack\(\); return r; \};/.test(card));
-
-  /* ---- the mark the office sees is shown here too ----
-     Nobody should learn from a meeting that their day carries a flag on
-     somebody else's screen. Seeing it is what makes it fair to have. */
-  check('a flagged entry is marked on the person’s own card',
-    /var flagged = selfEntryFlagged\(name, day\);/.test(card)
-      && /⚠ late entry/.test(card));
-  check('and says the same thing the office is told',
-    /⚠ Marked late\./.test(card) && /after the time claimed\./.test(card)
-      && /The office sees the same thing/.test(card));
-  /* The sentence belongs to the mark and is asked for - a hover, a tab or a
-     tap - rather than standing open under the card repeating itself every day
-     to somebody who read it the first time. */
-  check('the sentence is folded into the mark, not left standing',
-    /class="lk-pop" role="tooltip"/.test(card)
-      && !/class="ed-warn kept"/.test(card));
-  check('and opens by hover, by keyboard and by tap',
-    /\.lk\.late:hover \.lk-pop,/.test(APP)
-      && /\.lk\.late:focus \.lk-pop,/.test(APP)
-      && /chip\.classList\.toggle\('open'\)/.test(card));
-  check('a tap elsewhere, or Escape, shuts it again',
-    /document\.addEventListener\('click', shutPops\);/.test(card)
-      && /if\(ev\.key === 'Escape'\)/.test(card));
-  /* The time box and its buttons come later in the card and painted straight
-     over the open sentence until the mark carried the stacking order. */
-  check('and it is drawn above the box beneath it',
-    /\.fieldwrap \.lab \.lk\.late\{ position:relative; z-index:45;/.test(APP));
-  check('still as a gap, not a verdict',
-    /it is the gap that is on the record, not a verdict/.test(card));
-  /* The live warning is about the time being typed; the settled one has its
-     own line above and says more. Two amber boxes saying the same thing is
-     one too many. */
-  check('and a settled field is left to its own line',
-    /if\(f\.wrap\.classList\.contains\('shut'\)\) return;/.test(card));
-  /* Clear used to wipe the whole day, settled time and all, on one press with
-     nothing asked - straight through the lock it is sitting next to. */
-  check('Clear empties the boxes still open and leaves a settled one alone',
-    /if\(!f \|\| f\.wrap\.classList\.contains\('shut'\)\) return;   \/\/ settled stays settled/.test(card)
-      && /if\(f\.input\.value\)\{ f\.input\.value = ''; emptied\+\+; \}/.test(card));
-  check('and it writes nothing — a settled time is only reachable through Edit',
-    !/id="edClear"[\s\S]{0,900}saveManualRecords/.test(card));
-  check('it is not offered when there is nothing open to empty',
-    /\(!settled\('in'\) \|\| !settled\('out'\)\)/.test(card));
-  check('and says so rather than doing nothing silently',
-    /Nothing to clear — a saved time is changed with Edit\./.test(card));
-  check('and it is offered only on today, "now" being no time yesterday',
-    /var nowBtn = function\(which\)\{[\s\S]{0,200}return ceiling/.test(card),
-    (/var nowBtn[\s\S]{0,140}/.exec(card) || [])[0]);
-  check('today\u2019s boxes stop at the clock',
-    /var ceiling = \(day === todayISO_full\) \? nowHHMM\(\) : '';/.test(card)
-      && /has not happened yet \u2014 it is ' \+ fmtTime\(now\)/.test(card));
-  /* The digits are typed, not spun: a time can be written any of the ways a
-     person writes one, and the half of the day is picked rather than typed. */
-  check('what was typed is read generously',
-    /function parseEntry\(raw, mer\)/.test(APP)
-      && /if\(h > 12 && h <= 23 && !said\)\{ mer = 'PM'; h -= 12; \}/.test(APP));
-  check('and A or P picks the half of the day without leaving the keys',
-    /\/\^\[apAP\]\$\/\.test\(ev\.key\)/.test(card));
-  /* Offering 9:30 because that is when they always arrive beats offering a
-     round number nobody uses. */
-  check('the times this person actually uses are a tap away',
-    /function usualTimes\(name, which\)/.test(APP)
-      && /data-chip="' \+ which \+ '"/.test(card));
+  /* The chips offered the times this person actually used, which beat offering
+     a tidy round number nobody uses - but there is nothing to offer a time to
+     any more, so the function that worked them out went with them. */
+  check('and the chip-maker went with the chips it fed',
+    APP.indexOf('function usualTimes(') === -1);
   check('and a time still ahead is refused on the way out too',
     /wrong === 'future'/.test(card));
   /* The page caps its own boxes; the page is theirs to edit. */
