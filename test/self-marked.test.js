@@ -381,8 +381,34 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
 
      One button now, and it is the only thing on the card. */
   check('the card is one button, in the state the day is in',
-    /id="ckIn">Clock in</.test(card) && /id="ckOut">Clock out</.test(card)
+    /id="ckIn">Clock in</.test(card) && /id="ckOut"/.test(card)
     && /if\(!inAt\)\{/.test(card) && /else if\(!outAt\)\{/.test(card));
+  /* Clocking in starts a day, and a day started by mistake is put right by
+     clocking out. Clocking out ENDS one, and a day ended by a stray tap has
+     to be put right by somebody else - so that one is held, not tapped. */
+  check('clocking in is a tap; clocking out is a two-second hold',
+    /ckInBtn\.addEventListener\('click'/.test(card)
+    && /var HOLD = 2000/.test(card)
+    && /b\.addEventListener\('touchstart', start, \{ passive: false \}\)/.test(card));
+  check('the bar is the whole of the feedback, and letting go empties it',
+    /id="ckFill"/.test(card) && /paint\(0\);/.test(card)
+    && /Keep holding/.test(card) && /Hold to clock out/.test(card));
+  check('and only a full hold sends anything',
+    /if\(p >= 1\)\{\s*\r?\n\s*sent = true;/.test(card));
+  /* A keyboard cannot press and hold. */
+  check('a keyboard is asked the same question in words',
+    /e\.key !== 'Enter' && e\.key !== ' '/.test(card)
+    && /Clock out now\?/.test(card));
+  /* A figure that does not move is one nobody believes is live. */
+  check('the time they have been in runs, by the second',
+    /function ckRunning\(markedIn\)/.test(APP)
+    && /CK_TIMER = setInterval\(ckTick, 1000\);/.test(card)
+    && /id="ckRun"/.test(card));
+  check('and it is a clock, hours minutes and seconds, that does not jiggle',
+    /return h \+ ':' \+ \('0' \+ m\)\.slice\(-2\) \+ ':' \+ \('0' \+ sx\)\.slice\(-2\);/.test(APP)
+    && /\.ck-run b\{[\s\S]{0,160}tabular-nums/.test(APP));
+  check('a shift through midnight still counts forward',
+    /if\(secs < 0\) secs \+= 24 \* 3600;/.test(APP));
   check('and nothing is typed: the boxes, the halves of the day and Save are gone',
     card.indexOf('id="edIn"') === -1 && card.indexOf('data-ap="AM"') === -1
     && card.indexOf('id="edSave"') === -1 && card.indexOf('data-chip=') === -1);

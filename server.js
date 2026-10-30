@@ -1373,10 +1373,10 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
     /* And whoever has just been told yes or no hears it from the site. */
     newlyDecided(requestsBefore, value).slice(0, 10)
       .forEach(r => { notifyDecision(req.session.orgId, r); });
-    /* A first approver who passes one on from the portal rather than from
-       their email is the same event, and the final word has to hear about it
-       either way. The notice claims the request in maintenance_done first, so
-       the two doors cannot send it twice. */
+    /* A request moved to 'recommended' from the portal. Nothing produces that
+       state any more - one word settles a request now - but one raised before
+       the change can still be sitting in it, and the management still has to
+       hear that it is theirs to finish. */
     newlyRecommended(requestsBefore, value).slice(0, 10)
       .forEach(r => { notifyRecommended(req.session.orgId, r); });
   }
@@ -3574,37 +3574,29 @@ async function applyEmailDecision(p, note) {
     if (p.k === 'req') {
       const req = reqs.filter(r => r && r.id === p.id)[0];
       if (!req) { await client.query('ROLLBACK'); return { ok: false, title: 'That request is gone', detail: 'It is no longer on file.' }; }
-      /* Two stages, where somebody is marked to look at requests first. Their
-         yes moves it on to a super admin rather than granting it; their no ends
-         it there. A link made before anybody was marked carries no stage and
-         grants in one, as it always did. */
-      const firstStage = p.s === 1;
-      const waiting = firstStage ? ['pending', 'query'] : ['pending', 'query', 'recommended'];
-      if (waiting.indexOf(req.status) === -1) {
+      /* One approval, by whoever it was sent to.
+
+         It used to take two: an approver marked to look first said yes, which
+         moved it to a super admin rather than granting it, and the super admin
+         said yes again. The office asked for the first word to be the only
+         word - the person it is sent to is the person who decides it - and for
+         anybody routed straight to the management, nothing changes, because
+         that was already one word.
+
+         The stage still rides in the link, because it says whose word this is
+         and so who the note is written to. It no longer decides whether the
+         yes grants anything: it always does. */
+      const byFirst = p.s === 1;
+      if (WAITING.indexOf(req.status) === -1) {
         await client.query('ROLLBACK');
         return settledSay(dispReq(req), req.status);
-      }
-      if (firstStage && p.act === 'approve') {
-        /* Recommended, not granted: nothing is written on the record yet. */
-        req.status = 'recommended';
-        req.updatedAt = now;
-        req.recommendedBy = clip(p.by || '', 120) || 'the first approver';
-        req.recommendedAt = now;
-        if (note) req.recommendNote = note;
-        summary = dispReq(req);
-        recommended = req;
-        await write('leaveRequests', reqsText, JSON.stringify(reqs));
-        await client.query('COMMIT');
-        notifyRecommended(p.org, req);
-        return { ok: true, title: 'Passed on for approval',
-                 detail: summary + ' goes to a super admin for the final word. '
-                       + 'Nothing is on the record until they give it.'
-                       + (note ? ' Your note goes with it.' : '') };
       }
       req.status = p.act === 'approve' ? 'approved' : 'rejected';
       req.updatedAt = now;
       if (note) req.adminNote = note;                  // the reason, in their own words
-      if (p.act === 'approve') req.approvedBy = firstStage ? (p.by || 'email') : 'email';
+      /* Whoever was sent it is whoever granted it, and the record says which of
+         them it was rather than the word 'email'. */
+      if (p.act === 'approve') req.approvedBy = byFirst ? (p.by || 'email') : 'email';
       else delete req.approvedBy;
       summary = dispReq(req);
       decided = req;
@@ -3651,31 +3643,15 @@ async function applyEmailDecision(p, note) {
         id: 'req_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex'),
         empName: p.e, dateFrom: p.d, dateTo: p.d, leaveType: p.t, half: p.h || '',
         message: 'Taken without a request',
-        status: p.act !== 'approve' ? 'rejected' : (firstUnreq ? 'recommended' : 'approved'),
+        status: p.act !== 'approve' ? 'rejected' : 'approved',
         adminNote: note || (p.act === 'approve' ? 'Approved by email'
                                                  : 'Not authorised — the day was removed from the record.'),
         employeeReply: '', createdAt: now, updatedAt: now
       };
-      if (p.act === 'approve' && firstUnreq) {
-        /* Recommended, not granted. The day already carries its mark - that is
-           what made it unrequested - so nothing is written either way; what
-           changes is that a request now stands against it, awaiting the final
-           word. */
-        fresh.recommendedBy = clip(p.by || '', 120) || 'the first approver';
-        fresh.recommendedAt = now;
-        if (note) fresh.recommendNote = note;
-        delete fresh.adminNote;
-        reqs.push(fresh);
-        await client.query('DELETE FROM maintenance_done WHERE job = $1',
-          ['unreq-email:' + p.org + ':' + p.e + '|' + p.d]);
-        await write('leaveRequests', reqsText, JSON.stringify(reqs));
-        await client.query('COMMIT');
-        notifyRecommended(p.org, fresh);
-        return { ok: true, title: 'Passed on for approval',
-                 detail: dispReq(fresh) + ' goes to a super admin for the final word. '
-                       + 'The day keeps the mark it already had until they give it.' };
-      }
-      if (p.act === 'approve') fresh.approvedBy = 'email';
+      /* One word settles it here too: whoever the day was sent to decides it.
+         It used to be passed on to a super admin, which is the stage the office
+         has asked to drop. */
+      if (p.act === 'approve') fresh.approvedBy = firstUnreq ? (p.by || 'email') : 'email';
       reqs.push(fresh);
       summary = dispReq(fresh);
       decided = fresh;
@@ -3722,6 +3698,8 @@ function dispReq(r) {
 /* Whichever way a request was answered, that answer stands: the buttons in an
    email decide once. Changing one's mind is a job for the panel, where the
    whole record is in view. */
+/* Every state a request can be in and still be waiting on somebody. */
+const WAITING = ['pending', 'query', 'recommended'];
 function settledSay(summary, status) {
   return { ok: false, title: 'This request is already settled',
            detail: summary + ' was already ' + (status === 'approved' ? 'approved' : 'rejected')
@@ -3744,7 +3722,12 @@ async function alreadySettled(p) {
       ? reqs.filter(x => coversDay(x, p))[0]
       : reqs.filter(x => x && x.id === p.id)[0];
     if (!hit) return null;
-    if (p.k !== 'unreq' && (hit.status === 'pending' || hit.status === 'query')) return null;
+    /* A request passed on by a first approver sits at 'recommended', waiting on
+       the management - which is the one state this gate did not know about. The
+       final approver's own link opened on “already settled” and there was no way
+       past it: the page that asks never appeared, so the button that grants it
+       was never reached. Anything still waiting on somebody is not settled. */
+    if (p.k !== 'unreq' && WAITING.indexOf(hit.status) > -1) return null;
     return settledSay(dispReq(hit), hit.status);
   } catch (e) { return null; }      // if it cannot be read, the POST still guards
 }
@@ -3765,9 +3748,9 @@ app.get('/e/:token', mailActionLimiter, async (req, res) => {
   res.send(mailer.confirmPage({
     action: p.act, unrequested: p.k === 'unreq', summary: what,
     who: p.k === 'unreq' ? p.e : '',
-    /* Whose word this is decides who reads it: a first approver is writing to
-       the management, anybody else to the person who asked. */
-    firstStage: p.s === 1,
+    /* One word settles it, so a note on it is written to the person who asked
+       - there is no longer a stage after this one to pass it to. */
+    firstStage: false,
     postTo: '/e/' + req.params.token
   }));
 });

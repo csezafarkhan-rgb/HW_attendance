@@ -951,50 +951,37 @@ process.env.SESSION_SECRET = SECRET;
         && JSON.stringify(sent[sent.length - 1].to) === JSON.stringify(['boss@x.com']),
       sent[sent.length - 1].to);
 
-    /* The first word: approve. It is recommended, not granted. */
+    /* One word settles it. It took two: the approver marked to look first said
+       yes, which moved it to a super admin rather than granting it, and the
+       super admin said yes again. The office asked for the first word to be
+       the only word - whoever it was sent to is whoever decides it. */
     const recBefore = sent.length;
     const stage1 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve',
                                         s: 1, by: 'karan Ahuja' }, SECRET);
     const passed = await hit('POST', '/e/' + stage1);
     const afterOne = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_two');
-    check('the first approver\'s yes passes it on rather than granting it',
-      passed.status === 200 && afterOne.status === 'recommended'
-        && afterOne.recommendedBy === 'karan Ahuja', { status: passed.status, req: afterOne });
-    check('and the page says so, in those words',
-      /Passed on for approval/.test(passed.body) && /Nothing is on the record/.test(passed.body),
-      passed.body.slice(0, 400));
-    check('nothing is written on the record yet',
-      !JSON.parse(kvFind(1, 'overrides').value)['Keshav Garg|2026-11-10'],
-      kvFind(1, 'overrides').value);
-
-    /* The super admins are asked for the word that grants it, and told whose
-       recommendation they are acting on. */
-    await new Promise(r => setTimeout(r, 700));
-    const onward = sent[sent.length - 1];
-    check('the super admins are then asked, and told who approved it first',
-      sent.length === recBefore + 1 && (onward.to || []).indexOf('boss@x.com') > -1
-        && /Approved by karan Ahuja/.test(onward.html),
-      onward && { to: onward.to, subject: onward.subject });
-    check('the employee is not told yet, because it is not settled',
-      !(onward.to || []).some(a => /keshav/.test(a)), onward && onward.to);
-    /* A first approver's yes is the whole reason the management is being
-       written to, and their name is in the heading of it. Until now that was
-       all they got: the answer to their own recommendation went past them. */
-    check('and whoever passed it on is copied, their name being in its heading',
-      (onward.cc || []).indexOf('karan@homeweavers.net') > -1,
-      onward && onward.cc);
-
-    /* The second word grants it, and the record is written. */
-    const stage2 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve', s: 2 }, SECRET);
-    const granted = await hit('POST', '/e/' + stage2);
-    const afterTwo = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_two');
-    check('the second word grants it',
-      granted.status === 200 && afterTwo.status === 'approved', { status: granted.status, req: afterTwo });
-    check('and the day reaches the record then, not before',
+    check('the approver it was sent to grants it outright',
+      passed.status === 200 && afterOne.status === 'approved',
+      { status: passed.status, req: afterOne });
+    check('and the record says which of them gave the word',
+      afterOne.approvedBy === 'karan Ahuja', afterOne);
+    check('the day reaches the record on that one yes',
       !!JSON.parse(kvFind(1, 'overrides').value)['Keshav Garg|2026-11-10'],
       kvFind(1, 'overrides').value);
-    check('the name of whoever recommended it is kept',
-      afterTwo.recommendedBy === 'karan Ahuja', afterTwo);
+
+    /* And the person who asked hears, because it is settled. */
+    await new Promise(r => setTimeout(r, 700));
+    const onward = sent[sent.length - 1];
+    check('the person who asked is told, there being nothing left to wait for',
+      sent.length === recBefore + 1 && (onward.to || []).some(a => /keshav/.test(a)),
+      onward && { to: onward.to, subject: onward.subject });
+    check('and nobody is asked for a second word',
+      !/waiting on you/.test(onward.html || ''), onward && onward.subject);
+
+    /* The same link again is a settled request, and says so. */
+    const again = await hit('POST', '/e/' + stage1);
+    check('pressing it again is refused rather than re-granted',
+      again.status === 409, again.status);
 
     /* A no at the first stage ends it there. */
     kvSet(1, 'leaveRequests', JSON.stringify([
@@ -1238,28 +1225,28 @@ process.env.SESSION_SECRET = SECRET;
         && JSON.stringify(firstMail.cc) === JSON.stringify(['watch@x.com']),
       firstMail && { to: firstMail.to, cc: firstMail.cc });
 
-    /* Their yes passes it on; it does not grant it. */
+    /* Their yes settles it. It used to pass the day on to a super admin for a
+       second word; the office asked for one word, given by whoever it was
+       sent to. */
     const link = (String((firstMail && firstMail.html) || '').match(/\/e\/[A-Za-z0-9_.\-]+/g) || [])[0];
     check('and the message carries a button to press', !!link, link);
     const pressed = link ? await hit('POST', link) : { status: 0, body: '' };
     const after = JSON.parse(kvFind(1, 'leaveRequests').value);
-    check('their yes passes it on for approval rather than granting it',
-      after.length === 1 && after[0].status === 'recommended'
-        && after[0].approvedBy === undefined,
+    check('their yes settles the day rather than passing it on',
+      after.length === 1 && after[0].status === 'approved',
       after.map(r => ({ status: r.status, approvedBy: r.approvedBy })));
-    check('and says so, rather than saying it is done',
-      /passed on|final word|approval/i.test(String(pressed.body || '')),
-      String(pressed.body || '').slice(0, 200));
+    check('and the record says who gave the word',
+      after.length === 1 && !!after[0].approvedBy,
+      after.map(r => r.approvedBy));
 
     await new Promise(r => setTimeout(r, 450));
     const onward = sent[sent.length - 1];
-    check('the people who grant are then told, with who approved it first',
-      sent.length > before + 1 && onward
-        && JSON.stringify(onward.to) === JSON.stringify(['final@x.com'])
-        && /waiting on you/i.test(onward.html),
-      onward && { to: onward.to, has: /waiting on you/i.test(onward.html) });
+    check('nobody is asked for a second word',
+      !/waiting on you/i.test(String((onward && onward.html) || '')),
+      onward && { to: onward.to });
 
-    /* The day keeps its mark throughout: a recommendation writes nothing. */
+    /* The day carried its mark before any of this: that is what made it an
+       unrequested one. A decision does not take it away. */
     const marks = JSON.parse(kvFind(1, 'overrides').value);
     check('and the day keeps the mark it already had',
       !!marks['Asha Test|2026-09-29'], marks);
@@ -1432,16 +1419,13 @@ process.env.SESSION_SECRET = SECRET;
     /A word for Keshav Garg with your approval/.test(fin));
   check('and a refusal still is too',
     /A word for Keshav Garg, if you want to give one/.test(rej));
-  check('the page is told which stage it is confirming',
-    /firstStage: p\.s === 1/.test(srv));
+  /* One word settles a request now, so a note on it is written to the person
+     who asked - there is no stage after this one to pass it to. */
+  check('the page knows a note has nowhere else to go',
+    /firstStage: false,/.test(srv));
   /* The plumbing it lands in. */
-  check('a first approver’s word is kept as the recommendation’s own',
-    /if \(note\) req\.recommendNote = note;/.test(srv));
-  check('and the message to the management carries it',
-    /req\.recommendNote/.test(require('fs').readFileSync(
-      require('path').join(__dirname, '..', 'mailer.js'), 'utf8')));
-  check('the page that follows says the note went with it',
-    /Your note goes with it\./.test(srv));
+  check('the word given with a decision is kept as the decision’s own',
+    /if \(note\) req\.adminNote = note;/.test(srv));
   /* These pages are opened from an email, in whatever browser is to hand, and
      they never said what they were written in: "Approve · Attendance"
      arrived as "Approve Â· Attendance". */

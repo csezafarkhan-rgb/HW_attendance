@@ -3062,6 +3062,19 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ck-go.in:hover{ background:#26684B; }
 .ck-go.out{ background:var(--brand); }
 .ck-go:disabled{ opacity:.65; cursor:default; }
+/* How long they have been in, as a clock that runs. Tabular figures so the
+   seconds do not shuffle the line about as they turn over. */
+.ck-run{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.ck-run b{ font-size:34px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums;
+  letter-spacing:.01em; }
+.ck-run span{ font-size:12.5px; color:var(--ink-soft); }
+/* Held, not tapped. The bar fills under the words; the words say what is
+   happening, so nothing else has to. */
+.ck-hold{ position:relative; overflow:hidden; -webkit-user-select:none; user-select:none;
+  -webkit-touch-callout:none; touch-action:none; }
+.ck-fill{ position:absolute; left:0; top:0; bottom:0; width:0;
+  background:rgba(255,255,255,.26); pointer-events:none; }
+.ck-txt{ position:relative; }
 .ck-why{ font-size:12px; color:var(--ink-soft); line-height:1.55; margin-top:10px; max-width:460px; }
 .ck-set{ border:1px solid #CFE6D8; background:#F7FBF8; border-radius:12px; padding:14px 16px;
   max-width:460px; }
@@ -20869,6 +20882,17 @@ function buildExcelBackup(){
   /* How long they have been in, said the way somebody would say it. Counted
      from the mark rather than from the moment it was written, which are the
      same moment now and will stay so. */
+  /* The same span as a clock rather than a phrase: hours, minutes and seconds
+     from the mark, so it visibly runs. */
+  function ckRunning(markedIn){
+    var start = toMin(markedIn);
+    if(start === null || isNaN(start)) return '';
+    var d = new Date();
+    var secs = (d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()) - start * 60;
+    if(secs < 0) secs += 24 * 3600;
+    var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), sx = secs % 60;
+    return h + ':' + ('0' + m).slice(-2) + ':' + ('0' + sx).slice(-2);
+  }
   function ckSince(markedIn){
     var m = ckRan(markedIn, nowHHMM());
     if(m === null) return '';
@@ -20958,10 +20982,21 @@ function buildExcelBackup(){
           + '<div class="ck-why">The time is taken when you press, from the office clock. '
           +   'There is nothing to type.</div>';
       } else if(!outAt){
-        html += '<div class="ck-lab">While you are in</div>'
-          + '<div class="ck-now"><b>In at ' + shotEsc(fmtTime(inAt)) + '</b>'
-          +   '<span id="ckSince">' + shotEsc(ckSince(inAt)) + '</span></div>'
-          + '<button type="button" class="ck-go out" id="ckOut">Clock out</button>';
+        /* The figure somebody wants while they are in is how long they have
+           been, and it should move: a number that sits still is one nobody
+           believes is live. */
+        html += '<div class="ck-lab">You are clocked in</div>'
+          + '<div class="ck-run"><b id="ckRun">' + shotEsc(ckRunning(inAt)) + '</b>'
+          +   '<span>since ' + shotEsc(fmtTime(inAt)) + '</span></div>'
+          /* Clocking out ends the day, and a day ended by a stray tap has to be
+             put right by somebody else. Held for two seconds it cannot happen
+             by accident, and letting go early does nothing at all. */
+          + '<button type="button" class="ck-go out ck-hold" id="ckOut">'
+          +   '<span class="ck-fill" id="ckFill"></span>'
+          +   '<span class="ck-txt" id="ckTxt">Hold to clock out</span>'
+          + '</button>'
+          + '<div class="ck-why">Press and hold for two seconds. Let go and nothing '
+          +   'happens.</div>';
       } else {
         html += '<div class="ck-set"><div class="ck-lab">Done for the day</div>'
           + '<div class="ck-times">' + shotEsc(fmtTime(inAt)) + ' <i>→</i> '
@@ -21253,63 +21288,131 @@ function buildExcelBackup(){
     /* One press, one request, and the server decides the time. The button is
        shut the moment it is pressed: a second press is a slip, and the server
        refuses it anyway, but it should not be possible to make. */
-    var ckPress = function(btn, which, saying){
+    /* Sending the press, which both the plain button and the held one end in.
+       The label lives in a span on the held button and on the button itself on
+       the plain one, so it is set through one place. */
+    var ckGo = function(btn, which, saying){
       if(!btn) return;
-      btn.addEventListener('click', function(){
-        btn.disabled = true;
-        var was = btn.textContent;
-        btn.textContent = saying;
-        fetch('/api/clock', { method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ which: which }) })
-          .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){
-            if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
-            return j;
-          }); }).then(function(r){
-          /* Taken straight from the answer rather than guessed at here: the
-             time on the record is the server's, and the card should show that
-             and nothing else. */
-          var key = name + '|' + (r && r.day ? r.day : day);
-          manualRecords[key] = { 'in': (r && r['in']) || '', out: (r && r.out) || '',
-            st: 'PR', by: 'self', at: new Date().toISOString() };
-          refreshActivePage();
-          renderEmpDayCard();
-          /* Where the card reader already had them in earlier, or out later,
-             that time stands and the press did not move it. Saying so is the
-             difference between a button that looks broken and one that is
-             doing the right thing. */
-          said((r && r.kept)
-            ? (which === 'in'
-                ? ('The reader already had you in at ' + fmtTime(r.kept)
-                   + ' — your day starts from there.')
-                : ('The reader already had you out at ' + fmtTime(r.kept)
-                   + ' — your day ends there.'))
-            : (which === 'in' ? ('Clocked in at ' + fmtTime((r && r['in']) || '') + '.')
-                              : ('Clocked out at ' + fmtTime((r && r.out) || '') + '.')));
-        }).catch(function(e){
-          btn.disabled = false;
-          btn.textContent = was;
-          var why = (e && e.message) || '';
-          said(/already_in/.test(why) ? 'You are already clocked in for this day.'
-             : /not_in_yet/.test(why) ? 'Clock in first.'
-             : /already_out/.test(why) ? 'This day is already finished.'
-             : /not_self_marked/.test(why) ? 'The office has not marked you to type your own day.'
-             : ('That did not go through (' + (why || 'no answer') + ').'), true);
-        });
+      var txt = btn.querySelector('.ck-txt');
+      var was = txt ? txt.textContent : btn.textContent;
+      var label = function(t){ if(txt) txt.textContent = t; else btn.textContent = t; };
+      btn.disabled = true;
+      label(saying);
+      fetch('/api/clock', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ which: which }) })
+        .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){
+          if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+          return j;
+        }); }).then(function(r){
+        /* Taken straight from the answer rather than guessed at here: the time
+           on the record is the server's, and the card should show that and
+           nothing else. */
+        var key = name + '|' + (r && r.day ? r.day : day);
+        manualRecords[key] = { 'in': (r && r['in']) || '', out: (r && r.out) || '',
+          st: 'PR', by: 'self', at: new Date().toISOString() };
+        refreshActivePage();
+        renderEmpDayCard();
+        /* Where the card reader already had them in earlier, or out later, that
+           time stands and the press did not move it. Saying so is the difference
+           between a button that looks broken and one that is doing the right
+           thing. */
+        said((r && r.kept)
+          ? (which === 'in'
+              ? ('The reader already had you in at ' + fmtTime(r.kept)
+                 + ' — your day starts from there.')
+              : ('The reader already had you out at ' + fmtTime(r.kept)
+                 + ' — your day ends there.'))
+          : (which === 'in' ? ('Clocked in at ' + fmtTime((r && r['in']) || '') + '.')
+                            : ('Clocked out at ' + fmtTime((r && r.out) || '') + '.')));
+      }).catch(function(e){
+        btn.disabled = false;
+        label(was);
+        var why = (e && e.message) || '';
+        said(/already_in/.test(why) ? 'You are already clocked in for this day.'
+           : /not_in_yet/.test(why) ? 'Clock in first.'
+           : /already_out/.test(why) ? 'This day is already finished.'
+           : /not_self_marked/.test(why) ? 'The office has not marked you to type your own day.'
+           : ('That did not go through (' + (why || 'no answer') + ').'), true);
       });
     };
-    ckPress(document.getElementById('ckIn'), 'in', 'Clocking in\u2026');
-    ckPress(document.getElementById('ckOut'), 'out', 'Clocking out\u2026');
+    /* Clocking in is a tap: it starts a day, and a day started by mistake is
+       put right by clocking out, or by the office. */
+    var ckInBtn = document.getElementById('ckIn');
+    if(ckInBtn) ckInBtn.addEventListener('click', function(){
+      ckGo(ckInBtn, 'in', 'Clocking in…');
+    });
+    /* Clocking out is held. The bar is the whole of the feedback: it fills
+       while the finger is down, empties the moment it lifts, and only a full
+       one sends anything. */
+    (function(){
+      var b = document.getElementById('ckOut');
+      if(!b) return;
+      var fill = document.getElementById('ckFill'), txt = document.getElementById('ckTxt');
+      var HOLD = 2000, began = 0, raf = 0, sent = false;
+      var paint = function(p){ if(fill) fill.style.width = (p * 100).toFixed(1) + '%'; };
+      var stop = function(){
+        if(sent) return;
+        if(raf) cancelAnimationFrame(raf);
+        raf = 0; began = 0;
+        paint(0);
+        if(txt) txt.textContent = 'Hold to clock out';
+      };
+      var step = function(){
+        if(!began || sent) return;
+        var p = Math.min(1, (Date.now() - began) / HOLD);
+        paint(p);
+        if(txt && p < 1) txt.textContent = 'Keep holding…';
+        if(p >= 1){
+          sent = true; began = 0;
+          if(raf) cancelAnimationFrame(raf);
+          raf = 0;
+          ckGo(b, 'out', 'Clocking out…');
+          return;
+        }
+        raf = requestAnimationFrame(step);
+      };
+      var start = function(e){
+        if(sent || b.disabled) return;
+        if(e && e.cancelable && e.preventDefault) e.preventDefault();
+        began = Date.now();
+        if(raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(step);
+      };
+      b.addEventListener('mousedown', start);
+      b.addEventListener('touchstart', start, { passive: false });
+      ['mouseup', 'mouseleave', 'touchend', 'touchcancel', 'blur'].forEach(function(ev){
+        b.addEventListener(ev, stop);
+      });
+      /* A keyboard cannot press and hold, so it is asked instead - the same
+         question the hold is asking with time. */
+      b.addEventListener('keydown', function(e){
+        if(e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if(sent || b.disabled) return;
+        hwConfirm({ title: 'Clock out now?',
+          message: 'This ends your day on the record. Putting it right afterwards '
+                 + 'takes a request to the office.',
+          confirmLabel: 'Clock out' }).then(function(ok){
+          if(ok){ sent = true; ckGo(b, 'out', 'Clocking out…'); }
+        });
+      });
+    })();
     /* The clock on the card and the time in it move on their own, so neither
        is stale by the time somebody looks up at it. */
     var ckTick = function(){
       var c = document.getElementById('ckClock');
       if(c) c.textContent = fmtTime(nowHHMM());
-      var sn = document.getElementById('ckSince');
-      if(sn && man && man['in']) sn.textContent = ckSince(man['in']);
+      var run = document.getElementById('ckRun');
+      if(run && man && man['in']) run.textContent = ckRunning(man['in']);
     };
     if(CK_TIMER) clearInterval(CK_TIMER);
-    if(document.getElementById('ckClock') || document.getElementById('ckSince')){
+    /* Once a second while the day is running, so the figure is a clock rather
+       than a stale number; once a minute is enough for the time of day on the
+       other face of the card. */
+    if(document.getElementById('ckRun')){
+      CK_TIMER = setInterval(ckTick, 1000);
+    } else if(document.getElementById('ckClock')){
       CK_TIMER = setInterval(ckTick, 20000);
     }
     var fix = document.getElementById('ckFix');
