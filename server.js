@@ -4069,9 +4069,16 @@ async function pullDeskTime(orgId, day) {
   if (!key) return { ok: false, error: 'no_key' };
   let body = null, status = 0, text = '';
   try {
-    const r = await fetch(DESKTIME_API + '?apiKey=' + encodeURIComponent(key)
-                          + '&date=' + encodeURIComponent(day),
-                          { headers: { Accept: 'application/json' } });
+    /* The key goes in a header, not on the query string. This asked with
+       ?apiKey= - which was a guess, written before there was any key to try it
+       with - and DeskTime's own documentation says X-API-Key. It would have
+       answered 401 to every nightly pull, silently, for as long as it took
+       somebody to notice the figures were not moving.
+
+       A key on a query string is also a key in every log and proxy it passes
+       through, which is its own reason. */
+    const r = await fetch(DESKTIME_API + '?date=' + encodeURIComponent(day),
+                          { headers: { Accept: 'application/json', 'X-API-Key': key } });
     status = r.status;
     text = await r.text();
     try { body = JSON.parse(text); } catch (e) { body = null; }

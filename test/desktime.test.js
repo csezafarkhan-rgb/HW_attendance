@@ -766,6 +766,14 @@ function grab(src, name) {
     && panel.indexOf('id="dtPullBtn"') > -1);
   check('and what comes back is drawn without a reload',
     /loadDeskTime\(\)\.then\(function\(\){ DT_MONTH = null; renderDeskTimePage\(\); }\)/.test(panel));
+  /* DeskTime authenticates on a header. The pull asked with ?apiKey= - a guess
+     written before there was a key to try it against - and would have answered
+     401 to every nightly run, silently, for as long as it took somebody to
+     notice the figures were not moving. A key on a query string is also a key
+     in every log it passes through. */
+  check('the key is sent the way DeskTime asks for it, in a header',
+    /'X-API-Key': key/.test(SRV)
+    && !/fetch\(DESKTIME_API \+ '\?apiKey=/.test(SRV));
   check('a refused key says which of the ways it failed',
     /no_key/.test(panel) && /desktime_said/.test(panel) && /unreachable/.test(panel));
   /* The import stays: it is the way in without a key, and the key is the
