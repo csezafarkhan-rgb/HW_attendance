@@ -424,12 +424,34 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('the day is read and written under one lock',
     (() => {
       const route = SRC.slice(SRC.indexOf("app.post('/api/clock'"),
-                              SRC.indexOf("app.post('/api/clock'") + 4600);
+                              SRC.indexOf("app.post('/api/clock'") + 6200);
       return /await client\.query\('BEGIN'\)/.test(route)
         && /FOR UPDATE/.test(route)
         && /INSERT INTO kv/.test(route)
         && /await client\.query\('COMMIT'\)/.test(route);
     })());
+  /* ---- a press must not undo the card reader ----
+     A mark made on the portal has always sat over the reader's row for the
+     same day. That was safe while a day had to be typed, because nobody typed
+     a day the reader already had. One button is a different thing: a single
+     press on a day already read off the card wrote the moment of the press
+     over a real arrival, and the hours of the day with it - 11:52 to 13:08
+     became 15:22 to 15:22, which is nought hours. */
+  check('the readers\u2019 row for the day is read in the same transaction as the write',
+    /SELECT data FROM records WHERE org_id = \$1 AND employee = \$2 AND day = \$3/.test(SRC));
+  check('and a press never moves an arrival later',
+    /'in': which === 'in' \? keepEarlier\(inRaw, seen\['in'\]\) : inRaw,/.test(SRC)
+    && /const keepEarlier = \(a, b\) =>/.test(SRC));
+  check('nor a departure earlier',
+    /out: which === 'out' \? keepLater\(outRaw, seen\.out\) : outRaw,/.test(SRC)
+    && /const keepLater = \(a, b\) =>/.test(SRC));
+  /* Folding the reader's leaving time in while somebody is clocking IN would
+     hand them a day that was over before it started. */
+  check('only the half being marked is weighed against the reader',
+    /Only the half being marked is weighed against the reader/.test(SRC));
+  check('and the card says when the reader\u2019s time stood instead of the press',
+    /kept:/.test(SRC) && /The reader already had you in at/.test(card));
+
   /* It writes what the card wrote, so nothing downstream has to know. */
   check('what it writes is the entry the typed card wrote',
     /st: 'PR', by: 'self', at: nowIso,/.test(SRC));

@@ -1741,9 +1741,43 @@ app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, 
       if (!had || !had['in']) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'not_in_yet' }); }
       if (had.out) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'already_out', at: had.out }); }
     }
+    /* What the readers have for this day. A mark somebody makes on the portal
+       has always sat over the reader's row for the same day, which was safe
+       while a day had to be typed - nobody typed a day the reader already
+       had. One button is a different thing: a single press on a day already
+       read off the card wrote the moment of the press over a real arrival,
+       and the hours of the day with it.
+
+       So a clock mark never moves an arrival later or a departure earlier. It
+       is read in the same transaction as the write, against the same day. */
+    const rr = await client.query(
+      'SELECT data FROM records WHERE org_id = $1 AND employee = $2 AND day = $3',
+      [orgId, name, day]);
+    const seen = (rr.rows[0] && rr.rows[0].data) ? rr.rows[0].data : {};
+    const asMin = t => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim());
+      return m ? (+m[1]) * 60 + (+m[2]) : null;
+    };
+    const keepEarlier = (a, b) => {
+      const x = asMin(a), y = asMin(b);
+      if (x === null) return b || '';
+      if (y === null) return a || '';
+      return y < x ? b : a;
+    };
+    const keepLater = (a, b) => {
+      const x = asMin(a), y = asMin(b);
+      if (x === null) return b || '';
+      if (y === null) return a || '';
+      return y > x ? b : a;
+    };
+    /* Only the half being marked is weighed against the reader. Folding the
+       reader's leaving time in while somebody is clocking IN would hand them a
+       day that was over before it started. */
+    const inRaw = which === 'in' ? hhmm : (had ? had['in'] : '');
+    const outRaw = which === 'out' ? hhmm : (had ? had.out : '');
     const next = {
-      'in': which === 'in' ? hhmm : (had ? had['in'] : ''),
-      out: which === 'out' ? hhmm : (had ? had.out : ''),
+      'in': which === 'in' ? keepEarlier(inRaw, seen['in']) : inRaw,
+      out: which === 'out' ? keepLater(outRaw, seen.out) : outRaw,
       st: 'PR', by: 'self', at: nowIso,
       /* Written at the same moment it happened, which is the whole point: the
          gap the office was shown is nought by construction. */
@@ -1759,7 +1793,11 @@ app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, 
       [orgId, JSON.stringify(store), req.session.userId]);
     await logChange(client, orgId, 'manualRecords', null, req.session.userId);
     await client.query('COMMIT');
-    res.json({ ok: true, day, 'in': next['in'], out: next.out, which, at: hhmm });
+    res.json({ ok: true, day, 'in': next['in'], out: next.out, which, at: hhmm,
+      /* Said so the card can tell them their day starts from the card reader's
+         arrival rather than from the press they just made. */
+      kept: (which === 'in' && next['in'] !== hhmm) ? next['in']
+          : ((which === 'out' && next.out !== hhmm) ? next.out : '') });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (e2) { /* the error below is the one that matters */ }
     console.error('clock failed:', e && e.message);

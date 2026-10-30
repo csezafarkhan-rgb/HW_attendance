@@ -63,6 +63,58 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
         .every(id => (form.match(new RegExp('id="' + id + '"', 'g')) || []).length === 1));
   }
 
+  /* ---- correcting a day somebody clocked themselves ----
+     The card is two buttons now, so the one person this request exists for -
+     somebody who clocked in and forgot to clock out - has a manual entry by
+     definition. The guard against writing over a manual entry was harmless
+     while a day was typed, because they could simply retype it. It turned the
+     one case this request is now for into the one case it refused. */
+  {
+    const KEY = 'Zafar|2026-10-30';
+    const run = (manual, recs, req) => {
+      ctx.manualRecords = manual;
+      ctx.recIndex = recs || {};
+      notices.length = 0;
+      ctx.applyPunchCorrection(req);
+      return notices.slice();
+    };
+
+    const clocked = { [KEY]: { in: '11:52', out: '', st: 'PR', by: 'self', at: 'x', inAt: 'stamp' } };
+    let said = run(clocked, {}, { id: 'r1', empName: 'Zafar', dateFrom: '2026-10-30', punchOut: '18:35' });
+    check('a day they clocked takes the correction instead of refusing it',
+      said.length === 0, said);
+    check('and keeps the time they actually clocked',
+      clocked[KEY].in === '11:52' && clocked[KEY].out === '18:35', clocked[KEY]);
+    check('with the request recorded against the day',
+      clocked[KEY].reqId === 'r1', clocked[KEY]);
+    /* Half a day corrected is still half a day: the mark has to survive, or the
+       card reads it as the office's and takes the other button away. */
+    check('and the day still theirs, so they can still finish it',
+      clocked[KEY].by === 'self' && clocked[KEY].inAt === 'stamp', clocked[KEY]);
+
+    const typed = { [KEY]: { in: '09:30', out: '18:00', st: 'PR', by: 'office' } };
+    said = run(typed, {}, { id: 'r2', empName: 'Zafar', dateFrom: '2026-10-30', punchIn: '08:00' });
+    check('a day the office entered is still not written over',
+      said.length === 1 && typed[KEY].in === '09:30', { said, got: typed[KEY] });
+
+    const none = {};
+    run(none, { [KEY]: { in: '09:34', out: '' } },
+        { id: 'r3', empName: 'Zafar', dateFrom: '2026-10-30', punchOut: '18:30' });
+    check('with nothing clocked, the reader fills the half not asked about',
+      none[KEY].in === '09:34' && none[KEY].out === '18:30', none[KEY]);
+
+    const midday = { [KEY]: { in: '11:52', out: '', by: 'self' } };
+    run(midday, {}, { id: 'r4', empName: 'Zafar', dateFrom: '2026-10-30', punchIn: '09:35' });
+    check('correcting an arrival mid-day does not close the day',
+      midday[KEY].in === '09:35' && midday[KEY].out === '' && midday[KEY].by === 'self', midday[KEY]);
+
+    /* The form asks for the half they missed, so the words under it should not
+       name the reader as the only other source. */
+    check('and the form says where the other half comes from, whoever marked it',
+      /the other is left as it stands/.test(src)
+      && !/The other is taken from the reader/.test(src));
+  }
+
   console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

@@ -4246,7 +4246,8 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
           <label style="flex:1;font-weight:600;font-size:11px;">Out <input type="time" id="reqPunchOut" style="width:100%;"/></label>
         </div>
         <div style="font-size:10.5px;color:var(--ink-soft);margin-top:3px;">
-          Fill in only the one you missed. The other is taken from the reader.
+          Fill in only the one you missed — the other is left as it stands,
+          whether you clocked it or the reader did.
         </div>
       </div>
       <div class="gate-field" id="reqHalfWrap" style="display:none;">
@@ -9397,15 +9398,40 @@ function buildExcelBackup(){
   function applyPunchCorrection(req){
     var key = req.empName + '|' + req.dateFrom;
     var cur = manualRecords[key];
-    if(cur && cur.reqId !== req.id){
+    /* A day the office entered by hand is the office's, and a correction must
+       not quietly write over it. A day somebody clocked themselves is theirs,
+       and correcting it is the whole reason this request exists.
+
+       The guard used to refuse both alike, which was harmless while a day was
+       typed - the person could simply retype it - and became the opposite of
+       harmless the moment the card became two buttons. Somebody who clocked in
+       and forgot to clock out has a manual entry by definition, so the one
+       case this request is now for was the one case it turned away. */
+    var ownClock = !!(cur && cur.by === 'self');
+    if(cur && cur.reqId !== req.id && !ownClock){
       showUploadStatus(dispName(req.empName) + '’s ' + req.dateFrom + ' already has a manual entry, so the punch '
         + 'correction was not written over it. Change it on the Attendance Record if it should.');
       return Promise.resolve();
     }
     var rec = recIndex[key] || null;               // what the readers recorded
-    var tin = req.punchIn || (rec && rec['in']) || '';
-    var tout = req.punchOut || (rec && rec.out) || '';
-    manualRecords[key] = { 'in': tin, out: tout, st: (tin || tout) ? 'PR' : 'AB', reqId: req.id };
+    /* What the request says, then what they clocked, then what the reader saw.
+       Filling in only the half they missed is what the form asks for, so the
+       other half has to come from somewhere - and for a clocked day that is
+       their own mark, which the readers know nothing about. */
+    var had = ownClock ? cur : null;
+    var tin = req.punchIn || (had && had['in']) || (rec && rec['in']) || '';
+    var tout = req.punchOut || (had && had.out) || (rec && rec.out) || '';
+    var next = { 'in': tin, out: tout, st: (tin || tout) ? 'PR' : 'AB', reqId: req.id };
+    /* A corrected day that is still half finished is still theirs to finish:
+       keeping the mark means the clock card offers the other button rather
+       than reading the day as the office's and shutting them out of it. */
+    if(ownClock){
+      next.by = 'self';
+      next.at = new Date().toISOString();
+      if(cur.inAt) next.inAt = cur.inAt;
+      if(cur.outAt) next.outAt = cur.outAt;
+    }
+    manualRecords[key] = next;
     return saveManualRecords();
   }
   function applyApprovedRequestToAttendance(req){
@@ -21248,8 +21274,18 @@ function buildExcelBackup(){
             st: 'PR', by: 'self', at: new Date().toISOString() };
           refreshActivePage();
           renderEmpDayCard();
-          said(which === 'in' ? ('Clocked in at ' + fmtTime((r && r['in']) || '') + '.')
-                              : ('Clocked out at ' + fmtTime((r && r.out) || '') + '.'));
+          /* Where the card reader already had them in earlier, or out later,
+             that time stands and the press did not move it. Saying so is the
+             difference between a button that looks broken and one that is
+             doing the right thing. */
+          said((r && r.kept)
+            ? (which === 'in'
+                ? ('The reader already had you in at ' + fmtTime(r.kept)
+                   + ' — your day starts from there.')
+                : ('The reader already had you out at ' + fmtTime(r.kept)
+                   + ' — your day ends there.'))
+            : (which === 'in' ? ('Clocked in at ' + fmtTime((r && r['in']) || '') + '.')
+                              : ('Clocked out at ' + fmtTime((r && r.out) || '') + '.')));
         }).catch(function(e){
           btn.disabled = false;
           btn.textContent = was;
