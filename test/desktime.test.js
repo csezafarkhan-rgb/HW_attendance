@@ -793,11 +793,26 @@ function grab(src, name) {
 {
   const SAT = '2026-10-31';          // a Saturday
   const WEEKDAY = '2026-10-30';
-  let wrote = null;
+  /* A stand-in for the one connection it takes out, which remembers what it
+     was told to do with it: the rows it was given back, what it wrote, and
+     whether the transaction was seen through or abandoned. */
+  let wrote = null, sql = [];
+  const client = {
+    query: async (q, args) => {
+      sql.push(String(q).trim().split(NLRE)[0]);
+      if (/^INSERT INTO kv/.test(String(q).trim())) { wrote = args && args[1]; return { rows: [] }; }
+      if (/key = 'satPolicy'/.test(q)) return { rows: [{ value: ctx.__kv.satPolicy }] };
+      if (/key = 'overrides'/.test(q)) return { rows: [{ value: ctx.__kv.overrides }] };
+      return { rows: [] };
+    },
+    release: () => {},
+  };
+  const NLRE = /\r?\n/;
   const ctx = {
     parseJson: t => { try { return JSON.parse(t); } catch (e) { return undefined; } },
-    sharedKeys: async () => ctx.__kv,
-    pool: { query: async (q, args) => { wrote = args && args[1]; return { rows: [] }; } },
+    lockedMonthsOf: async () => ctx.__locked,
+    pool: { connect: async () => client },
+    NLRE,
     Date, JSON, Object, Math, String, console,
   };
   vm.createContext(ctx);
@@ -805,12 +820,13 @@ function grab(src, name) {
   vm.runInContext('async ' + grab(SRV, 'markSaturdayFromDeskTime'), ctx);
 
   /* day, what DeskTime saw, each person's Saturday, what is already marked */
-  const run = async (day, desk, satPolicy, overrides) => {
-    wrote = null;
+  const run = async (day, desk, satPolicy, overrides, locked) => {
+    wrote = null; sql = [];
     ctx.__kv = { satPolicy: JSON.stringify(satPolicy || {}),
                  overrides: JSON.stringify(overrides || {}) };
+    ctx.__locked = locked || {};
     const n = await ctx.markSaturdayFromDeskTime(1, day, desk);
-    return { n, out: wrote ? JSON.parse(wrote) : null };
+    return { n, out: wrote ? JSON.parse(wrote) : null, sql };
   };
   const saw = (name, day, i, o, d) => ({ [name + '|' + day]: { i, o, d } });
 
@@ -861,6 +877,22 @@ function grab(src, name) {
     r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '15:00', 260), {},
                   { ['Aman Chandra|' + SAT]: { cat: 'WFH', duration: '4:20', by: 'desktime' } });
     check('and left alone when it already says exactly that', r.n === 0, r.n);
+
+    /* A month payroll has closed has been paid against. The pull reaches back
+       over old days whenever somebody asks it to, and it must not reopen one. */
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '14:30', 207), {}, {},
+                  { '2026-10': true });
+    check('a month payroll has closed is not reopened',
+      r.n === 0 && r.out === null && r.sql.indexOf('ROLLBACK') > -1, r.sql);
+
+    /* Every override is one stored value, so writing one day means putting
+       all of them back. Two pulls at once would each write what they read. */
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '14:30', 207));
+    check('it reads them under a lock, so two pulls at once cannot undo each other',
+      /FOR UPDATE/.test(r.sql.join(' ')) && r.sql[0] === 'BEGIN'
+      && r.sql[r.sql.length - 1] === 'COMMIT', r.sql);
+    check('and a Saturday it decides against is left without a transaction behind it',
+      (await run(WEEKDAY, saw('X', WEEKDAY, '09:00', '18:00', 400))).sql.length === 0);
 
     /* Nobody asked for it: it rides along with the pull that is already
        running every five minutes. */

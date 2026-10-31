@@ -4188,40 +4188,63 @@ async function pullDeskTime(orgId, day) {
    It is careful about whose day it is. Only a Saturday; only somebody whose
    Saturday is set to be worked from home; only where the day is unmarked, or
    carries a mark this same rule wrote. A day the office or the person marked
-   is theirs and is left exactly as it is. */
+   is theirs and is left exactly as it is, and a month payroll has closed is
+   not reopened for anybody.
+
+   The whole map of overrides is one stored value, so writing one day means
+   reading all of them and putting them all back. Two of these at once - the
+   five-minute tick and somebody pressing the button - would each write back
+   what they read, and the second would undo the first. It is read under a
+   lock, like every other save of a shared key. */
 async function markSaturdayFromDeskTime(orgId, day, deskStore) {
   if (new Date(day + 'T00:00:00Z').getUTCDay() !== 6) return 0;
-  const kv = await sharedKeys(orgId, ['satPolicy', 'overrides']);
-  const sat = parseJson(kv.satPolicy) || {};
-  const overrides = parseJson(kv.overrides) || {};
-  const MINE = 'desktime';
-  let n = 0;
-  Object.keys(deskStore).forEach(key => {
-    const cut = key.lastIndexOf('|');
-    if (cut < 1 || key.slice(cut + 1) !== day) return;
-    const name = key.slice(0, cut);
-    /* The default is a four-hour Saturday from home, which is why a person
-       with nothing stored against them counts as one. */
-    const mode = (sat[name] && sat[name].mode) || 'WFH';
-    if (mode !== 'WFH') return;
-    const seen = deskStore[key];
-    if (!seen || !seen.d) return;                  // nothing at the computer, nothing to say
-    const had = overrides[key];
-    if (had && had.by !== MINE) return;            // somebody's own mark; not ours to touch
-    const mins = Math.max(0, Math.round(seen.d));
-    const dur = Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
-    if (had && had.cat === 'WFH' && had.duration === dur) return;   // already says this
-    overrides[key] = { cat: 'WFH', detail: '', reason: '', duration: dur,
-                       by: MINE, at: new Date().toISOString() };
-    n++;
-  });
-  if (!n) return 0;
-  await pool.query(
-    `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'overrides', $2, NULL)
-     ON CONFLICT (org_id, key) WHERE user_id IS NULL
-     DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
-    [orgId, JSON.stringify(overrides)]);
-  return n;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    /* A closed month is closed: the figures have been paid against. */
+    const locked = await lockedMonthsOf(client, orgId);
+    if (locked[day.slice(0, 7)]) { await client.query('ROLLBACK'); return 0; }
+    const pol = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'satPolicy' AND user_id IS NULL", [orgId]);
+    const row = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'overrides' AND user_id IS NULL FOR UPDATE", [orgId]);
+    const sat = parseJson(pol.rows[0] ? pol.rows[0].value : '{}') || {};
+    const overrides = parseJson(row.rows[0] ? row.rows[0].value : '{}') || {};
+    const MINE = 'desktime';
+    const at = new Date().toISOString();
+    let n = 0;
+    Object.keys(deskStore).forEach(key => {
+      const cut = key.lastIndexOf('|');
+      if (cut < 1 || key.slice(cut + 1) !== day) return;
+      const name = key.slice(0, cut);
+      /* The default is a four-hour Saturday from home, which is why a person
+         with nothing stored against them counts as one. */
+      const mode = (sat[name] && sat[name].mode) || 'WFH';
+      if (mode !== 'WFH') return;
+      const seen = deskStore[key];
+      if (!seen || !seen.d) return;                // nothing at the computer, nothing to say
+      const had = overrides[key];
+      if (had && had.by !== MINE) return;          // somebody's own mark; not ours to touch
+      const mins = Math.max(0, Math.round(seen.d));
+      const dur = Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
+      if (had && had.cat === 'WFH' && had.duration === dur) return;   // already says this
+      overrides[key] = { cat: 'WFH', detail: '', reason: '', duration: dur, by: MINE, at };
+      n++;
+    });
+    if (!n) { await client.query('ROLLBACK'); return 0; }
+    await client.query(
+      `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'overrides', $2, NULL)
+       ON CONFLICT (org_id, key) WHERE user_id IS NULL
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
+      [orgId, JSON.stringify(overrides)]);
+    await client.query('COMMIT');
+    return n;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (e2) {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /* Asked for by hand, a day or a stretch of days at a time. A stretch is capped
