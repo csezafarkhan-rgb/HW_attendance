@@ -318,13 +318,38 @@ function shiftFor(assignments, name, day) {
    the shift they are standing in started yesterday, and today's date would
    file the night under the wrong day. The day turns over at the shift's own
    start time instead of at midnight; for a day shift the two are the same. */
+/* Where one working day stops and the next begins, for somebody whose shift
+   runs through midnight.
+
+   A night shift belongs to the day it started on, and the question is where
+   one shift stops being the answer and the next starts. It was the shift's own
+   start time: before 18:00 the day was yesterday's, from 18:00 it was today's.
+
+   Which puts somebody who arrives ten minutes early on yesterday. That is not
+   a corner case - it is what arriving early means, and it is exactly what
+   happened: a press at 17:50 was filed to the day before, and the person saw
+   their shift marked on a day they had already finished.
+
+   The line sits in the middle of the gap between shifts now - half way from
+   when one ends to when the next begins. For 18:00 to 03:00 that is half past
+   ten in the morning: everything from then until three the next morning is
+   tonight's shift, and the small hours still belong to the night before. A
+   press is filed to whichever shift it is nearer to, which is what anybody
+   pressing it believes they are doing.
+*/
+function nightTurnsAt(sh) {
+  /* The shift ends after midnight, so its end in clock terms is endMin - 24h;
+     the gap runs from there round to the start. */
+  const ends = sh.endMin - 24 * 60;
+  return Math.round((ends + sh.startMin) / 2);
+}
 function ownDays(shift) {
   const now = new Date(Date.now() + IST_MS);
   const today = now.toISOString().slice(0, 10);
   const sh = parseShiftSpan(shift);
   if (sh && sh.overnight) {
     const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
-    if (mins < sh.startMin) {
+    if (mins < nightTurnsAt(sh)) {
       return [new Date(now.getTime() - 86400000).toISOString().slice(0, 10)];
     }
   }

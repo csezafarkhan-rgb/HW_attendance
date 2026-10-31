@@ -136,17 +136,46 @@ const ok = s => { vm.runInContext('__v = validShift(' + JSON.stringify(s) + ')',
 /* ---- and the day turns over at the shift start, not at midnight ---- */
 {
   const SRV = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  /* ownDays reads the real clock, so rather than pretend otherwise this checks
-     the rule it applies: before the shift's start, the working day is
-     yesterday's date. */
-  check('the server turns the day over at the shift start',
-    /if \(mins < sh\.startMin\) \{[\s\S]{0,160}- 86400000/.test(SRV));
+  /* A night shift belongs to the day it started on, and the question is where
+     one shift stops being the answer and the next starts. It was the shift's
+     own start time - which puts somebody who arrives ten minutes early on
+     yesterday, and that is not a corner case: it is what arriving early means.
+     A press at 17:50 before an 18:00 shift was filed to the day before, and
+     the person saw their night marked on a day they had already finished. */
+  const nightLine = (src, fn) => {
+    const i = src.indexOf('function ' + fn + '(');
+    let k = src.indexOf('{', i), d = 0;
+    for (; k < src.length; k++) {
+      const c = src[k];
+      if (c === '{') d++; else if (c === '}') { d--; if (!d) break; }
+    }
+    return src.slice(i, k + 1);
+  };
+  /* Half way from when one shift ends to when the next begins: for 18:00 to
+     03:00 that is half past ten in the morning. */
+  const turns = new Function(nightLine(SRV, 'nightTurnsAt') + '\nreturn nightTurnsAt;')();
+  check('the line sits in the middle of the gap between shifts',
+    turns({ startMin: 18 * 60, endMin: 27 * 60 }) === 10 * 60 + 30,
+    turns({ startMin: 18 * 60, endMin: 27 * 60 }));
+  check('a night that starts later moves the line with it',
+    turns({ startMin: 22 * 60, endMin: 30 * 60 }) === 14 * 60,
+    turns({ startMin: 22 * 60, endMin: 30 * 60 }));
+  check('the server turns the day over there, not at the shift start',
+    /if \(mins < nightTurnsAt\(sh\)\) \{[\s\S]{0,160}- 86400000/.test(SRV)
+    && !/if \(mins < sh\.startMin\)/.test(SRV));
   check('and only for a shift that crosses midnight',
     /if \(sh && sh\.overnight\) \{/.test(SRV));
-  check('the page does the same, from the same reading',
-    /function empWorkingDay\(\)\{[\s\S]{0,420}if\(toMin\(nowHHMM\(\)\) >= sh\.startMin\) return todayISO_full;/.test(APP));
-  check('and says so, the date not being today’s',
+  /* It has to be the same line on both sides, or a press writes to one day
+     and the card redraws the other - which reads as a button doing nothing. */
+  check('the page draws the same line, from the same reading',
+    /if\(toMin\(nowHHMM\(\)\) >= nightTurnsAt\(sh\)\) return todayISO_full;/.test(APP)
+    && !/if\(toMin\(nowHHMM\(\)\) >= sh\.startMin\)/.test(APP));
+  check('and the two work it out the same way',
+    nightLine(APP, 'nightTurnsAt').replace(/\s+/g, ' ').indexOf('(ends + sh.startMin) / 2') > -1
+    && nightLine(SRV, 'nightTurnsAt').replace(/\s+/g, ' ').indexOf('(ends + sh.startMin) / 2') > -1);
+  check('and says so, the date not being today\u2019s',
     /your shift started this day/.test(APP));
+
   /* The merges all judge it the same way, from one read of the shifts. */
   check('every merge is given the shift to judge it by',
     (SRV.match(/const days = ownDays\(shift\);/g) || []).length === 4);
