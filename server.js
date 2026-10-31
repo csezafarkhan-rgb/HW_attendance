@@ -4169,8 +4169,61 @@ async function pullDeskTime(orgId, day) {
        DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
       [orgId, JSON.stringify(store)]);
   }
-  return { ok: true, day, wrote, seen: list.length, fields };
+  const sat = wrote ? await markSaturdayFromDeskTime(orgId, day, store) : 0;
+  return { ok: true, day, wrote, saturdays: sat, seen: list.length, fields };
 }
+/* A Saturday worked from home, written from what the computer saw.
+
+   Saturday is a four-hour day for most of the office and it is worked from
+   home, so there are no punches: the day arrives blank and somebody has to go
+   and mark it. DeskTime was watching all along - if it saw the machine in use,
+   the person was working, and the day is a day from home.
+
+   What it writes is the mark, and the hours it carries are DeskTime's own
+   figure for the day. What the day is *owed* is a separate question with a
+   separate answer - four hours, or whatever that person's Saturday is set to -
+   and the comparison on the DeskTime page still measures against that, not
+   against this.
+
+   It is careful about whose day it is. Only a Saturday; only somebody whose
+   Saturday is set to be worked from home; only where the day is unmarked, or
+   carries a mark this same rule wrote. A day the office or the person marked
+   is theirs and is left exactly as it is. */
+async function markSaturdayFromDeskTime(orgId, day, deskStore) {
+  if (new Date(day + 'T00:00:00Z').getUTCDay() !== 6) return 0;
+  const kv = await sharedKeys(orgId, ['satPolicy', 'overrides']);
+  const sat = parseJson(kv.satPolicy) || {};
+  const overrides = parseJson(kv.overrides) || {};
+  const MINE = 'desktime';
+  let n = 0;
+  Object.keys(deskStore).forEach(key => {
+    const cut = key.lastIndexOf('|');
+    if (cut < 1 || key.slice(cut + 1) !== day) return;
+    const name = key.slice(0, cut);
+    /* The default is a four-hour Saturday from home, which is why a person
+       with nothing stored against them counts as one. */
+    const mode = (sat[name] && sat[name].mode) || 'WFH';
+    if (mode !== 'WFH') return;
+    const seen = deskStore[key];
+    if (!seen || !seen.d) return;                  // nothing at the computer, nothing to say
+    const had = overrides[key];
+    if (had && had.by !== MINE) return;            // somebody's own mark; not ours to touch
+    const mins = Math.max(0, Math.round(seen.d));
+    const dur = Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
+    if (had && had.cat === 'WFH' && had.duration === dur) return;   // already says this
+    overrides[key] = { cat: 'WFH', detail: '', reason: '', duration: dur,
+                       by: MINE, at: new Date().toISOString() };
+    n++;
+  });
+  if (!n) return 0;
+  await pool.query(
+    `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, 'overrides', $2, NULL)
+     ON CONFLICT (org_id, key) WHERE user_id IS NULL
+     DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1`,
+    [orgId, JSON.stringify(overrides)]);
+  return n;
+}
+
 /* Asked for by hand, a day or a stretch of days at a time. A stretch is capped
    because each day is one call to DeskTime and a careless range would be a
    month of them in a row. */
@@ -4191,7 +4244,9 @@ app.post('/api/desktime/pull', requireRole('admin'), async (req, res) => {
     catch (e) { out.push({ ok: false, day, error: 'threw', detail: (e && e.message) || '' }); }
   }
   const wrote = out.reduce((n, r) => n + (r.wrote || 0), 0);
-  res.json({ ok: out.some(r => r.ok), days: out.length, wrote, results: out.slice(0, 5) });
+  const saturdays = out.reduce((n, r) => n + (r.saturdays || 0), 0);
+  res.json({ ok: out.some(r => r.ok), days: out.length, wrote, saturdays,
+             results: out.slice(0, 5) });
 });
 /* And once a night, for yesterday and for the day that is running - yesterday
    because a day is only whole once it is over, today because somebody looking

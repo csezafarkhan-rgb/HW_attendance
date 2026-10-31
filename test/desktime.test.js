@@ -782,6 +782,99 @@ function grab(src, name) {
     page.indexOf('id="dtImpBtn"') > -1);
 }
 
-const bad = results.filter(x => !x).length;
-console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
-process.exit(bad ? 1 : 0);
+/* ---- Saturday, which nobody was there to mark ----
+   Saturday is a four-hour day worked from home, so there are no punches and
+   the day arrives blank: somebody has to go through and mark nine people's
+   Saturdays by hand, every week. DeskTime was watching all along - if it saw
+   the machine in use, the person was working.
+
+   This writes attendance, which makes what it refuses to touch the more
+   important half. Everything below is the function actually running. */
+{
+  const SAT = '2026-10-31';          // a Saturday
+  const WEEKDAY = '2026-10-30';
+  let wrote = null;
+  const ctx = {
+    parseJson: t => { try { return JSON.parse(t); } catch (e) { return undefined; } },
+    sharedKeys: async () => ctx.__kv,
+    pool: { query: async (q, args) => { wrote = args && args[1]; return { rows: [] }; } },
+    Date, JSON, Object, Math, String, console,
+  };
+  vm.createContext(ctx);
+  /* grab() finds the body from 'function', so the async comes back on here. */
+  vm.runInContext('async ' + grab(SRV, 'markSaturdayFromDeskTime'), ctx);
+
+  /* day, what DeskTime saw, each person's Saturday, what is already marked */
+  const run = async (day, desk, satPolicy, overrides) => {
+    wrote = null;
+    ctx.__kv = { satPolicy: JSON.stringify(satPolicy || {}),
+                 overrides: JSON.stringify(overrides || {}) };
+    const n = await ctx.markSaturdayFromDeskTime(1, day, desk);
+    return { n, out: wrote ? JSON.parse(wrote) : null };
+  };
+  const saw = (name, day, i, o, d) => ({ [name + '|' + day]: { i, o, d } });
+
+  (async () => {
+    let r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '14:30', 207));
+    check('a Saturday nobody marked becomes a day worked from home',
+      r.n === 1 && r.out['Aman Chandra|' + SAT].cat === 'WFH', r.out);
+    check('carrying the time the computer was actually in use',
+      r.out['Aman Chandra|' + SAT].duration === '3:27', r.out['Aman Chandra|' + SAT]);
+    check('and signed, so it can tell its own work from anybody else\u2019s',
+      r.out['Aman Chandra|' + SAT].by === 'desktime');
+    /* Four hours is what the day is owed; three and a half is what was worked.
+       Writing the worked figure as the assignment would make every Saturday
+       read 100% against itself, which is how this went wrong once before. */
+    check('what the day is owed is left to the Saturday assignment',
+      !/owed/.test(grab(SRV, 'markSaturdayFromDeskTime')));
+
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '14:05', 245));
+    check('four hours and five minutes reads as 4:05, not 4:5',
+      r.out['Aman Chandra|' + SAT].duration === '4:05', r.out['Aman Chandra|' + SAT]);
+
+    /* the refusals */
+    r = await run(WEEKDAY, saw('Aman Chandra', WEEKDAY, '09:00', '18:00', 400));
+    check('a weekday is not a Saturday and is left alone', r.n === 0 && r.out === null, r.n);
+
+    r = await run(SAT, saw('karan Ahuja', SAT, '10:00', '14:00', 200),
+                  { 'karan Ahuja': { mode: 'OFF', hours: 4 } });
+    check('somebody whose Saturday is off is left alone', r.n === 0, r.n);
+
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '14:00', 200), {},
+                  { ['Aman Chandra|' + SAT]: { cat: 'LEAVE', detail: 'CL', by: 'office' } });
+    check('a day the office marked is not written over', r.n === 0, r.n);
+
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '14:00', 200), {},
+                  { ['Aman Chandra|' + SAT]: { cat: 'VISIT', detail: 'Factory', by: 'self' } });
+    check('nor a day the person marked themselves', r.n === 0, r.n);
+
+    r = await run(SAT, saw('Aman Chandra', SAT, '', '', 0));
+    check('a Saturday the computer saw nothing on stays blank', r.n === 0, r.n);
+
+    /* Its own earlier mark is its to keep up to date, so the figure grows
+       through the morning instead of freezing at the first pull. */
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '15:00', 260), {},
+                  { ['Aman Chandra|' + SAT]: { cat: 'WFH', duration: '3:27', by: 'desktime' } });
+    check('its own mark is brought up to date as the day goes on',
+      r.n === 1 && r.out['Aman Chandra|' + SAT].duration === '4:20', r.out);
+
+    r = await run(SAT, saw('Aman Chandra', SAT, '10:00', '15:00', 260), {},
+                  { ['Aman Chandra|' + SAT]: { cat: 'WFH', duration: '4:20', by: 'desktime' } });
+    check('and left alone when it already says exactly that', r.n === 0, r.n);
+
+    /* Nobody asked for it: it rides along with the pull that is already
+       running every five minutes. */
+    check('it runs off the back of the pull, not as another thing to remember',
+      /const sat = wrote \? await markSaturdayFromDeskTime\(orgId, day, store\) : 0;/.test(SRV)
+      && /saturdays: sat/.test(SRV));
+    check('and the count comes back with the rest of the reckoning',
+      /out\.reduce\(\(n, r\) => n \+ \(r\.saturdays \|\| 0\), 0\)/.test(SRV));
+
+    done();
+  })();
+}
+function done() {
+  const bad = results.filter(x => !x).length;
+  console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
+  process.exit(bad ? 1 : 0);
+}
