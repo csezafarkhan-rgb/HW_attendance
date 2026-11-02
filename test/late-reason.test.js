@@ -259,14 +259,15 @@ function grab(src, name) {
     APP.indexOf('box.disabled = fin.checked;') > -1);
   /* It lived at the foot of the attendance pane, below everything that pane is
      about, and was not found. A late day answered for is its own message to
-     its own people, so it has a tab of its own. */
+     its own people, so it has a tab of its own - shared now with the other
+     marks somebody makes on their own day without being asked. */
   check('the setting has a tab of its own rather than a footnote on another',
-    APP.indexOf('data-em-tab="lt">Late &amp; Shift<') > -1
+    APP.indexOf('data-em-tab="lt">Self-marked<') > -1
     && APP.indexOf('data-em-pane="lt"') > -1);
-  /* The tab carries two things somebody can put on their own day, and says so
+  /* The tab carries the things somebody can put on their own day, and says so
      before it asks who hears about them. */
   check('and the tab says what it covers before asking who hears',
-    /data-em-pane="lt"[\s\S]{0,420}a late arrival answered for, and the hours they are working/.test(APP));
+    /data-em-pane="lt"[\s\S]{0,460}a late arrival answered for, the hours they are working/.test(APP));
   check('each of the two is told in its own words, to the same people',
     APP.indexOf('id="emShSubject"') > -1 && APP.indexOf('id="emShIntro"') > -1
     && APP.indexOf('id="emShFooter"') > -1

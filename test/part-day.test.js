@@ -381,6 +381,63 @@ function grab(src, name) {
       });
     }
 
+    /* ---- the office types the addresses itself ----
+       Who should hear that somebody has taken leave is not the same question
+       as who should hear they came in late, and it is not a question this
+       code is in any position to answer. So the message has a To and a Cc of
+       its own on the settings panel, and the answer above - the management
+       with the approvers copied - is only what happens until somebody types
+       one. */
+    {
+      const part = /part: \(function \(\) \{[\s\S]*?\}\)\(\)/.exec(SRV)[0];
+      check('the part-day message has addresses of its own in the settings',
+        /to: \(Array\.isArray\(pt\.to\)/.test(part) && /cc: \(Array\.isArray\(pt\.cc\)/.test(part), null);
+      check('and they are filtered like every other address box',
+        (part.match(/EMAIL_RE\.test\(x\)\)\.slice\(0, 20\)/g) || []).length === 2, null);
+      check('its wording is kept beside them',
+        /subject: clip\(pt\.subject, 200\)/.test(part), null);
+
+      const notify = grab(SRV, 'notifyPartDayTaken');
+      /* Whoever is named on the tab is who it goes to - the same bargain
+         every other tab in this panel strikes. */
+      check('typed addresses are who it goes to',
+        /const named = \(words\.to \|\| \[\]\)\.length > 0;/.test(notify)
+        && /to = named \? \(words\.to \|\| \[\]\)\.slice\(\)/.test(notify), null);
+      check('and nobody else - the approvers are not added on top of them',
+        /if \(!named\) \(await leaveApprovers\(orgId, settings\)\)\.forEach\(push\);/.test(notify), null);
+      check('named nobody, it still reaches whoever decides leave',
+        /: \(await mailRecipients\(orgId, settings, 'leave'\)\)\.slice\(\)/.test(notify), null);
+      /* Whatever the office types, the person whose leave it is still sees
+         the message about it. */
+      check('and the person who took the day is copied in either way',
+        notify.indexOf('ownersOf(orgId, items.map') > notify.indexOf('if (!named)'), null);
+
+      check('there is wording it comes with, so the boxes are not blank',
+        !!mailer.DEFAULT_TEXT.partDay && /\{kind\}/.test(mailer.DEFAULT_TEXT.partDay.subject),
+        mailer.DEFAULT_TEXT.partDay);
+      check('and the panel is sent that wording to show',
+        /defaults: mailer\.DEFAULT_TEXT/.test(SRV), null);
+
+      /* The panel itself: boxes to type in, and a save that keeps them. */
+      check('the settings panel has a box for the addresses',
+        /id="emPtTo"/.test(APP) && /id="emPtCc"/.test(APP), null);
+      check('with the subject and the words beside it',
+        /id="emPtSubject"/.test(APP) && /id="emPtIntro"/.test(APP) && /id="emPtFooter"/.test(APP), null);
+      check('and saving the panel keeps all five',
+        /part: \{ to: list\('emPtTo'\), cc: list\('emPtCc'\),/.test(APP)
+        && /subject: document\.getElementById\('emPtSubject'\)/.test(APP), null);
+      /* It sits with the other two things somebody marks on their own day,
+         which is where anybody would go looking for it. */
+      check('it sits on the tab for marks people make themselves',
+        /data-em-tab="lt">Self-marked</.test(APP)
+        && APP.indexOf('id="emPtTo"') > APP.indexOf('data-em-pane="lt"')
+        && APP.indexOf('id="emPtTo"') < APP.indexOf('data-em-pane="lv"'), null);
+      check('and says plainly where it goes while nobody has typed anything',
+        /Nobody named, so it goes to whoever decides leave/.test(APP), null);
+      check('the default wording is shown in the boxes rather than hidden',
+        /mailEscape\(text\(pt\.subject, D\.subject\)\)/.test(APP), null);
+    }
+
     const bad = results.filter(x => !x).length;
     console.log(bad ? ('FAILED ' + bad + ' of ' + results.length)
                     : ('ALL PASS (' + results.length + ' checks)'));

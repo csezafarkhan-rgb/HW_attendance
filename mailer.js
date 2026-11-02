@@ -291,6 +291,16 @@ const DEFAULT_TEXT = {
       + 'you \u2014 it is already on the record, and it is that one day only.',
     footer: 'Best regards,\n{org}'
   },
+  /* And the third of them: part of a day taken rather than asked for. The
+     same arrangement again, and again a different message - what the office
+     wants to see here is how much of the day went and off whose leave. */
+  partDay: {
+    subject: '{kind} taken \u00b7 {who} \u00b7 {date}',
+    intro: 'Hello,\n\nSomebody has taken part of a day off. Nothing is being asked of you '
+      + '\u2014 a short leave or a half day does not wait for a decision, and the leave is '
+      + 'already counted as it reads below.',
+    footer: 'Best regards,\n{org}'
+  },
   excused: {
     subject: 'Late excused \u00b7 {who} \u00b7 {date}',
     intro: 'Hello,\n\nSomebody has marked their own late arrival as excused and said why. '

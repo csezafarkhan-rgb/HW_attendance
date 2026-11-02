@@ -2243,10 +2243,22 @@ async function mailSettings(orgId) {
     })(),
     /* And a third: a short leave or a half day somebody took for themselves.
        Same reason the shift words are kept apart - it is a different piece of
-       news, and the office wanted each to read as what it is. */
+       news, and the office wanted each to read as what it is.
+
+       Addresses of its own, which the other two do not have. Who should hear
+       that somebody has taken leave is not the same question as who should
+       hear they came in late, and the office asked to name these themselves
+       rather than have them worked out. Named nobody, it falls back to the
+       people who decide leave and whoever holds the first word on it. */
     part: (function () {
       const pt = isPlainObject(ex.part) ? ex.part : {};
-      return { subject: clip(pt.subject, 200), intro: clip(pt.intro, 2000), footer: clip(pt.footer, 2000) };
+      return {
+        to: (Array.isArray(pt.to) ? pt.to : []).map(x => String(x).trim())
+          .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+        cc: (Array.isArray(pt.cc) ? pt.cc : []).map(x => String(x).trim())
+          .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+        subject: clip(pt.subject, 200), intro: clip(pt.intro, 2000), footer: clip(pt.footer, 2000)
+      };
     })()
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
@@ -3617,24 +3629,31 @@ async function notifyPartDayTaken(orgId, items) {
   try {
     if (!mailer.ready() || !items || !items.length) return;
     const settings = await mailSettings(orgId);
-    const to = (await mailRecipients(orgId, settings, 'leave')).slice();
+    const words = settings.excused.part || {};
+    /* Whoever is named on the tab is who it goes to, and nobody else - the
+       same bargain every other tab strikes. Named nobody, it falls back to the
+       people who decide leave, with whoever holds the first word on it copied
+       in, so the message goes somewhere sensible before anybody has typed
+       anything at all. */
+    const named = (words.to || []).length > 0;
+    const to = named ? (words.to || []).slice()
+                     : (await mailRecipients(orgId, settings, 'leave')).slice();
     if (!to.length) return;
     const cc = [];
     const push = a => { if (a && to.indexOf(a) < 0 && cc.indexOf(a) < 0) cc.push(a); };
-    (settings.excused.cc || []).forEach(push);
-    (await leaveApprovers(orgId, settings)).forEach(push);
+    (words.cc || []).forEach(push);
+    if (!named) (await leaveApprovers(orgId, settings)).forEach(push);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames']);
     const shownNames = parseJson(kv.empNames) || {};
-    const words = settings.excused.part || {};
     /* Said in days rather than in the fraction the record keeps: a reader of
        this message is not holding the leave rules in their head. */
-    const named = { SHORT: 'Short leave', HALF: 'Half day' };
+    const kindSaid = { SHORT: 'Short leave', HALF: 'Half day' };
     const cost = { SHORT: 'a quarter of a day', HALF: 'half a day' };
     const list = items.map(m => ({
       name: shownNames[m.empName] || m.empName, day: m.day,
-      kindName: named[m.kind] || 'Part day', qty: cost[m.kind] || '',
+      kindName: kindSaid[m.kind] || 'Part day', qty: cost[m.kind] || '',
       half: m.half || '', note: m.note || '', leave: m.leave || 'CL',
-      removed: !!m.removed, was: m.was ? (named[m.was] || m.was) : ''
+      removed: !!m.removed, was: m.was ? (kindSaid[m.was] || m.was) : ''
     }));
     cc.push.apply(cc, await ownersOf(orgId, items.map(m => m.empName), to, cc));
     const mail = mailer.partDayEmail({
