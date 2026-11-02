@@ -1837,6 +1837,167 @@ app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, 
   } finally { client.release(); }
 });
 
+/* ---- a short leave or a half day, taken rather than asked for ----
+
+   Leave for part of a day went the way all leave goes: a request, a wait, a
+   decision. For a quarter of a day that is a decision costing more than the
+   thing being decided, and the morning it is about is usually over before the
+   answer arrives - so people stopped asking, and the day turned up on the
+   record later as leave nobody had requested. The worst of both: taken
+   anyway, and unaccounted for.
+
+   It counts at once now. The same bargain the excused late mark and the
+   self-set hours strike: written on the spot, nobody approves it, and the
+   office is told. Half a day is the limit - anything longer is somebody else's
+   day to plan around and still goes through a request.
+
+   It cannot be the page's own write, and that is the whole reason this route
+   exists. halfDays is not an employee's to put anything in, and
+   mergeEmployeeRequests forces any request somebody makes for themselves to
+   'pending' - which is right, and is why the grant and the mark both have to
+   be the server's, made together in one transaction. */
+const SELF_PART_KINDS = ['SHORT', 'HALF'];
+/* Kept apart from the route so it can be run on its own against stand-ins.
+   This writes leave, and leave is money: a thing that moves money should be
+   provable without a database and a browser standing in front of it. It
+   answers with the status and the body the route is to send, and with what the
+   office is to be told once the write has gone through. */
+async function takePartDay(orgId, name, userId, body) {
+  const kind = String((body && body.kind) || '').trim().toUpperCase();
+  /* An empty kind is how a day is put back: they took it, so they can untake
+     it, on the same day and only while the mark is still their own. */
+  if (kind && SELF_PART_KINDS.indexOf(kind) === -1) return { code: 400, out: { error: 'bad_kind' } };
+  const half = kind === 'HALF'
+    ? (String((body && body.half) || '').trim().toUpperCase() === 'PM' ? 'PM' : 'AM') : '';
+  const why = clip(body && body.message, 500).trim();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    /* Their own working day, worked out here rather than taken from the
+       browser: at two in the morning a night shift belongs to yesterday, and
+       nothing the page sends gets to choose which day this writes. */
+    const sa = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'shiftAssignments' AND user_id IS NULL", [orgId]);
+    const day = ownDays(shiftFor(parseJson(sa.rows[0] ? sa.rows[0].value : '{}'), name,
+                                 new Date(Date.now() + IST_MS).toISOString().slice(0, 10)))[0];
+    const locked = await lockedMonthsOf(client, orgId);
+    if (locked[day.slice(0, 7)]) { await client.query('ROLLBACK'); return { code: 409, out: { error: 'month_locked' } }; }
+    const key = name + '|' + day;
+    /* A day the office has already marked away whole is not a day anybody
+       takes a half of. */
+    const ovr = await client.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'overrides' AND user_id IS NULL", [orgId]);
+    const ov = (parseJson(ovr.rows[0] ? ovr.rows[0].value : '{}') || {})[key];
+    if (ov && ov.cat === 'LEAVE') { await client.query('ROLLBACK'); return { code: 409, out: { error: 'day_is_leave' } }; }
+    /* Read for update, because a shared value is one whole blob: without the
+       lock, two saves a moment apart each write the map they read and the
+       second quietly drops the first. */
+    const read = async k => {
+      const r = await client.query(
+        'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL FOR UPDATE', [orgId, k]);
+      return r.rows[0] ? r.rows[0].value : null;
+    };
+    const write = async (k, before, after) => {
+      await client.query(
+        `INSERT INTO kv (org_id, user_id, key, value, updated_by) VALUES ($1, NULL, $2, $3, $4)
+         ON CONFLICT (org_id, key) WHERE user_id IS NULL
+         DO UPDATE SET value = EXCLUDED.value, updated_at = now(), version = kv.version + 1,
+                       updated_by = EXCLUDED.updated_by`,
+        [orgId, k, after, userId || null]);
+      await logChange(client, orgId, 'kv', k, userId || null);
+      const changes = diffValue(before, after);
+      if (changes.length) await addHistory(client, orgId, userId || null, name, k, changes);
+    };
+    const hdText = await read('halfDays');
+    const parts = parseJson(hdText) || {};
+    const had = (parts[key] && typeof parts[key] === 'object') ? parts[key] : null;
+    /* A mark the office made, or one that came out of a request somebody
+       granted, is not theirs to move. */
+    if (had && had.by !== 'self') { await client.query('ROLLBACK'); return { code: 409, out: { error: 'marked_by_office' } }; }
+    if (!kind && !had) { await client.query('ROLLBACK'); return { code: 409, out: { error: 'nothing_to_undo' } }; }
+    if (kind && had && had.kind === kind && String(had.half || '') === half) {
+      await client.query('ROLLBACK'); return { code: 409, out: { error: 'already_taken' } };
+    }
+    const reqText = await read('leaveRequests');
+    const reqs = parseJson(reqText) || [];
+    /* Anything already in hand for this day stays in hand. A request waiting
+       on somebody's word is not overtaken by this, and one already granted has
+       written the day itself - either way the answer is the Requests page, not
+       a second grant sitting beside the first. */
+    const standing = reqs.filter(r => r && r.empName === name && !r.selfTaken
+      && r.leaveType !== 'PUNCH' && r.status !== 'rejected' && r.status !== 'cancelled'
+      && String(r.dateFrom) <= day && String(r.dateTo) >= day)[0];
+    if (kind && standing) {
+      await client.query('ROLLBACK');
+      return { code: 409, out: { error: 'already_requested', status: standing.status } };
+    }
+    /* The one they made for themselves, if they have been here already today:
+       changing their mind amends it rather than leaving two records of one
+       day. */
+    const mine = reqs.filter(r => r && r.selfTaken && r.empName === name && r.dateFrom === day)[0] || null;
+    const now = new Date().toISOString();
+    const reqId = mine ? mine.id
+      : ('req_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex'));
+    if (kind) {
+      /* note is what the grid and the exports read; why is their own words on
+         their own, so the card can show them back without the prefix. */
+      const note = (kind === 'HALF' ? (half === 'PM' ? 'Second half' : 'First half') : 'Short leave')
+                 + (why ? (' \u00b7 ' + why) : '');
+      parts[key] = { reqId, kind, half, leave: 'CL', note, why, at: now, by: 'self' };
+    } else {
+      delete parts[key];
+    }
+    await write('halfDays', hdText, JSON.stringify(parts));
+    if (mine) {
+      if (kind) { mine.leaveType = kind; mine.half = half; mine.message = why; mine.status = 'approved'; }
+      else { mine.status = 'cancelled'; mine.cancelledAt = now; }
+      mine.updatedAt = now;
+    } else if (kind) {
+      reqs.push({
+        id: reqId, empName: name, dateFrom: day, dateTo: day, leaveType: kind,
+        half, message: why, returnOn: '', status: 'approved',
+        /* Granted, and nobody granted it. Saying so is the point: the record
+           should not put a person's name to a decision they never made, and
+           the panel that hunts for leave nobody requested should not call this
+           one of those. */
+        selfTaken: true, approvedBy: '',
+        adminNote: 'Taken without approval \u2014 a short leave or half day does not need one. '
+                 + 'The office was told as it was taken.',
+        employeeReply: '', createdAt: now, updatedAt: now
+      });
+    }
+    await write('leaveRequests', reqText, JSON.stringify(reqs));
+    await client.query('COMMIT');
+    return {
+      code: 200, out: { ok: true, day, kind, half, reqId: kind ? reqId : '' },
+      told: { empName: name, day, kind: kind || (had && had.kind) || '', half, note: why,
+              leave: 'CL', removed: !kind,
+              /* What they had taken for this day before they changed their
+                 mind, so a second message does not read as a second day. */
+              was: (kind && had && had.kind !== kind) ? had.kind : '' }
+    };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (e2) { /* the error thrown on is the one that matters */ }
+    throw e;
+  } finally { client.release(); }
+}
+app.post('/api/part-day', requireAuth, express.json({ limit: '2kb' }), async (req, res) => {
+  if (req.session.role !== 'employee') return res.status(403).json({ error: 'not_an_employee' });
+  const name = String((req.user && req.user.name) || '').trim();
+  if (!name) return res.status(400).json({ error: 'no_name' });
+  let r;
+  try {
+    r = await takePartDay(req.session.orgId, name, req.session.userId, req.body || {});
+  } catch (e) {
+    console.error('part day failed:', e && e.message);
+    return res.status(500).json({ error: 'part_day_failed' });
+  }
+  res.status(r.code).json(r.out);
+  /* After the answer and not waited for: the day is on the record whether or
+     not the message gets out. */
+  if (r.told) notifyPartDayTaken(req.session.orgId, [r.told]);
+});
+
 /* ---------------- the office PC ----------------
    The office PC has no user and no session. It proves itself with SYNC_TOKEN, a
    long random value set in Render's environment and kept in a file on that PC,
@@ -2079,6 +2240,13 @@ async function mailSettings(orgId) {
     shift: (function () {
       const sh = isPlainObject(ex.shift) ? ex.shift : {};
       return { subject: clip(sh.subject, 200), intro: clip(sh.intro, 2000), footer: clip(sh.footer, 2000) };
+    })(),
+    /* And a third: a short leave or a half day somebody took for themselves.
+       Same reason the shift words are kept apart - it is a different piece of
+       news, and the office wanted each to read as what it is. */
+    part: (function () {
+      const pt = isPlainObject(ex.part) ? ex.part : {};
+      return { subject: clip(pt.subject, 200), intro: clip(pt.intro, 2000), footer: clip(pt.footer, 2000) };
     })()
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
@@ -3414,6 +3582,72 @@ async function notifyShiftChange(orgId, moves) {
     await logMail(orgId, 'shift', msg, sent);
   } catch (e) {
     console.error('the shift stands but its message failed:', e && e.message);
+  }
+}
+
+/* Whoever the office has named to look at leave before the management do.
+
+   Read out of the office's own routing rather than written down here. Two
+   addresses hold that word today; holding it is the whole reason they are the
+   people to tell, so if the office moves it to somebody else the message
+   follows without anybody editing this. A name routed straight to the
+   management holds no first word and contributes no address. */
+async function leaveApprovers(orgId, settings) {
+  const out = [];
+  const add = e => {
+    const a = String(e || '').trim().toLowerCase();
+    if (EMAIL_RE.test(a) && out.indexOf(a) === -1) out.push(a);
+  };
+  ((settings.leave && settings.leave.firstTo) || []).forEach(add);
+  const route = await approvalRouteOf(orgId);
+  Object.keys(route).forEach(n => { if (route[n] !== 'final') add(route[n]); });
+  return out;
+}
+/* Somebody has taken a short leave or a half day without asking.
+
+   Three audiences, and the office asked for all three. The management, because
+   leave is theirs to know about. Whoever holds the first word on leave, because
+   a day taken without asking is exactly the thing they would have been asked
+   about. And the person whose day it is, so there is never a message about
+   their own leave that they did not see.
+
+   For reading, not for deciding: there are no buttons, because the day is
+   already on the record and already counted. */
+async function notifyPartDayTaken(orgId, items) {
+  try {
+    if (!mailer.ready() || !items || !items.length) return;
+    const settings = await mailSettings(orgId);
+    const to = (await mailRecipients(orgId, settings, 'leave')).slice();
+    if (!to.length) return;
+    const cc = [];
+    const push = a => { if (a && to.indexOf(a) < 0 && cc.indexOf(a) < 0) cc.push(a); };
+    (settings.excused.cc || []).forEach(push);
+    (await leaveApprovers(orgId, settings)).forEach(push);
+    const kv = await sharedKeys(orgId, ['companyInfo', 'empNames']);
+    const shownNames = parseJson(kv.empNames) || {};
+    const words = settings.excused.part || {};
+    /* Said in days rather than in the fraction the record keeps: a reader of
+       this message is not holding the leave rules in their head. */
+    const named = { SHORT: 'Short leave', HALF: 'Half day' };
+    const cost = { SHORT: 'a quarter of a day', HALF: 'half a day' };
+    const list = items.map(m => ({
+      name: shownNames[m.empName] || m.empName, day: m.day,
+      kindName: named[m.kind] || 'Part day', qty: cost[m.kind] || '',
+      half: m.half || '', note: m.note || '', leave: m.leave || 'CL',
+      removed: !!m.removed, was: m.was ? (named[m.was] || m.was) : ''
+    }));
+    cc.push.apply(cc, await ownersOf(orgId, items.map(m => m.empName), to, cc));
+    const mail = mailer.partDayEmail({
+      orgName: orgNameOf(kv.companyInfo), items: list, siteUrl: mailer.baseUrl(),
+      subject: words.subject, intro: words.intro, footer: words.footer
+    });
+    if (!mail) return;
+    const msg = { to, cc, subject: mail.subject, html: mail.html };
+    const sent = await mailer.send(msg);
+    await logMail(orgId, 'partday', msg, sent);
+  } catch (e) {
+    /* The day is on the record either way; only the telling failed. */
+    console.error('the part day stands but its message failed:', e && e.message);
   }
 }
 

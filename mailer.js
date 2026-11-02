@@ -1234,11 +1234,83 @@ function shiftEmail(o) {
   };
 }
 
+/* Somebody has taken a short leave or a half day out of their own working day.
+
+   These two used to go the way all leave goes: asked for, waited on, decided.
+   For a quarter of a day that is a decision costing more than the thing being
+   decided, and the morning it is about is usually over before the answer comes.
+   So they are told now rather than asked - the same bargain the excused late
+   mark and the self-set hours strike.
+
+   What the message has to carry is what the office would otherwise have to go
+   and look up: how much of the day it costs, which half of it went, and that
+   nobody had to agree to it. There are no buttons on it. The leave is already
+   on the record and already counted against their casual leave. */
+function partDayEmail(o) {
+  const items = (o.items || []).filter(Boolean);
+  if (!items.length) return null;
+  const one = items.length === 1;
+  /* All of them put back is a different piece of news from any of them taken,
+     and the heading should not say the opposite of the message under it. */
+  const allBack = items.every(function (it) { return it.removed; });
+  const say = { n: String(items.length), org: o.orgName || 'Attendance',
+                who: items[0].name, date: fmtDay(items[0].day),
+                kind: items[0].kindName || 'Part day' };
+  const body = [];
+  const written = fillText(o.intro, say).trim();
+  body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+    + (written
+        ? esc(written).replace(/\n/g, '<br>')
+        : ((allBack
+              ? (one ? 'Somebody has put back part of a day they had taken off.'
+                     : (items.length + ' part days have been put back.'))
+              : (one ? 'Somebody has taken part of a day off.'
+                     : (items.length + ' people have taken part of a day off.')))
+           + '<br><span style="color:' + SOFT + ';">Already on the record \u2014 nothing is '
+           + 'being asked of you. A short leave or a half day does not wait for a '
+           + 'decision; the leave is counted as it reads here.</span>'))
+    + '</div>');
+  items.forEach(function (it) {
+    const halfSaid = it.half ? (it.half === 'PM' ? 'second half' : 'first half') : '';
+    body.push('<div style="padding:10px 12px;margin-bottom:8px;border:1px solid ' + LINE + ';border-radius:10px;">'
+      + '<div style="font-size:13.5px;"><b>' + esc(it.name) + '</b>'
+      + '<span style="color:' + SOFT + ';"> \u00b7 ' + esc(fmtDay(it.day)) + '</span></div>'
+      + (it.removed
+          ? ('<div style="font-size:13px;margin-top:6px;"><b>a whole working day again</b>'
+             + '<span style="color:' + SOFT + ';"> \u2014 the ' + esc(String(it.kindName).toLowerCase())
+             + ' they had taken is off the record, and the leave with it</span></div>')
+          : ('<div style="font-size:13px;margin-top:6px;"><b>' + esc(it.kindName || '') + '</b>'
+             + (halfSaid ? ('<span style="color:' + SOFT + ';"> \u00b7 ' + halfSaid + ' off</span>') : '')
+             + '<span style="color:' + SOFT + ';"> \u2014 ' + esc(it.qty || '') + ' taken'
+             + (it.leave ? (' from their ' + esc(it.leave === 'Sick' ? 'sick leave' : 'casual leave')) : '')
+             + '</span></div>'))
+      + (it.note ? ('<div style="font-size:13px;margin-top:6px;">\u201c' + esc(it.note) + '\u201d</div>') : '')
+      /* What they had taken for the same day before they changed their mind,
+         so a second message about one day does not read as two days taken. */
+      + (it.was ? ('<div style="font-size:12px;color:' + SOFT + ';margin-top:4px;">Changed from the '
+                   + esc(String(it.was).toLowerCase()) + ' they had taken for this day.</div>') : '')
+      + '</div>');
+  });
+  if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
+  const foot = fillText(o.footer, say).trim();
+  if (foot) body.push('<div style="margin-top:14px;font-size:12.5px;color:' + SOFT
+    + ';line-height:1.6;">' + esc(foot).replace(/\n/g, '<br>') + '</div>');
+  const subject = fillText(o.subject, say).trim();
+  const head = allBack ? 'Part of a day put back' : 'Part of a day taken';
+  return {
+    subject: subject || (one
+      ? ((allBack ? 'Part day put back \u00b7 ' : (items[0].kindName + ' taken \u00b7 '))
+         + items[0].name + ' \u00b7 ' + fmtDay(items[0].day))
+      : ((allBack ? 'Part days put back \u00b7 ' : 'Part days taken \u00b7 ') + items.length)),
+    html: layout(o.orgName || 'Attendance', head, body)
+  };
+}
+
 module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, shiftEmail, leaveRecordBlock, requestCard, confirmPage, resultPage, clock, minsSaid,
+  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, shiftEmail, partDayEmail, leaveRecordBlock, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

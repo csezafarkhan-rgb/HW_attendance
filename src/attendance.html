@@ -21025,7 +21025,7 @@ function buildExcelBackup(){
        those are theirs to say - the office cannot know either until it is
        told. They were behind the self-marking gate because they happened to be
        drawn on the same card. */
-    var ownDay = visitRow(name, day) + shiftRow(name, day);
+    var ownDay = visitRow(name, day) + shiftRow(name, day) + partDayRow(name, day);
     /* Nothing to offer at all: no card to type on, nothing to say about the
        day, and they were not late. */
     if(!mine && !isLate && !ownDay){ box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -21757,6 +21757,58 @@ function buildExcelBackup(){
         said('That did not clear (' + ((e && e.message) || 'no answer') + ').', true);
       });
     });
+    /* Taking part of today off. Not written from here: a part-day mark is not
+       an employee's to make, and a request somebody makes for themselves is
+       forced to pending - rightly. So the server grants it and marks it in one
+       go, and this asks it to. */
+    var pKind = document.getElementById('edPartKind');
+    var pSave = document.getElementById('edPartSave');
+    var pClear = document.getElementById('edPartClear');
+    var pGo = function(btn, kind, half, note){
+      btn.disabled = true;
+      fetch('/api/part-day', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind, half: half, message: note }) })
+        .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){
+          if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+          return j;
+        }); })
+        /* Read back rather than guessed at. The server wrote two things - the
+           mark and the record of it - and the page should show what it wrote
+           and not its own idea of it. */
+        .then(function(){ return Promise.all([loadHalfDays(), loadLeaveRequests()]); })
+        .then(function(){
+          showUploadStatus(kind
+            ? (partSaid(kind, half) + ' taken for today. The office has been told.')
+            : 'Today is a whole working day again. The office has been told.', false);
+          refreshActivePage(); renderEmpDayCard();
+          try{ renderMyRequests(); }catch(e){}
+        })
+        .catch(function(e){
+          btn.disabled = false;
+          var why = (e && e.message) || '';
+          showUploadStatus(
+            /month_locked/.test(why)     ? 'That month is closed \u2014 its pay has already been run.'
+          : /marked_by_office/.test(why) ? 'The office has already marked part of this day \u2014 ask them to change it.'
+          : /day_is_leave/.test(why)     ? 'This whole day is already marked as leave.'
+          : /already_requested/.test(why)? 'You already have a request covering today \u2014 it is on your Requests page.'
+          : /already_taken/.test(why)    ? 'Today is already set to that.'
+          : /nothing_to_undo/.test(why)  ? 'There is nothing to put back.'
+          : ('That did not go through (' + (why || 'no answer') + ').'), true);
+          renderEmpDayCard();
+        });
+    };
+    if(pSave) pSave.addEventListener('click', function(){
+      var v = pKind ? String(pKind.value || '') : '';
+      if(!v){
+        showUploadStatus('Pick how much of the day you are taking \u2014 or Put it back to undo one.', true);
+        return;
+      }
+      var bits = v.split(':');
+      pGo(pSave, bits[0], bits[1] || '',
+          ((document.getElementById('edPartNote') || {}).value || '').trim());
+    });
+    if(pClear) pClear.addEventListener('click', function(){ pGo(pClear, '', '', ''); });
   }
   /* A day spent out on a visit, said by the person who spent it.
 
@@ -21842,6 +21894,70 @@ function buildExcelBackup(){
       + (theirs ? ('<div class="v-by">Showing as <b>' + shotEsc('Visit_' + ov.detail)
                    + '</b> on the calendar, credited as a working day.</div>') : '')
       + '</div>';
+  }
+
+  /* Taking part of today off, said by the person taking it.
+
+     A short leave or a half day used to be a request like any other: asked
+     for, waited on, decided. For a quarter of a day the asking costs more
+     than the thing asked for, and the morning it is about is usually over
+     before the answer comes - so people stopped asking, and the day turned up
+     on the record afterwards as leave nobody had requested.
+
+     The same bargain as the hours above it: it counts at once, nobody
+     approves it, and the office is told. The leave comes off exactly as it
+     would have either way. Half a day is as far as it goes - a whole day away
+     is somebody else's day to plan around, and that still needs asking. */
+  var PART_SELF = [
+    { v:'SHORT',   lab:'Short leave \u2014 a quarter of the day' },
+    { v:'HALF:AM', lab:'Half day \u2014 taking the first half off' },
+    { v:'HALF:PM', lab:'Half day \u2014 taking the second half off' }
+  ];
+  function partSaid(kind, half){
+    if(kind !== 'HALF') return 'Short leave';
+    return 'Half day (' + (half === 'PM' ? 'second half' : 'first half') + ')';
+  }
+  function partDayRow(name, day){
+    if(day !== todayISO_full) return '';        // the day they are actually in
+    var hd = halfDays[name + '|' + day] || null;
+    var ov = overrides[name + '|' + day] || null;
+    /* Nothing to take a part of: the whole day is already away. */
+    if(ov && ov.cat === 'LEAVE'){
+      return '<div class="ed-visit set"><span class="v-by">This whole day is marked as leave '
+        + '\u2014 there is no part of it left to take.</span></div>';
+    }
+    /* A mark that came from the office, or out of a request somebody granted,
+       is not theirs to move. It is still worth showing: it is their day. */
+    if(hd && hd.by !== 'self'){
+      return '<div class="ed-visit set"><span class="v-tag">' + shotEsc(hdMark(hd.kind)) + '</span>'
+        + '<span class="v-why">' + shotEsc(hdLabel(hd.kind)) + ' \u00b7 ' + hdQty(hd.kind)
+        + ' of a day</span><span class="v-by">Already on the record'
+        + (hd.reqId ? ' from a request you made.' : ' \u2014 entered by the office.') + '</span></div>';
+    }
+    var cur = hd ? (hd.kind === 'HALF' ? ('HALF:' + (hd.half === 'PM' ? 'PM' : 'AM')) : hd.kind) : '';
+    var opts = '<option value="">Not taking time off today</option>'
+      + PART_SELF.map(function(k){
+          return '<option value="' + k.v + '"' + (cur === k.v ? ' selected' : '') + '>'
+            + shotEsc(k.lab) + '</option>';
+        }).join('');
+    return '<div class="ed-visit ed-partrow">'
+      + '<div class="lab">Taking part of today off?</div>'
+      + '<div class="v-row">'
+      +   '<select id="edPartKind">' + opts + '</select>'
+      +   '<input id="edPartNote" maxlength="200" placeholder="Why \u2014 optional"'
+      +     ' value="' + (hd ? shotEsc(hd.why || '') : '') + '">'
+      +   '<button type="button" class="bk-btn primary" id="edPartSave">'
+      +     (hd ? 'Update' : 'Take it') + '</button>'
+      +   (hd ? '<button type="button" class="month-btn" id="edPartClear">Put it back</button>' : '')
+      + '</div>'
+      + '<div class="v-by">' + (hd
+          ? ('Today counts as <b>' + shotEsc(partSaid(hd.kind, hd.half)) + '</b> \u2014 '
+             + hdQty(hd.kind) + ' of a day off your casual leave. Nobody had to agree to it, '
+             + 'and the office has been told.')
+          : ('Up to half a day counts the moment you take it \u2014 nobody has to agree to it '
+             + '\u2014 and the office is told. Longer than that still needs a request. '
+             + 'Today only.'))
+      + '</div></div>';
   }
 
   /* ---- reading and writing a time somebody typed ----

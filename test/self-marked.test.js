@@ -329,9 +329,12 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /var mine = marksOwn\(name\);/.test(card)
     && /if\(mine\)\{/.test(card), card.slice(0, 80));
   /* The visit and the day's hours are not that question, and were only behind
-     that gate because they happened to be drawn on the same card. */
+     that gate because they happened to be drawn on the same card. Taking part
+     of the day off joined them: it is the same kind of thing - something only
+     the person can know, counting the moment they say it, with the office
+     told rather than asked. */
   check('but where they are and what hours they work are everybody’s to say',
-    /var ownDay = visitRow\(name, day\) \+ shiftRow\(name, day\);/.test(card)
+    /var ownDay = visitRow\(name, day\) \+ shiftRow\(name, day\) \+ partDayRow\(name, day\);/.test(card)
     && /if\(!mine && !isLate && !ownDay\)/.test(card)
     && (card.match(/ownDay/g) || []).length >= 4);
   /* One day, and it is the working day: on a night shift that is the day the
