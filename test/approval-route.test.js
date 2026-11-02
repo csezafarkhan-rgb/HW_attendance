@@ -325,6 +325,37 @@ const req = (empName, status) => ({ empName, status, id: 'r1' });
   check('and loaded at startup', /loadSelfMark, loadApprovalRoute/.test(APP));
 }
 
+/* ---- what counts as still waiting ----
+   A request carrying a first approval from before leave took two words is
+   still undecided, and the list has always shown it so. The two counts had
+   their own older idea of it, which left the one request that needed an
+   answer shown by the list and counted by neither: Waiting 0 directly above
+   the card, and no badge in the sidebar at all - which is how anybody finds
+   out there is something to do. It sat four days. */
+{
+  const fn = new Function(grab(APP, 'reqIsWaiting') + '\nreturn reqIsWaiting;')();
+  check('a request nobody has answered is waiting', fn({ status: 'pending' }));
+  check('one that was asked a question back is waiting', fn({ status: 'query' }));
+  check('and one carrying a first approval from the old two-word flow is waiting',
+    fn({ status: 'recommended' }));
+  check('a settled one is not', !fn({ status: 'approved' }) && !fn({ status: 'rejected' }));
+
+  /* Three readings of one question. They were three separate answers. */
+  check('the sidebar badge asks this and nothing of its own',
+    /return !r\.archived && reqIsWaiting\(r\);/.test(APP));
+  check('the Waiting tab counts by the same question',
+    /waiting:  live\.filter\(reqIsWaiting\)\.length,/.test(APP));
+  check('and the list it sits above is filtered by it too',
+    /if\(REQ_VIEW === 'live'\)     return reqIsWaiting\(r\);/.test(APP));
+  /* One of these, in the definition, and nowhere else: the buttons on the
+     card were asking the question a fourth time in their own words. */
+  check('and no reading of \u201cwaiting\u201d is left spelled out beside it',
+    APP.split("status === 'pending' || ").length === 2);
+  /* The server has its own list for the same thing, and the two must agree or
+     a link settles what the page says is already done. */
+  check('and the server waits on the same three',
+    /const WAITING = \['pending', 'query', 'recommended'\];/.test(SRV));
+}
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
 process.exit(bad ? 1 : 0);

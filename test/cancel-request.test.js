@@ -169,10 +169,13 @@ const cancelOf = (fromStatus, who) => {
   check('and a badge of its own', /\.req-status\.cancelled\{/.test(APP));
   /* The waiting list is what the office works from; a request nobody is
      waiting on does not belong in it. */
-  const live = /if\(REQ_VIEW === 'live'\)\s*return ([^;]+);/.exec(APP)[1];
-  check('it is not in the office’s waiting list', live.indexOf('cancelled') === -1, live);
-  const waiting = /waiting:\s*live\.filter\(function\(r\)\{ return ([^;]+); \}\)/.exec(APP)[1];
-  check('nor counted as waiting', waiting.indexOf('cancelled') === -1, waiting);
+  /* The list and the count used to spell this out separately; they ask one
+     function now, so there is one place for cancelled to be absent from. */
+  const waiting = /function reqIsWaiting\(r\)\{\s*return ([^;]+);/.exec(APP)[1];
+  check('it is not in the office’s waiting list', waiting.indexOf('cancelled') === -1, waiting);
+  check('nor counted as waiting, the count asking the same function',
+    /waiting:  live\.filter\(reqIsWaiting\)\.length,/.test(APP)
+    && /if\(REQ_VIEW === 'live'\)     return reqIsWaiting\(r\);/.test(APP));
   check('but it can be archived with the rest of what is settled',
     /r\.status === 'approved' \|\| r\.status === 'rejected'\s*\n?\s*\|\| r\.status === 'cancelled'/.test(APP));
 }

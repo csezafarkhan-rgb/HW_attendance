@@ -9505,11 +9505,24 @@ function buildExcelBackup(){
     // a half day writes to halfDays, everything else to overrides - save both
     return Promise.all([saveOverrides(), saveHalfDays()]);
   }
+  /* Still waiting on somebody to say a word. Three states, not two: a request
+     that carries a first approval from before leave took two words is still
+     undecided, and the list has always shown it as such.
+
+     The counts did not. The badge and the Waiting tab each had their own
+     version of this, both of them the old two, so the one request that
+     actually needed a decision was shown by the list and counted by neither:
+     the tab read Waiting 0 directly above the card, and the badge in the
+     sidebar - which is how anybody learns there is anything to do at all -
+     never lit. It sat for four days. One answer, asked in one place. */
+  function reqIsWaiting(r){
+    return r.status === 'pending' || r.status === 'query' || r.status === 'recommended';
+  }
   function pendingRequestCount(){
     // An archived request is out of the way by definition, so it should not
     // keep the badge lit.
     return leaveRequests.filter(function(r){
-      return !r.archived && (r.status==='pending' || r.status==='query');
+      return !r.archived && reqIsWaiting(r);
     }).length;
   }
   function renderReqBadge(){
@@ -9955,7 +9968,7 @@ function buildExcelBackup(){
     var live = all.filter(function(r){ return !reqIsArchived(r); });
     return {
       all:      live.length,
-      waiting:  live.filter(function(r){ return r.status === 'pending' || r.status === 'query'; }).length,
+      waiting:  live.filter(reqIsWaiting).length,
       approved: live.filter(function(r){ return r.status === 'approved'; }).length,
       rejected: live.filter(function(r){ return r.status === 'rejected'; }).length,
       archived: all.filter(reqIsArchived).length
@@ -9965,8 +9978,7 @@ function buildExcelBackup(){
     if(!reqInScope(r)) return false;
     if(REQ_VIEW === 'arch')     return reqIsArchived(r);
     if(reqIsArchived(r))        return false;
-    if(REQ_VIEW === 'live')     return r.status === 'pending' || r.status === 'query'
-                                    || r.status === 'recommended';
+    if(REQ_VIEW === 'live')     return reqIsWaiting(r);
     if(REQ_VIEW === 'approved') return r.status === 'approved';
     if(REQ_VIEW === 'rejected') return r.status === 'rejected';
     return true;                                    // 'all'
@@ -10460,7 +10472,7 @@ function buildExcelBackup(){
       /* A request the first approver has passed on is still waiting on
          somebody, so it keeps its buttons: pressing Approve here is the word
          that grants it. */
-      if(req.status === 'pending' || req.status === 'query' || req.status === 'recommended'){
+      if(reqIsWaiting(req)){
         /* Whoever holds the first stage is here to pass it on, not to grant
            it - that is the whole of what two stages means, and the button
            said Approve to them exactly as it did to everybody else. Approve

@@ -38,7 +38,7 @@ const ctx = {
 vm.createContext(ctx);
 try { vm.runInContext(grab('pad2'), ctx); console.log('pad2: the page\'s own'); }
 catch (e) { vm.runInContext("function pad2(n){ return (n < 10 ? '0' : '') + n; }", ctx); console.log('pad2: stand-in (' + e.message + ')'); }
-['isPartDay', 'eachDateBetween', 'pendingRequestCount', 'unrequestedLeave', 'renderReqBadge', 'saveOverrides']
+['isPartDay', 'eachDateBetween', 'reqIsWaiting', 'pendingRequestCount', 'unrequestedLeave', 'renderReqBadge', 'saveOverrides']
   .forEach(n => vm.runInContext(grab(n), ctx));
 
 try { vm.runInContext('unrequestedLeave()', ctx); console.log('unrequestedLeave runs'); }
