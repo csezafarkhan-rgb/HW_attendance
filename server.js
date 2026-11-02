@@ -187,9 +187,16 @@ function mayWriteSharedKey(role, key) {
    the few settings every calendar needs. The KV routes used to hand any signed-in
    account every shared key - salaries, pay rules, signatures, everyone's marks
    and requests. Anything not named here is hidden from employees. */
+/* Keyed "Name|date", and an employee is served only the rows under their own
+   name - so these are visible to them without being shared with them.
+
+   deskTime is here for the hours a day from home is shown as having. Without
+   it the figure appears on the office's screen and not on the person's own,
+   which is the wrong way round for a measure of their own working time. It is
+   readable only, like the rest: nobody but the pull writes it. */
 const EMP_KEYED_BY_DAY = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags', 'manualRecords',
                           'lateExcuses', 'earlyExcuses', 'manualLeave', 'leaveDeductions',
-                          'dailyTasks'];  // "Name|date"
+                          'dailyTasks', 'deskTime'];  // "Name|date"
 const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames',
                           'selfMark'];                                       // "Name"
 const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',

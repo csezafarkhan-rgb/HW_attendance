@@ -8995,11 +8995,29 @@ function buildExcelBackup(){
      the hours that person's Saturday policy sets - four by default - and the
      totals have always credited them. The cell showed only "WFH", so the day
      read as counting for nothing next to the weekdays beside it. An explicitly
-     logged duration still wins; this only fills the silence. */
+     logged duration still wins; this only fills the silence.
+
+     And the silence was most of it. A day from home has no punches, so unless
+     somebody typed hours against it the cell said "WFH" and nothing else - a
+     fortnight of them in a row, reading as a fortnight of days that counted
+     for nothing, with the four hours of a Saturday the only figure in sight.
+
+     DeskTime was watching those days too. Where it has a figure for that
+     person on that day, that is what the day was: measured, not assumed, and
+     better than both the silence and the Saturday's flat assignment. It is
+     read here rather than written into the record, so nothing anybody typed
+     is overwritten and no month that has been paid is disturbed - and it
+     reaches as far back as DeskTime does. What the day is *credited* is a
+     separate question with its own answer, and this does not touch it. */
   function wfhCellDuration(emp, dateStr, ov){
     if(!ov) return '';
     if(ov.duration) return ov.duration;
     if(ov.cat !== 'WFH') return '';
+    /* Asked of the store directly rather than through deskDay, which wants an
+       arrival before it will answer: a day from home often has no arrival to
+       show, and the time at the computer is the whole of what is wanted. */
+    var seen = deskTime[emp + '|' + dateStr];
+    if(seen && seen.d > 0) return fmtMin(Math.round(seen.d));
     if(new Date(dateStr+'T00:00:00').getDay() !== 6) return '';
     var sp = getSatPolicy(emp);
     if(sp.mode !== 'WFH') return '';

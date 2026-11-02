@@ -126,8 +126,13 @@ function grab(src, name) {
 }
 
 /* ---- what an employee may see of it ----
-   A key nobody has allowed an employee to read is not readable by one: the
-   filter answers with nothing rather than with everybody's day. */
+   Their own days and nobody else's. It used to be nothing at all, which put
+   the hours of somebody's own day from home on the office's screen and not on
+   theirs - the wrong way round for a measure of their own working time. It is
+   keyed "Name|date" like the marks beside it, so the same filter that serves
+   somebody their own leave serves them their own figures, and the row under
+   the next name along is not sent at all. Readable only: the pull writes it
+   and nobody else does. */
 {
   const ctx = { console, parseJson: t => { try { return JSON.parse(t); } catch (e) { return null; } },
                 EMP_READABLE: [], EMP_KEYED_BY_DAY: [], EMP_KEYED_BY_NAME: [] };
@@ -138,9 +143,15 @@ function grab(src, name) {
   });
   vm.runInContext(grab(SRV, 'ownRequests') + grab(SRV, 'valueForEmployee'), ctx);
   const store = JSON.stringify({ 'Asha|2026-10-28': { i: '09:34' }, 'Ravi|2026-10-28': { i: '11:08' } });
-  check('an employee asking for everybody\u2019s DeskTime is told nothing',
-    ctx.valueForEmployee('deskTime', store, 'Asha', null) === undefined,
-    ctx.valueForEmployee('deskTime', store, 'Asha', null));
+  const asAsha = JSON.parse(ctx.valueForEmployee('deskTime', store, 'Asha', null) || 'null');
+  check('an employee is served their own DeskTime days',
+    !!asAsha && asAsha['Asha|2026-10-28'].i === '09:34', asAsha);
+  check('and not the next person\u2019s',
+    !!asAsha && Object.keys(asAsha).length === 1, asAsha);
+  /* Somebody with nothing of their own gets an empty map, not everybody's. */
+  check('somebody DeskTime has never seen gets nothing rather than everything',
+    ctx.valueForEmployee('deskTime', store, 'Nobody', null) === '{}',
+    ctx.valueForEmployee('deskTime', store, 'Nobody', null));
 }
 
 /* ---- the page ---- */
@@ -780,6 +791,63 @@ function grab(src, name) {
      of days the running pull does not cover. */
   check('reading an export in is still there beside it',
     page.indexOf('id="dtImpBtn"') > -1);
+}
+
+/* ---- the hours a day from home is shown as having ----
+   A day from home has no punches. Unless somebody typed hours against it the
+   cell read "WFH" and nothing more - a fortnight of them in a row looking
+   like a fortnight that counted for nothing. DeskTime was watching those days
+   as well, and its figure is a measurement where the Saturday fallback was an
+   assumption. Read, never written: nothing typed is overwritten and no month
+   that has been paid is disturbed. */
+{
+  const ctx = { console, Math, Date, deskTime: {}, satPolicy: {},
+                SAT_DEFAULT: { mode: 'WFH', hours: 4 } };
+  vm.createContext(ctx);
+  ['pad2', 'fmtMin', 'getSatPolicy', 'wfhCellDuration'].forEach(n => vm.runInContext(grab(APP, n), ctx));
+  const WEEKDAY = '2026-10-28';        // a Wednesday
+  const SAT = '2026-10-31';
+  const say = (day, ov, seen, pol) => {
+    ctx.deskTime = seen ? { ['Zafar Khan|' + day]: seen } : {};
+    ctx.satPolicy = pol || {};
+    return ctx.wfhCellDuration('Zafar Khan', day, ov);
+  };
+
+  check('a weekday from home shows what the computer was in use for',
+    say(WEEKDAY, { cat: 'WFH' }, { i: '09:30', o: '18:30', d: 521 }) === '8:41',
+    say(WEEKDAY, { cat: 'WFH' }, { i: '09:30', o: '18:30', d: 521 }));
+  /* The arrival is what a day from home most often has nothing of. */
+  check('and does so even where DeskTime logged no arrival',
+    say(WEEKDAY, { cat: 'WFH' }, { i: '', o: '', d: 317 }) === '5:17');
+  check('hours somebody actually typed still win',
+    say(WEEKDAY, { cat: 'WFH', duration: '6:00' }, { i: '09:30', o: '18:30', d: 521 }) === '6:00');
+  check('a day the computer saw nothing on still says nothing',
+    say(WEEKDAY, { cat: 'WFH' }, { i: '09:30', o: '09:30', d: 0 }) === '');
+  check('nor does it invent one where DeskTime has no record at all',
+    say(WEEKDAY, { cat: 'WFH' }, null) === '');
+
+  /* A measurement beats the assignment it used to fall back on. */
+  check('a Saturday shows what was worked, not the four hours it is owed',
+    say(SAT, { cat: 'WFH' }, { i: '10:00', o: '14:30', d: 188 }) === '3:08');
+  check('and falls back to the Saturday assignment when nothing was seen',
+    say(SAT, { cat: 'WFH' }, null) === '4:00');
+
+  /* Only days from home: leave is leave, and a visit credits the whole day. */
+  check('a day of leave is not given the computer\u2019s hours',
+    say(WEEKDAY, { cat: 'LEAVE', detail: 'CL' }, { i: '09:30', o: '18:30', d: 521 }) === '');
+  check('nor is a day out on a visit',
+    say(WEEKDAY, { cat: 'VISIT', detail: 'Factory' }, { i: '09:30', o: '18:30', d: 521 }) === '');
+
+  /* The grid and the sheet it exports read the same function, so a figure on
+     the screen is the figure in the file. */
+  check('the grid and the exported sheet both ask it',
+    APP.split('wfhCellDuration(').length === 4);
+  /* The figure is about somebody's own working time; it should not be a thing
+     the office can see about them and they cannot see about themselves. */
+  check('and an employee is served their own rows of it',
+    /'dailyTasks', 'deskTime'\];  \/\/ "Name\|date"/.test(SRV));
+  check('reading only - the pull is the only thing that writes it',
+    !/EMPLOYEE_WRITABLE = \[[^\]]*deskTime/.test(SRV));
 }
 
 /* ---- Saturday, which nobody was there to mark ----
