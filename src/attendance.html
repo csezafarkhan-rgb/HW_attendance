@@ -8948,8 +8948,25 @@ function buildExcelBackup(){
         var m = toMin(ov.duration);
         if(!isNaN(m)) return m;
       }
-      // A day marked WFH or off-site with no hours against it means the whole
-      // day was worked that way - credit the day's shift rather than nothing.
+      /* A day from home with no hours typed against it used to be credited
+         the whole shift on the strength of the mark alone - nobody had
+         anything better, so the mark itself had to stand for the day. The
+         meter read a full month from home whatever the month had been.
+
+         DeskTime was watching those days, and a measurement beats an
+         assumption. Where it has a figure, that is what the day was worth;
+         where it saw nothing the old assumption still stands, because a day
+         DeskTime has no record of is not a day nobody worked.
+
+         Only a day from home. A day out on a visit is a day away from the
+         computer by definition, and asking DeskTime what it was worth would
+         answer nothing and credit nothing. */
+      if(ov.cat === 'WFH'){
+        var seenMin = wfhSeenMinutes(emp, dateStr);
+        if(seenMin !== null) return seenMin;
+      }
+      // Nothing typed and nothing seen: the whole day was worked that way -
+      // credit the day's shift rather than nothing.
       return owedMinutes(emp, dateStr);
     }
     var rec = getRecord(emp, dateStr);
@@ -9009,15 +9026,23 @@ function buildExcelBackup(){
      is overwritten and no month that has been paid is disturbed - and it
      reaches as far back as DeskTime does. What the day is *credited* is a
      separate question with its own answer, and this does not touch it. */
+  /* The minutes DeskTime saw at the computer on one day, or null where it saw
+     nothing at all. Asked of the store directly rather than through deskDay,
+     which wants an arrival before it will answer: a day from home often has no
+     arrival to show, and the time at the computer is the whole of what is
+     wanted. One definition, because what the cell says the day was worth and
+     what the week counts it as have to be the same figure or the screen
+     argues with itself. */
+  function wfhSeenMinutes(emp, dateStr){
+    var seen = deskTime[emp + '|' + dateStr];
+    return (seen && seen.d > 0) ? Math.round(seen.d) : null;
+  }
   function wfhCellDuration(emp, dateStr, ov){
     if(!ov) return '';
     if(ov.duration) return ov.duration;
     if(ov.cat !== 'WFH') return '';
-    /* Asked of the store directly rather than through deskDay, which wants an
-       arrival before it will answer: a day from home often has no arrival to
-       show, and the time at the computer is the whole of what is wanted. */
-    var seen = deskTime[emp + '|' + dateStr];
-    if(seen && seen.d > 0) return fmtMin(Math.round(seen.d));
+    var seenMin = wfhSeenMinutes(emp, dateStr);
+    if(seenMin !== null) return fmtMin(seenMin);
     if(new Date(dateStr+'T00:00:00').getDay() !== 6) return '';
     var sp = getSatPolicy(emp);
     if(sp.mode !== 'WFH') return '';
@@ -11197,8 +11222,20 @@ function buildExcelBackup(){
         var ov = getOverride(empName, dateStr);
         if(ov){
           if(ov.cat === 'LEAVE') return;         // on leave — not part of the requirement
-          if(!ov.duration) return;               // WFH/Visit/Other with no logged hours — skip
-          delta = toMin(ov.duration) - required; // credited hours vs required
+          /* A day from home used to leave the week entirely unless somebody
+             had typed hours against it, which almost nobody does. A week of
+             them in a row counted no days at all, and a week that counts no
+             days reads "Completed · full hours" - the band said the week was
+             met because there was nothing in it to measure.
+
+             DeskTime measured those days. Where it has a figure the day joins
+             the week on that figure, the same one the cell above it shows.
+             Where it saw nothing, and on a visit or anything else without
+             logged hours, the day stays out of the reckoning as it did. */
+          var fromHome = ov.duration ? toMin(ov.duration)
+                       : (ov.cat === 'WFH' ? wfhSeenMinutes(empName, dateStr) : null);
+          if(fromHome === null || isNaN(fromHome)) return;
+          delta = fromHome - required;           // credited hours vs required
         } else {
           var rec = getRecord(empName, dateStr);
           if(!rec) return;

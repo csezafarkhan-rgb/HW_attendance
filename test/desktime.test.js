@@ -233,7 +233,14 @@ function grab(src, name) {
     dayrow.indexOf('class="dt-credited"') > -1
     && dayrow.indexOf('Credited to the shift') > -1);
   check('the figure comes from the same place the totals take it',
-    /function workedMinutes\(emp, dateStr\)[\s\S]{0,700}return owedMinutes\(emp, dateStr\);/.test(APP));
+    /function workedMinutes\(emp, dateStr\)[\s\S]{0,2200}return owedMinutes\(emp, dateStr\);/.test(APP));
+  /* Credited to the shift is now the last answer rather than the first: where
+     DeskTime measured the day from home, the measurement is what it was
+     worth, and the shift stands in only where nothing was seen. */
+  check('but a day DeskTime measured is worth what it measured',
+    /if\(ov\.cat === 'WFH'\)\{[\s\S]{0,80}wfhSeenMinutes\(emp, dateStr\)/.test(APP));
+  check('and a day out on a visit is not asked of the computer at all',
+    /A day out on a visit is a day away from the/.test(APP));
   check('which is the whole shift on a weekday and the Saturday policy on a Saturday',
     /function owedMinutes\(emp, dateStr\)[\s\S]{0,420}sp\.mode === 'WFH'\)  return Math\.round\(\(sp\.hours\|\|0\) \* 60\)/.test(APP));
   check('a day nobody worked at all is still a dash',
@@ -804,7 +811,7 @@ function grab(src, name) {
   const ctx = { console, Math, Date, deskTime: {}, satPolicy: {},
                 SAT_DEFAULT: { mode: 'WFH', hours: 4 } };
   vm.createContext(ctx);
-  ['pad2', 'fmtMin', 'getSatPolicy', 'wfhCellDuration'].forEach(n => vm.runInContext(grab(APP, n), ctx));
+  ['pad2', 'fmtMin', 'getSatPolicy', 'wfhSeenMinutes', 'wfhCellDuration'].forEach(n => vm.runInContext(grab(APP, n), ctx));
   const WEEKDAY = '2026-10-28';        // a Wednesday
   const SAT = '2026-10-31';
   const say = (day, ov, seen, pol) => {
