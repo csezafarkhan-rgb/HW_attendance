@@ -2908,7 +2908,15 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-visit .v-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .ed-visit select, .ed-visit input{ height:38px; padding:0 10px; border:1px solid var(--line-dk);
   border-radius:9px; font-size:12.5px; background:#fff; }
-.ed-visit select{ min-width:150px; font-weight:600; }
+.ed-visit select{ min-width:150px; max-width:100%; font-weight:600; }
+/* The glass dropdown that stands in for a native <select> draws its own padding
+   and caret inside the native control's box, and that chrome is wider than the
+   native arrow it covers - so a label that fits the select still comes out
+   clipped in the button. These three carry a phrase rather than a word, so each
+   is given the room its longest option needs. */
+.ed-visit #edShiftPick{ min-width:212px; }
+.ed-visit #edVisitKind{ min-width:180px; }
+.ed-visit #edPartKind{ min-width:302px; }
 .ed-visit #edVisitOther{ width:170px; }
 .ed-visit #edVisitNote{ flex:1 1 220px; min-width:160px; }
 /* The reason for a part day is the whole of what the office is told about it,
