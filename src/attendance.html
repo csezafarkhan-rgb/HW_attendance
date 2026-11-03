@@ -12458,7 +12458,16 @@ function buildExcelBackup(){
       + (function(){
           var lv = s.leave || {};
           var cols = approverColumns();
-          var people = (ALL_EMPLOYEES || []).filter(stillHere);
+          /* The people the portal is showing, which is the rule every message
+             already goes by - it is what keeps a card-punch row with nobody
+             behind it out of the daily message - and anybody already named in
+             the table, so hiding somebody never hides an arrangement that is
+             still in force. */
+          var people = (ALL_EMPLOYEES || []).filter(stillHere).filter(function(e){
+            var shown = (typeof visibleEmpSet !== 'undefined' && visibleEmpSet)
+              ? !!visibleEmpSet[e.name] : true;
+            return shown || (e.name in (approvalRoute || {}));
+          });
           return '<div class="em-note" style="padding-top:0;">'
             + 'One word settles a request. <b>Everybody in To can approve it</b>; everybody in '
             + 'Cc is only told, and a copied-in message has no buttons on it \u2014 including the '
