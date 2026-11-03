@@ -92,7 +92,10 @@ function grab(src, name) {
       leaveRequests: JSON.stringify(st.leaveRequests || []),
     };
     ctx.__locked = st.locked || {};
-    const r = await ctx.takePartDay(1, 'Keshav Garg', 7, body);
+    /* A reason is required, so everything meant to go through carries one.
+       The checks for leaving it out pass an empty one on purpose. */
+    const r = await ctx.takePartDay(1, 'Keshav Garg', 7,
+      Object.assign({ message: 'dentist' }, body || {}));
     return {
       code: r.code, out: r.out, told: r.told, sql,
       parts: wrote.halfDays ? JSON.parse(wrote.halfDays) : null,
@@ -138,6 +141,30 @@ function grab(src, name) {
     r = await run({ kind: 'HALF' });
     check('a half day with no half named is the first half',
       r.parts[K('Keshav Garg')].half === 'AM', r.parts);
+
+    /* ---- the reason, which is the whole of what the office is told ----
+       Every other kind of leave is asked for, and the asking is where the
+       reason goes. This one is taken: it counts at once and nobody gets to
+       say no, so without a reason the office is told a quarter of a day went
+       and nothing more. Required on the server as well as on the card,
+       because a page is the person's to edit. */
+    r = await run({ kind: 'HALF', message: '' });
+    check('a part day taken without a reason is refused',
+      r.code === 400 && r.out.error === 'why_needed' && r.parts === null, r.out);
+    r = await run({ kind: 'SHORT', message: '   ' });
+    check('and a reason of nothing but spaces is no reason',
+      r.code === 400 && r.out.error === 'why_needed', r.out);
+    /* Putting a day back needs none: the day is simply a whole day again. */
+    r = await run({ message: '' },
+      { halfDays: { [K('Keshav Garg')]: { kind: 'HALF', half: 'AM', by: 'self' } },
+        leaveRequests: [{ id: 'req_own', empName: 'Keshav Garg', dateFrom: TODAY, dateTo: TODAY,
+                          leaveType: 'HALF', status: 'approved', selfTaken: true }] });
+    check('but putting one back does not need one',
+      r.code === 200 && r.parts[K('Keshav Garg')] === undefined, r.out);
+    /* It is refused before anything is read for writing, so a refusal cannot
+       leave a transaction open behind it. */
+    check('and the refusal costs no transaction at all',
+      (await run({ kind: 'HALF', message: '' })).sql.length === 0, null);
 
     /* ---- the refusals ---- */
     r = await run({ kind: 'THREEQ' });
@@ -352,6 +379,15 @@ function grab(src, name) {
         /value="SHORT"/.test(html) && /value="HALF:AM"/.test(html) && /value="HALF:PM"/.test(html), null);
       check('and says it counts at once with nobody agreeing to it',
         /nobody has to agree to it/.test(html), null);
+      /* The reason has a line of its own and room to write a sentence in. It
+         was a single line sharing the row with the dropdown and the button,
+         and labelled optional - the wrong shape and the wrong word for the
+         one thing this message carries. */
+      check('the reason has its own line and room to write in',
+        /<textarea id="edPartNote"[^>]*rows="2"/.test(html)
+        && /Why you are taking it/.test(html) && !/optional/.test(html), null);
+      check('and the button says Submit before anything is taken',
+        />Submit</.test(html), null);
       check('a whole day away still needs asking, and the card says so',
         /still needs a request/.test(html), null);
       /* Today only, like the hours and the visit beside it. */
@@ -363,9 +399,13 @@ function grab(src, name) {
       check('what they took is shown back to them',
         /selected/.test(html) && /second half/.test(html), null);
       check('their own words come back without the prefix in front',
-        /value="dentist"/.test(html), null);
+        /<textarea id="edPartNote"[^>]*>dentist<\/textarea>/.test(html), null);
       check('and it can be put back',
         /edPartClear/.test(html), null);
+      /* Submitted once, it is on the record and counted, so the button stops
+         offering to do it again and offers to change it instead. */
+      check('the button says what it would be doing now',
+        />Change it</.test(html) && !/>Submit</.test(html), null);
 
       c3.halfDays[K('Keshav Garg')] = { kind: 'THREEQ' };
       html = c3.partDayRow('Keshav Garg', TODAY);
@@ -382,6 +422,26 @@ function grab(src, name) {
         /fetch\('\/api\/part-day'/.test(APP) && !/halfDays\[name \+ '\|' \+ day\] =/.test(APP), null);
       check('and reads back what the server wrote rather than guessing it',
         /Promise\.all\(\[loadHalfDays\(\), loadLeaveRequests\(\)\]\)/.test(APP), null);
+      /* The card will not send one without a reason either, so somebody is
+         told what is missing where they are rather than by a round trip. */
+      check('the card refuses to send one without a reason',
+        /if\(!note\)\{[\s\S]{0,200}Say why you are taking it/.test(APP), null);
+      /* Submitted once it is on the record and counted. Changing it is
+         allowed - people mistype - but not by the same single press that
+         made it, and not without saying what it costs. */
+      check('changing one already submitted asks first',
+        /hwConfirm\(\{[\s\S]{0,120}you already submitted\?/.test(APP), null);
+      check('and so does putting one back',
+        /hwConfirm\(\{[\s\S]{0,140}Put today back to a whole working day\?/.test(APP), null);
+      check('the warning says what it costs, not merely that it is a change',
+        /already counted against your casual leave/.test(APP)
+        && /leave goes back to your balance/.test(APP), null);
+      /* What is already taken is read when the button is pressed, not carried
+         down from the drawing: the card redraws on every save, and a stale
+         copy would warn about a day that is no longer there. */
+      check('and it warns about the day as it stands, not as it was drawn',
+        /var pHad = halfDays\[name \+ '\|' \+ day\] \|\| null;/.test(APP), null);
+
       /* Each refusal the server can give is a sentence somebody can act on. */
       ['month_locked', 'marked_by_office', 'day_is_leave', 'already_requested',
        'already_taken', 'nothing_to_undo'].forEach(e => {

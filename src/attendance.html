@@ -2911,6 +2911,12 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-visit select{ min-width:150px; font-weight:600; }
 .ed-visit #edVisitOther{ width:170px; }
 .ed-visit #edVisitNote{ flex:1 1 220px; min-width:160px; }
+/* The reason for a part day is the whole of what the office is told about it,
+   so it gets a line of its own and room to write a sentence in. */
+.ed-visit .pt-why{ margin-top:10px; }
+.ed-visit #edPartNote{ display:block; width:100%; height:auto; min-height:56px;
+  padding:9px 10px; border:1px solid var(--line-dk); border-radius:9px; font:inherit;
+  font-size:12.5px; background:#fff; resize:vertical; margin-bottom:9px; }
 .ed-visit .bk-btn, .ed-visit .month-btn{ height:38px; padding:0 16px; font-size:12.5px; }
 .ed-visit .v-by{ display:block; margin-top:7px; font-size:11.5px; color:var(--ink-soft); line-height:1.5; }
 .ed-visit.set{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
@@ -21652,21 +21658,55 @@ function buildExcelBackup(){
           : /already_requested/.test(why)? 'You already have a request covering today \u2014 it is on your Requests page.'
           : /already_taken/.test(why)    ? 'Today is already set to that.'
           : /nothing_to_undo/.test(why)  ? 'There is nothing to put back.'
+          : /why_needed/.test(why)       ? 'Say why you are taking it.'
           : ('That did not go through (' + (why || 'no answer') + ').'), true);
           renderEmpDayCard();
         });
     };
+    /* What is already taken, read here rather than carried down from the
+       drawing above: the card redraws on every save, and a stale copy of it
+       would warn about a day that is no longer there. */
+    var pHad = halfDays[name + '|' + day] || null;
+    var pMine = pHad && pHad.by === 'self';
     if(pSave) pSave.addEventListener('click', function(){
       var v = pKind ? String(pKind.value || '') : '';
       if(!v){
         showUploadStatus('Pick how much of the day you are taking \u2014 or Put it back to undo one.', true);
         return;
       }
+      var note = ((document.getElementById('edPartNote') || {}).value || '').trim();
+      /* Compulsory. Every other kind of leave is asked for, and the asking is
+         where the reason goes; this one is taken, so the only place left for
+         it is here. */
+      if(!note){
+        showUploadStatus('Say why you are taking it \u2014 that is the whole of what the office '
+          + 'is told.', true);
+        var nb = document.getElementById('edPartNote');
+        if(nb){ try{ nb.focus(); }catch(e){} }
+        return;
+      }
       var bits = v.split(':');
-      pGo(pSave, bits[0], bits[1] || '',
-          ((document.getElementById('edPartNote') || {}).value || '').trim());
+      var go = function(){ pGo(pSave, bits[0], bits[1] || '', note); };
+      /* Submitted once, it is on the record and counted. Changing it is
+         allowed - people mistype, and the morning is theirs - but not by the
+         same single press that made it, and not without saying what it costs. */
+      if(!pMine){ go(); return; }
+      hwConfirm({
+        title: 'Change the ' + partSaid(pHad.kind, pHad.half).toLowerCase() + ' you already submitted?',
+        message: 'It is on the record and already counted against your casual leave, and the '
+               + 'office has been told once. Changing it tells them again.',
+        confirmLabel: 'Change it'
+      }).then(function(ok){ if(ok) go(); });
     });
-    if(pClear) pClear.addEventListener('click', function(){ pGo(pClear, '', '', ''); });
+    if(pClear) pClear.addEventListener('click', function(){
+      hwConfirm({
+        title: 'Put today back to a whole working day?',
+        message: 'The ' + (pHad ? partSaid(pHad.kind, pHad.half).toLowerCase() : 'time off')
+               + ' comes off the record, the leave goes back to your balance, and the office '
+               + 'is told it was put back.',
+        confirmLabel: 'Put it back'
+      }).then(function(ok){ if(ok) pGo(pClear, '', '', ''); });
+    });
   }
   /* A day spent out on a visit, said by the person who spent it.
 
@@ -21866,17 +21906,25 @@ function buildExcelBackup(){
       + '<div class="lab">Taking part of today off?</div>'
       + '<div class="v-row">'
       +   '<select id="edPartKind">' + opts + '</select>'
-      +   '<input id="edPartNote" maxlength="200" placeholder="Why \u2014 optional"'
-      +     ' value="' + (hd ? shotEsc(hd.why || '') : '') + '">'
+      + '</div>'
+      /* Its own line, and room to write a sentence in. It was a single line
+         sharing the row with the dropdown and the button, and marked
+         optional - which is the wrong shape and the wrong word for the one
+         thing this message has to carry. */
+      + '<div class="lab pt-why">Why you are taking it</div>'
+      + '<textarea id="edPartNote" maxlength="300" rows="2"'
+      +   ' placeholder="A sentence is enough \u2014 the office is told this and nothing more">'
+      +   (hd ? shotEsc(hd.why || '') : '') + '</textarea>'
+      + '<div class="v-row">'
       +   '<button type="button" class="bk-btn primary" id="edPartSave">'
-      +     (hd ? 'Update' : 'Take it') + '</button>'
+      +     (hd ? 'Change it' : 'Submit') + '</button>'
       +   (hd ? '<button type="button" class="month-btn" id="edPartClear">Put it back</button>' : '')
       + '</div>'
       + '<div class="v-by">' + (hd
           ? ('Today counts as <b>' + shotEsc(partSaid(hd.kind, hd.half)) + '</b> \u2014 '
              + hdQty(hd.kind) + ' of a day off your casual leave. Nobody had to agree to it, '
              + 'and the office has been told.')
-          : ('Up to half a day counts the moment you take it \u2014 nobody has to agree to it '
+          : ('Up to half a day counts the moment you submit it \u2014 nobody has to agree to it '
              + '\u2014 and the office is told. Longer than that still needs a request. '
              + 'Today only.'))
       + '</div></div>';

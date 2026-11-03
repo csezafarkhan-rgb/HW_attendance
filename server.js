@@ -1907,6 +1907,15 @@ async function takePartDay(orgId, name, userId, body) {
   const half = kind === 'HALF'
     ? (String((body && body.half) || '').trim().toUpperCase() === 'PM' ? 'PM' : 'AM') : '';
   const why = clip(body && body.message, 500).trim();
+  /* A reason is required, and it is required here rather than only on the
+     page, because a page is the person's to edit.
+
+     Every other kind of leave is asked for, and the asking is where the
+     reason goes. This one is taken: it counts at once and nobody gets to say
+     no. So the one thing the message to the office has to carry is why, or
+     the office is told a quarter of a day went and nothing more. Putting a
+     day back needs none - the day is simply a whole day again. */
+  if (kind && !why) return { code: 400, out: { error: 'why_needed' } };
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
