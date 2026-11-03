@@ -362,6 +362,29 @@ function ownDays(shift) {
   }
   return [today];
 }
+/* Which day a press belongs to, read from the hours actually being worked.
+
+   ownDays answers that from a shift, and the shift it was handed was always
+   the standing one. Everywhere else on the record the day's own hours win
+   where somebody has set them - the late mark, the early mark, what the day
+   owes, what the week counts - and this was the one reckoning that did not
+   ask.
+
+   Which is how a night shift nobody is working any more sent a morning to the
+   day before. On 18:00-3:00 the day turns at half past ten, so a press at
+   10:06 was filed to yesterday and the same person pressing again at 10:31
+   opened today as well: two days begun, neither finished, and a week reading
+   several hours extra for an arrival nobody made. The card above the button
+   said the day ran from ten.
+
+   So the day's own hours are asked for first. Somebody who has set them has
+   said which day they mean, and that is a better answer than a standing shift
+   that has not caught up with them. */
+function clockDay(assignments, dayShifts, name) {
+  const today = new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
+  const own = String((dayShifts || {})[name + '|' + today] || '').trim();
+  return ownDays(own || shiftFor(assignments, name, today))[0];
+}
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
 /* Their own in and out, for their own day.
@@ -1748,11 +1771,15 @@ app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, 
     const marked = parseJson(mark.rows[0] ? mark.rows[0].value : '{}') || {};
     if (marked[name] !== true) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'not_self_marked' }); }
     /* Which day this belongs to is the shift's question, not the calendar's: a
-       night shift started yesterday is still yesterday's day until it ends. */
+       night shift started yesterday is still yesterday's day until it ends -
+       and the shift it asks is the one being worked, which is the day's own
+       hours wherever this person has set them. */
     const sa = await client.query(
-      "SELECT value FROM kv WHERE org_id = $1 AND key = 'shiftAssignments' AND user_id IS NULL", [orgId]);
-    const day = ownDays(shiftFor(parseJson(sa.rows[0] ? sa.rows[0].value : '{}'), name,
-                                 new Date(Date.now() + IST_MS).toISOString().slice(0, 10)))[0];
+      "SELECT key, value FROM kv WHERE org_id = $1 AND key IN ('shiftAssignments', 'dayShifts') AND user_id IS NULL", [orgId]);
+    const kvShift = {};
+    sa.rows.forEach(r => { kvShift[r.key] = r.value; });
+    const day = clockDay(parseJson(kvShift.shiftAssignments) || {},
+                         parseJson(kvShift.dayShifts) || {}, name);
     const key = name + '|' + day;
     const row = await client.query(
       "SELECT value FROM kv WHERE org_id = $1 AND key = 'manualRecords' AND user_id IS NULL FOR UPDATE", [orgId]);
@@ -1875,11 +1902,14 @@ async function takePartDay(orgId, name, userId, body) {
     await client.query('BEGIN');
     /* Their own working day, worked out here rather than taken from the
        browser: at two in the morning a night shift belongs to yesterday, and
-       nothing the page sends gets to choose which day this writes. */
+       nothing the page sends gets to choose which day this writes. The same
+       answer the clock gives, from the same hours. */
     const sa = await client.query(
-      "SELECT value FROM kv WHERE org_id = $1 AND key = 'shiftAssignments' AND user_id IS NULL", [orgId]);
-    const day = ownDays(shiftFor(parseJson(sa.rows[0] ? sa.rows[0].value : '{}'), name,
-                                 new Date(Date.now() + IST_MS).toISOString().slice(0, 10)))[0];
+      "SELECT key, value FROM kv WHERE org_id = $1 AND key IN ('shiftAssignments', 'dayShifts') AND user_id IS NULL", [orgId]);
+    const kvShift = {};
+    sa.rows.forEach(r => { kvShift[r.key] = r.value; });
+    const day = clockDay(parseJson(kvShift.shiftAssignments) || {},
+                         parseJson(kvShift.dayShifts) || {}, name);
     const locked = await lockedMonthsOf(client, orgId);
     if (locked[day.slice(0, 7)]) { await client.query('ROLLBACK'); return { code: 409, out: { error: 'month_locked' } }; }
     const key = name + '|' + day;

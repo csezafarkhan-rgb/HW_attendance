@@ -49,6 +49,13 @@ function grab(src, name) {
       sql.push(text.split(NLRE)[0]);
       if (/^INSERT INTO kv/.test(text)) { wrote[args[1]] = args[2]; return { rows: [] }; }
       if (/^INSERT INTO/.test(text)) return { rows: [] };
+      /* The shift and the day's own hours come back together, so the stand-in
+         answers with the key beside the value the way the real one does. */
+      const several = /key IN \(([^)]*)\)/.exec(text);
+      if (several) {
+        return { rows: several[1].split(',').map(x => x.trim().replace(/'/g, ''))
+          .map(k => ({ key: k, value: ctx.__kv[k] })) };
+      }
       const m = /key = '(\w+)'/.exec(text);
       if (m) return { rows: [{ value: ctx.__kv[m[1]] }] };
       if (/key = \$2/.test(text)) return { rows: [{ value: ctx.__kv[args[1]] }] };
@@ -65,7 +72,7 @@ function grab(src, name) {
     Date, JSON, Object, Math, String, Array, Number, Boolean, console,
   };
   vm.createContext(ctx);
-  ['parseJson', 'clip', 'canon', 'isPlainObject', 'diffValue',
+  ['parseJson', 'clip', 'canon', 'isPlainObject', 'diffValue', 'clockDay',
    'parseShiftSpan', 'nightTurnsAt', 'shiftFor', 'ownDays'].forEach(n => vm.runInContext(grab(SRV, n), ctx));
   vm.runInContext(/const SELF_PART_KINDS = \[[^\]]*\];/.exec(SRV)[0], ctx);
   vm.runInContext('async ' + grab(SRV, 'takePartDay'), ctx);
@@ -236,7 +243,7 @@ function grab(src, name) {
     /* At two in the morning a night shift belongs to yesterday, and nothing
        the browser sends gets to choose which day this writes. */
     check('the day is worked out from the shift, not taken from the browser',
-      /ownDays\(shiftFor\(/.test(body) && !/body\.day/.test(body), null);
+      /clockDay\(parseJson\(kvShift\.shiftAssignments\)/.test(body) && !/body\.day/.test(body), null);
     check('and a locked month is checked before anything is read for writing',
       body.indexOf('lockedMonthsOf') < body.indexOf('FOR UPDATE'), null);
 

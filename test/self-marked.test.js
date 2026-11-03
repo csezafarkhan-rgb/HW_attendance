@@ -434,11 +434,14 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
     /inAt: which === 'in' \? nowIso :/.test(SRC)
     && /outAt: which === 'out' \? nowIso :/.test(SRC));
   /* The same gate the typed card had, and the same day rule: a night shift
-     started yesterday is still yesterday's day. */
+     started yesterday is still yesterday's day - asked of the hours actually
+     being worked, which is the day's own where somebody has set them. */
   check('only those the office marked may clock at all',
     /if \(marked\[name\] !== true\)[\s\S]{0,80}not_self_marked/.test(SRC));
   check('and the day is the shift\u2019s question, not the calendar\u2019s',
-    /const day = ownDays\(shiftFor\(/.test(SRC));
+    /const day = clockDay\(parseJson\(kvShift\.shiftAssignments\)/.test(SRC));
+  check('read from the hours being worked, not only the standing shift',
+    /key IN \('shiftAssignments', 'dayShifts'\)/.test(SRC));
   /* Pressing twice is a slip. Letting the second press through would move an
      arrival later, which is the one direction a mistake must not go. */
   check('a second press on the same button is refused, not taken',
