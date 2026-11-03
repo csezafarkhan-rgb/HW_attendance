@@ -779,7 +779,12 @@ body{
   #requestsList .unreq-row .btn{ flex:1 1 auto !important; }
 }
 /* The Email panel: two things to send, then what goes out on its own. */
-.em-dropdown{ min-width:330px; width:560px; max-width:calc(100vw - 32px); }
+/* The settings panel is a window: take hold of the bottom corner and drag.
+   A panel holding a table of a dozen people and five boxes of wording has no
+   one right height, and the one worked out here is somebody else's guess at
+   it. resize wants an overflow of its own or the browser draws no grip. */
+.em-dropdown{ min-width:330px; width:560px; max-width:calc(100vw - 32px);
+              min-height:220px; resize:both; overflow:auto; }
 .em-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
 .em-appr-wrap{ max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin:4px 0 2px; }
 .em-appr{ width:100%; border-collapse:collapse; font-size:12px; }
@@ -22412,6 +22417,22 @@ function buildExcelBackup(){
 (function(){
   /* Fixed positioning escapes the clip but no longer inherits the offset
      parent, so place each panel under its own trigger button when it opens. */
+  /* A size somebody dragged for themselves, kept in this browser rather than
+     on the record: it is their screen, not the office's arrangement, and one
+     size saved for everybody would be the wrong size for most of them. */
+  function sizeKeyOf(dd){ return 'hw.panelSize.' + (dd.id || 'panel'); }
+  function savedSize(dd){
+    try{
+      var v = JSON.parse(localStorage.getItem(sizeKeyOf(dd)) || 'null');
+      return (v && v.w > 200 && v.h > 120) ? v : null;
+    }catch(e){ return null; }                 // a private window, or storage shut off
+  }
+  function rememberSize(dd){
+    try{
+      localStorage.setItem(sizeKeyOf(dd), JSON.stringify({
+        w: Math.round(dd.offsetWidth), h: Math.round(dd.offsetHeight) }));
+    }catch(e){ /* then the size simply does not outlive the window */ }
+  }
   function place(dd){
     if(!dd.classList.contains('open')) return;
     var picker = dd.parentElement;
@@ -22419,19 +22440,41 @@ function buildExcelBackup(){
     if(!btn) return;
     var b = btn.getBoundingClientRect();
     dd.style.top = (b.bottom + 6) + 'px';
-    /* Small screens pin panels to the left edge via an !important rule; don't
-       fight it. Otherwise align to the button and keep it on screen. */
+    /* Never let a tall panel run off the bottom. */
+    var room = Math.max(120, window.innerHeight - b.bottom - 18);
+    /* A size the person set themselves beats the one worked out here, but
+       only as far as the screen allows: a panel dragged tall on a big monitor
+       must not open below the bottom of a small one. */
+    var want = savedSize(dd);
+    if(want){
+      dd.style.width = Math.min(want.w, window.innerWidth - 16) + 'px';
+      dd.style.height = Math.min(want.h, room) + 'px';
+    }
+    dd.style.maxHeight = room + 'px';
+    dd.style.overflowY = 'auto';
+    /* Placed after any size is applied, so the panel is measured as it will
+       actually be drawn rather than as it was a moment ago. */
     if(window.innerWidth > 900){
       var w = dd.offsetWidth || 200;
       var left = Math.min(b.left, Math.max(4, window.innerWidth - w - 8));
       dd.style.left = left + 'px';
       dd.style.right = 'auto';
     }
-    /* Never let a tall panel run off the bottom. */
-    var maxH = window.innerHeight - b.bottom - 18;
-    dd.style.maxHeight = Math.max(120, maxH) + 'px';
-    dd.style.overflowY = 'auto';
+    dd.__hwPlaced = { w: dd.offsetWidth, h: dd.offsetHeight };
   }
+  /* Saved when the drag ends, and only where the size actually moved. Saving
+     on every release would write back whatever the clamp above had just cut
+     the panel down to, so a tall panel opened once on a short screen would
+     stay short on every screen after. */
+  document.addEventListener('mouseup', function(e){
+    var t = e.target;
+    var dd = t && t.closest ? t.closest('.month-dropdown') : null;
+    if(!dd || !dd.classList.contains('open')) return;
+    var was = dd.__hwPlaced;
+    if(was && Math.abs(was.w - dd.offsetWidth) < 2 && Math.abs(was.h - dd.offsetHeight) < 2) return;
+    rememberSize(dd);
+    dd.__hwPlaced = { w: dd.offsetWidth, h: dd.offsetHeight };
+  });
   function placeOpen(){
     Array.prototype.forEach.call(document.querySelectorAll('.month-dropdown.open'), place);
   }
