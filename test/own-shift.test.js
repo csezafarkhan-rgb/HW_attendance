@@ -188,18 +188,32 @@ check('the panel says so, rather than leaving it to be discovered',
    behind it: all of them are about somebody, and all of them used to go round
    without them. The rule is the same everywhere, and so is its limit - a
    digest naming several people is not theirs to read. */
-check('the request raised about them copies them',
-  /const theirs = await ownersOf\(orgId, \[r\.empName\], leg\.to, leg\.cc\);/.test(SRV));
+/* They get a copy of their own now rather than a Cc on somebody else's, and
+   it has no buttons on it: being told about your own leave is not a vote on
+   it, and a Cc line cannot take the buttons off a message already handed
+   over. */
+check('the request raised about them is sent to them',
+  /if \(own\) addCc\(own\);/.test(SRV)
+  && /const ccMsg = \{ to: aud\.cc, cc: \[\], subject: told\.subject/.test(SRV));
+check('and the copy they get cannot decide it',
+  /links: null, heading: 'A request has been raised'/.test(SRV));
 check('and so does the one passing their recommendation on',
   /mailCc\(settings, 'leave'\)\.concat\(\s*await ownersOf\(orgId, \[req\.empName\]/.test(SRV));
-check('a digest copies them only when it is about them alone',
-  /async function ownersIfAlone/.test(SRV)
-  && /if \(distinct\.length !== 1\) return \[\];/.test(SRV));
-check('which is how the waiting-leave message and the marks message decide',
-  /ownersIfAlone\(orgId, mail\.names \|\| \[\], leg\.to, leg\.cc\)/.test(SRV)
-  && /ownersIfAlone\(orgId, g\.items\.map\(m => m\.empName\), to, cc\)/.test(SRV));
-check('and the digest says whose days are in it, so that can be decided',
-  /built\.names = Array\.from\(new Set\(/.test(SRV));
+/* A digest is not copied to anybody at all: it is addressed to the one person
+   who may decide what is in it, and a digest naming several people was never
+   theirs to read. Their own request reached them when it was raised. */
+check('a digest goes to whoever may decide it and to nobody else',
+  /out\.push\(\{ to: \[addr\], cc: \[\], subject: mail\.subject/.test(SRV));
+/* The message about days marked with no request behind them is addressed the
+   same way, for the same reason: a mark is a request arriving by another
+   door. */
+check('which is how the marks message is addressed too',
+  /const msg = \{ to: \[addr\], cc: \[\], subject: mail\.subject, html: mail\.html \};/.test(SRV));
+/* One request in the message and it carries the year behind that person;
+   several and it does not, because that would hand every approver a dozen
+   people's leave records. */
+check('and a digest about one person still carries their record, a digest of many not',
+  /const only = \(pending\.length \+ unreq\.length === 1\)/.test(SRV));
 
 const ctx3 = { console, Array, Set, String,
   EMAIL_RE: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,

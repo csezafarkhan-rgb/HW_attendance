@@ -610,6 +610,10 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
 /* Which of their own requests somebody may take back: the ones nobody has
    acted on. The page offers the button on exactly these, but the page is
    theirs to edit, so this is where it is decided. */
+/* The part of a day somebody may take for themselves. Declared here with the
+   rest of the shared vocabulary because two places read it: the route that
+   grants one, and the merge that refuses to let one be asked for. */
+const SELF_PART_KINDS = ['SHORT', 'HALF'];
 const EMP_CANCELLABLE = ['pending', 'query', 'recommended'];
 function mergeEmployeeRequests(storedValue, incomingValue, name) {
   const incoming = parseJson(incomingValue);
@@ -626,6 +630,13 @@ function mergeEmployeeRequests(storedValue, incomingValue, name) {
       if (!/^req_[A-Za-z0-9_]{1,60}$/.test(r.id)) return;
       if (!DAY_RE.test(r.dateFrom) || !DAY_RE.test(r.dateTo) || r.dateTo < r.dateFrom) return;
       if (!/^[A-Za-z]{1,16}$/.test(String(r.leaveType || ''))) return;
+      /* A short leave and a half day are not asked for. They are taken, on
+         the person's own card, and counted the moment they are - so a request
+         for one is a road that no longer goes anywhere, and the page that
+         offered it has stopped. Refused here as well, because a page is the
+         person's to edit and an old one left open still has the old form on
+         it. Anything already asked for stands: this is only about new ones. */
+      if (SELF_PART_KINDS.indexOf(String(r.leaveType || '').toUpperCase()) > -1) return;
       const TIME_RE = /^\d{1,2}:\d{2}$/;
       const punch = r.leaveType === 'PUNCH';
       // A punch correction is one day, with at least one corrected time.
@@ -1883,7 +1894,6 @@ app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, 
    mergeEmployeeRequests forces any request somebody makes for themselves to
    'pending' - which is right, and is why the grant and the mark both have to
    be the server's, made together in one transaction. */
-const SELF_PART_KINDS = ['SHORT', 'HALF'];
 /* Kept apart from the route so it can be run on its own against stand-ins.
    This writes leave, and leave is money: a thing that moves money should be
    provable without a database and a browser standing in front of it. It
@@ -2165,7 +2175,7 @@ const MAIL_DEFAULTS = {
      it keeps its own address list and wording. Anything left blank here falls
      back to the attendance settings above. */
   leave: { to: [], cc: [], subject: '', intro: '', footer: '', confirm: true,
-           firstIntro: '', firstTo: [], firstCc: [] },
+           approvers: [] },
   /* The full month is sent by hand, so it has no hour of its own - only who it
      goes to and what it says. */
   month: { to: [], cc: [], subject: '', intro: '', footer: '' },
@@ -2244,16 +2254,11 @@ async function mailSettings(orgId) {
     intro: String(lv.intro || '').slice(0, 2000),
     footer: String(lv.footer || '').slice(0, 2000),
     confirm: lv.confirm !== false,
-    /* The first approver is written to before the super admins are, so the
-       words addressed to the super admins would be addressed to the wrong
-       person. Left empty, the message carries the ordinary wording. */
-    firstIntro: String(lv.firstIntro == null ? '' : lv.firstIntro).slice(0, 2000),
-    /* The first stage is a different message to different people, so it keeps
-       its own addresses. The first approver is written to whatever is here -
-       they are the one being asked - and these are who else sees it. */
-    firstTo: (Array.isArray(lv.firstTo) ? lv.firstTo : []).map(x => String(x).trim())
-      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
-    firstCc: (Array.isArray(lv.firstCc) ? lv.firstCc : []).map(x => String(x).trim())
+    /* The addresses that may be named against somebody as able to approve
+       their leave - the columns of the table on the panel. Kept here rather
+       than worked out from who is named already, so that nominating somebody
+       and then naming them are two steps and neither surprises the other. */
+    approvers: (Array.isArray(lv.approvers) ? lv.approvers : []).map(x => String(x).trim().toLowerCase())
       .filter(x => EMAIL_RE.test(x)).slice(0, 20)
   };
   const ex = isPlainObject(s.excused) ? s.excused : {};
@@ -2306,8 +2311,7 @@ function mailCc(settings, which) {
   const own = Array.isArray(tab.cc) ? tab.cc : [];
   if (own.length) return own;
   const to = Array.isArray(tab.to) ? tab.to : [];
-  const first = Array.isArray(tab.firstTo) ? tab.firstTo : [];
-  if (to.length || first.length) return [];
+  if (to.length) return [];
   return settings.cc || [];
 }
 /* Every active super admin, plus anyone named in the settings. A view admin is
@@ -2371,16 +2375,6 @@ function linksFor(payload) {
   const secret = process.env.SESSION_SECRET || 'dev-secret';
   const mk = act => base + '/e/' + mailer.actionToken(Object.assign({ act }, payload), secret);
   return { approve: mk('approve'), reject: mk('reject') };
-}
-/* The same, with the first approver's name sealed into the link, so the record
-   can say who recommended it without trusting anything the browser sends. */
-async function requestLinks(orgId, reqId, stage, approver) {
-  if (stage !== 1) return linksFor({ k: 'req', org: orgId, id: reqId, s: stage || 0 });
-  /* Whoever holds the stage for this one request, which need not be the
-     office's own first approver. */
-  const by = approver ? await approverName(orgId, approver)
-                      : ((await firstApproverOf(orgId)) || {}).name || 'the first approver';
-  return linksFor({ k: 'req', org: orgId, id: reqId, s: 1, by });
 }
 /* Leave marked on the record that no request accounts for, newest first. The
    dashboard's own rule: a rejected request or a punch correction covers nothing,
@@ -2608,101 +2602,73 @@ async function buildDailyEmail(orgId, day, opts) {
   });
 }
 
-/* The leave message: everything waiting for a decision, with its buttons.
-   Returns null when there is nothing to decide.
+/* Everything waiting, gathered by the person who may decide it: one message
+   each, holding what is theirs and nothing else. The management collect the
+   lot, because they may decide the lot.
 
-   Where leave is granted in two stages this is built twice, once for each, and
-   each message holds only what is that stage's to decide - stage 1 what the
-   first approver has not passed on, stage 2 what they have. It used to be one
-   message to the super admins holding the lot, with buttons that granted even
-   on days the first approver had not so much as seen, which is the one thing
-   two stages exist to prevent. Stage 0 is leave granted in one, where
-   everything shows and the buttons grant, as it always did. */
-async function buildLeaveEmail(orgId, stage, forApprover) {
+   It used to be built per stage, which meant a message could hold a decision
+   that was not the reader's to make. Addressed by who may answer, that cannot
+   happen: if it is in your message, it is yours. */
+async function leaveDigests(orgId) {
   const settings = await mailSettings(orgId);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'companyInfo']);
   const requests = parseJson(kv.leaveRequests) || [];
-  const first = await firstApproverOf(orgId);
   const route = await approvalRouteOf(orgId);
-  const fallback = (first && first.email) || '';
-  /* Stage 1 is one approver's; without one named there is only one stage. */
-  const mine = forApprover || fallback;
-  const st = (stage === 2) ? 2 : (mine ? 1 : 0);
-  /* Whose name goes in the buttons, so the record can say who recommended
-     it without trusting anything the browser sends. */
-  const byName = st === 1 ? await approverName(orgId, mine) : '';
-  const myWords = st === 1 ? firstWords(await approverIntroOf(orgId), mine, settings) : '';
+  const mgmt = await mailRecipients(orgId, settings, 'leave');
+  if (!mgmt.length) return { error: NO_ADDRESS };
   /* An archived request is out of the way by definition - the dashboard keeps
      it off the Requests page, and the message said seven were waiting when the
      portal said none. */
-  const live = r => r && !r.archived
-    && (r.status === 'pending' || r.status === 'query' || r.status === 'recommended');
-  const isMine = r => stageOwns(st, route, r, fallback, mine);
-  const pending = requests.filter(r => live(r) && isMine(r))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-    .slice(0, 15)
-    .map(r => ({ req: r,
-                 heading: r.status === 'recommended'
-                   ? ('Approved by ' + (r.recommendedBy || 'the first approver') + ', waiting on you')
-                   : (r.status === 'query' ? 'A query was raised'
-                      : (st === 1 ? ('For you to look at first, since '
-                                     + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))
-                               : 'Waiting since ' + mailer.fmtDay(String(r.createdAt || '').slice(0, 10)))),
-                 /* The stage is sealed into the button, so a link cannot be made
-                    to grant by stripping it. */
-                 links: linksFor(st === 1
-                   ? { k: 'req', org: orgId, id: r.id, s: 1, by: byName }
-                   : { k: 'req', org: orgId, id: r.id, s: 2 }) }));
+  const live = r => r && !r.archived && WAITING.indexOf(r.status) > -1;
   const since = new Date(Date.now() + IST_MS - 30 * 86400000).toISOString().slice(0, 10);
-  /* A day marked with no request behind it has been through no stage at all,
-     so it belongs to the first approver - for the people who have one. For
-     anybody set to skip that stage it goes to the final word instead, which is
-     the only place it would otherwise be seen at all. */
-  const unreqMine = u => stageOwnsUnreq(st, route, u, fallback, mine);
-  const unreq = settings.unrequested
+  const unreqAll = settings.unrequested
     ? unrequestedFrom(parseJson(kv.overrides) || {}, parseJson(kv.halfDays) || {}, requests, since)
-        .filter(unreqMine)
-        .slice(0, 15).map(u => ({
-          req: u,
-          heading: st === 1 ? 'For you to look at first' : 'No request on file',
-          links: linksFor(st === 1
-            ? { k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
-                t: u.leaveType, h: u.half || '', s: 1, by: byName }
-            : { k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
-                t: u.leaveType, h: u.half || '' })
-        }))
     : [];
-  /* Where the whole message is about one request, it carries the year behind
-     it, exactly as the one sent when that request was raised. A digest of
-     several people does not: it would be a year each, and the first thing it
-     would hand every approver is a dozen people's leave records.
-
-     Which is the same rule the copy list goes by - about one person, or about
-     everybody. */
-  const only = (pending.length + unreq.length === 1) ? (pending[0] || unreq[0]) : null;
-  if (only && only.req && only.req.empName) {
-    const rec = await leaveRecordFor(orgId, only.req.empName, only.req);
-    if (rec) only.req = Object.assign({}, only.req, { leaveRecord: rec });
+  const byAddr = {};
+  const file = async (item, kind) => {
+    const aud = await leaveAudience(orgId, settings, route, item.empName, mgmt);
+    aud.to.forEach(a => {
+      const slot = byAddr[a] || (byAddr[a] = { pending: [], unreq: [] });
+      slot[kind].push(item);
+    });
+  };
+  for (const r of requests.filter(live).slice(0, 60)) await file(r, 'pending');
+  for (const u of unreqAll.slice(0, 60)) await file(u, 'unreq');
+  const out = [];
+  for (const addr of Object.keys(byAddr)) {
+    const slot = byAddr[addr];
+    /* Whose name the button carries, so the record can say who approved it
+       rather than reciting an address - and without trusting anything the
+       browser sends, because it is sealed into the link. */
+    const byName = await approverName(orgId, addr);
+    const pending = slot.pending.slice(0, 15).map(r => ({
+      req: r,
+      heading: r.status === 'query' ? 'A query was raised'
+             : ('Waiting since ' + mailer.fmtDay(String(r.createdAt || '').slice(0, 10))),
+      links: linksFor({ k: 'req', org: orgId, id: r.id, s: 1, by: byName })
+    }));
+    const unreq = slot.unreq.slice(0, 15).map(u => ({
+      req: u, heading: 'No request on file',
+      links: linksFor({ k: 'unreq', org: orgId, e: u.empName, d: u.dateFrom,
+                        t: u.leaveType, h: u.half || '', s: 1, by: byName })
+    }));
+    /* Where the whole message is about one request, it carries the year behind
+       it. A digest of several people does not: the first thing it would hand
+       every approver is a dozen people's leave records. */
+    const only = (pending.length + unreq.length === 1) ? (pending[0] || unreq[0]) : null;
+    if (only && only.req && only.req.empName) {
+      const rec = await leaveRecordFor(orgId, only.req.empName, only.req);
+      if (rec) only.req = Object.assign({}, only.req, { leaveRecord: rec });
+    }
+    const mail = mailer.leaveEmail({
+      orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq,
+      siteUrl: mailer.baseUrl(), subject: settings.leave.subject,
+      intro: settings.leave.intro, footer: settings.leave.footer, approver: byName
+    });
+    if (mail) out.push({ to: [addr], cc: [], subject: mail.subject, html: mail.html });
   }
-  const built = mailer.leaveEmail({
-    orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq, siteUrl: mailer.baseUrl(),
-    subject: settings.leave.subject, footer: settings.leave.footer,
-    intro: myWords || settings.leave.intro,
-    approver: byName
-  });
-  /* Whose days are in it, so the sender can copy them where the message turns
-     out to be about one person. A digest naming several is not theirs to read. */
-  if (built) {
-    built.names = Array.from(new Set(
-      pending.map(p => p.req && p.req.empName)
-        .concat(unreq.map(u => u.req && u.req.empName)).filter(Boolean)));
-    /* And which of them were passed on by somebody, so a first approver can be
-       copied on the message their own yes caused. */
-    built.reqs = pending.map(p => p.req).filter(Boolean);
-  }
-  return built;
+  return { mails: out };
 }
-
 /* Every message that goes out is kept: what it was, when, who it went to and
    the message itself, so the Backup tab can show what the office was told and
    when. Kept ninety days; the picture inside a message is already kept
@@ -2992,62 +2958,12 @@ async function sendTasksEmail(orgId, day, opts) {
 async function sendLeaveEmail(orgId, opts) {
   const preview = !!(opts && opts.preview);
   if (!mailer.ready()) return { ok: false, error: 'email is not configured' };
-  const settings = await mailSettings(orgId);
-  const first = await firstApproverOf(orgId, settings);
-  /* One message where leave is granted in one stage; where it is granted in
-     two, one for each, so neither set of people is handed a decision that is
-     not theirs to make. A stage with nothing waiting sends nothing. */
-  const route = await approvalRouteOf(orgId);
-  const fallback = (first && first.email) || '';
-  /* Whether leave is granted in two stages is a question of whether anybody
-     holds the first one - which is not the same as the office having named a
-     default. Gating this on the default alone meant that naming an approver
-     against one person and leaving the Leave tab's own line empty sent their
-     new requests to that person, as it should, and then had the nightly
-     summary grant in one stage as though nobody were there. */
-  const approvers = firstApprovers(route, fallback);
-  const legs = [];
-  if (approvers.length) {
-    /* One stage-1 message per person holding a first stage, each holding only
-       their own people. Where somebody is routed to an approver of their own,
-       that address gets a message about them and nobody else - and the office's
-       own first approver is not told about a request that is not theirs. */
-    const ccMap = await approverCcOf(orgId);
-    approvers.forEach(who => { legs.push(legFor(settings, who, fallback, ccMap)); });
-    legs.push({ stage: 2, to: await mailRecipients(orgId, settings, 'leave'),
-                cc: mailCc(settings, 'leave') });
-  } else {
-    legs.push({ stage: 0, to: await mailRecipients(orgId, settings, 'leave'),
-                cc: mailCc(settings, 'leave') });
-  }
-  /* Built first, sent after - and where a preview was asked for, not sent at
-     all. Leave is the one message that can be several: a stage with nobody
-     waiting at it builds nothing, and two stages with people at both build two
-     messages to two sets of people. So the preview holds all of them and says
-     how many, rather than showing one and quietly posting the rest. */
-  let addressed = 0;
-  const built = [];
-  for (const leg of legs) {
-    if (!leg.to.length) continue;
-    addressed++;
-    const mail = await buildLeaveEmail(orgId, leg.stage, leg.approver);
-    if (!mail) continue;                                   // nothing at this stage
-    /* About one person: they are copied. About several: they are not, because
-       a digest is everybody's business and nobody else's. */
-    const alone = await ownersIfAlone(orgId, mail.names || [], leg.to, leg.cc);
-    /* Anybody whose yes put a request in this message is copied on it, whatever
-       else the message holds: it is the answer to their own recommendation, and
-       being named in its heading is not the same as being told. */
-    const passed = notAlready(await recommenderOf(orgId, settings, mail.reqs || []),
-                              leg.to, leg.cc.concat(alone));
-    built.push({ to: leg.to, cc: leg.cc.concat(alone).concat(passed),
-                 subject: mail.subject, html: mail.html });
-  }
-  if (!addressed) return { ok: false, error: NO_ADDRESS };
-  if (!built.length) return { ok: true, nothing: true };   // nothing waiting: no message
-  if (preview) return { ok: true, mails: built };
+  const built = await leaveDigests(orgId);
+  if (built.error) return { ok: false, error: built.error };
+  if (!built.mails.length) return { ok: true, nothing: true };   // nothing waiting: no message
+  if (preview) return { ok: true, mails: built.mails };
   let sent = 0, toN = 0, ccN = 0, failed = null;
-  for (const msg of built) {
+  for (const msg of built.mails) {
     const r = await mailer.send(msg);
     await logMail(orgId, 'leave', msg, r);
     if (r.ok) { sent++; toN += msg.to.length; ccN += msg.cc.length; }
@@ -3056,7 +2972,6 @@ async function sendLeaveEmail(orgId, opts) {
   if (!sent && failed) return failed;
   return { ok: true, to: toN, cc: ccN, messages: sent };
 }
-
 /* One new request, emailed as it is raised. Never throws: a request must be
    saved whether or not the email goes out. */
 async function notifyNewRequests(orgId, added) {
@@ -3064,45 +2979,34 @@ async function notifyNewRequests(orgId, added) {
     if (!mailer.ready() || !added.length) return;
     const settings = await mailSettings(orgId);
     if (!settings.requests) return;
-    /* Where somebody is marked to look at requests first, the request goes to
-       them and to nobody else: asking both at once would have the office
-       granting leave the first approver had not seen.
-
-       Whether this particular request goes through them is set against the
-       person who raised it, so the two sets of addresses are worked out once
-       and each request is sent down its own road. */
-    const first = await firstApproverOf(orgId, settings);
     const route = await approvalRouteOf(orgId);
-    const fallback = (first && first.email) || '';
-    const intros = await approverIntroOf(orgId);
-    const ccMap = await approverCcOf(orgId);
-    const finalLeg = { to: await mailRecipients(orgId, settings, 'leave'),
-                       cc: mailCc(settings, 'leave') };
+    const mgmt = await mailRecipients(orgId, settings, 'leave');
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
-      /* Whoever holds the first stage for this particular person - which may
-         be an address named against them alone. */
-      const who = approverFor(route, r.empName, fallback);
-      const leg = who ? legFor(settings, who, fallback, ccMap) : finalLeg;
-      if (!leg.to.length) continue;
+      const aud = await leaveAudience(orgId, settings, route, r.empName, mgmt);
+      if (!aud.to.length) continue;
       /* The year behind this one request, for whoever has to decide it. */
       const withRecord = Object.assign({}, r, { leaveRecord: await leaveRecordFor(orgId, r.empName, r) });
-      const mail = mailer.requestEmail({
-        orgName: orgNameOf(kv.companyInfo), req: withRecord,
-        links: await requestLinks(orgId, r.id, who ? 1 : 0, who),
-        siteUrl: mailer.baseUrl(),
-        heading: who ? 'A request for you to look at first'
-                     : 'A request is waiting for a decision',
-        intro: (who && firstWords(intros, who, settings)) || settings.leave.intro,
-        approver: who ? await approverName(orgId, who) : '',
-        footer: settings.leave.footer
-      });
-      /* The person who raised it, copied in: a request going round about
-         somebody that they never see is one they cannot correct. */
-      const theirs = await ownersOf(orgId, [r.empName], leg.to, leg.cc);
-      const msg = { to: leg.to, cc: leg.cc.concat(theirs), subject: mail.subject, html: mail.html };
-      const sentOne = await mailer.send(msg);
-      await logMail(orgId, 'request', msg, sentOne);
+      const base = { orgName: orgNameOf(kv.companyInfo), req: withRecord,
+                     siteUrl: mailer.baseUrl(), intro: settings.leave.intro,
+                     footer: settings.leave.footer };
+      /* The copy that decides it, to the people who may. */
+      const decide = mailer.requestEmail(Object.assign({}, base, {
+        links: linksFor({ k: 'req', org: orgId, id: r.id, s: 0 }),
+        heading: 'A request is waiting for a decision' }));
+      const toMsg = { to: aud.to, cc: [], subject: decide.subject, html: decide.html };
+      await logMail(orgId, 'request', toMsg, await mailer.send(toMsg));
+      /* And the copy that is only told - the person who asked, first of all.
+         Sent on its own rather than as a Cc on the message above, because the
+         difference between the two is the buttons, and a Cc line cannot take
+         buttons off a message somebody has already been handed. */
+      if (aud.cc.length) {
+        const told = mailer.requestEmail(Object.assign({}, base, {
+          links: null, heading: 'A request has been raised',
+          note: 'For information. The people who decide it have their own copy.' }));
+        const ccMsg = { to: aud.cc, cc: [], subject: told.subject, html: told.html };
+        await logMail(orgId, 'request', ccMsg, await mailer.send(ccMsg));
+      }
     }
   } catch (e) {
     console.error('request email failed (request itself was saved):', e && e.message);
@@ -3131,19 +3035,6 @@ async function approverName(orgId, email) {
   } catch (e) { /* the address stands in for the name */ }
   return addr;
 }
-async function firstApproverOf(orgId, settings) {
-  const s = settings || await mailSettings(orgId);
-  const email = ((s.leave && s.leave.firstTo) || [])[0] || '';
-  if (!EMAIL_RE.test(email)) return null;
-  let name = email;
-  try {
-    const r = await pool.query(
-      'SELECT name FROM users WHERE org_id = $1 AND lower(email) = lower($2) ORDER BY id LIMIT 1',
-      [orgId, email]);
-    if (r.rows[0] && String(r.rows[0].name || '').trim()) name = String(r.rows[0].name).trim();
-  } catch (e) { /* the address stands in for the name */ }
-  return { email, name };
-}
 /* Whose leave goes through that first approver. Naming one used to send every
    request in the company through them; it is set against the name now, in the
    shifts panel beside the shift itself.
@@ -3151,126 +3042,85 @@ async function firstApproverOf(orgId, settings) {
    Only the people who skip the first stage are stored, so an empty map - a
    company that has never opened the panel - is everybody going through both,
    exactly what naming a first approver meant before this existed. */
+/* ---- who may decide one person's leave ----
+
+   One rule answers it now, and it is the rule the office actually works to:
+   TO is everybody who may decide this, CC is everybody else who should see
+   it. A copy sent to CC carries no buttons, and that is what makes "they
+   cannot approve it" true rather than a convention - the buttons are the
+   authority, so the only way to withhold the authority is to withhold the
+   buttons.
+
+   It replaced two stages: somebody looked first and passed it on, and a
+   second word granted it. One word settles a request now, so the question is
+   no longer when somebody is asked but whether they may answer - which is a
+   simpler question and the only one anybody was ever really asking.
+
+   TO is the management, who are on every leave message and may approve
+   anything, and whoever the office has named against this person. Nobody
+   decides their own leave: an approver who asks for some themselves drops out
+   of TO and into CC, where their copy has nothing to click. */
+function approversOf(route, name) {
+  const v = (route || {})[name];
+  /* 'final' meant "no first stage, straight to the management" while there
+     were stages. It means the same thing here - nobody else named - so the
+     word is still read, and an office that never opens the panel keeps the
+     arrangement it already had. */
+  if (v == null || v === '' || v === 'final') return [];
+  const list = Array.isArray(v) ? v : [v];
+  const seen = {}, out = [];
+  list.forEach(a => {
+    const k = String(a || '').trim().toLowerCase();
+    if (EMAIL_RE.test(k) && !seen[k]) { seen[k] = true; out.push(k); }
+  });
+  return out;
+}
+async function leaveAudience(orgId, settings, route, empName, mgmt) {
+  const management = mgmt || await mailRecipients(orgId, settings, 'leave');
+  const own = String(await employeeAddress(orgId, empName) || '').trim().toLowerCase();
+  const seen = {}, to = [];
+  const add = a => {
+    const k = String(a || '').trim().toLowerCase();
+    /* Their own address is the one that never goes in TO, whoever else they
+       are: a manager asking for leave is asking, not granting. */
+    if (!EMAIL_RE.test(k) || k === own || seen[k]) return;
+    seen[k] = true; to.push(k);
+  };
+  management.forEach(add);
+  approversOf(route, empName).forEach(add);
+  const ccSeen = {}, cc = [];
+  const addCc = a => {
+    const k = String(a || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(k) || seen[k] || ccSeen[k]) return;
+    ccSeen[k] = true; cc.push(k);
+  };
+  /* The person who asked, first of all. A request going round about somebody
+     that they never see is one they cannot correct. */
+  if (own) addCc(own);
+  mailCc(settings, 'leave').forEach(addCc);
+  return { to, cc, own };
+}
+/* Every address that may decide anything at all, for the panel to show and
+   for the digest to gather by. */
+function allApprovers(route) {
+  const seen = {}, out = [];
+  Object.keys(route || {}).forEach(n => approversOf(route, n).forEach(a => {
+    if (!seen[a]) { seen[a] = true; out.push(a); }
+  }));
+  return out;
+}
 async function approvalRouteOf(orgId) {
   const kv = await sharedKeys(orgId, ['approvalRoute']);
   const map = parseJson(kv.approvalRoute);
   return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
 }
-/* The wording one approver reads, where the office set them wording of their
-   own. Kept against the address rather than against the person who asked,
-   because one message can cover several people - the nightly summary gathers
-   everybody an approver looks after into one - and wording kept against a
-   person would have had to pick one of them. Empty, or missing, means the
-   wording every first approver gets. */
-async function approverIntroOf(orgId) {
-  const kv = await sharedKeys(orgId, ['approverIntro']);
-  const map = parseJson(kv.approverIntro);
-  return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
-}
-/* Who else is copied on one approver's first-stage message, kept against the
-   address for the same reason the wording is. The office's own first approver
-   is not in here: that line has a Cc of its own in the settings. */
-async function approverCcOf(orgId) {
-  const kv = await sharedKeys(orgId, ['approverCc']);
-  const map = parseJson(kv.approverCc);
-  return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
-}
-/* The words this one address reads: their own, or the office's for everybody
-   who holds the stage. Empty means nothing was written for either. */
-function firstWords(intros, who, settings) {
-  const own = String((intros || {})[String(who || '').trim().toLowerCase()] || '').trim();
-  return own || String((settings.leave || {}).firstIntro || '');
-}
-function needsFirstApproval(route, name) {
-  return (route || {})[name] !== 'final';
-}
-/* Who holds the first stage for one person, as an address, or null where
-   nobody does.
-
-   A row in the map is one of three things: missing, meaning the office's own
-   first approver; the word 'final', meaning no first stage at all; or an
-   address, meaning that person's leave goes to somebody else first. The third
-   is why this exists - one employee reports to somebody outside the usual
-   line, and routing the whole company through that person to serve one of them
-   is not an answer. */
-function approverFor(route, name, fallback) {
-  const v = (route || {})[name];
-  if (v === 'final') return null;
-  const own = typeof v === 'string' && EMAIL_RE.test(v.trim()) ? v.trim() : '';
-  const who = own || String(fallback || '').trim();
-  return EMAIL_RE.test(who) ? who.toLowerCase() : null;
-}
 /* Whose decision a waiting request is, at the stage the message is being built
    for. At one stage (st 0) everybody's.
 
-   Stage 1 belongs to one named approver at a time: what they have not passed
-   on, for the people whose leave goes through them and nobody else's. Stage 2
-   is the final word's: what has been passed on, plus - from the moment it is
-   raised - anything from somebody with no first stage at all, since no one
-   else is ever going to look at it. */
-function stageOwns(st, route, r, fallback, forApprover) {
-  if (st === 0) return true;
-  const who = approverFor(route, r && r.empName, fallback);
-  if (st === 2) return r.status === 'recommended' || !who;
-  return !!who && who === String(forApprover || '').toLowerCase()
-      && r.status !== 'recommended';
-}
-/* The same, for a day marked on the record with no request behind it. It has
-   been through no stage at all, so it belongs to whoever holds the first stage
-   for that person - or to the final word where nobody does. */
-function stageOwnsUnreq(st, route, u, fallback, forApprover) {
-  if (st === 0) return true;
-  const who = approverFor(route, u && u.empName, fallback);
-  return st === 1 ? (!!who && who === String(forApprover || '').toLowerCase()) : !who;
-}
 /* Every address that holds a first stage for somebody: the office's own, and
    each one named against a particular person. One message each, so nobody is
    handed a decision that is not theirs.
 
-   The office's own is always in the list rather than worked out from who is
-   left over - a stage with nothing waiting builds no message and sends
-   nothing, which settles it without needing the roll of employees here. */
-function firstApprovers(route, fallback) {
-  const seen = {}, out = [];
-  const add = a => {
-    const k = String(a || '').trim().toLowerCase();
-    if (EMAIL_RE.test(k) && !seen[k]) { seen[k] = true; out.push(k); }
-  };
-  add(fallback);
-  Object.keys(route || {}).forEach(n => {
-    const v = route[n];
-    if (typeof v === 'string' && v !== 'final') add(v);
-  });
-  return out;
-}
-/* Who a stage-1 message goes to. The office's own first approver keeps the
-   line it was configured with, because that stage may be shared by several
-   people; an approver named against one person is that one address. */
-function legFor(settings, who, fallback, ccMap) {
-  if (who === String(fallback || '').trim().toLowerCase()) {
-    const to = ((settings.leave && settings.leave.firstTo) || []).slice();
-    /* Its own Cc, and anything kept against this address the way every other
-       approver's copy list is kept - the panel has one box for both now. */
-    const extra = ((ccMap || {})[who] || []).map(a => String(a || '').trim().toLowerCase());
-    const seen = {}, cc = [];
-    ((settings.leave && settings.leave.firstCc) || []).concat(extra).forEach(a => {
-      const k = String(a || '').trim().toLowerCase();
-      if (EMAIL_RE.test(k) && to.indexOf(k) === -1 && !seen[k]) { seen[k] = true; cc.push(k); }
-    });
-    return { stage: 1, approver: who, to, cc };
-  }
-  /* An address named against one person could be written to and never copied:
-     the office's Cc belongs to the office's own line, and there was nowhere
-     else to put one. This is that somewhere - kept against the approver, like
-     their wording, and read here rather than trusted, because it is a stored
-     map that decides who a message reaches. */
-  const seen = {}, cc = [];
-  ((ccMap || {})[who] || []).forEach(a => {
-    const k = String(a || '').trim().toLowerCase();
-    if (EMAIL_RE.test(k) && k !== who && !seen[k]) { seen[k] = true; cc.push(k); }
-  });
-  return { stage: 1, approver: who, to: [who], cc };
-}
 
 /* The person the leave belongs to, by their own account. Accounts are made
    with the employee's name against them, so that is what ties a request to an
@@ -3353,28 +3203,23 @@ async function leaveRecordFor(orgId, empName, req) {
    several people is a different thing: copying somebody on it would hand them
    everybody else's leave, which is not theirs to read. So a group of one is
    copied and a group of several is not. */
-/* The address that passed a request on. A first approver's yes is the reason
-   the management is being written to at all, and until now they were told
-   nothing of what became of it - their name was in the heading of a message
-   they never saw. Copied, like the person who asked.
-
-   The name on the request is a name, not an address, so the address is worked
-   out the way the first stage is worked out everywhere else: the approver named
-   against that person, or the office's own where nobody is. */
+/* The address that passed a request on, back when a request could be passed
+   on. One word settles a request now, so nothing new is ever recommended -
+   but requests recommended before that still sit on the record waiting, and
+   whoever recommended one should see what became of it rather than reading
+   their own name in the heading of a message they were never shown. */
 async function recommenderOf(orgId, settings, reqs) {
   const live = (reqs || []).filter(r => r && r.status === 'recommended' && r.empName);
   if (!live.length) return [];
-  const first = await firstApproverOf(orgId, settings);
-  const fallback = (first && first.email) || '';
   const route = await approvalRouteOf(orgId);
   const seen = {}, out = [];
   for (const r of live) {
     /* Whoever actually pressed it, by the name the button carried and the
        accounts' own roll - which is the right answer even where the office has
-       since pointed that person's leave somewhere else, or named nobody at all.
-       Only failing that is the stage read off the route as a stand-in. */
+       since pointed that person's leave somewhere else. Only failing that is
+       the first of the people who may approve for them read as a stand-in. */
     const byName = await employeeAddress(orgId, r.recommendedBy || '');
-    const who = byName || approverFor(route, r.empName, fallback) || '';
+    const who = byName || approversOf(route, r.empName)[0] || '';
     const k = String(who).toLowerCase();
     if (k && !seen[k]) { seen[k] = true; out.push(k); }
   }
@@ -3390,11 +3235,6 @@ function notAlready(list, to, cc) {
     seen[k] = true;
     return true;
   });
-}
-async function ownersIfAlone(orgId, names, to, cc) {
-  const distinct = Array.from(new Set((names || []).filter(Boolean)));
-  if (distinct.length !== 1) return [];
-  return ownersOf(orgId, distinct, to, cc);
 }
 async function ownersOf(orgId, names, to, cc) {
   const out = [];
@@ -3640,9 +3480,8 @@ async function leaveApprovers(orgId, settings) {
     const a = String(e || '').trim().toLowerCase();
     if (EMAIL_RE.test(a) && out.indexOf(a) === -1) out.push(a);
   };
-  ((settings.leave && settings.leave.firstTo) || []).forEach(add);
-  const route = await approvalRouteOf(orgId);
-  Object.keys(route).forEach(n => { if (route[n] !== 'final') add(route[n]); });
+  ((settings.leave && settings.leave.approvers) || []).forEach(add);
+  allApprovers(await approvalRouteOf(orgId)).forEach(add);
   return out;
 }
 /* Somebody has taken a short leave or a half day without asking.
@@ -3760,67 +3599,38 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
     }
     if (!worth.length) return;
 
-    /* The same two stages a request takes. A mark is a request by another
-       door, so where somebody is named to look at leave first it goes to them
-       and to nobody else, and their yes passes it on rather than granting it.
-       The stage is sealed into the buttons, so a link cannot be made to grant
-       by stripping it.
+    /* A mark is a request arriving by another door, so it is addressed the
+       same way: to whoever may decide it, with the person whose day it is
+       told separately and without buttons.
 
-       A batch of marks can hold both kinds of people, so it is split by whose
-       stage each one is and sent as two messages rather than one addressed to
-       whoever happened to come first. */
-    const first = await firstApproverOf(orgId, settings);
+       A batch can hold several people's days, so it is gathered by who may
+       answer rather than sent to whoever happened to come first. */
     const route = await approvalRouteOf(orgId);
-    const fallback = (first && first.email) || '';
-    /* One group per person holding a first stage, and one for the marks that
-       have no first stage at all. */
-    const markCc = await approverCcOf(orgId);
-    const groups = [];
-    firstApprovers(route, fallback).forEach(who => {
-      groups.push({ stage: 1, approver: who,
-                    items: worth.filter(m => approverFor(route, m.empName, fallback) === who) });
-    });
-    groups.push({ stage: 0, approver: '',
-                  items: worth.filter(m => !approverFor(route, m.empName, fallback)) });
-    for (const g of groups) {
-      if (!g.items.length) continue;
-      const stage = g.stage;
-      const byName = stage === 1 ? await approverName(orgId, g.approver) : '';
-      const gWords = stage ? firstWords(await approverIntroOf(orgId), g.approver, settings) : '';
+    const mgmt = await mailRecipients(orgId, settings, 'leave');
+    if (!mgmt.length) return;
+    const byAddr = {};
+    for (const m of worth) {
+      const aud = await leaveAudience(orgId, settings, route, m.empName, mgmt);
+      aud.to.forEach(a => { (byAddr[a] = byAddr[a] || []).push(m); });
+    }
+    for (const addr of Object.keys(byAddr)) {
+      const items = byAddr[addr];
+      if (!items.length) continue;
+      const byName = await approverName(orgId, addr);
       const mail = mailer.leaveEmail({
         orgName: orgNameOf(kv.companyInfo), pending: [],
-        unrequested: g.items.slice(0, 15).map(m => ({
-          req: m,
-          heading: stage ? 'Marked on the record, for you to look at first'
-                         : 'Marked on the record, no request',
-          links: linksFor(stage
-            ? { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
-                t: m.leaveType, h: m.half || '', s: 1, by: byName }
-            : { k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
-                t: m.leaveType, h: m.half || '' })
+        unrequested: items.slice(0, 15).map(m => ({
+          req: m, heading: 'Marked on the record, no request',
+          links: linksFor({ k: 'unreq', org: orgId, e: m.empName, d: m.dateFrom,
+                            t: m.leaveType, h: m.half || '', s: 1, by: byName })
         })),
-        subject: settings.leave.subject,
-        intro: gWords || settings.leave.intro,
-        approver: byName,
-        footer: settings.leave.footer, siteUrl: mailer.baseUrl()
+        subject: settings.leave.subject, intro: settings.leave.intro,
+        approver: byName, footer: settings.leave.footer, siteUrl: mailer.baseUrl()
       });
       if (!mail) continue;
-      let to, cc;
-      if (stage) {
-        const leg = legFor(settings, g.approver, fallback, markCc);
-        to = leg.to; cc = leg.cc;
-      } else {
-        to = await mailRecipients(orgId, settings, 'leave');
-        cc = mailCc(settings, 'leave');
-      }
-      if (!to.length) continue;
-      /* One person's days: they are copied. Several people's in the one
-         message: nobody is, because it is not theirs to read. */
-      cc = cc.concat(await ownersIfAlone(orgId, g.items.map(m => m.empName), to, cc));
-      const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
-      await logMail(orgId, 'leave', { to, cc, subject: mail.subject, html: mail.html }, r);
-    }
-  } catch (e) {
+      const msg = { to: [addr], cc: [], subject: mail.subject, html: mail.html };
+      await logMail(orgId, 'leave', msg, await mailer.send(msg));
+    }  } catch (e) {
     console.error('leave-without-a-request email failed (the mark itself was saved):', e && e.message);
   }
 }
@@ -4084,7 +3894,6 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
 app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
   const s = await mailSettings(req.session.orgId);
   const to = await mailRecipients(req.session.orgId, s);
-  const first = await firstApproverOf(req.session.orgId, s);
   const mine = String((req.user && req.user.email) || '');
   /* The wording each message is built with. The panel shows it in the box when
      nothing has been saved over it, so what is on screen is what goes out - it
@@ -4092,7 +3901,6 @@ app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
      looked empty until somebody typed in it. */
   res.json({ configured: mailer.ready(), from: mailer.conf().from, siteUrl: mailer.baseUrl(),
              settings: s, to, defaults: mailer.DEFAULT_TEXT,
-             firstApprover: first ? { name: first.name, email: first.email } : null,
              you: EMAIL_RE.test(mine) ? mine : '' });
 });
 app.post('/api/mail/test', requireRole('admin'), async (req, res) => {

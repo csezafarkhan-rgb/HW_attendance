@@ -213,54 +213,46 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       off('Asha', MON, null) === null);
   }
 
-  /* ---- the two stages of a leave grant, under the Leave tab ----
-     Two messages to two sets of people; the pane splits so neither set of
-     boxes can be taken for the other. */
+  /* ---- one table, and every person on it ----
+     The Leave tab was two panes behind two sub-tabs - one for whoever looked
+     at a request first, one for whoever granted it - and the arrangement
+     itself lived somewhere else entirely, a tick and a dropdown per person in
+     the Shifts panel. Neither screen showed one person's arrangement whole,
+     and the panel that asked who approves a request was not the panel where
+     the answer was kept. */
   {
     const menu = grab('renderEmailDropdown');
-    /* The tab names the people it reaches, not the person who happens to hold
-       it: an approver can change in Users, and a tab labelled with yesterday's
-       name is worse than one labelled with what it is for. */
-    check('the tabs are named for who decides, not for whoever holds them',
-      menu.indexOf('Their own approver') > -1 && menu.indexOf('The management') > -1
-        && menu.indexOf("mailEscape(fa.name) + '</b> sees every request") === -1,
-      menu.indexOf('Their own approver'));
-    check('the Leave tab offers one each, in order',
-      menu.indexOf('data-lv-tab="first"') > -1
-        && menu.indexOf('data-lv-tab="first"') < menu.indexOf('data-lv-tab="final"'),
-      [menu.indexOf('data-lv-tab="first"'), menu.indexOf('data-lv-tab="final"')]);
-    check('each keeps its own addresses',
-      ['emLvFirstTo', 'emLvFirstCc', 'emLvFirstIntro'].every(id => menu.indexOf(id) > -1)
-        && ['emLvTo', 'emLvCc', 'emLvIntro'].every(id => menu.indexOf(id) > -1), menu.length);
-    check('the management pane is the one folded away where approvers are named',
-      /data-lv-pane="final"' \+ \(MAIL_CFG\.firstApprover \? ' style="display:none;"'/.test(menu));
-    /* Both tabs are always there. They are no longer a first and a second:
-       one approval settles a request, and the tabs are the two sets of people
-       it can reach - the approver named against a person, or the management
-       for everybody else. Hiding either would leave nowhere to set it. */
-    check('both sets of people are offered whether or not anybody is named',
-      menu.indexOf("if(!fa) return ''") === -1
-        && /Their own approver/.test(menu)
-        && /The management/.test(menu)
-        && /name their approver under/.test(menu), menu.indexOf('own approver'));
-    check('and neither is called a stage any more',
-      !/1\. First approval/.test(menu) && !/2\. Final approval/.test(menu));
-
-    /* Switching between the stages must not disturb the panel's own tabs. */
-    const wiring = menu.slice(menu.indexOf('data-lv-tab]'));
-    check('switching stages reaches only the stage panes',
-      wiring.indexOf('data-lv-pane]') > -1 && wiring.slice(0, 400).indexOf('data-em-pane]') === -1,
-      wiring.slice(0, 300));
-
-    /* Saving from a pane that has no first-stage boxes must not wipe what is
-       stored for the next time somebody is marked. */
-    const save = grab('renderEmailDropdown');
-    check('saving with nobody marked keeps the first stage\'s settings',
-      /firstTo: document\.getElementById\('emLvFirstTo'\)\s*\n?\s*\? list\('emLvFirstTo'\) : \(\(\(MAIL_CFG/.test(save)
-        || save.indexOf("(((MAIL_CFG.settings || {}).leave || {}).firstTo || [])") > -1,
-      save.indexOf('firstTo:'));
+    check('the two stages, and the tabs that stood for them, are gone',
+      menu.indexOf('data-lv-tab') === -1 && menu.indexOf('data-lv-pane') === -1
+      && ['emLvFirstTo', 'emLvFirstCc', 'emLvFirstIntro'].every(id => menu.indexOf(id) === -1),
+      menu.indexOf('data-lv-tab'));
+    check('the management keep the box that says they are on every leave email',
+      menu.indexOf('emLvTo') > -1 && /on every leave email, and they can approve/.test(menu));
+    check('and the Cc box says plainly that it cannot decide anything',
+      menu.indexOf('emLvCc') > -1 && /Also copied, never asked/.test(menu));
+    check('there is a box for nominating approvers',
+      menu.indexOf('emLvApprovers') > -1);
+    /* A row per person, a column per approver, a tick where one may answer
+       for the other - which is the whole arrangement on one screen. */
+    check('and a table with a row for every person',
+      /people\.map\(function\(e\)\{/.test(menu) && menu.indexOf('data-appr-for') > -1
+      && menu.indexOf('data-appr-who') > -1);
+    /* Nothing implicit: a row with nothing ticked says so in as many words,
+       so a new name never quietly inherits an arrangement nobody chose. */
+    check('a person with nobody ticked is told they are the management\u2019s alone',
+      /mine\.length \? '' : 'management only'/.test(menu));
+    check('it says who may decide and who is only told',
+      /Everybody in To can approve it/.test(menu) && /no buttons on it/.test(menu));
+    check('and that nobody approves their own',
+      /a manager asking for leave is asking, /.test(menu));
+    /* The table writes its own store as it is ticked; the panel's Save writes
+       the mail settings. One button saving both would be lying about one. */
+    const whole = grab('renderEmailDropdown');
+    check('the table saves as it is ticked, not on the panel\u2019s Save',
+      /approvalRoute\[name\] = mine;/.test(whole) && /saveApprovalRoute\(\)/.test(whole));
+    check('and the panel\u2019s Save writes the nominated approvers',
+      /approvers: list\('emLvApprovers'\)/.test(whole));
   }
-
   /* ---- the break allowance ----
      Lunch and two breaks, set on the Options panel. It decides one thing only:
      when the time-out figure is marked red. The hours owed, when somebody is due

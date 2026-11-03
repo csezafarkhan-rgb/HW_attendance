@@ -852,162 +852,101 @@ process.env.SESSION_SECRET = SECRET;
   check('with no box filled in anywhere it falls back to the admins',
     (sent[sent.length - 1].to || []).indexOf('boss@x.com') > -1, sent[sent.length - 1].to);
 
-  /* ---- leave granted in two stages ----
-     One person looks at every request first and says whether it should go
-     forward; a super admin then grants it. Nothing reaches the record until the
-     second word is given. */
+  /* ---- who a leave message is addressed to ----
+     One rule: TO is everybody who may decide it, CC is everybody else, and a
+     CC copy carries no buttons. Which means two messages for one request,
+     because the difference between the two is the buttons, and a Cc line
+     cannot take the buttons off a message somebody has already been handed.
+
+     It replaced two stages - somebody looked first and passed it on, and a
+     second word granted it. One word settles a request now, so the question
+     is not when somebody is asked but whether they may answer. */
   {
-    /* Who looks first is an address on the Leave tab. It belongs to an account
-       here, so the message that follows can name them rather than reciting the
-       address - but it need not. */
     db.users.push({ id: 11, org_id: 1, email: 'karan@homeweavers.net', name: 'karan Ahuja',
                     role: 'employee', is_active: true });
+    db.users.push({ id: 12, org_id: 1, email: 'munish@homeweavers.net', name: 'Munish Dhamija',
+                    role: 'employee', is_active: true });
+    db.users.push({ id: 13, org_id: 1, email: 'shyam@homeweavers.net', name: 'Shyam Lal',
+                    role: 'employee', is_active: true });
+    /* The arrangement the office works to: the management on every message,
+       the Gurgaon office through Karan, the Panipat factory through Munish
+       and Karan both. */
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-      leave: { to: [], cc: [], firstTo: ['karan@homeweavers.net'] } }));
+      leave: { to: ['nitish@homeweavers.net', 'shivani@homeweavers.net'], cc: [] } }));
+    kvSet(1, 'approvalRoute', JSON.stringify({
+      'Keshav Garg': ['karan@homeweavers.net'],
+      'Shyam Lal': ['munish@homeweavers.net', 'karan@homeweavers.net'],
+      'karan Ahuja': [], 'Munish Dhamija': [] }));
     kvSet(1, 'overrides', '{}');
-    kvSet(1, 'leaveRequests', JSON.stringify([
-      { id: 'req_two', empName: 'Keshav Garg', dateFrom: '2026-11-10', dateTo: '2026-11-10',
-        leaveType: 'CL', status: 'pending', message: 'family',
-        createdAt: '2026-11-01T04:00:00Z', updatedAt: '2026-11-01T04:00:00Z' }
-    ]));
+    kvSet(1, 'leaveRequests', JSON.stringify([]));
 
-    /* Raised: it goes to the one who looks first, and to nobody else. */
-    const raisedBefore = sent.length;
-    const withNew = JSON.parse(kvFind(1, 'leaveRequests').value);
-    withNew.push({ id: 'req_new', empName: 'Keshav Garg', dateFrom: '2026-11-12', dateTo: '2026-11-12',
-                   leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T05:00:00Z',
-                   updatedAt: '2026-11-01T05:00:00Z' });
-    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(withNew), shared: true });
-    await new Promise(r => setTimeout(r, 700));
-    const raised = sent[sent.length - 1];
-    /* To the one who looks first, and nobody else is asked - but the person it
-       is about is copied, because a request going round about somebody that
-       they never see is one they cannot correct. */
-    check('a new request goes to whoever looks at them first, and to nobody else',
-      sent.length === raisedBefore + 1
-        && JSON.stringify(raised.to) === JSON.stringify(['karan@homeweavers.net']),
-      raised && { to: raised.to, cc: raised.cc });
-    check('with the person who raised it copied in',
-      JSON.stringify(raised.cc || []) === JSON.stringify(['keshav@homeweavers.net']),
-      raised && raised.cc);
+    const raise = async (id, who, day) => {
+      const before = sent.length;
+      const all = JSON.parse(kvFind(1, 'leaveRequests').value);
+      all.push({ id, empName: who, dateFrom: day, dateTo: day, leaveType: 'CL',
+                 status: 'pending', createdAt: '2026-11-01T05:00:00Z',
+                 updatedAt: '2026-11-01T05:00:00Z' });
+      await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(all), shared: true });
+      await new Promise(r => setTimeout(r, 700));
+      return sent.slice(before);
+    };
+    /* The buttons are the authority, so looking for them is how a test asks
+       which copy it is holding. */
+    const decides = m => /Approve/.test(String(m.html || ''));
+    const addrs = m => (m.to || []).slice().sort();
 
-    /* The one who looks first is addressed in words of their own: the message
-       to the super admins opens "Hello Shivani ma'am and Nitish Sir", which is
-       the wrong greeting for the person it reaches before them. */
+    let msgs = await raise('req_gur', 'Keshav Garg', '2026-11-12');
+    const decide = msgs.find(decides), told = msgs.find(m => !decides(m));
+    check('a request is sent twice: a copy that decides and a copy that is told',
+      msgs.length === 2 && !!decide && !!told, msgs.map(m => m.to));
+    check('the management and that person\u2019s own approver may decide it',
+      !!decide && JSON.stringify(addrs(decide)) === JSON.stringify(
+        ['karan@homeweavers.net', 'nitish@homeweavers.net', 'shivani@homeweavers.net']),
+      decide && decide.to);
+    check('and the person who asked is told, with nothing on it to click',
+      !!told && JSON.stringify(told.to) === JSON.stringify(['keshav@homeweavers.net']),
+      told && told.to);
+
+    /* Two approvers named against one person, because the office asked for
+       the factory's manager and the office's both. */
+    msgs = await raise('req_pan', 'Shyam Lal', '2026-11-13');
+    const pan = msgs.find(decides);
+    check('two approvers named against one person both get the deciding copy',
+      !!pan && JSON.stringify(addrs(pan)) === JSON.stringify(
+        ['karan@homeweavers.net', 'munish@homeweavers.net',
+         'nitish@homeweavers.net', 'shivani@homeweavers.net']),
+      pan && pan.to);
+
+    /* A manager asking for leave is asking, not granting. */
+    msgs = await raise('req_mgr', 'karan Ahuja', '2026-11-14');
+    const mgr = msgs.find(decides), mgrTold = msgs.find(m => !decides(m));
+    check('a manager\u2019s own leave goes to the management and not to himself',
+      !!mgr && JSON.stringify(addrs(mgr)) === JSON.stringify(
+        ['nitish@homeweavers.net', 'shivani@homeweavers.net']), mgr && mgr.to);
+    check('and he is told of it on a copy he cannot decide',
+      !!mgrTold && JSON.stringify(mgrTold.to) === JSON.stringify(['karan@homeweavers.net'])
+      && !decides(mgrTold), mgrTold && mgrTold.to);
+
+    /* Nobody named against them at all: the management, and that is all. */
+    msgs = await raise('req_plain', 'Ravi Test', '2026-11-15');
+    const plain = msgs.find(decides);
+    check('somebody with nobody named against them goes to the management alone',
+      !!plain && JSON.stringify(addrs(plain)) === JSON.stringify(
+        ['nitish@homeweavers.net', 'shivani@homeweavers.net']), plain && plain.to);
+
+    /* The office's standing copy list rides on the told copy and never on the
+       deciding one: being copied in is not a vote. */
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-      leave: { to: [], cc: [], firstTo: ['karan@homeweavers.net'],
-               intro: 'Hello Shivani and Nitish,',
-               firstIntro: 'Hello karan, please look at this one first.' } }));
-    const wordedBefore = sent.length;
-    const another = JSON.parse(kvFind(1, 'leaveRequests').value);
-    another.push({ id: 'req_worded', empName: 'Keshav Garg', dateFrom: '2026-11-14', dateTo: '2026-11-14',
-                   leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T06:00:00Z',
-                   updatedAt: '2026-11-01T06:00:00Z' });
-    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(another), shared: true });
-    await new Promise(r => setTimeout(r, 700));
-    const toFirst = sent[sent.length - 1];
-    check('the one who looks first is greeted in words of their own',
-      sent.length === wordedBefore + 1 && /Hello karan, please look at this one first/.test(toFirst.html)
-        && !/Hello Shivani and Nitish/.test(toFirst.html), toFirst && toFirst.subject);
-    check('and the message says it is theirs to look at first',
-      /for you to look at first/.test(toFirst.html), toFirst && toFirst.subject);
+      leave: { to: ['nitish@homeweavers.net', 'shivani@homeweavers.net'], cc: ['watch@x.com'] } }));
+    msgs = await raise('req_cc', 'Keshav Garg', '2026-11-16');
+    const ccTold = msgs.find(m => !decides(m)), ccDecide = msgs.find(decides);
+    check('an address in the Cc box is told, not asked',
+      !!ccTold && ccTold.to.indexOf('watch@x.com') > -1 && !decides(ccTold),
+      ccTold && ccTold.to);
+    check('and is not among the people who may decide',
+      !!ccDecide && ccDecide.to.indexOf('watch@x.com') === -1, ccDecide && ccDecide.to);
 
-    /* Where the first-stage tab names addresses, the first message goes to them
-       and to nobody else - not even the approver. The buttons work for whoever
-       holds the message, so it is still answerable, and the two stages can be
-       tried out without writing to the office. */
-    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-      leave: { to: [], cc: [], firstTo: ['support@x.com'], firstCc: ['watch@x.com'] } }));
-    const sentToBefore = sent.length;
-    const redirected = JSON.parse(kvFind(1, 'leaveRequests').value);
-    redirected.push({ id: 'req_redir', empName: 'Keshav Garg', dateFrom: '2026-11-16', dateTo: '2026-11-16',
-                      leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T07:00:00Z',
-                      updatedAt: '2026-11-01T07:00:00Z' });
-    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(redirected), shared: true });
-    await new Promise(r => setTimeout(r, 700));
-    const sentTo = sent[sent.length - 1];
-    check('the first message goes only where the first-stage tab says',
-      sent.length === sentToBefore + 1
-        && JSON.stringify(sentTo.to) === JSON.stringify(['support@x.com'])
-        && JSON.stringify(sentTo.cc) === JSON.stringify(['watch@x.com', 'keshav@homeweavers.net']),
-      sentTo && { to: sentTo.to, cc: sentTo.cc });
-    check('and the approver is not written to alongside them',
-      !(sentTo.to || []).concat(sentTo.cc || []).some(a => /karan/.test(a)),
-      sentTo && { to: sentTo.to, cc: sentTo.cc });
-
-    /* Naming nobody there is how the second stage is turned off: leave is
-       granted in one, and the request goes straight to the people who grant it. */
-    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-      leave: { to: [], cc: [], firstTo: [], firstCc: [] } }));
-    const backBefore = sent.length;
-    const back = JSON.parse(kvFind(1, 'leaveRequests').value);
-    back.push({ id: 'req_back', empName: 'Keshav Garg', dateFrom: '2026-11-18', dateTo: '2026-11-18',
-                leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T08:00:00Z',
-                updatedAt: '2026-11-01T08:00:00Z' });
-    await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(back), shared: true });
-    await new Promise(r => setTimeout(r, 700));
-    check('with no address there, leave is granted in one stage again',
-      sent.length === backBefore + 1
-        && JSON.stringify(sent[sent.length - 1].to) === JSON.stringify(['boss@x.com']),
-      sent[sent.length - 1].to);
-
-    /* One word settles it. It took two: the approver marked to look first said
-       yes, which moved it to a super admin rather than granting it, and the
-       super admin said yes again. The office asked for the first word to be
-       the only word - whoever it was sent to is whoever decides it. */
-    const recBefore = sent.length;
-    const stage1 = mailer.actionToken({ k: 'req', org: 1, id: 'req_two', act: 'approve',
-                                        s: 1, by: 'karan Ahuja' }, SECRET);
-    const passed = await hit('POST', '/e/' + stage1);
-    const afterOne = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_two');
-    check('the approver it was sent to grants it outright',
-      passed.status === 200 && afterOne.status === 'approved',
-      { status: passed.status, req: afterOne });
-    check('and the record says which of them gave the word',
-      afterOne.approvedBy === 'karan Ahuja', afterOne);
-    check('the day reaches the record on that one yes',
-      !!JSON.parse(kvFind(1, 'overrides').value)['Keshav Garg|2026-11-10'],
-      kvFind(1, 'overrides').value);
-
-    /* And the person who asked hears, because it is settled. */
-    await new Promise(r => setTimeout(r, 700));
-    const onward = sent[sent.length - 1];
-    check('the person who asked is told, there being nothing left to wait for',
-      sent.length === recBefore + 1 && (onward.to || []).some(a => /keshav/.test(a)),
-      onward && { to: onward.to, subject: onward.subject });
-    check('and nobody is asked for a second word',
-      !/waiting on you/.test(onward.html || ''), onward && onward.subject);
-
-    /* The same link again is a settled request, and says so. */
-    const again = await hit('POST', '/e/' + stage1);
-    check('pressing it again is refused rather than re-granted',
-      again.status === 409, again.status);
-
-    /* A no at the first stage ends it there. */
-    kvSet(1, 'leaveRequests', JSON.stringify([
-      { id: 'req_no', empName: 'Keshav Garg', dateFrom: '2026-11-20', dateTo: '2026-11-20',
-        leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T04:00:00Z',
-        updatedAt: '2026-11-01T04:00:00Z' }
-    ]));
-    const no = await hit('POST', '/e/' + mailer.actionToken(
-      { k: 'req', org: 1, id: 'req_no', act: 'reject', s: 1, by: 'karan Ahuja' }, SECRET));
-    const refused = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_no');
-    check('a no at the first stage ends it, with no second asking',
-      no.status === 200 && refused.status === 'rejected', { status: no.status, req: refused });
-
-    /* And with no address named, leave is granted in one stage as it always was. */
-    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
-      leave: { to: [], cc: [], firstTo: [] } }));
-    kvSet(1, 'leaveRequests', JSON.stringify([
-      { id: 'req_one', empName: 'Keshav Garg', dateFrom: '2026-11-24', dateTo: '2026-11-24',
-        leaveType: 'CL', status: 'pending', createdAt: '2026-11-01T04:00:00Z',
-        updatedAt: '2026-11-01T04:00:00Z' }
-    ]));
-    const straight = await hit('POST', '/e/' + mailer.actionToken(
-      { k: 'req', org: 1, id: 'req_one', act: 'approve', s: 0 }, SECRET));
-    const once = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_one');
-    check('with nobody marked to look first, one yes still grants it',
-      straight.status === 200 && once.status === 'approved', { status: straight.status, req: once });
+    kvSet(1, 'leaveRequests', JSON.stringify([]));
   }
 
   /* ---- a password set from a link in an email ---- */
@@ -1102,66 +1041,49 @@ process.env.SESSION_SECRET = SECRET;
   await new Promise(r => setTimeout(r, 400));
   check('saving the same decision again tells nobody twice', sent.length === portalBefore + 1);
 
-  /* ---- the digest takes the two stages too ----
-     The periodic leave message went to the super admins whatever the Leave tab
-     said, carrying buttons that granted - for days the first approver had not
-     so much as seen. Each stage now gets its own message holding only what is
-     actually its to decide. */
+  /* ---- the digest, gathered by whoever may decide ----
+     It went to the people who grant whatever the Leave tab said, carrying
+     buttons that granted on days somebody else was supposed to see first.
+     One message each now, holding what is theirs: if it is in your message,
+     it is yours. */
   {
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true, requests: true,
-      leave: { to: ['final@x.com'], cc: [], firstTo: ['karan@homeweavers.net'], firstCc: [] } }));
+      leave: { to: ['nitish@homeweavers.net'], cc: [] } }));
+    kvSet(1, 'approvalRoute', JSON.stringify({
+      'Keshav Garg': ['karan@homeweavers.net'], 'Ravi Test': [] }));
     kvSet(1, 'leaveRequests', JSON.stringify([
-      { id: 'dg_new', empName: 'Ravi Test', dateFrom: '2026-11-10', dateTo: '2026-11-10',
+      { id: 'dg_gur', empName: 'Keshav Garg', dateFrom: '2026-11-10', dateTo: '2026-11-10',
         leaveType: 'CL', status: 'pending',
         createdAt: '2026-11-01T06:00:00Z', updatedAt: '2026-11-01T06:00:00Z' },
-      { id: 'dg_rec', empName: 'Asha Test', dateFrom: '2026-11-11', dateTo: '2026-11-11',
-        leaveType: 'CL', status: 'recommended', recommendedBy: 'karan Ahuja',
-        createdAt: '2026-11-01T06:00:00Z', updatedAt: '2026-11-02T06:00:00Z' }
+      { id: 'dg_plain', empName: 'Ravi Test', dateFrom: '2026-11-11', dateTo: '2026-11-11',
+        leaveType: 'CL', status: 'pending',
+        createdAt: '2026-11-01T06:00:00Z', updatedAt: '2026-11-01T06:00:00Z' }
     ]));
-    /* Written straight into the store rather than saved through the API, so the
-       mark itself does not send a message of its own and muddle the count. */
-    /* Dated from today, not written down: "no request behind it" only looks
-       back thirty days, so a date typed in by hand drops out of the window as
-       soon as the calendar moves past it - which it did, and these checks
-       started failing on a day nobody had touched them. */
+    /* Dated from today rather than written down: "no request behind it" only
+       looks back thirty days, and a date typed in drops out of that window as
+       soon as the calendar moves past it. */
     const recently = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
     kvSet(1, 'overrides', JSON.stringify({
-      ['Meena Test|' + recently]: { cat: 'LEAVE', detail: 'CL', reason: 'family' } }));
+      ['Keshav Garg|' + recently]: { cat: 'LEAVE', detail: 'CL', reason: 'family' } }));
 
     const before = sent.length;
     const out = await asAdmin('POST', '/api/mail/leave', {});
     const msgs = sent.slice(before);
-    const toFirst = msgs.find(m => (m.to || []).indexOf('karan@homeweavers.net') > -1);
-    const toFinal = msgs.find(m => (m.to || []).indexOf('final@x.com') > -1);
-    check('the digest goes to both stages, each with a message of its own',
-      out.status === 200 && msgs.length === 2 && !!toFirst && !!toFinal,
-      msgs.map(m => m.to));
-    check('the first approver gets what is still theirs to look at',
-      !!toFirst && /Ravi Test/.test(toFirst.html) && !/Asha Test/.test(toFirst.html),
-      toFirst && { ravi: /Ravi Test/.test(toFirst.html), asha: /Asha Test/.test(toFirst.html) });
+    const toKaran = msgs.find(m => (m.to || []).indexOf('karan@homeweavers.net') > -1);
+    const toMgmt = msgs.find(m => (m.to || []).indexOf('nitish@homeweavers.net') > -1);
+    check('one message to each person who may decide something',
+      out.status === 200 && msgs.length === 2 && !!toKaran && !!toMgmt, msgs.map(m => m.to));
+    check('the manager gets his own people and nobody else\u2019s',
+      !!toKaran && /Keshav Garg/.test(toKaran.html) && !/Ravi Test/.test(toKaran.html));
+    check('the management get the lot, because they may decide the lot',
+      !!toMgmt && /Keshav Garg/.test(toMgmt.html) && /Ravi Test/.test(toMgmt.html));
     check('including a day marked with no request behind it',
-      !!toFirst && /Meena Test/.test(toFirst.html), toFirst && /Meena Test/.test(toFirst.html));
-    check('the super admins get only what has been passed on to them',
-      !!toFinal && /Asha Test/.test(toFinal.html)
-        && !/Ravi Test/.test(toFinal.html) && !/Meena Test/.test(toFinal.html),
-      toFinal && { asha: /Asha Test/.test(toFinal.html), ravi: /Ravi Test/.test(toFinal.html),
-                   meena: /Meena Test/.test(toFinal.html) });
-    check('and it says who passed it on',
-      !!toFinal && /waiting on you/i.test(toFinal.html) && /karan Ahuja/.test(toFinal.html),
-      toFinal && toFinal.html.slice(0, 0));
-
-    /* With nobody named to look first, it is one message again, as it was. */
-    kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true,
-      leave: { to: ['final@x.com'], cc: [], firstTo: [] } }));
-    const oneBefore = sent.length;
-    await asAdmin('POST', '/api/mail/leave', {});
-    const oneMsgs = sent.slice(oneBefore);
-    check('with nobody named first it is one message, holding everything',
-      oneMsgs.length === 1 && /Ravi Test/.test(oneMsgs[0].html)
-        && /Asha Test/.test(oneMsgs[0].html) && /Meena Test/.test(oneMsgs[0].html),
-      oneMsgs.map(m => m.to));
-
-    kvSet(1, 'overrides', JSON.stringify({}));
+      !!toKaran && /no request/i.test(toKaran.html));
+    /* A digest names several people, which is not theirs to read, so there is
+       nobody to copy: it goes to the one person who may act on it. */
+    check('and nobody is copied on a digest',
+      msgs.every(m => !(m.cc || []).length), msgs.map(m => m.cc));
+    kvSet(1, 'overrides', '{}');
     kvSet(1, 'leaveRequests', JSON.stringify([]));
   }
 
@@ -1201,55 +1123,30 @@ process.env.SESSION_SECRET = SECRET;
   check('a day from home is not something to decide, so nothing is sent',
     sent.length === marksBefore + 2, sent.length - marksBefore);
 
-  /* ---- a day marked without a request, where somebody looks first ----
-     Leave marked straight on the grid is the same news as a request arriving by
-     another door, so it has to take the same two stages. It used to go straight
-     to the people who grant, carrying buttons that granted on the first press -
-     the first approver never saw it at all. */
+  /* ---- a day marked with no request behind it ----
+     The same news arriving by another door, so it is addressed the same way:
+     everybody who may decide it, each able to act on their own copy. */
   {
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true, requests: true,
-      leave: { to: ['final@x.com'], cc: [], firstTo: ['karan@homeweavers.net'], firstCc: ['watch@x.com'] } }));
+      leave: { to: ['nitish@homeweavers.net'], cc: [] } }));
+    kvSet(1, 'approvalRoute', JSON.stringify({ 'Keshav Garg': ['karan@homeweavers.net'] }));
     kvSet(1, 'leaveRequests', JSON.stringify([]));
     await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
     await new Promise(r => setTimeout(r, 350));
 
+    const day = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
     const before = sent.length;
     await asAdmin('PUT', '/api/kv/overrides', {
-      value: JSON.stringify({ 'Asha Test|2026-09-29': { cat: 'LEAVE', detail: 'CL', reason: 'family' } }),
+      value: JSON.stringify({ ['Keshav Garg|' + day]: { cat: 'LEAVE', detail: 'CL', reason: 'family' } }),
       shared: true });
-    await new Promise(r => setTimeout(r, 650));
-    const firstMail = sent[sent.length - 1];
-    check('a day marked without a request goes to whoever looks at leave first',
-      sent.length === before + 1 && firstMail
-        && JSON.stringify(firstMail.to) === JSON.stringify(['karan@homeweavers.net'])
-        && JSON.stringify(firstMail.cc) === JSON.stringify(['watch@x.com']),
-      firstMail && { to: firstMail.to, cc: firstMail.cc });
-
-    /* Their yes settles it. It used to pass the day on to a super admin for a
-       second word; the office asked for one word, given by whoever it was
-       sent to. */
-    const link = (String((firstMail && firstMail.html) || '').match(/\/e\/[A-Za-z0-9_.\-]+/g) || [])[0];
-    check('and the message carries a button to press', !!link, link);
-    const pressed = link ? await hit('POST', link) : { status: 0, body: '' };
-    const after = JSON.parse(kvFind(1, 'leaveRequests').value);
-    check('their yes settles the day rather than passing it on',
-      after.length === 1 && after[0].status === 'approved',
-      after.map(r => ({ status: r.status, approvedBy: r.approvedBy })));
-    check('and the record says who gave the word',
-      after.length === 1 && !!after[0].approvedBy,
-      after.map(r => r.approvedBy));
-
-    await new Promise(r => setTimeout(r, 450));
-    const onward = sent[sent.length - 1];
-    check('nobody is asked for a second word',
-      !/waiting on you/i.test(String((onward && onward.html) || '')),
-      onward && { to: onward.to });
-
-    /* The day carried its mark before any of this: that is what made it an
-       unrequested one. A decision does not take it away. */
-    const marks = JSON.parse(kvFind(1, 'overrides').value);
-    check('and the day keeps the mark it already had',
-      !!marks['Asha Test|2026-09-29'], marks);
+    await new Promise(r => setTimeout(r, 800));
+    const msgs = sent.slice(before);
+    const toKaran = msgs.find(m => (m.to || []).indexOf('karan@homeweavers.net') > -1);
+    const toMgmt = msgs.find(m => (m.to || []).indexOf('nitish@homeweavers.net') > -1);
+    check('a day marked with no request reaches everyone who may decide it',
+      !!toKaran && !!toMgmt, msgs.map(m => m.to));
+    check('and each of them can act on their own copy',
+      !!toKaran && /Approve/.test(toKaran.html) && /Approve/.test(toMgmt.html));
 
     await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
     kvSet(1, 'leaveRequests', JSON.stringify([]));
@@ -1376,7 +1273,7 @@ process.env.SESSION_SECRET = SECRET;
   check('and sends only from inside the preview window',
     /'\/api\/mail\/leave', \{ preview: true \}[\s\S]{0,400}showPreview\(j[\s\S]{0,400}send:'preview'/.test(app));
   check('the server builds it without sending when a preview is asked for',
-    /if \(preview\) return \{ ok: true, mails: built \};/.test(srv));
+    /if \(preview\) return \{ ok: true, mails: built\.mails \};/.test(srv));
   check('and holds every message behind that one press, not just the first',
     /keepPreview\(req\.session\.userId, \{ mails: r\.mails \}\)/.test(srv));
   check('the window says what else goes, and to whom',

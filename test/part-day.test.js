@@ -266,12 +266,14 @@ function grab(src, name) {
       const c2 = { EMAIL_RE: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, Object, String, console,
                    approvalRouteOf: async () => c2.__route };
       vm.createContext(c2);
+      vm.runInContext(grab(SRV, 'approversOf'), c2);
+      vm.runInContext(grab(SRV, 'allApprovers'), c2);
       vm.runInContext('async ' + grab(SRV, 'leaveApprovers'), c2);
       c2.__route = { 'Nitish Kumar': 'final', 'karan Ahuja': 'final',
                      'Keshav Garg': 'karan@homeweavers.net',
                      'Aman Gupta': 'karan@homeweavers.net',
                      'Shyam Lal ESS': 'munish@homeweavers.net' };
-      let who = await c2.leaveApprovers(1, { leave: { firstTo: ['support@homeweavers.net'] } });
+      let who = await c2.leaveApprovers(1, { leave: { approvers: ['support@homeweavers.net'] } });
       check('the two people who hold the first word on leave are both told',
         who.indexOf('karan@homeweavers.net') > -1 && who.indexOf('munish@homeweavers.net') > -1, who);
       check('the office’s own first approver with them',
@@ -284,7 +286,7 @@ function grab(src, name) {
       check('somebody routed straight to the management holds no first word',
         who.indexOf('final') === -1 && who.every(a => /@/.test(a)), who);
       c2.__route = { 'Keshav Garg': 'final' };
-      who = await c2.leaveApprovers(1, { leave: { firstTo: [] } });
+      who = await c2.leaveApprovers(1, { leave: { approvers: [] } });
       check('and a company where nobody holds it has nobody extra to tell',
         who.length === 0, who);
       check('the addresses are not written down here',

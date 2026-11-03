@@ -781,6 +781,14 @@ body{
 /* The Email panel: two things to send, then what goes out on its own. */
 .em-dropdown{ min-width:330px; width:560px; max-width:calc(100vw - 32px); }
 .em-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
+.em-appr-wrap{ max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin:4px 0 2px; }
+.em-appr{ width:100%; border-collapse:collapse; font-size:12px; }
+.em-appr th{ position:sticky; top:0; background:var(--card, #fff); font-weight:600; font-size:11px;
+             padding:6px 5px; border-bottom:1px solid var(--line); text-align:center; white-space:nowrap; }
+.em-appr td{ padding:4px 5px; border-bottom:1px solid var(--line); text-align:center; }
+.em-appr td:first-child{ text-align:left; white-space:nowrap; }
+.em-appr tr:last-child td{ border-bottom:0; }
+.em-appr-say{ color:var(--ink-soft); font-size:10.5px; white-space:nowrap; }
 .em-note{ font-size:11.5px; color:var(--ink-soft); padding:2px 4px 8px; }
 .em-go{ display:block; width:100%; text-align:left; margin-bottom:7px; padding:9px 12px; cursor:pointer;
   border:1px solid #DCE3ED; border-radius:9px; background:#fff; font:600 12.5px/1.2 'Inter',sans-serif; color:var(--ink); }
@@ -4253,13 +4261,13 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
         <select id="reqLeaveType">
           <option value="CL">Casual Leave (CL)</option>
           <option value="Sick">Sick Leave (SL)</option>
-          <option value="SHORT">Short leave (¼ day)</option>
-          <option value="HALF">Half day</option>
           <option value="WFH">Work from home</option>
           <option value="VISIT">Off-site visit</option>
           <option value="Other">Other</option>
           <option value="PUNCH">Forgot to punch (correct my time)</option>
         </select>
+        <div class="gate-note">A short leave or a half day is not asked for — take it on your
+          attendance card. It counts the moment you do, and the office is told.</div>
       </div>
       <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/></div>
       <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/></div>
@@ -9320,13 +9328,48 @@ function buildExcelBackup(){
     var v = deskTime[name + '|' + day];
     return (v && typeof v === 'object' && v.i) ? v : null;
   }
-  function needsFirstApproval(name){ return approvalRoute[name] !== 'final'; }
-  /* An approver named against this one person, or '' where their leave goes to
-     whoever the office named. The server keeps the same reading; this is only
-     what the panel shows and who the page says holds the stage. */
-  function ownApprover(name){
+  /* Everybody the office has named as able to approve one person's leave.
+
+     A row used to hold one address, or the word 'final' for nobody. It holds
+     a list now, because the factory's leave is answered by its own manager
+     and the office's manager both - and the same reading keeps the two older
+     shapes, so an office that has not opened the panel since keeps exactly
+     the arrangement it already had. The server reads it the same way; this is
+     what the table shows. */
+  function approversFor(name){
     var v = approvalRoute[name];
-    return (typeof v === 'string' && v !== 'final' && v.indexOf('@') > -1) ? v : '';
+    if(v == null || v === '' || v === 'final') return [];
+    var list = Object.prototype.toString.call(v) === '[object Array]' ? v : [v];
+    var seen = {}, out = [];
+    list.forEach(function(a){
+      var k = String(a == null ? '' : a).trim().toLowerCase();
+      if(k.indexOf('@') > -1 && !seen[k]){ seen[k] = true; out.push(k); }
+    });
+    return out;
+  }
+  /* Every address named against anybody - the columns of the table. */
+  function approverColumns(){
+    var seen = {}, out = [];
+    (((MAIL_CFG.settings || {}).leave || {}).approvers || []).forEach(function(a){
+      var k = String(a || '').trim().toLowerCase();
+      if(k.indexOf('@') > -1 && !seen[k]){ seen[k] = true; out.push(k); }
+    });
+    Object.keys(approvalRoute || {}).forEach(function(n){
+      approversFor(n).forEach(function(a){ if(!seen[a]){ seen[a] = true; out.push(a); } });
+    });
+    return out;
+  }
+  /* The name behind an address where an account carries one, so a column can
+     be headed with a person rather than a mailbox. */
+  function approverLabel(email){
+    var k = String(email || '').toLowerCase(), found = '';
+    try{
+      Object.keys(authAccounts || {}).forEach(function(u){
+        var a = authAccounts[u] || {};
+        if(String(u).toLowerCase() === k && a.emp) found = a.emp;
+      });
+    }catch(e){}
+    return found || email;
   }
   /* How long after the time itself somebody typed it.
 
@@ -12164,7 +12207,9 @@ function buildExcelBackup(){
       (lv.firstCc || []).forEach(function(a){ add(a, ''); });
       (cfg.to || []).forEach(function(a){ add(a, ''); });
       if(cfg.firstApprover) add(cfg.firstApprover.email, cfg.firstApprover.name);
-      Object.keys(approvalRoute || {}).forEach(function(n){ add(ownApprover(n), ''); });
+      Object.keys(approvalRoute || {}).forEach(function(n){
+        approversFor(n).forEach(function(a){ add(a, ''); });
+      });
       out.sort(function(a, b){ return a.email.localeCompare(b.email); });
       APPROVER_LIST = out;
       return out;
@@ -12396,108 +12441,72 @@ function buildExcelBackup(){
       + '</div>'
       /* ---- the leave message ---- */
       + '<div data-em-pane="lv" style="display:none;">'
-      /* Leave can be granted in two stages, and the two are different messages
-         to different people, so the pane splits in two: a tab a stage, and
-         neither set of boxes can be taken for the other.
+      /* One table, and every person on it.
 
-         Both tabs are always here. The first one is where somebody is named as
-         the one who looks at every request first - hide it when nobody is and
-         there is nowhere left to name them. */
+         It used to be two panes behind two tabs - one for whoever looked at a
+         request first, one for whoever granted it - with the arrangement
+         itself kept somewhere else entirely, in the Shifts panel, a tick and
+         a dropdown per person. So neither screen ever showed one person's
+         arrangement whole, and the panel that asked "who approves this?" was
+         not the panel where the answer was kept.
+
+         One word settles a request now, so there are not two sets of people,
+         only two columns of one list: those who may answer and those who are
+         told. Nothing is implicit - somebody with nobody ticked reads
+         'management only' in as many words, so a new name never quietly
+         inherits an arrangement nobody chose for them. */
       + (function(){
-          /* A first stage exists if anybody holds one, which need not be the
-             office's own approver: an address named against a single person
-             is a first stage for that person. */
-          var fa = MAIL_CFG.firstApprover || (anyFirstApprover() ? { name: 'their own approver' } : null);
-          /* These were numbered, one after the other, because a request went
-             through both. It goes through one now - so they are not two stages
-             but two sets of people, and which of them a request reaches is set
-             per person under Shifts. */
+          var lv = s.leave || {};
+          var cols = approverColumns();
+          var people = (ALL_EMPLOYEES || []).filter(stillHere);
           return '<div class="em-note" style="padding-top:0;">'
-            + (fa
-                ? ('One approval settles a request. Who gives it depends on the '
-                   + 'person: anybody with their own approver named under <b>Shifts</b> '
-                   + 'goes to them, and everybody else goes to the management. '
-                   + 'The two messages below are for those two.')
-                : ('Every request goes to the management below, and their word '
-                   + 'settles it. To send one person’s leave somewhere else '
-                   + 'instead, name their approver under <b>Shifts</b>.'))
-            + '</div>'
-            /* The tab names the people, not a number: there is no first and
-               second any more, and a tab labelled with somebody's name is worse
-               than one labelled with what it is for. */
-            + '<div class="em-tabs">'
-            +   '<button type="button" class="em-tab' + (fa ? ' on' : '') + '" data-lv-tab="first">'
-            +     'Their own approver</button>'
-            +   '<button type="button" class="em-tab' + (fa ? '' : ' on') + '" data-lv-tab="final">'
-            +     'The management</button></div>';
+            + 'One word settles a request. <b>Everybody in To can approve it</b>; everybody in '
+            + 'Cc is only told, and a copied-in message has no buttons on it \u2014 including the '
+            + 'copy that goes to the person who asked.</div>'
+            + '<div class="em-lab">Management <span>on every leave email, and they can approve '
+            +   'anything</span></div>'
+            + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
+            +   mailEscape((lv.to || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Also copied, never asked</div>'
+            + '<div class="em-row"><input type="text" id="emLvCc" placeholder="comma separated" value="'
+            +   mailEscape((lv.cc || []).join(', ')) + '"></div>'
+            + '<div class="em-lab" style="margin-top:14px;padding-top:11px;border-top:1px solid var(--line);">'
+            +   'Approvers <span>the people who can be named against somebody below</span></div>'
+            + '<div class="em-row"><input type="text" id="emLvApprovers" placeholder="comma separated" value="'
+            +   mailEscape(cols.join(', ')) + '"></div>'
+            + '<div class="em-note">Type an address and save, and it becomes a column below.</div>'
+            + '<div class="em-lab">Who may approve each person\u2019s leave</div>'
+            + (cols.length
+                ? ('<div class="em-appr-wrap"><table class="em-appr">'
+                   + '<tr><th></th>' + cols.map(function(a){
+                       return '<th title="' + mailEscape(a) + '">' + mailEscape(approverLabel(a)) + '</th>';
+                     }).join('') + '<th></th></tr>'
+                   + people.map(function(e){
+                       var mine = approversFor(e.name);
+                       return '<tr><td>' + mailEscape(dispName(e.name)) + '</td>'
+                         + cols.map(function(a){
+                             return '<td><input type="checkbox" data-appr-for="'
+                               + mailEscape(e.name) + '" data-appr-who="' + mailEscape(a) + '"'
+                               + (mine.indexOf(a) > -1 ? ' checked' : '') + '></td>';
+                           }).join('')
+                         + '<td class="em-appr-say">' + (mine.length ? '' : 'management only') + '</td></tr>';
+                     }).join('')
+                   + '</table></div>')
+                : '<div class="em-note">Name an approver above and everybody appears here with a '
+                  + 'box to tick.</div>')
+            + '<div class="em-note">Ticked, that person can approve this one\u2019s leave as well as '
+            +   'the management. Nobody approves their own: a manager asking for leave is asking, '
+            +   'not granting, and his own copy has no buttons on it. Saved as you tick.</div>'
+            + '<div class="em-lab">Subject <span>{n} {waiting} {unrequested} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emLvSubject" value="'
+            +   mailEscape(text(lv.subject, W.leave.subject)) + '"></div>'
+            + '<div class="em-lab">Message at the top</div>'
+            + '<div class="em-row"><textarea id="emLvIntro" rows="3">'
+            +   mailEscape(text(lv.intro, W.leave.intro)) + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
+            +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>';
         })()
-      /* ---- the first word ---- */
-      + (function(){
-          /* Shown whether or not the office has a line of its own, because
-             this is where somebody is named: hiding it would leave no way to
-             turn the two stages on. */
-          var fa = MAIL_CFG.firstApprover || anyFirstApprover();
-          return '<div data-lv-pane="first"' + (fa ? '' : ' style="display:none;"') + '>'
-            + '<div class="em-note" style="padding-top:2px;">Goes out the moment a request is '
-            +   'raised, to the approver named against that person. Their word settles it — '
-            +   'nobody is asked again.</div>'
-            /* Who holds the stage is set against each person, over in the
-               Shifts panel, and the words are set here - so neither screen
-               ever showed one person's arrangement whole. Pick a name and
-               this says who gets the first word about them and what that
-               person will read, and lets both be changed from the one place.
-
-               It sits above the addresses because it is the question actually
-               asked of this pane - whose leave goes to whom - and the boxes
-               below it are the fallback for everybody it does not name. */
-            + '<div class="em-lab">One person at a time '
-            +   '<span>who approves their leave, and what that person reads</span></div>'
-            + '<div class="em-row"><select id="emLvWho"><option value="">Pick a name…</option>'
-            +   lvWhoPeople().map(function(e){
-                  return '<option value="' + mailEscape(e.name) + '">'
-                    + mailEscape(dispName(e.name)) + '</option>';
-                }).join('') + '</select></div>'
-            + '<div id="emLvWhoBox" style="display:none;margin-bottom:12px;"></div>'
-            /* The office's own first-stage line used to sit here as a second
-               To and Cc, under the pair that answers for whoever is picked
-               above. Read straight down it was one question asked twice, and
-               in an office where everybody who needs a first approver has one
-               named against them it answered for nobody at all. It is out of
-               the panel; what is stored stays stored, and the save below
-               leaves it exactly as it was. */
-            + '<div class="em-lab">Message at the top <span>blank: the wording it comes with '
-            +   '\u00b7 {approver} is whoever this copy goes to</span></div>'
-            + '<div class="em-row"><textarea id="emLvFirstIntro" rows="3">'
-            +   mailEscape(text((s.leave || {}).firstIntro, (W.leave || {}).firstIntro)) + '</textarea></div>'
-            + '</div>';
-        })()
-      /* ---- and the one that grants it ---- */
-      + '<div data-lv-pane="final"' + (MAIL_CFG.firstApprover ? ' style="display:none;"' : '') + '>'
-      + '<div class="em-note" style="padding-top:2px;">'
-      +   (MAIL_CFG.firstApprover
-            ? ('Goes to these people for anybody who has no approver of their own, '
-               + 'the moment a request is raised. Their word settles it and puts the '
-               + 'day on the record.')
-            : 'Goes out the moment a request is raised. Their word settles it.')
-      + '</div>'
-      + '<div class="em-lab">To <span>'
-      +   (MAIL_CFG.firstApprover ? 'who decides for everybody else'
-                                 : 'blank: the same as the attendance message')
-      +   '</span></div>'
-      + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
-      +   mailEscape(((s.leave || {}).to || []).join(', ')) + '"></div>'
-      + '<div class="em-lab">Cc</div>'
-      + '<div class="em-row"><input type="text" id="emLvCc" placeholder="comma separated" value="'
-      +   mailEscape(((s.leave || {}).cc || []).join(', ')) + '"></div>'
-      + '<div class="em-lab">Subject <span>{n} {waiting} {unrequested} {org}</span></div>'
-      + '<div class="em-row"><input type="text" id="emLvSubject" value="'
-      +   mailEscape(text((s.leave || {}).subject, W.leave.subject)) + '"></div>'
-      + '<div class="em-lab">Message at the top</div>'
-      + '<div class="em-row"><textarea id="emLvIntro" rows="3">'
-      +   mailEscape(text((s.leave || {}).intro, W.leave.intro)) + '</textarea></div>'
-      + '<div class="em-lab">Note at the foot</div>'
-      + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
-      +   mailEscape(text((s.leave || {}).footer, W.leave.footer)) + '</textarea></div>'
       + '</div>'
       /* ---- true of both stages ---- */
       + '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
@@ -12613,227 +12622,38 @@ function buildExcelBackup(){
         });
       };
     });
-    /* The two stages of a leave grant, under the Leave tab. Their own attribute
-       rather than the one above, so switching between the stages does not reach
-       the tabs the panel itself is built from. */
-    Array.prototype.forEach.call(document.querySelectorAll('[data-lv-tab]'), function(t){
-      t.onclick = function(){
-        var which = t.getAttribute('data-lv-tab');
-        Array.prototype.forEach.call(document.querySelectorAll('[data-lv-tab]'), function(x){
-          x.classList.toggle('on', x === t);
-        });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-lv-pane]'), function(p){
-          p.style.display = (p.getAttribute('data-lv-pane') === which) ? '' : 'none';
-        });
-      };
-    });
-    /* ---- one person's arrangement, whole ----
-       Who holds the first stage is set against each person over in the Shifts
-       panel; the wording is set here. Neither screen showed both, so nobody
-       could see what one named approver would actually read. This does: pick
-       a name, see the address and the words, change either.
-
-       Both save as they are changed rather than on the panel's own Save,
-       which writes the mail settings - these are two different stores, and a
+    /* The table saves as it is ticked, not on the panel's own Save: that
+       button writes the mail settings, and these are a different store. A
        button that saved one of them would be lying about the other. */
-    /* Who this pane is about: the people the portal is showing, which is the
-       rule every message already goes by - it is what keeps a card-punch row
-       with no person behind it out of the daily message - and anybody with an
-       approver named against them, so hiding somebody never hides an
-       arrangement that is still in force. */
-    function lvWhoPeople(){
-      return (ALL_EMPLOYEES || []).filter(stillHere).filter(function(e){
-        var shown = (typeof visibleEmpSet !== 'undefined' && visibleEmpSet)
-          ? !!visibleEmpSet[e.name] : true;
-        return shown || (e.name in (approvalRoute || {}));
-      });
-    }
-    function lvWhoRender(name){
-      var box = document.getElementById('emLvWhoBox');
-      if(!box) return;
-      if(!name){ box.style.display = 'none'; box.innerHTML = ''; return; }
-      box.style.display = '';
-      var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
-      var own = ownApprover(name), skips = !needsFirstApproval(name);
-      var who = skips ? '' : (own || (usual && usual.email) || '');
-      var chosen = skips ? 'final' : (own || '');
-      var known = {};
-      (APPROVER_LIST || []).forEach(function(a){ known[a.email.toLowerCase()] = a.name; });
-      var listed = !own || known[own.toLowerCase()] !== undefined;
-      var opts = '<option value=""' + (chosen === '' ? ' selected' : '') + '>'
-        + (usual ? ('The usual one — ' + mailEscape(usual.email)) : 'The usual one (nobody named yet)')
-        + '</option>';
-      (APPROVER_LIST || []).forEach(function(a){
-        opts += '<option value="' + mailEscape(a.email) + '"'
-          + (own && own.toLowerCase() === a.email.toLowerCase() ? ' selected' : '') + '>'
-          + mailEscape(a.name ? (a.name + ' · ' + a.email) : a.email) + '</option>';
-      });
-      opts += '<option value="__other"' + (own && !listed ? ' selected' : '') + '>Other…</option>'
-        + '<option value="final"' + (chosen === 'final' ? ' selected' : '') + '>'
-        + 'Nobody — granted in one stage</option>';
-      /* What that address will actually read, with the name filled in the way
-         the message itself fills it. */
-      var mine = introFor(who);
-      var shared = (document.getElementById('emLvFirstIntro') || {}).value || '';
-      var byName = who ? (known[who.toLowerCase()] || who) : '';
-      var reads = (mine || shared).replace(/\{approver\}/g, byName);
-      box.innerHTML =
-          '<div class="em-lab">Their first approver <span>saved as you change it</span></div>'
-        + '<div class="em-row"><select id="emLvWhoAppr">' + opts + '</select></div>'
-        + '<div class="em-row"' + ((own && !listed) ? '' : ' style="display:none;"') + '>'
-        +   '<input type="email" id="emLvWhoOther" placeholder="their email address" value="'
-        +   mailEscape(own && !listed ? own : '') + '"></div>'
-        + (skips
-            ? '<div class="em-note">' + mailEscape(name) + ' skips the first stage — their '
-              + 'leave goes straight to whoever gives the final word.</div>'
-            : (/* The address their first message actually goes to. It was only
-                  ever implied here - the pane named an approver and then showed
-                  the office's own To and Cc underneath, so picking somebody
-                  routed elsewhere still read as going to the office's line.
-                  It is not typed here: it is whoever is chosen above. */
-               '<div class="em-lab">To <span>'
-               + (own ? ('named against ' + mailEscape(dispName(name)))
-                      : 'the office’s own line, further down')
-               + '</span></div>'
-               + '<div class="em-row"><input type="text" id="emLvWhoTo" readonly '
-               +   'title="Set by who gets the first word, above" '
-               +   'style="background:#F5F6F8;" value="' + mailEscape(lvWhoTo(own)) + '"></div>'
-               + '<div class="em-lab">Cc <span>'
-               + (own ? 'copied on their message · saved as you change it'
-                      : 'the office’s own copy list · saved with the panel')
-               + '</span></div>'
-               + '<div class="em-row"><input type="text" id="emLvWhoCc" placeholder="comma separated" '
-               +   'value="' + mailEscape(own ? ccFor(own).join(', ') : lvFirstCcText()) + '"></div>'
-               + (own ? ('<div class="em-note">Copied on every first-stage message to '
-                         + mailEscape(own) + '.</div>') : '')
-               + '<div class="em-lab">Wording for ' + mailEscape(who || 'nobody yet')
-               + ' <span>blank: the message above</span></div>'
-               + '<div class="em-row"><textarea id="emLvWhoIntro" rows="3" placeholder="'
-               + mailEscape(shared) + '">' + mailEscape(mine) + '</textarea></div>'
-               + '<div class="em-lab">What they will read</div>'
-               + '<div class="em-note" style="white-space:pre-line;">' + mailEscape(reads) + '</div>'
-               + (who ? ('<div class="em-note">These words go to ' + mailEscape(who)
-                         + ' about everybody they look after: '
-                         + mailEscape(lvWhoSharing(who).join(', ')) + '.</div>') : '')));
-      lvWhoWire(name);
-    }
-    /* Whether anybody at all holds a first stage. The office's own line is one
-       way; an address named against a single person is another, and an office
-       that has only ever used the second still grants leave in two stages. */
-    function anyFirstApprover(){
-      return Object.keys(approvalRoute || {}).some(function(n){ return !!ownApprover(n); });
-    }
-    /* The office's own line. Its boxes are no longer on the panel, so this is
-       what was saved - which is what the message would use. */
-    function lvFirstToText(){
-      var el = document.getElementById('emLvFirstTo');
-      var v = el ? String(el.value || '').trim() : '';
-      if(v) return v;
-      var saved = (((MAIL_CFG.settings || {}).leave || {}).firstTo || []).join(', ');
-      if(saved) return saved;
-      var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
-      return (usual && usual.email) || '';
-    }
-    function lvFirstCcText(){
-      var el = document.getElementById('emLvFirstCc');
-      return el ? String(el.value || '').trim() : '';
-    }
-    /* Where this one person's first message goes: the address named against
-       them, or the office's own line where none is. */
-    function lvWhoTo(own){
-      return own || lvFirstToText() || 'nobody named yet — leave is granted in one stage';
-    }
-    /* Everybody whose first word goes to this address, so changing the wording
-       does not quietly change it for people the office was not looking at. */
-    function lvWhoSharing(email){
-      var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
-      var k = String(email || '').toLowerCase();
-      return lvWhoPeople().filter(function(e){
-        if(!needsFirstApproval(e.name)) return false;
-        var w = ownApprover(e.name) || (usual && usual.email) || '';
-        return w.toLowerCase() === k;
-      }).map(function(e){ return e.name; });
-    }
-    function lvWhoWire(name){
-      var sel = document.getElementById('emLvWhoAppr');
-      var other = document.getElementById('emLvWhoOther');
-      var intro = document.getElementById('emLvWhoIntro');
-      if(sel) sel.onchange = function(){
-        var v = sel.value;
-        if(v === '__other'){
-          if(other){ other.parentNode.style.display = ''; other.focus(); }
-          return;                                   // nothing to save until it is typed
-        }
-        if(v === 'final') approvalRoute[name] = 'final';
-        else if(v) approvalRoute[name] = v;
-        else delete approvalRoute[name];
-        saveApprovalRoute().then(function(){
-          if(typeof renderShiftDropdown === 'function' && document.getElementById('shiftDropdown')){
-            try{ renderShiftDropdown(); }catch(e){}
-          }
-          lvWhoRender(name);
-        });
-      };
-      if(other) other.onchange = function(){
-        var v = String(other.value || '').trim();
-        if(v && !/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(v)){ other.focus(); return; }
-        if(v) approvalRoute[name] = v; else delete approvalRoute[name];
-        saveApprovalRoute().then(function(){
-          APPROVER_LIST = null; APPROVER_WAIT = null;        // it belongs on the list now
-          return ensureApproverChoices();
-        }).then(function(){ lvWhoRender(name); });
-      };
-      if(intro) intro.onchange = function(){
-        var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
-        var who = ownApprover(name) || (usual && usual.email) || '';
-        if(!who) return;
-        var k = who.toLowerCase(), v = String(intro.value || '').trim();
-        if(v) approverIntro[k] = v; else delete approverIntro[k];
-        saveApproverIntro().then(function(){ lvWhoRender(name); });
-      };
-      /* Two boxes behind one. Against an address named for this person alone
-         it is that address's own copy list, saved as it is typed like the
-         wording beside it; against the office's own approver it is the office's
-         Cc further down the pane, so it is written straight into that box and
-         goes with the rest when the panel is saved. Keeping a second copy of
-         the office's list here would have let the two disagree. */
-      var cc = document.getElementById('emLvWhoCc');
-      if(cc) cc.onchange = function(){
-        var own = ownApprover(name);
-        var list = String(cc.value || '').split(',').map(function(a){ return a.trim(); })
-          .filter(function(a){ return /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(a); });
-        /* Where they go through the office's own approver there is no box of
-           its own on the panel any more, so the list is kept against that
-           address like everybody else's rather than written into a box that
-           is not there. */
-        var usual = (MAIL_CFG && MAIL_CFG.firstApprover) || null;
-        var who = own || (usual && usual.email) || '';
-        if(!who){ cc.value = ''; return; }            // nobody holds the stage
-        if(!own){
-          var box = document.getElementById('emLvFirstCc');
-          if(box){
-            box.value = list.join(', ');
-            cc.value = list.join(', ');
-            return;                    // the panel's own Save puts it away
-          }
-        }
-        var k = who.toLowerCase();
-        if(list.length) approverCc[k] = list; else delete approverCc[k];
-        saveApproverCc().then(function(){ lvWhoRender(name); });
-      };
-    }
     (function(){
-      var pick = document.getElementById('emLvWho');
-      if(!pick) return;
-      pick.onchange = function(){
-        if(!APPROVER_LIST){
-          ensureApproverChoices().then(function(){ lvWhoRender(pick.value); });
-          return;
-        }
-        lvWhoRender(pick.value);
-      };
-    })();
-    /* The box of addresses belongs to the second choice, so it is shut while
+      var pane = document.querySelector('[data-em-pane="lv"]');
+      if(!pane) return;
+      Array.prototype.forEach.call(pane.querySelectorAll('input[data-appr-for]'), function(cb){
+        cb.addEventListener('change', function(){
+          var name = cb.getAttribute('data-appr-for');
+          var who = String(cb.getAttribute('data-appr-who') || '').toLowerCase();
+          var mine = approversFor(name).filter(function(a){ return a !== who; });
+          if(cb.checked) mine.push(who);
+          /* An empty list is the management and nobody else, which is a row
+             worth keeping rather than a row worth deleting: the table says so
+             out loud, and a name missing from the map reads the same way. */
+          approvalRoute[name] = mine;
+          cb.disabled = true;
+          saveApprovalRoute().then(function(){
+            cb.disabled = false;
+            var row = cb.parentNode && cb.parentNode.parentNode;
+            var say = row && row.querySelector('.em-appr-say');
+            if(say) say.textContent = mine.length ? '' : 'management only';
+            showUploadStatus(dispName(name) + (mine.length
+              ? ('\u2019s leave can now be approved by ' + mine.join(', ') + ', and the management.')
+              : '\u2019s leave is now the management\u2019s alone.'), false);
+          }).catch(function(e){
+            cb.disabled = false; cb.checked = !cb.checked;
+            showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+          });
+        });
+      });
+    })();    /* The box of addresses belongs to the second choice, so it is shut while
        the first one is taken: a list nobody is using should not look like one
        somebody forgot to fill in. */
     (function(){
@@ -13163,21 +12983,15 @@ function buildExcelBackup(){
                            footer: document.getElementById('emPtFooter').value } },
         leave: {
           to: list('emLvTo'), cc: list('emLvCc'),
+          /* The people who may be named against somebody in the table. Kept
+             apart from the naming itself so that nominating an approver and
+             then giving them somebody are two steps, neither surprising the
+             other. */
+          approvers: list('emLvApprovers'),
           subject: document.getElementById('emLvSubject').value.trim(),
           intro: document.getElementById('emLvIntro').value,
-          /* The box is only on the pane when somebody is marked to look first.
-             With nobody marked there is nothing to read, so what is already
-             stored is written back - saving the other settings must not quietly
-             wipe wording that is waiting for the next time somebody is. */
-          firstIntro: document.getElementById('emLvFirstIntro')
-            ? document.getElementById('emLvFirstIntro').value
-            : (((MAIL_CFG.settings || {}).leave || {}).firstIntro || ''),
-          firstTo: document.getElementById('emLvFirstTo')
-            ? list('emLvFirstTo') : (((MAIL_CFG.settings || {}).leave || {}).firstTo || []),
-          firstCc: document.getElementById('emLvFirstCc')
-            ? list('emLvFirstCc') : (((MAIL_CFG.settings || {}).leave || {}).firstCc || []),
           footer: document.getElementById('emLvFooter').value,
-          confirm: document.getElementById('emConfirm').checked
+          confirm: !!(document.getElementById('emConfirm') || {}).checked
         },
         month: {
           to: list('emMoTo'), cc: list('emMoCc'),
@@ -16732,37 +16546,9 @@ function buildExcelBackup(){
               (marksOwn(e.name) ? ' checked' : '')+'>'+
             '<span>Marks own</span>'+
           '</label>'+
-          /* Whether their leave goes through a first approver, and if so
-             whose - one person may report to somebody outside the usual line,
-             and routing the whole company through them to serve that one
-             person is not an answer. */
-          '<label class="shf-self" title="Their leave goes to the approver named beside this, who settles it. Unticked, it goes to the management instead.">'+
-            '<input type="checkbox" data-first-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
-              (needsFirstApproval(e.name) ? ' checked' : '')+'>'+
-            '<span>Own approver</span>'+
-          '</label>'+
-          (function(){
-            /* Picked from the addresses on file, the way the shift beside it
-               is picked from the slots - with the same way out for one that
-               is not on the list yet. */
-            var cur = ownApprover(e.name), known = false;
-            var opts = '<option value="">the usual one</option>';
-            (APPROVER_LIST || []).forEach(function(a){
-              var on = a.email.toLowerCase() === cur.toLowerCase();
-              if(on) known = true;
-              opts += '<option value="'+a.email.replace(/"/g,'&quot;')+'"'+(on?' selected':'')+'>'
-                    + escapeHtml(a.email) + '</option>';
-            });
-            var other = !!cur && !known;
-            opts += '<option value="__other"'+(other?' selected':'')+'>Other…</option>';
-            var hide = needsFirstApproval(e.name) ? '' : 'display:none;';
-            return '<select class="shf-appr" data-appr-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
-                   ' title="Who approves this person’s leave. “The usual one” is whoever is named under Email → Leave."'+
-                   ' style="'+hide+'">'+opts+'</select>'+
-                   '<input type="email" class="shf-appr shf-appr-other" data-appr-other="'+e.name.replace(/"/g,'&quot;')+'"'+
-                   ' value="'+(other?cur.replace(/"/g,'&quot;'):'')+'" placeholder="their address"'+
-                   ' style="'+(other && !hide ? '' : 'display:none;')+'">';
-          })()+
+          /* Who approves whose leave was set here and worded over on the
+             Email panel, so neither screen ever showed one person's
+             arrangement whole. It is one table on the Leave tab now. */
           '</span>';
         })()+
         '</div>'+
@@ -16869,84 +16655,6 @@ function buildExcelBackup(){
         }).catch(function(e){
           cb.disabled = false; cb.checked = !cb.checked;
           showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
-        });
-      });
-    });
-    /* Saved on the tick, like the one beside it. Only the people who skip the
-       first stage are written down; everybody else is the arrangement naming a
-       first approver already meant. */
-    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-first-emp]'), function(cb){
-      cb.addEventListener('change', function(){
-        var name = cb.getAttribute('data-first-emp');
-        var q = name.replace(/"/g,'\\"');
-        var sel = shiftDropdown.querySelector('select[data-appr-emp="'+q+'"]');
-        var box = shiftDropdown.querySelector('input[data-appr-other="'+q+'"]');
-        /* Unticking drops whichever approver was named with it: there is no
-           first stage to hold, so an address still showing would say
-           otherwise. Ticking it back starts from the usual one. */
-        if(cb.checked) delete approvalRoute[name]; else approvalRoute[name] = 'final';
-        if(sel){ sel.style.display = cb.checked ? '' : 'none'; if(!cb.checked) sel.value = ''; }
-        if(box){ box.style.display = 'none'; box.value = ''; }
-        cb.disabled = true;
-        saveApprovalRoute().then(function(){
-          cb.disabled = false;
-          showUploadStatus(dispName(name) + (cb.checked
-            ? '’s leave now goes to a first approver before it is granted.'
-            : '’s leave now goes straight for the final word.'), false);
-        }).catch(function(e){
-          cb.disabled = false; cb.checked = !cb.checked;
-          showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
-        });
-      });
-    });
-    /* Who holds that stage for this one person. Blank means the office's own
-       first approver, which is what everybody had before this existed. */
-    var saveApprover = function(name, val, el){
-      if(val) approvalRoute[name] = val; else delete approvalRoute[name];
-      el.disabled = true;
-      return saveApprovalRoute().then(function(){
-        el.disabled = false;
-        showUploadStatus(val
-          ? (dispName(name) + '’s leave is now approved by ' + val + '.')
-          : (dispName(name) + '’s leave goes to the usual approver again.'), false);
-      }).catch(function(e){
-        el.disabled = false;
-        showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
-      });
-    };
-    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('select[data-appr-emp]'), function(sel){
-      sel.addEventListener('change', function(){
-        var name = sel.getAttribute('data-appr-emp');
-        var box = shiftDropdown.querySelector('input[data-appr-other="'+name.replace(/"/g,'\\"')+'"]');
-        /* Somebody not on the list yet: the box appears and nothing is saved
-           until they have typed the address. */
-        if(sel.value === '__other'){
-          if(box){ box.style.display = ''; box.focus(); }
-          return;
-        }
-        if(box){ box.style.display = 'none'; box.value = ''; }
-        saveApprover(name, sel.value, sel).then(function(){
-          /* A newly named address becomes one of the choices, so the next row
-             can be pointed at the same person by picking rather than typing. */
-          if(sel.value) renderShiftDropdown();
-        });
-      });
-    });
-    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-appr-other]'), function(box){
-      box.addEventListener('change', function(){
-        var name = box.getAttribute('data-appr-other');
-        var val = box.value.trim();
-        if(val && !/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(val)){
-          box.style.borderColor = '#B3261E';
-          box.title = 'That is not an email address.';
-          return;
-        }
-        box.style.borderColor = ''; box.title = '';
-        saveApprover(name, val, box).then(function(){
-          if(val){
-            APPROVER_LIST = null; APPROVER_WAIT = null;      // it belongs on the list now
-            ensureApproverChoices().then(renderShiftDropdown);
-          }
         });
       });
     });
