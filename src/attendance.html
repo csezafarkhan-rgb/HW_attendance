@@ -2871,6 +2871,37 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 /* Where somebody says they spent the day out. It sits under the times, quieter
    than they are: most days it is not needed and should not be the first thing
    the eye lands on. */
+/* ---- anything different about today ----
+   Three exceptions, side by side and the same size as each other, under one
+   question. Inside a drawer the old row keeps its own look, so the controls
+   are exactly the controls that were there - only out of the way until they
+   are wanted. */
+.od-wrap{ margin-top:16px; padding-top:14px; border-top:1px dashed var(--line-dk); }
+.od-head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+  margin-bottom:9px; }
+.od-head b{ font-size:13px; }
+.od-head span{ font-size:11.5px; color:var(--ink-soft); text-align:right; }
+.od-tiles{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.od-tile{ text-align:left; background:var(--panel2); border:1px solid var(--line);
+  border-left:3px solid var(--line-dk); border-radius:11px; padding:9px 11px; cursor:pointer;
+  font:inherit; color:inherit; display:block; width:100%; }
+.od-tile:hover{ background:var(--panel); border-color:var(--line-dk); }
+.od-tile .od-lab{ display:block; font-size:10px; font-weight:700; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink-dim); }
+.od-tile .od-val{ display:block; font-size:13px; font-weight:600; margin-top:3px; }
+.od-tile .od-go{ display:block; font-size:11px; color:var(--brand); margin-top:2px; }
+.od-tile[aria-expanded="true"]{ background:var(--panel); border-color:var(--brand);
+  border-left-color:var(--brand); }
+/* A day that is different is coloured, so it can be seen without being read. */
+.od-tile.set{ border-left-color:#0A7A42; background:#E3F6EC; }
+.od-tile.set .od-val{ color:#0A7A42; }
+.od-tile.leave{ border-left-color:#B26B00; background:#FFF3DF; }
+.od-tile.leave .od-val{ color:#B26B00; }
+.od-drawer{ display:none; }
+.od-drawer.open{ display:block; }
+/* The row inside a drawer has the section's own rule above it already. */
+.od-drawer .ed-visit{ margin-top:10px; padding-top:0; border-top:0; }
+@media (max-width:620px){ .od-tiles{ grid-template-columns:1fr; } }
 .ed-visit{ margin-top:14px; padding-top:13px; border-top:1px dashed var(--line-dk); }
 .ed-visit .lab{ font-size:10.5px; font-weight:700; letter-spacing:.08em;
   text-transform:uppercase; color:var(--ink-soft); margin-bottom:7px; }
@@ -20822,7 +20853,7 @@ function buildExcelBackup(){
        those are theirs to say - the office cannot know either until it is
        told. They were behind the self-marking gate because they happened to be
        drawn on the same card. */
-    var ownDay = visitRow(name, day) + shiftRow(name, day) + partDayRow(name, day);
+    var ownDay = ownDayBlock(name, day);
     /* Nothing to offer at all: no card to type on, nothing to say about the
        day, and they were not late. */
     if(!mine && !isLate && !ownDay){ box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -21486,6 +21517,36 @@ function buildExcelBackup(){
         });
       });
     });
+    /* Opening one of the three, and shutting whichever was open. One at a
+       time: the question is what is different about today, and a day is never
+       two of these at once. Pressing the open one again shuts it, so there is
+       always a way back out that is not a Cancel button.
+
+       The controls inside are the ones that were always there, wired below as
+       they always were - a drawer only decides whether they are on screen. */
+    var odShut = function(){
+      Array.prototype.forEach.call(box.querySelectorAll('.od-tile'), function(t){
+        t.setAttribute('aria-expanded', 'false');
+      });
+      Array.prototype.forEach.call(box.querySelectorAll('.od-drawer'), function(d){
+        d.classList.remove('open');
+      });
+    };
+    Array.prototype.forEach.call(box.querySelectorAll('.od-tile'), function(t){
+      t.addEventListener('click', function(){
+        var k = t.getAttribute('data-od');
+        var pane = box.querySelector('.od-drawer[data-od-pane="' + k + '"]');
+        var was = t.getAttribute('aria-expanded') === 'true';
+        odShut();
+        if(was || !pane) return;
+        t.setAttribute('aria-expanded', 'true');
+        pane.classList.add('open');
+        /* Straight to the thing being changed, so a tap is a tap and not a
+           tap and then a hunt. */
+        var f = pane.querySelector('select, input');
+        if(f){ try{ f.focus(); }catch(e){} }
+      });
+    });
     var vKind = document.getElementById('edVisitKind');
     var vOther = document.getElementById('edVisitOther');
     if(vKind && vOther){
@@ -21713,6 +21774,70 @@ function buildExcelBackup(){
   function partSaid(kind, half){
     if(kind !== 'HALF') return 'Short leave';
     return 'Half day (' + (half === 'PM' ? 'second half' : 'first half') + ')';
+  }
+  /* What each of the three says while it is shut: today's answer, in a word.
+
+     They were three rows stacked under the clock, each with its dropdown open
+     and waiting - three selects, two boxes and three buttons on screen before
+     anybody had decided to change anything, every one of them shouting as
+     loudly as the button you came to press. On almost every day the answer to
+     all three is "nothing is different", and a wall of empty controls is a
+     poor way of saying so. */
+  function odWhere(name, day){
+    var ov = overrides[name + '|' + day] || null;
+    if(ov && ov.cat === 'VISIT') return { v:'Visit \u00b7 ' + (ov.detail || 'NA'), s:'set' };
+    if(ov && ov.cat === 'WFH')   return { v:'Working from home', s:'set' };
+    if(ov) return { v:(OV_CATS[ov.cat] && OV_CATS[ov.cat].label) || ov.cat, s:'set' };
+    return { v:'In the office', s:'' };
+  }
+  function odHours(name, day){
+    var own = getDayShift(name, day) || '';
+    if(own) return { v:own, s:'set' };
+    return { v:(shiftOn(name, day) || shiftBaseDefault(name) || 'your usual hours'), s:'' };
+  }
+  function odOff(name, day){
+    var hd = halfDays[name + '|' + day] || null;
+    if(!hd) return { v:'Working the full day', s:'' };
+    var lab = hdLabel(hd.kind);
+    if(hd.kind === 'HALF') lab += ' \u00b7 ' + (hd.half === 'PM' ? 'second half' : 'first half');
+    /* Its own colour: a visit and a change of hours cost nothing and can be
+       undone, and leave is neither of those. */
+    return { v:lab, s:'set leave' };
+  }
+  /* The section itself. One question over three answers, and the control for
+     whichever one is being changed - one at a time, because the day is never
+     two of these at once. */
+  function ownDayBlock(name, day){
+    var parts = [
+      { k:'where', lab:'\ud83d\udccd Where',    go:'Change',    say:odWhere(name, day), html:visitRow(name, day) },
+      { k:'hours', lab:'\ud83d\udd58 Hours',    go:'Change',    say:odHours(name, day), html:shiftRow(name, day) },
+      { k:'off',   lab:'\ud83c\udf24 Time off', go:'Take some', say:odOff(name, day),   html:partDayRow(name, day) }
+    ].filter(function(p){ return !!p.html; });
+    if(!parts.length) return '';
+    var changed = parts.filter(function(p){ return !!p.say.s; });
+    return '<div class="od-wrap">'
+      + '<div class="od-head"><b>Anything different about today?</b><span>'
+      +   (changed.length
+            /* Comma-separated, not dot-separated: the answers carry dots of
+               their own, and "Visit \u00b7 Factory \u00b7 10:00-7:00" reads as one thing
+               with three parts rather than two things with two. */
+            ? shotEsc(changed.map(function(p){ return p.say.v; }).join(', '))
+            : 'nothing \u2014 an ordinary day')
+      + '</span></div>'
+      + '<div class="od-tiles">'
+      + parts.map(function(p){
+          return '<button type="button" class="od-tile' + (p.say.s ? (' ' + p.say.s) : '')
+            + '" data-od="' + p.k + '" aria-expanded="false">'
+            + '<span class="od-lab">' + p.lab + '</span>'
+            + '<span class="od-val">' + shotEsc(p.say.v) + '</span>'
+            + '<span class="od-go">' + (p.say.s ? 'Change' : p.go) + '</span>'
+            + '</button>';
+        }).join('')
+      + '</div>'
+      + parts.map(function(p){
+          return '<div class="od-drawer" data-od-pane="' + p.k + '">' + p.html + '</div>';
+        }).join('')
+      + '</div>';
   }
   function partDayRow(name, day){
     if(day !== todayISO_full) return '';        // the day they are actually in

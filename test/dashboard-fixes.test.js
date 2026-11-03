@@ -426,10 +426,15 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       /if\(cost && cost\.monthly != null\)/.test(src) && /Running cost/.test(src));
     /* Run together on one line the figures stop lining up with what they are
        for, which is the whole use of itemising them. */
+    /* Read against the charges themselves rather than the whole page: a
+       dot-joined list anywhere else in twenty thousand lines is not this
+       question, and asking it that way made an unrelated change look like a
+       regression here. */
+    const charges = src.slice(src.indexOf('cost.items'), src.indexOf('cost.items') + 400);
     check('each charge is on a line of its own',
-      /\.map\(function\(it\)\{[\s\S]*?return '<i><span>'/.test(src)
-        && !/\}\)\.join\(' \\u00b7 '\)/.test(src),
-      (/cost\.items[\s\S]{0,160}/.exec(src) || [])[0]);
+      /\.map\(function\(it\)\{[\s\S]*?return '<i><span>'/.test(charges)
+        && !/\}\)\.join\(' \\u00b7 '\)/.test(charges),
+      charges.slice(0, 160));
     check('and the amounts line up under one another',
       /\.st-cost i em\{[^}]*tabular-nums/.test((src.match(/<style[^>]*>[\s\S]*?<\/style>/g)||[]).join('')));
     /* The total is not the whole bill, and saying so is the honest part. */

@@ -334,9 +334,21 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
      the person can know, counting the moment they say it, with the office
      told rather than asked. */
   check('but where they are and what hours they work are everybody’s to say',
-    /var ownDay = visitRow\(name, day\) \+ shiftRow\(name, day\) \+ partDayRow\(name, day\);/.test(card)
+    /var ownDay = ownDayBlock\(name, day\);/.test(card)
     && /if\(!mine && !isLate && !ownDay\)/.test(card)
     && (card.match(/ownDay/g) || []).length >= 4);
+  /* All three are still there - gathered under one question, each showing
+     today's answer, with the control a click behind it. */
+  check('and all three are in the one section, not stacked under the clock',
+    /function ownDayBlock\(name, day\)\{[\s\S]{0,900}visitRow\(name, day\)[\s\S]{0,200}shiftRow\(name, day\)[\s\S]{0,200}partDayRow\(name, day\)/
+      .test(APP));
+  /* Shut, each says what today is rather than offering a control nobody asked
+     for; one opens at a time, and pressing it again shuts it. */
+  check('each shows today’s answer, with the control behind it',
+    /class="od-tile/.test(APP) && /class="od-drawer/.test(APP)
+    && /nothing \\u2014 an ordinary day/.test(APP));
+  check('and only one of them is open at once',
+    /var was = t\.getAttribute\('aria-expanded'\) === 'true';[\s\S]{0,60}odShut\(\);/.test(APP));
   /* One day, and it is the working day: on a night shift that is the day the
      shift started, not the date on the calendar, or a shift worked through
      midnight would be filed under the morning it happened to end in. */
