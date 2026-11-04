@@ -48,6 +48,9 @@ function run(month, requests) {
     'function unrequestedLeave(){ return []; }',
     'function unmarkedNoteHtml(){ return ""; }',
     'function renderEmpAlerts(){}',
+    /* The bar for printing several forms as one file wires itself after the
+       list is written; it has nothing to say about what the list says. */
+    'function wireBulkForms(){}',
     'var REQ_CANCELLABLE = ' + /var REQ_CANCELLABLE = (\[[^\]]*\])/.exec(APP)[1] + ';',
     grab('canPrintDayForm'),
     grab('canCancelRequest'),

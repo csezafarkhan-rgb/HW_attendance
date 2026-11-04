@@ -72,7 +72,9 @@ check('the name is the one the office has chosen to show',
    same answer goes on the approval line and the sign-off: they are the same
    person, and the form said one of them twice over as an address. */
 {
-  const src = grab(APP, 'printDayOffForm');
+  /* The sheet is built apart from the window that shows it, so that several
+     can be built and printed as one stack. */
+  const src = grab(APP, 'dayOffSheet');
   check('the form asks the account who the address belongs to',
     /var byAcct = byEmail \? '' : approverLabel\(req\.approvedBy\);/.test(src), null);
   check('and shows that person the way the record shows them',
@@ -103,6 +105,40 @@ check('the name is the one the office has chosen to show',
      title down an A4 sheet that has a printed foot waiting at the bottom. */
   check('the sign-off still ends with the company where it always did',
     /dof-sigln big" style="top:751.7pt">' \+ shotEsc\(coName/.test(src), null);
+}
+
+/* ---- and a stack of them, printed as one file ----
+   A month of granted leave is a pile of these, and printing them one at a
+   time means standing at the printer. */
+{
+  const many = grab(APP, 'printDayOffForms');
+  check('several forms are built one after another into one window',
+    /var sheet = picked\.map\(dayOffSheet\)\.join\(''\);/.test(many), null);
+  check('and one of them is still one of them',
+    /function printDayOffForm\(req\)\{ printDayOffForms\(\[req\]\); \}/.test(APP), null);
+  check('nothing is printed when nothing was picked',
+    /if\(!picked\.length\) return;/.test(many), null);
+  /* Each sheet is a page, and the last one does not push out a blank. */
+  check('each form is a page of its own',
+    /page-break-inside:avoid; page-break-after:always; break-inside:avoid;/.test(APP), null);
+  check('and the last one does not end on a blank sheet',
+    /\.dof-sheet:last-of-type\{ page-break-after:avoid; \}/.test(APP), null);
+
+  const bar = grab(APP, 'wireBulkForms');
+  check('the bar says nothing until something is ticked',
+    /bar\.style\.display = n \? '' : 'none';/.test(bar), null);
+  check('it prints them in the order they are read, not the order they were ticked',
+    /Array\.prototype\.filter\.call\(boxes\(\), function\(b\)\{ return b\.checked; \}\)/.test(bar), null);
+  check('and only the ones that may still be printed',
+    /\.filter\(Boolean\)/.test(bar), null);
+  /* Both lists offer it: the office's and the person's own. */
+  check('the office can pick several',
+    /data-act="form"[\s\S]{0,400}?data-pick-form/.test(APP), null);
+  check('and so can the person whose leave it is',
+    /data-print-form="'\+req\.id\+'"[\s\S]{0,320}?data-pick-form/.test(APP), null);
+  check('each list wires its own bar',
+    /wireBulkForms\(list, myFormReq\);/.test(APP)
+    && /wireBulkForms\(list, function\(id\)\{/.test(APP), null);
 }
 
 console.log(fail ? ('FAILED (' + fail + ' of ' + (pass + fail) + ')')
