@@ -12866,14 +12866,10 @@ function buildExcelBackup(){
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
             +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>'
-            /* Read it before anybody asks for leave. The only way to see this
-               message used to be to wait for somebody to want a day off, which
-               is a poor moment to find out the wording greets the wrong person
-               or that the wrong people are on it. */
-            + '<div class="em-prevbar">'
-            +   '<button type="button" class="btn ghost" id="emLvSample">'
-            +     '\ud83d\udc41 Preview for an employee</button>'
-            + '</div>'
+            /* The names it offers. The button that opens them is on the foot
+               of the panel with Save and the test, because reading the
+               message is the last thing somebody does on this card and not a
+               setting in the middle of it. */
             + '<div class="em-months" id="emLvWho" style="display:none">'
             +   people.map(function(e){
                   return '<button type="button" class="em-mo" data-lv-who="'
@@ -12986,7 +12982,13 @@ function buildExcelBackup(){
         })()
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
       +   '<button type="button" class="btn ghost" id="emTest">'
-      +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button></div>'
+      +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button>'
+      /* Reading the leave message is the last thing done on that card, so the
+         button for it belongs at the foot with the other two. It is only on
+         the foot while the Leave tab is the one open: there is nothing to
+         preview for a tab that sends one message to one list of people. */
+      +   '<button type="button" class="btn ghost" id="emLvSample" style="display:none">'
+      +     '\ud83d\udc41 Preview for an employee</button></div>'
       + '</div></div>';
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-em-tab]'), function(t){
@@ -12998,8 +13000,23 @@ function buildExcelBackup(){
         Array.prototype.forEach.call(document.querySelectorAll('[data-em-pane]'), function(p){
           p.style.display = (p.getAttribute('data-em-pane') === which) ? '' : 'none';
         });
+        showLeaveTools(which === 'lv');
       };
     });
+    /* The foot is one row under all six tabs, so the one button on it that
+       belongs to a single tab comes and goes with that tab - and the list of
+       names shuts behind it rather than being left open on a card nobody can
+       see it from. */
+    function showLeaveTools(on){
+      var btn = document.getElementById('emLvSample');
+      var who = document.getElementById('emLvWho');
+      if(btn) btn.style.display = on ? '' : 'none';
+      if(!on && who){
+        who.style.display = 'none';
+        if(btn) btn.textContent = '\ud83d\udc41 Preview for an employee';
+      }
+    }
+    showLeaveTools(false);
     /* Pick a name, and the message that name's leave would arrive in. The
        request behind it does not exist and is never saved; the settings, the
        table and the audience are the real ones. */
@@ -13010,7 +13027,10 @@ function buildExcelBackup(){
       go.onclick = function(){
         var open = who.style.display !== 'none';
         who.style.display = open ? 'none' : '';
-        go.textContent = open ? '\ud83d\udc41 Preview for an employee' : 'Pick a name below';
+        go.textContent = open ? '\ud83d\udc41 Preview for an employee' : 'Pick a name above';
+        /* The button is at the foot and the names are up in the card, so
+           opening them without going to them is opening them out of sight. */
+        if(!open){ try{ who.scrollIntoView({ block:'nearest' }); }catch(e){} }
       };
       Array.prototype.forEach.call(who.querySelectorAll('[data-lv-who]'), function(b){
         b.onclick = function(){

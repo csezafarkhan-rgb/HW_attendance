@@ -255,8 +255,19 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
       null);
 
     /* The page offers it where the settings end, and asks who first. */
-    check('the card has a button for it',
-      /id="emLvSample"/.test(APP) && /Preview for an employee/.test(APP), null);
+    /* At the foot with Save and the test, because reading the message is the
+       last thing done on this card rather than a setting in the middle of it -
+       and the foot is one row under all six tabs, so it comes and goes with
+       the tab it belongs to. */
+    check('the button is on the foot beside Save',
+      /id="emTest"[\s\S]{0,600}?id="emLvSample"/.test(APP), null);
+    check('and only while the Leave tab is the one open',
+      /showLeaveTools\(which === 'lv'\);/.test(APP)
+      && /btn\.style\.display = on \? '' : 'none';/.test(grab(APP, 'showLeaveTools')), null);
+    check('the names shut behind it when the tab changes',
+      /who\.style\.display = 'none';/.test(grab(APP, 'showLeaveTools')), null);
+    check('and it starts hidden, because Attendance is the tab that opens',
+      /showLeaveTools\(false\);/.test(APP), null);
     check('which opens a list of the people on the table',
       /data-lv-who="/.test(APP), null);
     check('and the window it opens says what its button will do',
