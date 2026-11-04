@@ -900,7 +900,10 @@ body{
    card, which is now the longest of the six by a street, scrolled in a small
    window with the panel half empty around it, and two scrollbars side by side
    to say so. It fills the panel now, however tall the panel has been made. */
-.em-dropdown.open{ display:flex; flex-direction:column; }
+/* Named by both its classes, because `.month-dropdown.open{display:block}`
+   is declared further down the sheet and would otherwise win on order alone
+   and quietly undo the column. */
+.month-dropdown.em-dropdown.open{ display:flex; flex-direction:column; }
 .em-dropdown .em-pane{ display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
 /* Everything above the settings keeps its own size; only the settings stretch. */
 .em-dropdown .em-pane > *{ flex:none; }

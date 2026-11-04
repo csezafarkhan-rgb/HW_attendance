@@ -126,7 +126,17 @@ const bad = results.filter(x => !x).length;
   check('it stretches to whatever the panel has been dragged to',
     /\.em-set\{ flex:1 1 auto;/.test(APP), null);
   check('the panel is a column for it to stretch in',
-    /\.em-dropdown\.open\{ display:flex; flex-direction:column; \}/.test(APP), null);
+    /\.month-dropdown\.em-dropdown\.open\{ display:flex; flex-direction:column; \}/.test(APP),
+    null);
+  /* Named by both its classes on purpose: `.month-dropdown.open{display:block}`
+     is declared further down the sheet, and with one class each the later rule
+     wins on order alone and quietly undoes the column - which is exactly what
+     it did, leaving the settings at their full height and the panel scrolling
+     around them instead. */
+  check('and says so by both its classes, so a later rule cannot undo it',
+    APP.indexOf('.month-dropdown.em-dropdown.open{') <
+      APP.indexOf('.month-dropdown.open{display:block;}')
+    && /\.month-dropdown\.em-dropdown\.open/.test(APP), null);
   check('and everything above it keeps its own size',
     /\.em-dropdown \.em-pane > \*\{ flex:none; \}/.test(APP), null);
   /* A flex child will not scroll inside its parent unless it is allowed to be
