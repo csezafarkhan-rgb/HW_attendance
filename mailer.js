@@ -604,6 +604,10 @@ function dailyEmail(o) {
     const kinds = [
       ['Present', who('present'), '#137A3B', true],
       ['Not Reached Office', who('missing'), '#B3261E', true],
+      /* Beside the absent rather than among them: a night shift's working day
+         is the one that ended this morning, and the hour on the card is the
+         hour they came in on it. */
+      ['On nights', who('night'), '#4C46C6', true, true],
       ['Visiting', who('visit'), '#7C3AED', false],
       ['On leave', who('leave'), '#B45309', false],
       ['Work from home', who('wfh'), '#2F6FE4', false]
@@ -663,12 +667,21 @@ function dailyEmail(o) {
                    + '<span style="color:#7A5200;font-size:9.5px;"> - '
                    + minsSaid(r.late) + ' late</span>'))
             : ('<span style="color:' + SOFT + ';font-size:9.5px;"> (' + esc(at) + ')</span>');
+          /* One character, because a card is a fifth of the message wide and
+             one person has to stay on one line. What it means is said once
+             under the card rather than once against every name. */
+          const via = r.via === 'portal'
+            ? '<sup style="color:#4C46C6;font-weight:700;font-size:7.5px;">P</sup>' : '';
           return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
-               + (at ? time : '')
+               + (at ? time : '') + via
                + '</div>';
         };
         /* Grouped only where there is more than one slot in the card: with
-           everybody on the same one the heading says nothing. */
+           everybody on the same one the heading says nothing.
+
+           Except on the night card, where it says the one thing that card is
+           there for. Without it the hour beside a name reads as this evening,
+           and it is from the night before. */
         let order = [];
         const by = {};
         if (k[3]) {
@@ -679,8 +692,11 @@ function dailyEmail(o) {
           });
           order.sort(function (a, b) { return slotMin(a) - slotMin(b) || a.localeCompare(b); });
         }
+        /* And the legend, on a card that has one and on no other: a day
+           nobody used the portal says nothing about the portal. */
+        const anyVia = k[1].some(function (r) { return r.via === 'portal'; });
         let listHtml;
-        if (order.length > 1) {
+        if (order.length > 1 || (k[4] && order.length)) {
           let n = 0;
           listHtml = order.map(function (s) {
             return slotRule(s) + by[s].map(function (r) { return lineOf(r, n++); }).join('');
@@ -694,7 +710,14 @@ function dailyEmail(o) {
           + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
           + '<div style="font-size:10.5px;line-height:1.5;color:' + INK + ';text-align:left;">'
           +   listHtml
-          + '</div></div></td>';
+          + '</div>'
+          + (anyVia
+              ? ('<div style="margin-top:6px;padding-top:5px;border-top:1px solid ' + LINE + ';'
+                 + 'font-size:8.5px;line-height:1.4;color:' + SOFT + ';text-align:left;">'
+                 + '<sup style="color:#4C46C6;font-weight:700;">P</sup> marked on the portal,'
+                 + ' not the reader</div>')
+              : '')
+          + '</div></td>';
       }).join('');
       body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
         + '<tr>' + cells + '</tr></table>');

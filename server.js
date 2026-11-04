@@ -2569,9 +2569,21 @@ async function buildDailyEmail(orgId, day, opts) {
     else if (rec['in']) { state = 'present'; kind = 'present'; label = rec.out ? 'Present' : 'In, not out yet'; }
     const hd = halfDays[e.name + '|' + day];
     if (hd && state !== 'leave') label += ' · part day';
+    /* Three things put a time on the record and the message showed all three
+       the same way: a thumb on the reader, the office typing one in, and
+       somebody pressing Clock in on their own page. The last of those is the
+       one the office asks about, and it is already stored with by: self
+       against it - the message simply never said.
+
+       Only where it is the time being shown. A portal press on a day the
+       reader also has is not what the card is displaying, so it is not what
+       the card should mark. */
+    const typed = manualRecs[e.name + '|' + day];
+    const via = (rec.manual === true && typed && typed.by === 'self') ? 'portal' : '';
     /* A day worked from home or at a customer has no punches, and two dashes
        said nothing about it: the times read WFH or Visit instead. */
-    return { name, 'in': rec['in'] || away, out: rec.out || away, state, kind, label,
+    return { name, emp: e.name, via,
+             'in': rec['in'] || away, out: rec.out || away, state, kind, label,
              /* When they arrived, as a number, so the message can list a card
                 in the order people came in rather than alphabetically. */
              inMin: hhmmToMinutes(rec['in']) };
@@ -2646,6 +2658,47 @@ async function buildDailyEmail(orgId, day, opts) {
       }
     }
   });
+
+  /* Somebody on nights has not failed to arrive at half past seven in the
+     evening. Their day has not started, or has only just - and the day of
+     theirs that is finished is the one that ended this morning.
+
+     Read as an absence, the message said something false about a man who
+     worked nine hours and went home at four. So they come out of that card
+     into one of their own, carrying the hour they came in on the shift that
+     ended this morning.
+
+     Only where the day would otherwise read as missing: punched in already
+     tonight they are present like anybody else, and a day of leave is a day
+     of leave. And only where there is an hour to show - nothing last night
+     either is a real absence, and stays in the red card. */
+  const onNights = rows.filter(function (r) {
+    const span = parseShiftSpan(r.shift);
+    return r.kind === 'missing' && !!span && span.overnight;
+  });
+  if (onNights.length) {
+    const back = new Date(day + 'T00:00:00Z');
+    back.setUTCDate(back.getUTCDate() - 1);
+    const yday = back.toISOString().slice(0, 10);
+    const prev = await pool.query(
+      'SELECT employee, data FROM records WHERE org_id = $1 AND day = $2 AND employee = ANY($3)',
+      [orgId, yday, onNights.map(function (r) { return r.emp; })]);
+    const was = {};
+    prev.rows.forEach(function (r) { was[r.employee] = r.data || {}; });
+    onNights.forEach(function (r) {
+      const typed = manualRecs[r.emp + '|' + yday];
+      const seen = was[r.emp] || {};
+      const inAt = seen['in'] || (typed && typed['in']) || '';
+      if (!inAt) return;
+      r.state = 'night'; r.kind = 'night'; r.label = 'On nights';
+      r['in'] = inAt;
+      r.inMin = hhmmToMinutes(inAt);
+      r.via = (!seen['in'] && typed && typed.by === 'self') ? 'portal' : '';
+      /* The slot says which night it was, so nobody reads the hour as this
+         evening's. slotMin still sorts on the time at the front of it. */
+      r.shift = r.shift + ' \u00b7 last night';
+    });
+  }
 
   const settings = opts.settings || await mailSettings(orgId);
   return mailer.dailyEmail({
