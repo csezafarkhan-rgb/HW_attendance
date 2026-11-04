@@ -88,6 +88,31 @@ const DAY = [
     html.indexOf('Aman Gupta') > html.indexOf('Not Reached Office'), null);
 }
 
+/* ---- and the room it is given ----
+   The night card carries a name, two times and the hours between them where
+   every other card carries a name and one time. An equal share each and its
+   line ran out past its own border. */
+{
+  const widths = function (html) {
+    const out = {};
+    const re = /<td width="(\d+)%"[\s\S]{0,400}?padding-bottom:4px;">([^<]+)</g;
+    let m;
+    while ((m = re.exec(html))) out[m[2]] = +m[1];
+    return out;
+  };
+  const w = widths(build(DAY.concat([onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00')])));
+  check('the night card is given more room than the others',
+    w['On Night Shift'] > w['Present'] && w['On Night Shift'] > w['Not Reached Office'], w);
+  check('and the row still adds up to a row',
+    Object.keys(w).reduce(function (a, k) { return a + w[k]; }, 0) <= 100, w);
+  /* Taken from the others in proportion, not from one of them. */
+  check('the other cards keep an equal share of what is left',
+    w['Present'] === w['Not Reached Office'], w);
+  const even = widths(build(DAY));
+  check('and with no night card the shares are equal again',
+    even['Present'] === even['Not Reached Office'], even);
+}
+
 /* A night nobody was on puts no empty card on the message. */
 {
   const html = build(DAY);

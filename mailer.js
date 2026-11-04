@@ -634,7 +634,17 @@ function dailyEmail(o) {
         + '</tr></table>';
     };
     if (kinds.length) {
-      const w = Math.floor(100 / kinds.length);
+      /* An equal share each, except for the night card, which carries a whole
+         night on one line - a name, two times and the hours between them -
+         where every other card carries a name and one time. Given the same
+         width as the rest, its line ran out past its own border.
+
+         A share and a half, taken from the others in proportion, so the row
+         still adds to one. Enough cards on the message and even that is too
+         narrow: the line wraps then, which it is built to do, at the one gap
+         between the name and the span. */
+      const weight = function (k) { return k[0] === 'On Night Shift' ? 1.55 : 1; };
+      const total = kinds.reduce(function (sum, k) { return sum + weight(k); }, 0);
       const cells = kinds.map(function (k) {
         /* Numbered, so a card can be counted down at a glance and read back
            over the phone without losing the place, with the time they came
@@ -724,7 +734,7 @@ function dailyEmail(o) {
         } else {
           listHtml = k[1].map(lineOf).join('');
         }
-        return '<td width="' + w + '%" valign="top" style="padding:0 3px;">'
+        return '<td width="' + Math.floor(weight(k) / total * 100) + '%" valign="top" style="padding:0 3px;">'
           + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:8px 6px;text-align:center;">'
           + '<div style="font-size:18px;font-weight:700;color:' + k[2] + ';line-height:1.1;">' + k[1].length + '</div>'
           + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
