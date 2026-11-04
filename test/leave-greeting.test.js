@@ -174,7 +174,7 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
     /* ---- and both copies are given a name to use ---- */
     const n = grab(SRV, 'notifyNewRequests');
     check('the deciding copy is told who it is going to',
-      /approver: await approverNames\(orgId, aud\.to\),/.test(n), null);
+      /approver: await approverNames\(orgId, greetedOf\(aud\.to, mgmt\)\),/.test(n), null);
     check('and the told copy is given the person who asked',
       /approver: r\.empName,/.test(n), null);
     /* The digest already knew; this is only that it still does. */
@@ -193,6 +193,33 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
       /intro: 'Hello \{approver\},/.test(fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')),
       null);
 
+    /* ---- and whose name the greeting carries ----
+       The owners are on most leave messages. One going to the manager who
+       actually decides it, opening by naming the owners, reads as though it
+       were written for them and copied to him. */
+    vm.runInContext(grab(SRV, 'greetedOf'), ctx);
+    const MG = ['shivani@x', 'nitish@x'];
+    check('the manager named against somebody is the one greeted',
+      JSON.stringify(ctx.greetedOf(['karan@x', 'shivani@x', 'nitish@x'], MG)) ===
+        JSON.stringify(['karan@x']), null);
+    check('two of them are both greeted',
+      JSON.stringify(ctx.greetedOf(['karan@x', 'munish@x', 'shivani@x'], MG)) ===
+        JSON.stringify(['karan@x', 'munish@x']), null);
+    /* A row nobody else is named against IS the management's, so there they
+       are greeted - otherwise the message opens with nobody's name. */
+    check('where only the owners decide it, the owners are greeted',
+      JSON.stringify(ctx.greetedOf(['shivani@x', 'nitish@x'], MG)) ===
+        JSON.stringify(['shivani@x', 'nitish@x']), null);
+    check('and case is not the rule’s business',
+      JSON.stringify(ctx.greetedOf(['karan@x', ' SHIVANI@X '], MG)) ===
+        JSON.stringify(['karan@x']), null);
+    check('nobody at all stays nobody',
+      JSON.stringify(ctx.greetedOf([], MG)) === JSON.stringify([]), null);
+    /* Who it GOES to is untouched: this is the first line, not the To line. */
+    check('the greeting is narrowed, the audience is not',
+      /approver: await approverNames\(orgId, greetedOf\(aud\.to, mgmt\)\),/.test(SRV)
+      && /const toMsg = \{ to: aud\.to, cc: \[\],/.test(SRV), null);
+
     /* ---- and reading it before anybody asks for leave ----
        The only way to see this message used to be to wait for somebody to
        want a day off, which is a poor moment to find the wording greets the
@@ -208,7 +235,7 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
         .test(sample), null);
     check('it is addressed the way that person\u2019s leave really would be',
       /const aud = await leaveAudience\(orgId, settings, route, name, mgmt\);/.test(sample)
-      && /approver: await approverNames\(orgId, aud\.to\)/.test(sample), null);
+      && /approver: await approverNames\(orgId, greetedOf\(aud\.to, mgmt\)\)/.test(sample), null);
     check('and uses the office\u2019s own wording, not a stand-in',
       /intro: settings\.leave\.intro, footer: settings\.leave\.footer,/.test(sample), null);
     /* The request behind it does not exist, so it carries no buttons and says

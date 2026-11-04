@@ -3144,7 +3144,7 @@ async function notifyNewRequests(orgId, added) {
          be written for. */
       const decide = mailer.requestEmail(Object.assign({}, base, {
         links: linksFor({ k: 'req', org: orgId, id: r.id, s: 0 }),
-        approver: await approverNames(orgId, aud.to),
+        approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
         heading: 'A request is waiting for a decision' }));
       const toMsg = { to: aud.to, cc: [], subject: decide.subject, html: decide.html };
       await logMail(orgId, 'request', toMsg, await mailer.send(toMsg));
@@ -3193,6 +3193,22 @@ async function approverName(orgId, email) {
    request is one message to everybody who may decide it, so the greeting on
    it names all of them or none. "Karan, Shivani and Nitish" rather than a
    list of addresses. */
+/* Whose name the greeting carries.
+
+   The owners are on most leave messages, and a message going to the manager
+   who actually decides it that opens by naming the owners reads as though it
+   were written for them and copied to him. So the greeting names the people
+   named against that person - and the management only where they are the
+   ones deciding it, which is a row nobody else is named against.
+
+   Who the message GOES to does not change. This is only who it is addressed
+   to in its first line. */
+function greetedOf(to, management) {
+  const mgmt = {};
+  (management || []).forEach(a => { mgmt[String(a || '').trim().toLowerCase()] = true; });
+  const others = (to || []).filter(a => !mgmt[String(a || '').trim().toLowerCase()]);
+  return others.length ? others : (to || []);
+}
 async function approverNames(orgId, addrs) {
   const out = [];
   for (const a of (addrs || [])) out.push(await approverName(orgId, a));
@@ -4122,7 +4138,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
   const mail = mailer.requestEmail({
     orgName: orgNameOf(kv.companyInfo), req: req0, siteUrl: mailer.baseUrl(),
     intro: settings.leave.intro, footer: settings.leave.footer,
-    approver: await approverNames(orgId, aud.to),
+    approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
     /* No links on it. A button on a sample would act on a request that does
        not exist, and the office is reading this, not deciding it. */
     links: null, heading: 'Sample \u2014 how this person\u2019s leave will arrive' });
