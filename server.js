@@ -4088,6 +4088,61 @@ app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
              settings: s, to, defaults: mailer.DEFAULT_TEXT,
              you: EMAIL_RE.test(mine) ? mine : '' });
 });
+/* The leave message for one person, as it would reach whoever decides theirs.
+
+   The office could only see this by waiting for somebody to ask for leave,
+   which is a poor moment to discover the wording greets the wrong person or
+   the wrong people are on it. So: pick a name, and the message is built for
+   that name - real settings, real table, real audience - against a request
+   that does not exist and is never saved.
+
+   Nothing is sent unless the test is asked for, and a test goes to the one
+   address a test has ever gone to: the account asking for it. */
+app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
+  if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });
+  const name = String((req.body && req.body.emp) || '').trim();
+  if (!name) return res.status(400).json({ error: 'pick somebody first' });
+  const orgId = req.session.orgId;
+  const known = await pool.query(
+    'SELECT 1 FROM employees WHERE org_id = $1 AND name = $2 AND is_active = TRUE LIMIT 1', [orgId, name]);
+  if (!known.rows.length) return res.status(404).json({ error: 'no such employee' });
+
+  const settings = await mailSettings(orgId);
+  const route = await approvalRouteOf(orgId);
+  const mgmt = await mailRecipients(orgId, settings, 'leave');
+  const aud = await leaveAudience(orgId, settings, route, name, mgmt);
+  const kv = await sharedKeys(orgId, ['companyInfo']);
+  const day = new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
+  /* Said plainly on the request itself, so a copy of this landing in somebody's
+     inbox cannot be mistaken for a day actually being asked for. */
+  const req0 = { id: 'sample', empName: name, dateFrom: day, dateTo: day,
+                 leaveType: 'CL', half: '', status: 'pending',
+                 message: 'Sample only - nobody has asked for this day.',
+                 createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const mail = mailer.requestEmail({
+    orgName: orgNameOf(kv.companyInfo), req: req0, siteUrl: mailer.baseUrl(),
+    intro: settings.leave.intro, footer: settings.leave.footer,
+    approver: await approverNames(orgId, aud.to),
+    /* No links on it. A button on a sample would act on a request that does
+       not exist, and the office is reading this, not deciding it. */
+    links: null, heading: 'Sample \u2014 how this person\u2019s leave will arrive' });
+
+  if ((req.body && req.body.send) === 'test') {
+    let to = String((req.user && req.user.email) || '').trim();
+    if (!EMAIL_RE.test(to)) {
+      if (!mgmt.length) return res.status(400).json({ error: 'Your account has no email address on it.' });
+      to = mgmt[0];
+    }
+    const msg = { to: [to], cc: [], subject: '[Sample] ' + mail.subject, html: mail.html };
+    const r = await mailer.send(msg);
+    await logMail(orgId, 'leave', msg, r);
+    if (!r.ok) return res.status(502).json(r);
+    return res.json({ ok: true, sentTo: to });
+  }
+  res.json({ ok: true, sample: true, to: aud.to, cc: aud.cc,
+             preview: { subject: mail.subject, html: mail.html } });
+});
+
 app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
   if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });
   /* An account can sign in by name or by the part before the @, so what is

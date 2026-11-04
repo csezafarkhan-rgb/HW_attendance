@@ -165,6 +165,49 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
       /intro: 'Hello \{approver\},/.test(fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')),
       null);
 
+    /* ---- and reading it before anybody asks for leave ----
+       The only way to see this message used to be to wait for somebody to
+       want a day off, which is a poor moment to find the wording greets the
+       wrong person or the wrong people are on it. */
+    const sample = SRV.slice(SRV.indexOf("app.post('/api/mail/leave-sample'"),
+                             SRV.indexOf("app.post('/api/mail/test'"));
+    check('a sample is built for one named person',
+      /const name = String\(\(req\.body && req\.body\.emp\) \|\| ''\)\.trim\(\);/.test(sample), null);
+    /* Somebody who is still here. A sample for a leaver is a message about
+       a day nobody will ever ask for. */
+    check('and only for somebody who is still on the roster',
+      /SELECT 1 FROM employees WHERE org_id = \$1 AND name = \$2 AND is_active = TRUE LIMIT 1/
+        .test(sample), null);
+    check('it is addressed the way that person\u2019s leave really would be',
+      /const aud = await leaveAudience\(orgId, settings, route, name, mgmt\);/.test(sample)
+      && /approver: await approverNames\(orgId, aud\.to\)/.test(sample), null);
+    check('and uses the office\u2019s own wording, not a stand-in',
+      /intro: settings\.leave\.intro, footer: settings\.leave\.footer,/.test(sample), null);
+    /* The request behind it does not exist, so it carries no buttons and says
+       on its face that nobody has asked for the day. */
+    check('a sample carries nothing to press',
+      /links: null, heading: 'Sample/.test(sample), null);
+    check('and says on the request itself that it is one',
+      /Sample only - nobody has asked for this day\./.test(sample), null);
+    check('nothing is saved for it',
+      sample.indexOf('INSERT INTO kv') === -1 && sample.indexOf('leaveRequests') === -1, null);
+    /* Nothing goes out unless the test is asked for, and a test has only ever
+       gone to the account asking for it. */
+    check('nothing is sent unless a test is asked for',
+      /if \(\(req\.body && req\.body\.send\) === 'test'\) \{/.test(sample), null);
+    check('and the test goes to the account asking, not to the real audience',
+      /const msg = \{ to: \[to\], cc: \[\], subject: '\[Sample\] ' \+ mail\.subject/.test(sample),
+      null);
+
+    /* The page offers it where the settings end, and asks who first. */
+    check('the card has a button for it',
+      /id="emLvSample"/.test(APP) && /Preview for an employee/.test(APP), null);
+    check('which opens a list of the people on the table',
+      /data-lv-who="/.test(APP), null);
+    check('and the window it opens says what its button will do',
+      /sendLabel: 'Send this sample to me'/.test(APP)
+      && /wrap\.querySelector\('\[data-em-send\]'\)\.textContent = pv\.sendLabel/.test(APP), null);
+
     console.log(fail ? ('FAILED (' + fail + ' of ' + (pass + fail) + ')')
                      : ('ALL PASS (' + pass + ' checks)'));
     process.exit(fail ? 1 : 0);

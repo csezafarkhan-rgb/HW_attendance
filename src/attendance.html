@@ -802,9 +802,18 @@ body{
               min-height:220px; resize:both; overflow:auto; }
 .em-pane{ padding:2px; font-size:12.5px; color:var(--ink); }
 .em-appr-wrap{ max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin:4px 0 2px; }
-.em-appr{ width:100%; border-collapse:collapse; font-size:12px; }
-.em-appr th{ position:sticky; top:0; background:var(--card, #fff); font-weight:600; font-size:11px;
-             padding:6px 5px; border-bottom:1px solid var(--line); text-align:center; white-space:nowrap; }
+/* The heading row stays put while the names scroll under it, and "under" is
+   the whole of the point: with nothing said about who paints on top, the rows
+   went over it, and a tick from the row above sat in the middle of a column
+   heading. A stacking order, and an opaque background to stop beneath.
+
+   Separate borders rather than collapsed ones, because a collapsed border
+   belongs to the table and not to the cell, so it scrolls away from a sticky
+   heading and leaves it hanging. The hairline is drawn inside the cell. */
+.em-appr{ width:100%; border-collapse:separate; border-spacing:0; font-size:12px; }
+.em-appr th{ position:sticky; top:0; z-index:3; background:#fff; font-weight:600; font-size:11px;
+             padding:6px 5px; box-shadow:inset 0 -1px 0 var(--line); text-align:center;
+             white-space:nowrap; }
 .em-appr td{ padding:4px 5px; border-bottom:1px solid var(--line); text-align:center; }
 .em-appr td:first-child{ text-align:left; white-space:nowrap; }
 .em-appr tr:last-child td{ border-bottom:0; }
@@ -835,6 +844,12 @@ body{
 .em-prev-top span{ display:block; margin-top:3px; font-size:11.5px; color:var(--ink-soft); }
 /* One press can stand behind several messages, and each one is read rather
    than counted, so the window pages through them. */
+/* The one control on the leave card that is not a setting: it reads rather
+   than writes, so it sits apart from the boxes, at the end and to the right. */
+.em-prevbar{ display:flex; justify-content:flex-end; margin:12px 0 0;
+  padding-top:11px; border-top:1px solid var(--line); }
+.em-prevbar .btn{ width:auto !important; flex:none !important; padding:7px 14px;
+  font-size:12px; }
 .em-prev-pg{ display:flex; align-items:center; gap:8px; margin-bottom:7px; }
 .em-prev-pg .em-pg-n{ font-size:11px; font-weight:700; letter-spacing:.05em;
   text-transform:uppercase; color:var(--ink-soft); }
@@ -12421,8 +12436,9 @@ function buildExcelBackup(){
     };
     /* The button says how many go, because it sends all of them however many
        of them have been read. */
-    wrap.querySelector('[data-em-send]').textContent = many
-      ? ('Send all ' + mails.length) : 'Send it';
+    wrap.querySelector('[data-em-send]').textContent = pv.sendLabel
+      ? pv.sendLabel
+      : (many ? ('Send all ' + mails.length) : 'Send it');
     if(many){
       wrap.querySelector('[data-em-back]').onclick = function(){ if(at > 0){ at--; draw(); } };
       wrap.querySelector('[data-em-next]').onclick = function(){ if(at < mails.length - 1){ at++; draw(); } };
@@ -12849,7 +12865,21 @@ function buildExcelBackup(){
             +   'goes to the person who asked greets them by their own name.</div>'
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
-            +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>';
+            +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>'
+            /* Read it before anybody asks for leave. The only way to see this
+               message used to be to wait for somebody to want a day off, which
+               is a poor moment to find out the wording greets the wrong person
+               or that the wrong people are on it. */
+            + '<div class="em-prevbar">'
+            +   '<button type="button" class="btn ghost" id="emLvSample">'
+            +     '\ud83d\udc41 Preview for an employee</button>'
+            + '</div>'
+            + '<div class="em-months" id="emLvWho" style="display:none">'
+            +   people.map(function(e){
+                  return '<button type="button" class="em-mo" data-lv-who="'
+                    + mailEscape(e.name) + '">' + mailEscape(dispName(e.name)) + '</button>';
+                }).join('')
+            + '</div>';
         })()
       /* The three that send themselves without being asked. They sat outside
          the pane, and the stray </div> that followed them closed the settings
@@ -12970,6 +13000,62 @@ function buildExcelBackup(){
         });
       };
     });
+    /* Pick a name, and the message that name's leave would arrive in. The
+       request behind it does not exist and is never saved; the settings, the
+       table and the audience are the real ones. */
+    (function(){
+      var go = document.getElementById('emLvSample');
+      var who = document.getElementById('emLvWho');
+      if(!go || !who) return;
+      go.onclick = function(){
+        var open = who.style.display !== 'none';
+        who.style.display = open ? 'none' : '';
+        go.textContent = open ? '\ud83d\udc41 Preview for an employee' : 'Pick a name below';
+      };
+      Array.prototype.forEach.call(who.querySelectorAll('[data-lv-who]'), function(b){
+        b.onclick = function(){
+          var name = b.getAttribute('data-lv-who');
+          b.disabled = true;
+          var was = b.textContent;
+          b.textContent = 'Building\u2026';
+          fetch('/api/mail/leave-sample', { method:'POST', credentials:'same-origin',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ emp: name }) })
+            .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+            .then(function(out){
+              b.disabled = false; b.textContent = was;
+              if(!out.ok || !out.j.ok){
+                showUploadStatus((out.j && out.j.error) || 'That did not build.', true);
+                return;
+              }
+              /* The button in the window sends it to the account asking,
+                 and to nobody else - it is a sample, and the people on the
+                 To line above it are who the real one would go to. */
+              showPreview(Object.assign({}, out.j, {
+                sendLabel: 'Send this sample to me'
+              }), function(done){
+                fetch('/api/mail/leave-sample', { method:'POST', credentials:'same-origin',
+                      headers:{'Content-Type':'application/json'},
+                      body: JSON.stringify({ emp: name, send: 'test' }) })
+                  .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+                  .then(function(o2){
+                    if(!o2.ok || !o2.j.ok){
+                      done((o2.j && (o2.j.error || o2.j.message)) || 'It did not go out.', true);
+                      return;
+                    }
+                    done();
+                    showUploadStatus('Sample sent to ' + (o2.j.sentTo || 'you') + '.', false);
+                  })
+                  .catch(function(e){ done(e.message || 'It did not go out.', true); });
+              });
+            })
+            .catch(function(e){
+              b.disabled = false; b.textContent = was;
+              showUploadStatus(e.message || 'That did not build.', true);
+            });
+        };
+      });
+    })();
     /* What has to be asked for is its own store too, and the same reasoning
        applies: the panel's Save writes the mail settings and nothing else.
        The page is redrawn on the way out because the card under the clock and
