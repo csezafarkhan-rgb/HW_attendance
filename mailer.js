@@ -674,16 +674,22 @@ function dailyEmail(o) {
             ? '<sup style="color:#4C46C6;font-weight:700;font-size:7.5px;">P</sup>' : '';
           /* A night is a span rather than a moment: it began yesterday
              evening and ended this morning, and the hours between are the
-             thing worth knowing about it. Too long for the one nowrap line
-             the other cards keep to, so the line may wrap - but the span
-             itself never breaks across one, because half of an arrow on the
-             end of a line is worse than a second line. */
+             thing worth knowing about it.
+
+             Which is longer than the one unbroken line the other cards keep
+             to, so this line is allowed to wrap - in exactly one place. The
+             name is held together and so is the span, and the only gap the
+             line may break at is the one between them. Left to itself the
+             card broke the name instead, and 1_Aman / Gupta reads as two
+             people until you look twice. */
           if (r.kind === 'night' && r.out) {
-            return '<div style="line-height:1.45;">' + (i + 1) + '_' + esc(r.name)
+            return '<div style="line-height:1.45;">'
+                 + '<span style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name) + '</span>'
                  + '<span style="white-space:nowrap;color:' + SOFT + ';font-size:9.5px;">'
                  +   ' (' + esc(clock(r['in'])) + ' → ' + esc(clock(r.out)) + ')'
                  +   (r.worked ? ' · ' + esc(r.worked) : '')
-                 + '</span>' + via
+                 + via
+                 + '</span>'
                  + '</div>';
           }
           return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)

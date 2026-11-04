@@ -55,16 +55,28 @@ const DAY = [
 {
   const html = build(DAY.concat([onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00')]));
   check('there is a card for people on nights', html.indexOf('On Night Shift') > -1, null);
+  {
+    /* A portal mark sits with the time it marks, so a wrap takes it to the
+       second line with the span rather than stranding it after the name. */
+    const p = build([onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00', 'portal')]);
+    check('a portal mark travels with the span, not the name',
+      /9:00<sup[^>]*>P<\/sup><\/span>/.test(p), null);
+  }
   check('and he is on it', html.indexOf('1_Aman Gupta') > -1, null);
   /* The whole night, because a night is a span and not a moment: when it
      began, when it ended, and how long it was. */
   check('it carries the night he worked, end to end',
     html.indexOf('(7:04 PM → 4:04 AM)') > -1, null);
   check('and how long it was', /\(7:04 PM → 4:04 AM\) · 9:00/.test(html), null);
-  /* The span may fall to a second line in a narrow card. It may not break in
-     the middle: half an arrow at the end of a line is worse than a wrap. */
-  check('and the span itself never breaks across a line',
-    /white-space:nowrap[^"]*"> \(7:04 PM → 4:04 AM\) · 9:00<\/span>/.test(html), null);
+  /* The line is longer than a narrow card, so it is allowed to wrap - in one
+     place only, the gap between the name and the span. Left to itself the
+     card broke the name instead, and 1_Aman / Gupta reads as two people. */
+  check('the name is held together',
+    /<span style="white-space:nowrap;">1_Aman Gupta<\/span>/.test(html), null);
+  check('and so is the span',
+    /white-space:nowrap[^"]*"> \(7:04 PM → 4:04 AM\) · 9:00/.test(html), null);
+  check('so the only place the line can break is between the two',
+    /<\/span><span style="white-space:nowrap;color:/.test(html), null);
   check('the slot says which night it was',
     html.indexOf('19:00-4:00 · last night') > -1, null);
 
