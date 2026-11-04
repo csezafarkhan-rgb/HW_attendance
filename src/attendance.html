@@ -2321,6 +2321,10 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .dof-eg{ flex:0 0 auto; margin-left:8pt; font-size:12pt; color:#777; }
 .dof-sigln{ position:absolute; left:84pt; font:11.04pt/1 Arial,Helvetica,sans-serif; }
 .dof-sigln.big{ font-size:12pt; }
+/* The approver's address, beside the name rather than under it: a line of
+   its own would push the company and the title down the page, and the
+   sheet is a fixed A4 with a printed foot waiting at the bottom. */
+.dof-sigln .dof-sigmail{ font-size:9.6pt; color:#333; }
 /* An approver's signature sits on its own line, where one would be signed. */
 .dof-sign{ position:absolute; max-height:30pt; max-width:150pt; }
 
@@ -14768,8 +14772,22 @@ function buildExcelBackup(){
        It is not a name, and the form read "Request Approved By: email" and
        signed off "Sincerely, email". */
     var byEmail = req.approvedBy === 'email';
-    var approver = byEmail ? 'Approved by email' : (req.approvedBy || '');
-    var signName = (byParts[0] || '').trim() || (byEmail ? '' : (req.approvedBy || ''));
+    /* An address is how an account is named in the record. It is not how a
+       person is named on a form somebody signs and files - "Request Approved
+       By: support@homeweavers.net" is a sentence about a mailbox.
+
+       So: the name they sign documents with, if they have set one; then the
+       employee the login belongs to; and only if neither is known, the address
+       itself, because something has to go on the line. */
+    var byAcct = byEmail ? '' : approverLabel(req.approvedBy);
+    if(byAcct && byAcct !== req.approvedBy) byAcct = dispName(byAcct);
+    var signName = (byParts[0] || '').trim() || byAcct || (byEmail ? '' : (req.approvedBy || ''));
+    var approver = byEmail ? 'Approved by email' : signName;
+    /* The address belongs in the sign-off even though it does not belong on
+       the approval line. The line above says who agreed to this; the sign-off
+       is what somebody holding the paper a year later writes to. */
+    var approverMail = (!byEmail && String(req.approvedBy || '').indexOf('@') > -1)
+      ? req.approvedBy : '';
     var signTitle = (byParts.slice(1).join(',') || '').trim();
 
     var sheet =
@@ -14824,7 +14842,14 @@ function buildExcelBackup(){
           : '')
 
       + '<div class="dof-sigln" style="top:726.2pt">Sincerely,</div>'
-      + (signName ? '<div class="dof-sigln" style="top:738.8pt">' + shotEsc(signName) + '</div>' : '')
+      + ((signName || approverMail)
+          ? ('<div class="dof-sigln" style="top:738.8pt">' + shotEsc(signName)
+             + ((approverMail && approverMail !== signName)
+                 ? ('<span class="dof-sigmail">' + (signName ? ' \u00b7 ' : '')
+                    + shotEsc(approverMail) + '</span>')
+                 : '')
+             + '</div>')
+          : '')
       + '<div class="dof-sigln big" style="top:751.7pt">' + shotEsc(coName || '') + '</div>'
       + (signTitle ? '<div class="dof-sigln big" style="top:765.5pt">' + shotEsc(signTitle) + '</div>' : '')
       + '</div></div>';

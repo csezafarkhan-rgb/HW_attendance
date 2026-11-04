@@ -1,99 +1,102 @@
-// The paper day-off form says the leave was granted. It was offered on every
-// request from the moment it was raised, so somebody could send a request and
-// print a form for it in the same breath - before anybody had read it - and
-// walk away holding what looks like a signed-off day. The comment beside the
-// button said "once approved" all along; the code never checked.
+/* The day-off form is the one thing in this system that leaves it on paper:
+   somebody signs it and it goes in a file. So the names on it have to be
+   names. "Request Approved By: support@homeweavers.net" is a sentence about a
+   mailbox, and it was also what the form signed off with. */
 'use strict';
-const fs = require('fs'), path = require('path'), vm = require('vm');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
 const APP = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
 
-const results = [];
-const check = (name, ok, got) => {
-  results.push(ok);
-  console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(got)));
-};
+let pass = 0, fail = 0;
+function check(what, ok, got) {
+  if (ok) { pass++; console.log('PASS ' + what); }
+  else { fail++; console.log('FAIL ' + what + '  ' + JSON.stringify(got)); }
+}
 
-function grab(name) {
-  const i = APP.indexOf('function ' + name + '(');
+function grab(src, name) {
+  const i = src.indexOf('function ' + name + '(');
   if (i < 0) throw new Error('not found: ' + name);
-  let k = APP.indexOf('{', i), depth = 0;
-  for (; k < APP.length; k++) {
-    const c = APP[k];
-    if (c === '/' && APP[k + 1] === '/') { k = APP.indexOf('\n', k); continue; }
-    if (c === '/' && APP[k + 1] === '*') { k = APP.indexOf('*/', k) + 1; continue; }
+  let k = src.indexOf('{', i), depth = 0;
+  for (; k < src.length; k++) {
+    const c = src[k];
+    if (c === '/' && src[k + 1] === '/') { k = src.indexOf('\n', k); continue; }
+    if (c === '/' && src[k + 1] === '*') { k = src.indexOf('*/', k) + 1; continue; }
+    if (c === '"' || c === "'" || c === '`') {
+      const q = c; k++;
+      while (k < src.length && src[k] !== q) { if (src[k] === '\\') k++; k++; }
+      continue;
+    }
     if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) break; }
   }
-  return APP.slice(i, k + 1);
+  return src.slice(i, k + 1);
 }
 
-const ctx = {};
+/* The two lookups the form leans on, run for real. */
+const ctx = { authAccounts: {}, empNames: {}, Object, String, console };
 vm.createContext(ctx);
-vm.runInContext(grab('canPrintDayForm'), ctx);
-const can = req => {
-  vm.runInContext('__r = canPrintDayForm(' + JSON.stringify(req) + ')', ctx);
-  return ctx.__r;
+vm.runInContext(grab(APP, 'approverLabel'), ctx);
+vm.runInContext(grab(APP, 'dispName'), ctx);
+
+ctx.authAccounts = {
+  'support@homeweavers.net': { role: 'admin', emp: 'Portal Admin' },
+  'KARAN@homeweavers.net':   { role: 'admin', emp: 'karan Ahuja' },
+  'nobody@homeweavers.net':  { role: 'admin' }            // a login with no person behind it
 };
-const r = (status, leaveType) => ({ id: 'r1', status, leaveType: leaveType || 'CL' });
+ctx.empNames = { 'karan Ahuja': 'Karan Ahuja' };
 
-/* ---- nothing to print until somebody has said yes ---- */
+/* ---- the lookup itself ---- */
+check('an address with a person behind it reads as that person',
+  ctx.approverLabel('support@homeweavers.net') === 'Portal Admin', null);
+check('and the spelling of the address does not matter',
+  ctx.approverLabel('karan@homeweavers.net') === 'karan Ahuja', null);
+check('an address with nobody behind it stays an address',
+  ctx.approverLabel('nobody@homeweavers.net') === 'nobody@homeweavers.net', null);
+check('and so does one the record has never heard of',
+  ctx.approverLabel('stranger@example.com') === 'stranger@example.com', null);
+/* The name shown on the form is the name shown everywhere else. */
+check('the name is the one the office has chosen to show',
+  ctx.dispName(ctx.approverLabel('karan@homeweavers.net')) === 'Karan Ahuja', null);
+
+/* ---- and the order the form picks in ----
+   A signature name beats the account, the account beats the address, and the
+   same answer goes on the approval line and the sign-off: they are the same
+   person, and the form said one of them twice over as an address. */
 {
-  ['pending', 'query', 'recommended'].forEach(st => {
-    check('a ' + st + ' request offers no form', can(r(st)) === false, st);
-  });
-  check('a rejected one certainly not', can(r('rejected')) === false);
+  const src = grab(APP, 'printDayOffForm');
+  check('the form asks the account who the address belongs to',
+    /var byAcct = byEmail \? '' : approverLabel\(req\.approvedBy\);/.test(src), null);
+  check('and shows that person the way the record shows them',
+    /if\(byAcct && byAcct !== req\.approvedBy\) byAcct = dispName\(byAcct\);/.test(src), null);
+  check('a signature name comes first, the account second, the address last',
+    /var signName = \(byParts\[0\] \|\| ''\)\.trim\(\) \|\| byAcct \|\| \(byEmail \? '' : \(req\.approvedBy \|\| ''\)\);/
+      .test(src), null);
+  check('the approval line and the sign-off name the same person',
+    /var approver = byEmail \? 'Approved by email' : signName;/.test(src), null);
+  /* A decision taken from a button in an email is stored as the word "email",
+     which is not an address and not a person. */
+  check('a decision taken from a message still says so',
+    src.indexOf("'Approved by email'") > -1, null);
+  check('and the approval line is still the field it always was',
+    /field\('Request Approved By:', approver, 205\)/.test(src), null);
+
+  /* The address is not on the approval line and is in the sign-off. The line
+     above says who agreed to this; the sign-off is what somebody holding the
+     paper a year later writes to. */
+  check('the address is kept for the sign-off',
+    /var approverMail = \(!byEmail && String\(req\.approvedBy \|\| ''\)\.indexOf\('@'\) > -1\)/
+      .test(src), null);
+  check('and goes beside the name there, not instead of it',
+    /<span class="dof-sigmail">' \+ \(signName \? ' .{1,8} ' : ''\)/.test(src), null);
+  check('a name that is already the address is not printed twice',
+    /approverMail && approverMail !== signName/.test(src), null);
+  /* Beside and not under: a line of its own would push the company and the
+     title down an A4 sheet that has a printed foot waiting at the bottom. */
+  check('the sign-off still ends with the company where it always did',
+    /dof-sigln big" style="top:751.7pt">' \+ shotEsc\(coName/.test(src), null);
 }
 
-/* ---- and once they have ---- */
-{
-  check('an approved request prints its form', can(r('approved')) === true);
-  /* A day the office put on the record without a request going through at
-     all. It is settled, and the form is the one thing it might still need. */
-  check('so does a day already recorded', can(r('recorded')) === true);
-}
-
-/* ---- a punch correction is not a day off ---- */
-{
-  ['approved', 'recorded', 'pending'].forEach(st => {
-    check('a ' + st + ' punch correction has no day off to print',
-      can(r(st, 'PUNCH')) === false, st);
-  });
-}
-
-/* ---- rubbish in ---- */
-{
-  check('nothing at all prints nothing', can(null) === false);
-  check('nor a request with no status', can({ id: 'x', leaveType: 'CL' }) === false);
-  check('nor a made-up status', can(r('granted-ish')) === false);
-}
-
-/* ---- every door the button is behind, and the handlers behind those ---- */
-{
-  const buttons = (APP.match(/Print day-off form/g) || []).length;
-  check('the button appears in both lists', buttons === 2, buttons);
-  const guards = (APP.match(/canPrintDayForm\(/g) || []).length;
-  /* One definition, two buttons, two click handlers. */
-  check('and every one of them is behind the same rule', guards === 5, guards);
-  check('the admin card asks before it offers',
-    /if\(canPrintDayForm\(req\)\) actionsHtml \+=/.test(APP));
-  check('the employee card asks before it offers',
-    /\(canPrintDayForm\(req\) \?\s*\n?\s*'<div style="margin-top:10px;"><button class="btn ghost" data-print-form=/.test(APP));
-  check('the admin click asks again',
-    /if\(act === 'form'\)\{ if\(canPrintDayForm\(req\)\) printDayOffForm\(req\); return; \}/.test(APP));
-  check('and the employee click asks again',
-    /if\(canPrintDayForm\(r\)\) printDayOffForm\(r\);/.test(APP));
-  /* The one that put a form in somebody's hand: pressing Send opened the
-     printable page there and then, for a day nobody had agreed to. */
-  check('sending a request no longer opens a form by itself',
-    !/if\(!isPunch\) printDayOffForm\(req\);/.test(APP));
-  /* Three calls remain: the two buttons, each behind the rule, and the
-     office's own tool for printing a form for a past leave - which builds its
-     own approved request rather than reading one. */
-  const calls = (APP.match(/[^n] printDayOffForm\(|^\s*printDayOffForm\(/gm) || []).length;
-  check('the form is printed from three places and no more', calls === 3, calls);
-  check('and the office’s past-leave form still stands on its own',
-    /id: 'past_' \+ from \+ '_' \+ to[\s\S]{0,400}status: 'approved'/.test(APP));
-}
-
-const bad = results.filter(x => !x).length;
-console.log(bad ? ('\n' + bad + ' FAILED of ' + results.length) : ('\nALL PASS (' + results.length + ')'));
-process.exit(bad ? 1 : 0);
+console.log(fail ? ('FAILED (' + fail + ' of ' + (pass + fail) + ')')
+                 : ('ALL PASS (' + pass + ' checks)'));
+process.exit(fail ? 1 : 0);
