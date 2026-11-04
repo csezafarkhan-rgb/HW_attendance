@@ -11307,6 +11307,40 @@ function buildExcelBackup(){
     if(box){ box.addEventListener('change', sayRequestDates);
              box.addEventListener('input', sayRequestDates); }
   });
+  /* Picked, never typed.
+
+     Typing into a date box is four numbers in an order the machine chooses
+     and never shows: 11/05 is the fifth of November here and the eleventh of
+     May on the next desk, and the person typing cannot tell which they got.
+     That is how a day in November was asked for in March.
+
+     A calendar has no such ambiguity - the month is written above the days -
+     so the keyboard is turned away from these boxes and a click opens the
+     calendar instead. The day it is holding is still said back underneath,
+     because the box itself still shows the four numbers. */
+  function pickOnly(id){
+    var box = document.getElementById(id);
+    if(!box) return;
+    /* showPicker wants a gesture behind it, and does not exist at all on
+       older browsers. Where it cannot be opened the box is left as it was:
+       a date box nobody can type in AND nobody can open is worse than one
+       that can be typed in. */
+    var canOpen = typeof box.showPicker === 'function';
+    if(!canOpen) return;
+    var open = function(){ try{ box.showPicker(); }catch(e){} };
+    box.addEventListener('keydown', function(e){
+      /* Tab still moves on and Escape still shuts the calendar: turning the
+         keyboard away must not trap somebody in the box. Enter sends the
+         form, so it is left to do that. */
+      if(e.key === 'Tab' || e.key === 'Escape' || e.key === 'Enter') return;
+      e.preventDefault();
+    });
+    box.addEventListener('click', open);
+    /* And for somebody who arrived by Tab rather than by clicking. */
+    box.addEventListener('focus', open);
+    box.setAttribute('title', 'Pick the day from the calendar');
+  }
+  ['reqDateFrom','reqDateTo','reqReturn'].forEach(pickOnly);
   document.getElementById('requestModalClose').addEventListener('click', function(){
     requestModalOverlay.classList.remove('open');
   });

@@ -166,5 +166,28 @@ check('worked out at the office’s own hour, not the server’s',
 check('both sides count the same number of days back',
   /const REQ_BACK_DAYS = 30;/.test(SRV) && /var REQ_BACK_DAYS = 30;/.test(APP), null);
 
+/* ---- and the day is picked, never typed ----
+   The box still shows four numbers in whatever order the machine chose, and
+   the person typing cannot tell which order that is. A calendar writes the
+   month above the days, so there is nothing to get round the wrong way. */
+check('the keyboard is turned away from the date boxes',
+  /box\.addEventListener\('keydown', function\(e\)\{/.test(APP)
+  && /e\.preventDefault\(\);/.test(APP), null);
+check('but Tab and Escape still work, so nobody is trapped in one',
+  /if\(e\.key === 'Tab' \|\| e\.key === 'Escape' \|\| e\.key === 'Enter'\) return;/.test(APP), null);
+check('a click opens the calendar instead',
+  /box\.addEventListener\('click', open\);/.test(APP)
+  && /box\.showPicker\(\);/.test(APP), null);
+check('and arriving by Tab opens it too',
+  /box\.addEventListener\('focus', open\);/.test(APP), null);
+check('where the calendar cannot be opened the box is left typeable',
+  /if\(!canOpen\) return;/.test(APP), null);
+check('all three date boxes on the request form are pick-only',
+  /\['reqDateFrom','reqDateTo','reqReturn'\]\.forEach\(pickOnly\);/.test(APP), null);
+/* The floor is still on the box, so the calendar greys out what it refuses
+   rather than letting somebody pick a day the form will then turn down. */
+check('and the calendar itself will not offer a day below the floor',
+  /if\(box\) box\.min = floor;/.test(APP), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
