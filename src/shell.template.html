@@ -68,6 +68,9 @@
 .um-sqrow input{padding:8px 11px;font:500 12.5px 'Inter',sans-serif;border:1px solid rgba(120,140,180,.4);border-radius:10px;background:rgba(255,255,255,.85);outline:none;flex:1 1 200px;}
 .um-flash-ok{display:block !important;margin-top:8px;padding:9px 12px;border-radius:10px;background:rgba(46,190,120,.16) !important;border:1px solid rgba(46,190,120,.45) !important;color:#177A4B !important;font-size:12.5px;font-weight:600;}
 .um-count{margin:0 0 10px;font-size:11.5px;font-weight:700;color:#5B6472;letter-spacing:.3px;text-transform:uppercase;padding:0 2px;}
+.um-warn{margin:0 0 12px;padding:10px 12px;border-radius:12px;background:#FFF4E2;border:1px solid #F0D29A;color:#7A5212;font-size:12px;line-height:1.55;}
+.um-warn b{display:block;margin-bottom:3px;font-size:12.5px;}
+.um-dupe{font-size:10.5px;font-weight:700;color:#8A5A12;background:#FDEBCB;border-radius:8px;padding:2px 8px;}
 .um-row.um-hi{animation:umhi 2.6s ease;border-color:rgba(59,125,245,.55);box-shadow:0 8px 22px rgba(59,125,245,.28);}
 @keyframes umhi{0%,15%{background:rgba(59,125,245,.22);}100%{background:rgba(255,255,255,.6);}}
 #lgOk{display:none;margin:0 0 12px;padding:9px 12px;border-radius:11px;background:rgba(46,190,120,.14);border:1px solid rgba(46,190,120,.4);color:#177A4B;font-size:12px;font-weight:600;text-align:center;}
@@ -2698,12 +2701,61 @@ function _initLoginGateReal(startWorkspace){
       list.innerHTML = '';
       var count = document.createElement('div'); count.className='um-count';
       count.textContent = users.length + ' user' + (users.length===1?'':'s') + ' total'; list.appendChild(count);
+
+      /* Two active accounts under one name.
+
+         An employee's own address is found by their name, and where two
+         accounts answer to it the lookup takes the lower id and says nothing.
+         So their leave mail - the copy of their own request, and the word
+         that it has been decided - goes to whichever account was made first,
+         and the person it is about never sees it. Nothing errors; it simply
+         arrives somewhere else.
+
+         Worth saying out loud here, because this is the page where a name is
+         typed and the only page that can see both of them at once. */
+      var byName = {};
+      users.forEach(function(u){
+        if(u.is_active === false) return;
+        var k = String(u.name || '').trim().toLowerCase();
+        if(!k) return;
+        (byName[k] = byName[k] || []).push(u);
+      });
+      var clashes = Object.keys(byName).filter(function(k){ return byName[k].length > 1; });
+      if(clashes.length){
+        var warn = document.createElement('div'); warn.className='um-warn';
+        var t = document.createElement('b');
+        t.textContent = clashes.length === 1
+          ? 'Two accounts share one name'
+          : (clashes.length + ' names are on more than one account');
+        warn.appendChild(t);
+        clashes.forEach(function(k){
+          var who = byName[k];
+          /* Lowest id wins, which is the one the mail actually reaches. */
+          var wins = who.slice().sort(function(a,b){ return a.id - b.id; })[0];
+          var line = document.createElement('div');
+          line.textContent = '\u201c' + (who[0].name || '') + '\u201d is on '
+            + who.map(function(u){ return u.email; }).join(' and ')
+            + ' \u2014 leave mail for them goes to ' + wins.email + ' only.';
+          warn.appendChild(line);
+        });
+        var fix = document.createElement('div');
+        fix.style.marginTop = '5px';
+        fix.textContent = 'Give one of them a different name, or switch the spare account off.';
+        warn.appendChild(fix);
+        list.appendChild(warn);
+      }
       users.forEach(function(u){
         var row=document.createElement('div'); row.className='um-row';
         var head=document.createElement('div'); head.className='um-head';
         var b=document.createElement('b'); b.textContent=u.email; head.appendChild(b);
         if(window.HWAuth && window.HWAuth.user && window.HWAuth.user.id===u.id){ var you=document.createElement('span'); you.className='um-you'; you.textContent='you'; head.appendChild(you); }
         var stat=document.createElement('span'); stat.className='um-rec'; stat.textContent=(u.is_active?'Active':'Disabled'); head.appendChild(stat);
+        /* So the warning above can be acted on without counting rows. */
+        if(u.is_active !== false && clashes.indexOf(String(u.name || '').trim().toLowerCase()) > -1){
+          var dup=document.createElement('span'); dup.className='um-dupe';
+          dup.textContent='name shared'; dup.title='Another active account has this name';
+          head.appendChild(dup);
+        }
         var role=document.createElement('select'); role.className='um-role';
         [['employee','Employee'],['admin_view','View Admin — read only'],['admin','Super Admin — full access']]
           .forEach(function(x){ var o=document.createElement('option'); o.value=x[0]; o.textContent=x[1]; if(u.role===x[0]) o.selected=true; role.appendChild(o); });

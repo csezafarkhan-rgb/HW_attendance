@@ -341,5 +341,36 @@ check('the form shows it, and hides it when there is nothing to show',
 check('and says it again when the kind changes, because the kind sets the cost',
   /if\(typeof sayRequestDates === 'function'\) sayRequestDates\(\);/.test(APP), null);
 
+/* ---- two active accounts under one name ----
+   An employee's own address is found by their name, and where two accounts
+   answer to it the lookup takes the lower id and says nothing. Their leave
+   mail then goes to whichever account was made first and the person it is
+   about never sees it - nothing errors, it simply arrives somewhere else.
+   The Users page is where a name is typed and the only page that can see
+   both accounts at once, so it says so there. */
+const SHELL = fs.readFileSync(path.join(REPO, 'src', 'shell.template.html'), 'utf8');
+check('the address is found by name, lowest id winning silently',
+  /lower\(COALESCE\(name, ''\)\) = lower\(\$2\) ORDER BY id LIMIT 1/.test(SRV), null);
+check('the users page gathers the active accounts by name',
+  /var byName = \{\};/.test(SHELL)
+  && /if\(u\.is_active === false\) return;/.test(SHELL), null);
+check('a name on more than one active account is a clash',
+  /var clashes = Object\.keys\(byName\)\.filter\(function\(k\)\{ return byName\[k\]\.length > 1; \}\);/
+    .test(SHELL), null);
+check('and the warning names the account the mail actually reaches',
+  /var wins = who\.slice\(\)\.sort\(function\(a,b\)\{ return a\.id - b\.id; \}\)\[0\];/.test(SHELL)
+  && /leave mail for them goes to ' \+ wins\.email \+ ' only\./.test(SHELL), null);
+check('it says what to do about it',
+  /Give one of them a different name, or switch the spare account off\./.test(SHELL), null);
+check('and the rows themselves are flagged, so it can be acted on',
+  /dup\.textContent='name shared';/.test(SHELL), null);
+/* A disabled account is not in the running for the lookup, so sharing a name
+   with one is not a clash and must not be cried over. */
+check('a disabled account sharing a name is not a clash',
+  /if\(u\.is_active === false\) return;/.test(SHELL)
+  && /u\.is_active !== false && clashes\.indexOf/.test(SHELL), null);
+check('nor is a blank name, which is not a name at all',
+  /if\(!k\) return;/.test(SHELL), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
