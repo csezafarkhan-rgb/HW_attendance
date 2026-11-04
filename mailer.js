@@ -192,8 +192,12 @@ function layout(title, subtitle, blocks) {
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F3F6FB" '
     +   'style="background:#F3F6FB;padding:24px 12px;">'
     + '<tr><td align="center">'
-    + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" bgcolor="#ffffff" '
-    +   'style="width:640px;max-width:100%;background:#fff;'
+    /* 640 was the old safe width for a mail client, and the cards have
+       outgrown it: three of them across that leaves each about two hundred
+       pixels, which is a name and a time and nothing more. 720 is still
+       inside what every client handles, and max-width keeps a phone honest. */
+    + '<table role="presentation" width="720" cellpadding="0" cellspacing="0" bgcolor="#ffffff" '
+    +   'style="width:720px;max-width:100%;background:#fff;'
     +   'border:1px solid ' + LINE + ';border-radius:14px;overflow:hidden;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
     + '<tr><td bgcolor="' + INK + '" style="padding:18px 22px;background:' + INK + ';color:#fff;">'
     +   '<div style="font-size:16px;font-weight:700;letter-spacing:.2px;">' + esc(title) + '</div>'
@@ -683,11 +687,19 @@ function dailyEmail(o) {
         });
         return most + 14;                            // padding, border, breathing
       };
-      /* Nothing may be squeezed to nothing, so a floor first and the shares
-         worked out again around it. */
+      /* Half by what each asks for, half by an equal share.
+
+         Purely by need, a card holding nothing but short names shrank until
+         its own heading broke over two lines, while the long cards were given
+         more than their longest line used and stood empty down the right.
+         Purely equal is where this started. Between the two, every card is
+         wide enough for its longest line and none of them is a sliver. */
       const needs = kinds.map(needOf);
       const asked = needs.reduce(function (a, b) { return a + b; }, 0) || 1;
-      const floored = needs.map(function (n) { return Math.max(14, n / asked * 100); });
+      const even = 100 / kinds.length;
+      const mixed = needs.map(function (n) { return (n / asked * 100 + even) / 2; });
+      /* And nothing below a floor, with the rest worked out again around it. */
+      const floored = mixed.map(function (s) { return Math.max(18, s); });
       const given = floored.reduce(function (a, b) { return a + b; }, 0) || 1;
       const share = floored.map(function (s) { return Math.floor(s / given * 100); });
       const cells = kinds.map(function (k, idx) {

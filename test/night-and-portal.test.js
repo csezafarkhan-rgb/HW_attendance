@@ -133,9 +133,11 @@ const DAY = [
 
   /* A heading can wrap and a line cannot, so a long heading does not take
      the room off the lines underneath it. Not Reached Office is eighteen
-     characters over three words, and asks for the longest of the three. */
+     characters over three words and asks for the longest of the three, so it
+     stays the narrower of the two even against a card headed Present - which
+     holds a longer line, being a name with an hour after it. */
   check('a long heading does not buy width the lines need',
-    shortNames['Not Reached Office'] < 45, shortNames);
+    shortNames['Not Reached Office'] < shortNames['Present'], shortNames);
 }
 
 /* A night nobody was on puts no empty card on the message. */
