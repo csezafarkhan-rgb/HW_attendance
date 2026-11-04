@@ -46,6 +46,8 @@ vm.createContext(ctx);
  /const IST_MS = [^\n]*/, /const REQ_BACK_DAYS = [^\n]*/]
   .forEach(re => { const m = re.exec(SRV); if (!m) throw new Error('not found: ' + re); vm.runInContext(m[0], ctx); });
 vm.runInContext(grab(SRV, 'isPlainObject'), ctx);
+/* The save path asks this how far back a request may reach. */
+vm.runInContext(grab(SRV, 'backDaysOf'), ctx);
 vm.runInContext(grab(SRV, 'mergeEmployeeRequests'), ctx);
 
 const NAME = 'Keshav Garg';

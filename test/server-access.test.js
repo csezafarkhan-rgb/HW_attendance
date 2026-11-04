@@ -49,6 +49,11 @@ function query(sql, p) {
   if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'lockedMonths' AND user_id IS NULL")) {
     const r = kvFind(p[0], 'lockedMonths', null); return rows(r ? [{ value: r.value }] : []);
   }
+  /* Saving a request now asks how far back one may reach, which is a setting
+     on the Leave card. Nothing here sets it, so the office's default stands. */
+  if (s.startsWith("SELECT value FROM kv WHERE org_id = $1 AND key = 'mailSettings' AND user_id IS NULL")) {
+    const r = kvFind(p[0], 'mailSettings', null); return rows(r ? [{ value: r.value }] : []);
+  }
   if (s.startsWith('SELECT pg_database_size')) {
     return rows([{ size: '41943040', version: '18.1', name: 'hw_attendance' }]);
   }

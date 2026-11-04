@@ -162,8 +162,12 @@ check('and tells them to look at the month',
 check('the server will not take one either',
   /if \(r\.dateFrom < floor\) return;/.test(SRV), null);
 check('worked out at the office’s own hour, not the server’s',
-  /const floor = new Date\(Date\.now\(\) \+ IST_MS - REQ_BACK_DAYS \* 86400000\)/.test(SRV), null);
-check('both sides count the same number of days back',
+  /const floor = new Date\(Date\.now\(\) \+ IST_MS - backDaysOf\(backDays\) \* 86400000\)/.test(SRV),
+  null);
+/* Thirty is only what an office that has never opened the card gets. Both
+   sides fall back to the same thirty, so an unset office and a page that has
+   not read the setting yet agree rather than differing by a silent default. */
+check('both sides fall back to the same number of days',
   /const REQ_BACK_DAYS = 30;/.test(SRV) && /var REQ_BACK_DAYS = 30;/.test(APP), null);
 
 /* ---- and the day is picked, never typed ----
@@ -188,6 +192,79 @@ check('all three date boxes on the request form are pick-only',
    rather than letting somebody pick a day the form will then turn down. */
 check('and the calendar itself will not offer a day below the floor',
   /if\(box\) box\.min = floor;/.test(APP), null);
+
+/* ---- the day-off form gets the same boxes, and keeps its old days ----
+   It is the admin's form for leave already taken, so it is written by hand
+   about days gone by - the same four numbers in the same unknowable order,
+   and this one writes straight onto the record. What it must NOT get is the
+   thirty-day floor: old days are the whole of its job. */
+check('the day-off form says its dates back in words too',
+  /id="pfSayFrom"/.test(APP) && /id="pfSayTo"/.test(APP) && /id="pfSayReturn"/.test(APP), null);
+check('and its boxes are picked rather than typed',
+  /\['pfFrom','pfTo','pfReturn'\]\.forEach\(function\(id\)\{[\s\S]{0,320}pickOnly\(id\);/.test(APP),
+  null);
+check('it says them as soon as it opens, not only once something is changed',
+  /if\(typeof sayPastFormDates === 'function'\) sayPastFormDates\(\);/.test(APP), null);
+/* The floor belongs to the request form alone. If it ever reached this one,
+   the form for past leave would refuse the past. */
+check('no floor is put on the day-off form',
+  !/pfFrom[^\n]*\.min = floor/.test(APP) && !/\['pfFrom','pfTo'\][^\n]*\.min/.test(APP), null);
+check('the floor is still set on the request form, and only there',
+  (APP.match(/\.min = floor;/g) || []).length === 1
+  && /\['reqDateFrom','reqDateTo'\]\.forEach\(function\(id\)\{[\s\S]{0,120}box\.min = floor;/.test(APP),
+  null);
+/* Both forms lean on the same two helpers rather than each having its own. */
+check('both forms say the day the same way',
+  (APP.match(/dayInWords\(/g) || []).length >= 4, null);
+
+/* ---- the calendar opens once per click ----
+   A click arrives twice, as focus and then as click. Opening on both shut the
+   calendar the first call had just opened, and with the keyboard turned away
+   there was nothing else left to do with the box. */
+check('an opening is guarded, so the second event does not shut the first',
+  /var opening = false, fromIcon = false;/.test(APP)
+  && /if\(opening \|\| fromIcon\) return;/.test(APP)
+  && /setTimeout\(function\(\)\{ opening = false; \}, 400\);/.test(APP), null);
+/* The box draws its own calendar icon and the browser opens from it unasked.
+   Asking again on top of that shut what it had just opened. */
+check('the icon is left to do its own job',
+  /var onTheIcon = function\(e\)\{/.test(APP)
+  && /return \(r\.right - e\.clientX\) <= 34;/.test(APP)
+  && /if\(!fromIcon\) open\(\);/.test(APP), null);
+check('and where the icon is, is measured off the box rather than assumed',
+  /var r = box\.getBoundingClientRect\(\);/.test(APP), null);
+check('every way in is still listened for',
+  /box\.addEventListener\('mousedown', function\(e\)\{/.test(APP)
+  && /box\.addEventListener\('click', open\);/.test(APP)
+  && /box\.addEventListener\('focus', open\);/.test(APP), null);
+
+/* ---- how far back is the office's to set ---- */
+check('the leave card carries the number',
+  /id="emLvBack"/.test(APP), null);
+check('and saving the card saves it',
+  /backDays: parseInt\(\(document\.getElementById\('emLvBack'\) \|\| \{\}\)\.value, 10\) \|\| 30/.test(APP),
+  null);
+check('the server keeps it inside sane bounds',
+  /function backDaysOf\(v\) \{/.test(SRV)
+  && /return n > 0 \? Math\.max\(1, Math\.min\(365, n\)\) : REQ_BACK_DAYS;/.test(SRV), null);
+check('it is read onto the leave settings',
+  /backDays: backDaysOf\(lv\.backDays\)/.test(SRV), null);
+check('the save path is handed the number rather than holding one',
+  /function mergeEmployeeRequests\(storedValue, incomingValue, name, selfKinds, backDays\) \{/.test(SRV)
+  && /backDaysOf\(backDays\) \* 86400000/.test(SRV), null);
+check('and the call site reads it from the office\u2019s own settings',
+  /\(await mailSettings\(req\.session\.orgId\)\)\.leave\.backDays\);/.test(SRV), null);
+/* An employee has to obey it, so they are allowed to read it - and only it,
+   because the rest of that key is addresses. */
+check('an employee may read the number',
+  /'leaveRequests', 'signatures', 'mailSettings'\]/.test(SRV), null);
+check('and is handed that field alone, not the addresses around it',
+  /return JSON\.stringify\(\{ leave: \{ backDays: backDaysOf\(lv\.backDays\) \} \}\);/.test(SRV), null);
+check('the form asks for it rather than holding thirty',
+  /function loadRequestWindow\(\)\{/.test(APP)
+  && /loadRequestWindow\(\)\.then\(applyFloor\);/.test(APP), null);
+check('and the floor is worked out again each time the form opens',
+  /var applyFloor = function\(\)\{/.test(APP), null);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

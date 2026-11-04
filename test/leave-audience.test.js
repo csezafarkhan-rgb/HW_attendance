@@ -220,8 +220,12 @@ const sorted = a => a.slice().sort();
     /if \(\(selfKinds \|\| \[\]\)\.indexOf\(String\(r\.leaveType \|\| ''\)\.toUpperCase\(\)\) > -1\) return;/
       .test(grab(SRV, 'mergeEmployeeRequests')), null);
   check('and is told which those are rather than deciding for itself',
-    /mergeEmployeeRequests\(stored, value, \(req\.user && req\.user\.name\) \|\| '',\s*selfKindsOf\(await leavePolicy\(req\.session\.orgId\)\)\)/
+    /mergeEmployeeRequests\(stored, value, \(req\.user && req\.user\.name\) \|\| '',\s*selfKindsOf\(await leavePolicy\(req\.session\.orgId\)\),/
       .test(SRV), null);
+  /* And how far back it may reach, which is the office's to set rather than
+     the save path's to assume. */
+  check('and told how far back a request may reach, for the same reason',
+    /\(await mailSettings\(req\.session\.orgId\)\)\.leave\.backDays\);/.test(SRV), null);
   check('the route that grants one refuses a kind that is asked for',
     /if \(kind && \(await leavePolicy\(orgId\)\)\[kind\] !== 'self'\)/.test(grab(SRV, 'takePartDay')), null);
   check('anything already asked for before still stands',

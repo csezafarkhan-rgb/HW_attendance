@@ -204,7 +204,8 @@ const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
                       /* Their own card has to know which parts of a day it may offer,
                          and the answer is the office's rather than the page's. */
                       'leavePolicy'];
-const EMP_VISIBLE_KEYS = EMP_KEYED_BY_DAY.concat(EMP_KEYED_BY_NAME, EMP_READABLE, ['leaveRequests', 'signatures']);
+const EMP_VISIBLE_KEYS = EMP_KEYED_BY_DAY.concat(EMP_KEYED_BY_NAME, EMP_READABLE,
+                                                 ['leaveRequests', 'signatures', 'mailSettings']);
 
 function parseJson(s) { try { return JSON.parse(s); } catch (e) { return undefined; } }
 function ownRequests(value, name) {
@@ -216,6 +217,15 @@ function ownRequests(value, name) {
    their own approved day-off forms print with. */
 function valueForEmployee(key, value, name, requestsValue) {
   if (EMP_READABLE.indexOf(key) > -1) return value;
+  /* The mail settings are the office's, and most of them are addresses that
+     are none of an employee's business. One number in there is: how far back
+     their own request form may reach. So they are handed that and nothing
+     else - a window onto one field rather than the key. */
+  if (key === 'mailSettings') {
+    const v = parseJson(value);
+    const lv = (isPlainObject(v) && isPlainObject(v.leave)) ? v.leave : {};
+    return JSON.stringify({ leave: { backDays: backDaysOf(lv.backDays) } });
+  }
   if (key === 'leaveRequests') return JSON.stringify(ownRequests(value, name));
   const byDay = EMP_KEYED_BY_DAY.indexOf(key) > -1, byName = EMP_KEYED_BY_NAME.indexOf(key) > -1;
   if (byDay || byName || key === 'signatures') {
@@ -630,8 +640,14 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
    Read through here rather than used raw, so a key somebody has edited by
    hand, or has never written at all, still answers with something sane. */
 const SELF_ABLE_KINDS = ['SHORT', 'HALF'];
-/* How far back a request may reach, in days. The same number the page uses. */
+/* How far back a request may reach, in days, where the office has not said.
+   It is theirs to set on the Leave card; this is only what an office that has
+   never opened it gets. */
 const REQ_BACK_DAYS = 30;
+function backDaysOf(v) {
+  const n = Math.floor(Number(v));
+  return n > 0 ? Math.max(1, Math.min(365, n)) : REQ_BACK_DAYS;
+}
 const LEAVE_POLICY_DEFAULT = { SHORT: 'self', HALF: 'approval' };
 function leavePolicyOf(value) {
   const v = parseJson(value);
@@ -650,7 +666,7 @@ async function leavePolicy(orgId) {
   return leavePolicyOf(kv.leavePolicy);
 }
 const EMP_CANCELLABLE = ['pending', 'query', 'recommended'];
-function mergeEmployeeRequests(storedValue, incomingValue, name, selfKinds) {
+function mergeEmployeeRequests(storedValue, incomingValue, name, selfKinds, backDays) {
   const incoming = parseJson(incomingValue);
   if (!Array.isArray(incoming)) return null;
   const parsed = parseJson(storedValue);
@@ -664,13 +680,13 @@ function mergeEmployeeRequests(storedValue, incomingValue, name, selfKinds) {
     if (!cur) {
       if (!/^req_[A-Za-z0-9_]{1,60}$/.test(r.id)) return;
       if (!DAY_RE.test(r.dateFrom) || !DAY_RE.test(r.dateTo) || r.dateTo < r.dateFrom) return;
-      /* Nothing from further back than a month. The page says so and stops
-         it there; this is the same rule where it cannot be edited out, and
-         it is the rule that catches a date typed by hand with the day and
-         the month the wrong way round - 11/03 for 3/11 lands eight months
-         ago rather than a week out, which is too far wrong to be a date
-         somebody meant. */
-      const floor = new Date(Date.now() + IST_MS - REQ_BACK_DAYS * 86400000)
+      /* Nothing from further back than the office allows. The page says so
+         and stops it there; this is the same rule where it cannot be edited
+         out, and it is the rule that catches a date typed by hand with the
+         day and the month the wrong way round - 11/03 for 3/11 lands eight
+         months ago rather than a week out, which is too far wrong to be a
+         date somebody meant. */
+      const floor = new Date(Date.now() + IST_MS - backDaysOf(backDays) * 86400000)
         .toISOString().slice(0, 10);
       if (r.dateFrom < floor) return;
       if (!/^[A-Za-z]{1,16}$/.test(String(r.leaveType || ''))) return;
@@ -1455,7 +1471,8 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         const stored = row ? row.value : '[]';
         if (req.session.role === 'employee') {
           const merged = mergeEmployeeRequests(stored, value, (req.user && req.user.name) || '',
-                                               selfKindsOf(await leavePolicy(req.session.orgId)));
+                                               selfKindsOf(await leavePolicy(req.session.orgId)),
+                                               (await mailSettings(req.session.orgId)).leave.backDays);
           if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_requests' }); }
           value = merged;
         } else {
@@ -2353,7 +2370,12 @@ async function mailSettings(orgId) {
        than worked out from who is named already, so that nominating somebody
        and then naming them are two steps and neither surprises the other. */
     approvers: (Array.isArray(lv.approvers) ? lv.approvers : []).map(x => String(x).trim().toLowerCase())
-      .filter(x => EMAIL_RE.test(x)).slice(0, 20)
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    /* How far back somebody may ask for leave. A day typed by hand with the
+       day and the month the wrong way round lands months away rather than
+       days, so there is a limit; how long it should be is the office's to
+       say, not ours. */
+    backDays: backDaysOf(lv.backDays)
   };
   const ex = isPlainObject(s.excused) ? s.excused : {};
   s.excused = {

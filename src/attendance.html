@@ -4345,9 +4345,14 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     </div>
     <div class="modal-body">
       <div class="gate-field"><label>Employee</label><select id="pfEmp"></select></div>
-      <div class="gate-field"><label>From date</label><input type="date" id="pfFrom"/></div>
-      <div class="gate-field"><label>To date</label><input type="date" id="pfTo"/></div>
-      <div class="gate-field"><label>Returning to work on</label><input type="date" id="pfReturn"/></div>
+      <!-- Typed by hand these are four numbers in an order the machine never
+           shows, exactly as on the request form - and this one writes
+           straight onto the record. Picked from the calendar, and said back
+           in words underneath. No floor here: this form exists for days
+           already gone, which is the whole of its job. -->
+      <div class="gate-field"><label>From date</label><input type="date" id="pfFrom"/><div class="gate-say" id="pfSayFrom"></div></div>
+      <div class="gate-field"><label>To date</label><input type="date" id="pfTo"/><div class="gate-say" id="pfSayTo"></div></div>
+      <div class="gate-field"><label>Returning to work on</label><input type="date" id="pfReturn"/><div class="gate-say" id="pfSayReturn"></div></div>
       <div class="gate-field"><label>Type</label>
         <select id="pfType">
           <option value="CL">Casual Leave (CL)</option>
@@ -11215,13 +11220,18 @@ function buildExcelBackup(){
     var rr = document.getElementById('reqReturn');
     if(rr){ rr.dataset.touched = ''; rr.value = returnDate(todayISO_full, viewRole && viewRole.name); }
     /* Worked out as it opens, not once at boot: a page left open overnight
-       would otherwise still be offering yesterday's floor. */
-    var floor = earliestRequestDay();
-    ['reqDateFrom','reqDateTo'].forEach(function(id){
-      var box = document.getElementById(id);
-      if(box) box.min = floor;
-    });
-    sayRequestDates();
+       would otherwise still be offering yesterday's floor - and the office
+       may have changed how far back it reaches since the page was loaded. */
+    var applyFloor = function(){
+      var floor = earliestRequestDay();
+      ['reqDateFrom','reqDateTo'].forEach(function(id){
+        var box = document.getElementById(id);
+        if(box) box.min = floor;
+      });
+      sayRequestDates();
+    };
+    applyFloor();
+    loadRequestWindow().then(applyFloor);
     document.getElementById('reqErr').classList.remove('show');
     requestModalOverlay.classList.add('open');
   });
@@ -11279,7 +11289,18 @@ function buildExcelBackup(){
      rather than days, so the floor catches the mistake this is here to catch
      - and a day off asked for last March is not a day off anybody can still
      grant or refuse. */
+  /* What the office set on the Leave card. Thirty until it has been read,
+     and the server holds the same rule anyway - this is the form being
+     helpful, not the form being the authority. */
   var REQ_BACK_DAYS = 30;
+  function loadRequestWindow(){
+    return storage.get('mailSettings', true).then(function(res){
+      var v = null;
+      if(res && res.value){ try{ v = JSON.parse(res.value); }catch(e){ v = null; } }
+      var n = v && v.leave ? Math.floor(Number(v.leave.backDays)) : 0;
+      if(n > 0) REQ_BACK_DAYS = Math.max(1, Math.min(365, n));
+    }).catch(function(){});
+  }
   function earliestRequestDay(){
     var d = new Date();
     d.setDate(d.getDate() - REQ_BACK_DAYS);
@@ -11327,7 +11348,44 @@ function buildExcelBackup(){
        that can be typed in. */
     var canOpen = typeof box.showPicker === 'function';
     if(!canOpen) return;
-    var open = function(){ try{ box.showPicker(); }catch(e){} };
+    /* One opening per interaction, and none at all on the icon.
+
+       Two different things were shutting the calendar as fast as it opened.
+
+       A click on the box arrives more than once - as focus, and then as
+       click - and showPicker on the second shuts what the first opened. A
+       calendar that opens and closes inside one click is a calendar that
+       never opens, which is what it looked like with the keyboard turned
+       away and nothing else left to do.
+
+       And the box already has a calendar icon of its own at the trailing
+       edge, which the browser opens from without being asked. Asking again
+       on top of that shut it just the same. So the icon is left to do its
+       own job, and only a click on the part showing the numbers opens the
+       calendar by hand.
+
+       Every way in is still listened for, because a click is not the only
+       one: somebody arriving by Tab gets no click at all. What changed is
+       that they agree on who opens it. */
+    var opening = false, fromIcon = false;
+    var open = function(){
+      if(opening || fromIcon) return;
+      opening = true;
+      setTimeout(function(){ opening = false; }, 400);
+      try{ box.showPicker(); }catch(e){}
+    };
+    /* The icon sits at the trailing edge of the box. Measured off the box
+       rather than assumed, so it holds wherever the box ends up. */
+    var onTheIcon = function(e){
+      var r = box.getBoundingClientRect();
+      return (r.right - e.clientX) <= 34;
+    };
+    box.addEventListener('mousedown', function(e){
+      fromIcon = onTheIcon(e);
+      /* Long enough to cover the focus and click that follow this press. */
+      setTimeout(function(){ fromIcon = false; }, 400);
+      if(!fromIcon) open();
+    });
     box.addEventListener('keydown', function(e){
       /* Tab still moves on and Escape still shuts the calendar: turning the
          keyboard away must not trap somebody in the box. Enter sends the
@@ -12999,6 +13057,19 @@ function buildExcelBackup(){
       + '<label class="em-row"><input type="checkbox" id="emConfirm"'
       +   (((s.leave || {}).confirm !== false) ? ' checked' : '') + '>'
       +   '<span>Tell the employee once their leave is decided</span></label>'
+      /* How far back the request form may reach. Here rather than hidden in
+         the page, because how long an office will still answer for is the
+         office's business - a factory closing its month on the 5th is not a
+         desk that will take last March. */
+      + '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
+      +   'How far back leave may be asked for</div>'
+      + '<div class="em-row em-indent"><input type="text" id="emLvBack" value="'
+      +   mailEscape(String((s.leave || {}).backDays == null ? 30 : (s.leave || {}).backDays))
+      +   '" size="3"><span>days back, counting today</span></div>'
+      + '<div class="em-row" style="font-size:10.5px;color:var(--ink-dim);line-height:1.5;">'
+      +   'Older days are refused on the form and on the server, and the '
+      +   'calendar will not offer them. The day-off form for leave already '
+      +   'taken is not limited by this.</div>'
       + '</div>'
           /* What everybody wrote they did, gathered into one message. Laid out
              the way the other tabs are - boxes in rows, the wording it comes
@@ -13609,7 +13680,8 @@ function buildExcelBackup(){
           subject: document.getElementById('emLvSubject').value.trim(),
           intro: document.getElementById('emLvIntro').value,
           footer: document.getElementById('emLvFooter').value,
-          confirm: !!(document.getElementById('emConfirm') || {}).checked
+          confirm: !!(document.getElementById('emConfirm') || {}).checked,
+          backDays: parseInt((document.getElementById('emLvBack') || {}).value, 10) || 30
         },
         month: {
           to: list('emMoTo'), cc: list('emMoCc'),
@@ -15398,6 +15470,7 @@ function buildExcelBackup(){
       if($$('pfReason')) $$('pfReason').value = '';
       if($$('pfApprover')) $$('pfApprover').value = (viewRole && viewRole.username) || '';
       if($$('pfErr')) $$('pfErr').classList.remove('show');
+      if(typeof sayPastFormDates === 'function') sayPastFormDates();
       ov.classList.add('open');
     });
     if($$('pastFormClose')) $$('pastFormClose').addEventListener('click', function(){ ov.classList.remove('open'); });
@@ -15406,6 +15479,24 @@ function buildExcelBackup(){
       if($$(id)) $$(id).addEventListener('change', syncReturn);
     });
     if($$('pfReturn')) $$('pfReturn').addEventListener('change', function(){ $$('pfReturn').dataset.touched = '1'; });
+    /* Picked rather than typed, and said back in words - the same protection
+       the request form has, because the mistake is the same mistake. What it
+       does NOT get is the thirty-day floor: a form for leave already taken
+       is a form for old dates by definition. */
+    function sayPastFormDates(){
+      [['pfFrom','pfSayFrom'], ['pfTo','pfSayTo'],
+       ['pfReturn','pfSayReturn']].forEach(function(pair){
+        var box = $$(pair[0]), out = $$(pair[1]);
+        if(box && out) out.textContent = dayInWords(box.value);
+      });
+    }
+    ['pfFrom','pfTo','pfReturn'].forEach(function(id){
+      var box = $$(id);
+      if(!box) return;
+      box.addEventListener('change', sayPastFormDates);
+      box.addEventListener('input', sayPastFormDates);
+      pickOnly(id);
+    });
 
     if($$('pfGo')) $$('pfGo').addEventListener('click', function(){
       var err = $$('pfErr');
