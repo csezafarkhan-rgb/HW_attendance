@@ -517,6 +517,22 @@ function label(t) {
   return '<div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;'
     + 'color:' + SOFT + ';margin:14px 0 6px;">' + esc(t) + '</div>';
 }
+/* How much time is being asked for. Two dates say when it starts and when it
+   ends and leave whoever is deciding to count the days between them, which is
+   the one number they are weighing.
+
+   Not said for a part day: a half day says how much it is in its own name, and
+   "Half day · ½ day" says it twice. */
+function dayCount(req) {
+  const t = String(req.leaveType || req.type || '');
+  if (t === 'HALF' || t === 'SHORT' || t === 'THREEQ') return '';
+  const a = new Date(String(req.dateFrom) + 'T00:00:00Z');
+  const b = new Date(String(req.dateTo || req.dateFrom) + 'T00:00:00Z');
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+  let n = Math.round((b - a) / 86400000) + 1;
+  if (n < 1) n = 1;
+  return n + (n === 1 ? ' day' : ' days');
+}
 function requestCard(req, links, heading) {
   /* Leave can be granted in two stages: one person looks at every request first
      and says whether it should go forward, and a super admin then grants it.
@@ -538,6 +554,8 @@ function requestCard(req, links, heading) {
     + '<div style="color:' + SOFT + ';font-size:13px;margin:2px 0 8px;">'
     +   esc(kindName(req.leaveType || req.type)) + (req.half ? (' · ' + esc(req.half)) : '')
     +   ' · ' + esc(dateRange(req.dateFrom, req.dateTo))
+    +   (dayCount(req) ? ('<span style="color:' + INK + ';font-weight:700;"> · '
+                          + esc(dayCount(req)) + '</span>') : '')
     + '</div>'
     /* What the person actually typed, which is the whole of what the decision
        turns on. It was a second grey line inside the grey line that carries

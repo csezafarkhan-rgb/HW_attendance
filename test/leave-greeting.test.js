@@ -123,6 +123,34 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
     })(), null);
 }
 
+/* ---- how much time is being asked for ----
+   Two dates say when it starts and when it ends, and leave whoever is
+   deciding to count the days between them - which is the one number they are
+   weighing. */
+{
+  const card = (over) => mailer.leaveEmail({
+    orgName: 'Test Co', intro: INTRO, footer: 'Regards', approver: 'karan Ahuja',
+    pending: [{ req: Object.assign({}, REQ, over),
+                links: { approve: 'https://x/a', reject: 'https://x/r' } }],
+    unrequested: [], siteUrl: 'https://x' }).html;
+  check('a range says how many days it is',
+    /&middot; 2 days|· 2 days/.test(card({ dateFrom: '2026-11-10', dateTo: '2026-11-11' })),
+    null);
+  check('one day is a day, not 1 days',
+    / · 1 day</.test(card({ dateFrom: '2026-11-10', dateTo: '2026-11-10' })), null);
+  check('and a week reads as six',
+    / · 6 days</.test(card({ dateFrom: '2026-11-10', dateTo: '2026-11-15' })), null);
+  /* A half day says how much it is in its own name, so counting it again
+     would print "Half day · ½ day". */
+  ['HALF', 'SHORT', 'THREEQ'].forEach(t => {
+    check('a ' + t + ' does not say it twice',
+      !/ · \d+ days?</.test(card({ leaveType: t, dateFrom: '2026-11-10', dateTo: '2026-11-10' })),
+      null);
+  });
+  check('a request with no dates at all says nothing rather than NaN',
+    !/NaN/.test(card({ dateFrom: '', dateTo: '' })), null);
+}
+
 /* ---- the names, as the server says them ---- */
 {
   const ctx = { Object, Array, String, console };
