@@ -12566,8 +12566,12 @@ function buildExcelBackup(){
             + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
             +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>';
         })()
-      + '</div>'
-      /* ---- true of both stages ---- */
+      /* The three that send themselves without being asked. They sat outside
+         the pane, and the stray </div> that followed them closed the settings
+         box as well - so they showed under every tab, and Work, Holiday,
+         Month and the Save button all fell out of the box and below it.
+
+         They are leave settings. The pane they belong to is this one. */
       + '<div class="em-lab" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">'
       +   'When it goes on its own</div>'
       + '<label class="em-row"><input type="checkbox" id="emReq"' + (s.requests !== false ? ' checked' : '') + '>'
