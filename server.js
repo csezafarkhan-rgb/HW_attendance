@@ -4129,6 +4129,42 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
   const aud = await leaveAudience(orgId, settings, route, name, mgmt);
   const kv = await sharedKeys(orgId, ['companyInfo']);
   const day = new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
+
+  /* The other message somebody's own day can produce: a part of it taken on
+     their own card. It goes to different people and says a different thing,
+     so it is read the same way - by asking for it rather than by waiting for
+     somebody to take an afternoon off. */
+  if (String((req.body && req.body.kind) || '') === 'part') {
+    const words = settings.excused.part || {};
+    const named = (words.to || []).length > 0;
+    const to = named ? (words.to || []).slice() : mgmt.slice();
+    const cc = [];
+    const push = a => { if (a && to.indexOf(a) < 0 && cc.indexOf(a) < 0) cc.push(a); };
+    (words.cc || []).forEach(push);
+    if (!named) (await leaveApprovers(orgId, settings)).forEach(push);
+    const own = String(await employeeAddress(orgId, name) || '').trim().toLowerCase();
+    if (own) push(own);
+    const pmail = mailer.partDayEmail({
+      orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
+      subject: words.subject, intro: words.intro, footer: words.footer,
+      items: [{ name: name, day: day, kindName: 'Half day',
+                qty: 'half a day', half: 'PM', leave: 'CL',
+                note: 'Sample only - nobody has taken this afternoon.' }]
+    });
+    if (!pmail) return res.status(400).json({ error: 'nothing to build' });
+    if ((req.body && req.body.send) === 'test') {
+      let box = String((req.user && req.user.email) || '').trim();
+      if (!EMAIL_RE.test(box)) box = to[0] || '';
+      if (!box) return res.status(400).json({ error: 'Your account has no email address on it.' });
+      const m2 = { to: [box], cc: [], subject: '[Sample] ' + pmail.subject, html: pmail.html };
+      const r2 = await mailer.send(m2);
+      await logMail(orgId, 'partday', m2, r2);
+      if (!r2.ok) return res.status(502).json(r2);
+      return res.json({ ok: true, sentTo: box });
+    }
+    return res.json({ ok: true, sample: true, to: to, cc: cc,
+                      preview: { subject: pmail.subject, html: pmail.html } });
+  }
   /* Said plainly on the request itself, so a copy of this landing in somebody's
      inbox cannot be mistaken for a day actually being asked for. */
   const req0 = { id: 'sample', empName: name, dateFrom: day, dateTo: day,

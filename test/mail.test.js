@@ -1277,6 +1277,38 @@ process.env.SESSION_SECRET = SECRET;
   const bad = await hit('POST', '/e/' + approveTok.slice(0, -3) + 'zzz');
   check('a tampered link does nothing', bad.status === 400 && /expired/.test(bad.body), bad.status);
 
+  /* ---- and the one rule the whole arrangement rests on ----
+
+     Everybody in To can decide it; everybody in Cc is only told. The
+     difference is the buttons, and a Cc line cannot take buttons off a
+     message somebody has already been handed - so a copy that is only told
+     is sent as its own message, with nothing on it to press.
+
+     This sweeps every message this whole run sent, rather than the few each
+     check looked at, because the fault would be one path out of a dozen
+     getting it wrong and nobody noticing until somebody approved their own
+     leave. */
+  {
+    const decides = m => /Approve<\/span>|>Approve</.test(String(m.html || ''));
+    const clickable = sent.filter(decides);
+    check('nothing that can be decided was ever sent with a Cc on it',
+      clickable.every(m => !(m.cc || []).length),
+      clickable.filter(m => (m.cc || []).length).map(m => m.cc));
+    /* The person who asked is on every leave message about them, and may
+       never be on one that can decide it - their own least of all. */
+    const asked = ['keshav@homeweavers.net', 'rahul@homeweavers.net',
+                   'ravi@homeweavers.net', 'quality@homeweavers.net'];
+    const handed = clickable.filter(m =>
+      (m.to || []).concat(m.cc || []).some(a => asked.indexOf(String(a).toLowerCase()) > -1));
+    check('and no employee was ever handed a copy they could decide with',
+      handed.length === 0, handed.map(m => m.to));
+    /* Said the other way round: every copy that went to somebody only being
+       told carried nothing to press. */
+    check('a message that is only telling somebody has nothing on it to press',
+      sent.filter(m => /For information/.test(String(m.html || ''))).every(m => !decides(m)),
+      null);
+  }
+
   srv.close();
   const failed = results.filter(r => !r).length;
   console.log(failed ? ('FAILED (' + failed + ' of ' + results.length + ')') : ('ALL PASS (' + results.length + ')'));

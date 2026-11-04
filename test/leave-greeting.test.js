@@ -269,13 +269,27 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
        the tab it belongs to. */
     check('the button is on the foot beside Save',
       /id="emTest"[\s\S]{0,600}?id="emLvSample"/.test(APP), null);
-    check('and only while the Leave tab is the one open',
-      /showLeaveTools\(which === 'lv'\);/.test(APP)
-      && /btn\.style\.display = on \? '' : 'none';/.test(grab(APP, 'showLeaveTools')), null);
-    check('the names shut behind it when the tab changes',
-      /who\.style\.display = 'none';/.test(grab(APP, 'showLeaveTools')), null);
-    check('and it starts hidden, because Attendance is the tab that opens',
-      /showLeaveTools\(false\);/.test(APP), null);
+    /* The names serve both per-person tabs, so they sit outside either of
+       them - beside the foot, which is under all six. */
+    check('the names are not shut inside one tab',
+      APP.indexOf('id="emLvWho"') > APP.indexOf("data-em-pane=\"mo\""), null);
+    /* Every tab has it, and it does whatever that tab's message needs. Four
+       of them send one message to one list of people, and the button that
+       sends it already shows it first - so previewing those is pressing that
+       button and stopping at the window it opens. */
+    check('four of the tabs borrow their own send button',
+      /var BY_TAB = \{ att:'emSendDay', hol:'emSendHol', wk:'emSendWork', mo:'emSendMonth' \};/
+        .test(APP), null);
+    /* The other two are about one person at a time, so they ask which. */
+    check('and the two about one person ask which person',
+      /tab === 'lv' \|\| tab === 'lt'/.test(grab(APP, 'previewLabel'))
+      && /Preview for an employee/.test(grab(APP, 'previewLabel')), null);
+    check('the self-marked tab asks for its own kind of message',
+      /\(on && on\.getAttribute\('data-em-tab'\) === 'lt'\) \? 'part' : 'leave'/.test(APP), null);
+    check('the names shut when the tab changes',
+      /if\(who\) who\.style\.display = 'none';/.test(grab(APP, 'showLeaveTools')), null);
+    check('and the label is set for whichever tab opens',
+      /showLeaveTools\('att'\);/.test(APP) && /showLeaveTools\(which\);/.test(APP), null);
     check('which opens a list of the people on the table',
       /data-lv-who="/.test(APP), null);
     check('and the window it opens says what its button will do',

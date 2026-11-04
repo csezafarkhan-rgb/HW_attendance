@@ -12866,16 +12866,7 @@ function buildExcelBackup(){
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
             +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>'
-            /* The names it offers. The button that opens them is on the foot
-               of the panel with Save and the test, because reading the
-               message is the last thing somebody does on this card and not a
-               setting in the middle of it. */
-            + '<div class="em-months" id="emLvWho" style="display:none">'
-            +   people.map(function(e){
-                  return '<button type="button" class="em-mo" data-lv-who="'
-                    + mailEscape(e.name) + '">' + mailEscape(dispName(e.name)) + '</button>';
-                }).join('')
-            + '</div>';
+            ;
         })()
       /* The three that send themselves without being asked. They sat outside
          the pane, and the stray </div> that followed them closed the settings
@@ -12980,15 +12971,26 @@ function buildExcelBackup(){
             +   mailEscape(text(m.footer, W.month.footer)) + '</textarea></div>'
             + '</div>';
         })()
+      /* The names, for the two tabs whose message is about one person at a
+         time. Out here rather than inside either of them, because it belongs
+         to the button on the foot and the foot is under all six tabs. */
+      + '<div class="em-months" id="emLvWho" style="display:none">'
+      +   (ALL_EMPLOYEES || []).filter(stillHere).filter(function(e){
+            return (typeof visibleEmpSet !== 'undefined' && visibleEmpSet)
+              ? (!!visibleEmpSet[e.name] || (e.name in (approvalRoute || {}))) : true;
+          }).map(function(e){
+            return '<button type="button" class="em-mo" data-lv-who="'
+              + mailEscape(e.name) + '">' + mailEscape(dispName(e.name)) + '</button>';
+          }).join('')
+      + '</div>'
       + '<div class="em-row em-btns"><button type="button" class="btn ghost" id="emSave">Save</button>'
       +   '<button type="button" class="btn ghost" id="emTest">'
       +     (MAIL_CFG.you ? ('Send a test to ' + mailEscape(MAIL_CFG.you)) : 'Send a test') + '</button>'
-      /* Reading the leave message is the last thing done on that card, so the
-         button for it belongs at the foot with the other two. It is only on
-         the foot while the Leave tab is the one open: there is nothing to
-         preview for a tab that sends one message to one list of people. */
-      +   '<button type="button" class="btn ghost" id="emLvSample" style="display:none">'
-      +     '\ud83d\udc41 Preview for an employee</button></div>'
+      /* Reading the message is the last thing done on any of these cards, so
+         the button for it is at the foot with the other two - one button, on
+         every tab, doing whatever that tab's message needs. */
+      +   '<button type="button" class="btn ghost" id="emLvSample">'
+      +     '\ud83d\udc41 Preview</button></div>'
       + '</div></div>';
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-em-tab]'), function(t){
@@ -13000,23 +13002,27 @@ function buildExcelBackup(){
         Array.prototype.forEach.call(document.querySelectorAll('[data-em-pane]'), function(p){
           p.style.display = (p.getAttribute('data-em-pane') === which) ? '' : 'none';
         });
-        showLeaveTools(which === 'lv');
+        showLeaveTools(which);
       };
     });
     /* The foot is one row under all six tabs, so the one button on it that
        belongs to a single tab comes and goes with that tab - and the list of
        names shuts behind it rather than being left open on a card nobody can
        see it from. */
-    function showLeaveTools(on){
+    function previewLabel(tab){
+      return (tab === 'lv' || tab === 'lt')
+        ? '\ud83d\udc41 Preview for an employee' : '\ud83d\udc41 Preview';
+    }
+    function showLeaveTools(which){
       var btn = document.getElementById('emLvSample');
       var who = document.getElementById('emLvWho');
-      if(btn) btn.style.display = on ? '' : 'none';
-      if(!on && who){
-        who.style.display = 'none';
-        if(btn) btn.textContent = '\ud83d\udc41 Preview for an employee';
-      }
+      /* The list belongs to whichever of the two per-person tabs is open, so
+         it shuts on the way out rather than being left open on a card nobody
+         can see it from. */
+      if(who) who.style.display = 'none';
+      if(btn) btn.textContent = previewLabel(which);
     }
-    showLeaveTools(false);
+    showLeaveTools('att');
     /* Pick a name, and the message that name's leave would arrive in. The
        request behind it does not exist and is never saved; the settings, the
        table and the audience are the real ones. */
@@ -13024,23 +13030,37 @@ function buildExcelBackup(){
       var go = document.getElementById('emLvSample');
       var who = document.getElementById('emLvWho');
       if(!go || !who) return;
+      /* Four of the six tabs send one message to one list of people, and the
+         button that sends it already shows it first - so previewing them is
+         pressing that button and stopping at the window it opens. The other
+         two are about one person at a time, and ask which. */
+      var BY_TAB = { att:'emSendDay', hol:'emSendHol', wk:'emSendWork', mo:'emSendMonth' };
       go.onclick = function(){
+        var tab = (document.querySelector('[data-em-tab].on') || {}).getAttribute
+          ? document.querySelector('[data-em-tab].on').getAttribute('data-em-tab') : 'att';
+        if(BY_TAB[tab]){
+          var send = document.getElementById(BY_TAB[tab]);
+          if(send) send.click();
+          return;
+        }
         var open = who.style.display !== 'none';
         who.style.display = open ? 'none' : '';
-        go.textContent = open ? '\ud83d\udc41 Preview for an employee' : 'Pick a name above';
-        /* The button is at the foot and the names are up in the card, so
-           opening them without going to them is opening them out of sight. */
+        go.textContent = open ? previewLabel(tab) : 'Pick a name above';
+        /* The button is at the foot and the names are up the card, so opening
+           them without going to them is opening them out of sight. */
         if(!open){ try{ who.scrollIntoView({ block:'nearest' }); }catch(e){} }
       };
       Array.prototype.forEach.call(who.querySelectorAll('[data-lv-who]'), function(b){
         b.onclick = function(){
           var name = b.getAttribute('data-lv-who');
+          var on = document.querySelector('[data-em-tab].on');
+          var kind = (on && on.getAttribute('data-em-tab') === 'lt') ? 'part' : 'leave';
           b.disabled = true;
           var was = b.textContent;
           b.textContent = 'Building\u2026';
           fetch('/api/mail/leave-sample', { method:'POST', credentials:'same-origin',
                 headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ emp: name }) })
+                body: JSON.stringify({ emp: name, kind: kind }) })
             .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
             .then(function(out){
               b.disabled = false; b.textContent = was;
@@ -13056,7 +13076,7 @@ function buildExcelBackup(){
               }), function(done){
                 fetch('/api/mail/leave-sample', { method:'POST', credentials:'same-origin',
                       headers:{'Content-Type':'application/json'},
-                      body: JSON.stringify({ emp: name, send: 'test' }) })
+                      body: JSON.stringify({ emp: name, kind: kind, send: 'test' }) })
                   .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
                   .then(function(o2){
                     if(!o2.ok || !o2.j.ok){
