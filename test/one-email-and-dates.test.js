@@ -295,5 +295,45 @@ check('signing in goes there before the dashboard is built',
   check('nor one dressed up to look like a decision link', !re.test('/e/../admin'), null);
 }
 
+/* ---- how much is being asked for ----
+   A range reads as two dates and nothing says how long it is; four days off
+   and five are one keystroke apart. The form says it, in the words the leave
+   record will use. */
+vm.runInContext(grab(APP, 'isPartDay'), ctx);
+vm.runInContext(grab(APP, 'hdQty'), ctx);
+vm.runInContext(grab(APP, 'daysAsked'), ctx);
+check('a span is counted inclusively - the 4th to the 6th is three days',
+  ctx.daysAsked('CL', '2026-11-04', '2026-11-06') === '3 days',
+  ctx.daysAsked('CL', '2026-11-04', '2026-11-06'));
+check('one day is a day, not days',
+  ctx.daysAsked('CL', '2026-11-04', '2026-11-04') === '1 day', null);
+check('no To date is the From date alone',
+  ctx.daysAsked('CL', '2026-11-04', '') === '1 day', null);
+/* A part of a day is a part of ONE day, and what it costs is the fraction the
+   balance is actually reduced by. */
+check('a half day costs half a day, not one',
+  ctx.daysAsked('HALF', '2026-11-04', '2026-11-04') === '0.5 day', null);
+check('a short leave costs a quarter',
+  ctx.daysAsked('SHORT', '2026-11-04', '2026-11-04') === '0.25 day', null);
+check('a three-quarter day costs three quarters',
+  ctx.daysAsked('THREEQ', '2026-11-04', '2026-11-04') === '0.75 day', null);
+check('and the fractions are the ones the record counts by',
+  ctx.hdQty('HALF') === 0.5 && ctx.hdQty('SHORT') === 0.25 && ctx.hdQty('THREEQ') === 0.75, null);
+/* A punch correction is not leave and has no length worth saying. */
+check('a punch correction says nothing', ctx.daysAsked('PUNCH', '2026-11-04', '2026-11-04') === '', null);
+check('nor does an empty form', ctx.daysAsked('CL', '', '') === '', null);
+check('rubbish in the boxes says nothing rather than NaN',
+  ctx.daysAsked('CL', 'not-a-day', 'nor-this') === '', ctx.daysAsked('CL', 'not-a-day', 'nor-this'));
+/* The server counts the same way for the email, so the form and the message
+   about it cannot disagree. */
+check('the email counts a span the same way',
+  /let n = Math\.round\(\(b - a\) \/ 86400000\) \+ 1;/.test(
+    fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')), null);
+check('the form shows it, and hides it when there is nothing to show',
+  /id="reqSayDays"/.test(APP)
+  && /tot\.style\.display = said \? '' : 'none';/.test(APP), null);
+check('and says it again when the kind changes, because the kind sets the cost',
+  /if\(typeof sayRequestDates === 'function'\) sayRequestDates\(\);/.test(APP), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

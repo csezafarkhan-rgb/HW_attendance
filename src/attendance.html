@@ -2306,6 +2306,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .gate-field label{font-size:11px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;}
 .gate-field input, .gate-field select{width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--line-dk);font-size:13px;font-family:'Inter',sans-serif;}
 .gate-say{font-size:11.5px;font-weight:700;color:var(--ink);margin-top:5px;}
+.gate-tot{display:inline-block;margin-top:7px;padding:4px 10px;border-radius:999px;background:#EEF2FF;color:#3A35A8;font-size:11.5px;font-weight:700;}
 .gate-say.bad{color:#B23A34;}
 .gate-error{background:#F8E7E6;color:#B23A34;font-size:12px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:12px;display:none;}
 .gate-error.show{display:block;}
@@ -4403,7 +4404,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
            another, and the person typing it cannot see which they got. So
            each one says back, in words, the day it is actually holding. -->
       <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/><div class="gate-say" id="reqSayFrom"></div></div>
-      <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/><div class="gate-say" id="reqSayTo"></div></div>
+      <!-- How much is being asked for, worked out from the two dates and the
+           kind. A range reads as two dates and nothing says how long it is;
+           four days off and five are one keystroke apart. -->
+      <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/><div class="gate-say" id="reqSayTo"></div><div class="gate-tot" id="reqSayDays" style="display:none;"></div></div>
       <div class="gate-field" id="reqPunchWrap" style="display:none;">
         <label>The time you actually came in or left</label>
         <div style="display:flex;gap:10px;">
@@ -11260,6 +11264,9 @@ function buildExcelBackup(){
         toEl.disabled = oneDay || isPunch;
         if((oneDay || isPunch) && fromEl) toEl.value = fromEl.value;
       }
+      /* The kind decides what a day is worth, so the length is said again
+         rather than being left showing the last kind's answer. */
+      if(typeof sayRequestDates === 'function') sayRequestDates();
     };
     t.addEventListener('change', sync);
     var retEl = document.getElementById('reqReturn');
@@ -11307,6 +11314,24 @@ function buildExcelBackup(){
     var p = function(n){ return n < 10 ? '0' + n : '' + n; };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
+  /* How long the request is, in the words the leave record will use.
+
+     A part of a day is a part of ONE day, and what it costs is the fraction
+     the record counts - a half day is 0.5 off the balance, not one day off
+     it. A full-day kind is the span, counted inclusively: the fourth to the
+     sixth is three days, not two.
+
+     A punch correction is not leave at all and has no length worth saying. */
+  function daysAsked(kind, from, to){
+    if(kind === 'PUNCH' || !from) return '';
+    if(isPartDay(kind)) return hdQty(kind) + ' day';
+    var a = new Date(from + 'T00:00:00Z');
+    var b = new Date((to || from) + 'T00:00:00Z');
+    if(isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+    var n = Math.round((b - a) / 86400000) + 1;
+    if(n < 1) n = 1;
+    return n + (n === 1 ? ' day' : ' days');
+  }
   function sayRequestDates(){
     var floor = earliestRequestDay();
     [['reqDateFrom','reqSayFrom'], ['reqDateTo','reqSayTo'],
@@ -11322,6 +11347,15 @@ function buildExcelBackup(){
       out.className = 'gate-say' + (tooFar ? ' bad' : '');
       if(tooFar) out.textContent = said + ' \u2014 more than ' + REQ_BACK_DAYS + ' days gone';
     });
+    var tot = document.getElementById('reqSayDays');
+    var kindBox = document.getElementById('reqLeaveType');
+    if(tot){
+      var said = daysAsked(kindBox ? kindBox.value : '',
+        (document.getElementById('reqDateFrom') || {}).value,
+        (document.getElementById('reqDateTo') || {}).value);
+      tot.textContent = said ? ('Asking for ' + said) : '';
+      tot.style.display = said ? '' : 'none';
+    }
   }
   ['reqDateFrom','reqDateTo','reqReturn'].forEach(function(id){
     var box = document.getElementById(id);
