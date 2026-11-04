@@ -88,10 +88,12 @@ const DAY = [
     html.indexOf('Aman Gupta') > html.indexOf('Not Reached Office'), null);
 }
 
-/* ---- and the room it is given ----
-   The night card carries a name, two times and the hours between them where
-   every other card carries a name and one time. An equal share each and its
-   line ran out past its own border. */
+/* ---- and the room each card is given ----
+   They do not hold the same thing. Not Reached Office holds bare names. The
+   night card holds a name, two times and the hours between. The Present card
+   holds the longest line on the message: a late arrival with its hour and how
+   late it was. Shared out equally the short card stood a third empty while
+   the two long ones ran out past their own borders. */
 {
   const widths = function (html) {
     const out = {};
@@ -100,17 +102,40 @@ const DAY = [
     while ((m = re.exec(html))) out[m[2]] = +m[1];
     return out;
   };
-  const w = widths(build(DAY.concat([onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00')])));
-  check('the night card is given more room than the others',
-    w['On Night Shift'] > w['Present'] && w['On Night Shift'] > w['Not Reached Office'], w);
-  check('and the row still adds up to a row',
-    Object.keys(w).reduce(function (a, k) { return a + w[k]; }, 0) <= 100, w);
-  /* Taken from the others in proportion, not from one of them. */
-  check('the other cards keep an equal share of what is left',
-    w['Present'] === w['Not Reached Office'], w);
-  const even = widths(build(DAY));
-  check('and with no night card the shares are equal again',
-    even['Present'] === even['Not Reached Office'], even);
+  const sum = function (w) { return Object.keys(w).reduce(function (a, k) { return a + w[k]; }, 0); };
+  const LATE = Object.assign(present('Rahul Mishra', '9:47', '9:30-6:30'), { late: 17 });
+  const w = widths(build(DAY.concat([LATE,
+    onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00')])));
+  check('the card holding only names is the narrowest',
+    w['Not Reached Office'] < w['Present'] && w['Not Reached Office'] < w['On Night Shift'], w);
+  check('the card holding the longest line is not squeezed for it',
+    w['Present'] >= 33, w);
+  check('and the night card has the room for a whole night',
+    w['On Night Shift'] >= 33, w);
+  check('the row still adds up to a row', sum(w) <= 100, w);
+
+  /* A card that is all short names does not vanish, however little it asks. */
+  const tiny = widths(build([present('Ab', '9:02', '9:30-6:30'), missing('Cd', '9:30-6:30')]));
+  check('nothing is squeezed to nothing',
+    Object.keys(tiny).every(function (k) { return tiny[k] >= 14; }), tiny);
+  check('and that row adds up too', sum(tiny) <= 100, tiny);
+
+  /* The room follows the lines, so it moves when they do. */
+  const shortNames = widths(build([
+    present('Ab', '9:02', '9:30-6:30'), missing('Cd Ef', '9:30-6:30')]));
+  const longNames = widths(build([
+    present('Abcdefghijklmnop Qrstuv', '9:02', '9:30-6:30'), missing('Cd Ef', '9:30-6:30')]));
+  check('a card with longer lines in it is given more of the row',
+    longNames['Present'] > shortNames['Present'], [shortNames, longNames]);
+  check('and the card beside it gives that room up',
+    longNames['Not Reached Office'] < shortNames['Not Reached Office'],
+    [shortNames, longNames]);
+
+  /* A heading can wrap and a line cannot, so a long heading does not take
+     the room off the lines underneath it. Not Reached Office is eighteen
+     characters over three words, and asks for the longest of the three. */
+  check('a long heading does not buy width the lines need',
+    shortNames['Not Reached Office'] < 45, shortNames);
 }
 
 /* A night nobody was on puts no empty card on the message. */

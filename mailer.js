@@ -634,18 +634,63 @@ function dailyEmail(o) {
         + '</tr></table>';
     };
     if (kinds.length) {
-      /* An equal share each, except for the night card, which carries a whole
-         night on one line - a name, two times and the hours between them -
-         where every other card carries a name and one time. Given the same
-         width as the rest, its line ran out past its own border.
+      /* Each card gets the room its own longest line needs.
 
-         A share and a half, taken from the others in proportion, so the row
-         still adds to one. Enough cards on the message and even that is too
-         narrow: the line wraps then, which it is built to do, at the one gap
-         between the name and the span. */
-      const weight = function (k) { return k[0] === 'On Night Shift' ? 1.55 : 1; };
-      const total = kinds.reduce(function (sum, k) { return sum + weight(k); }, 0);
-      const cells = kinds.map(function (k) {
+         An equal share each was right while every card held the same thing: a
+         name and the hour somebody arrived. They do not hold the same thing.
+         Not Reached Office holds bare names and nothing else. The night card
+         holds a name, two times and the hours between them. And the Present
+         card holds the longest line on the whole message - a late arrival,
+         its hour, and how late it was.
+
+         Shared out equally, the short card had a third of the row standing
+         empty while the two long ones ran out past their own borders. Giving
+         the night card a share and a half only moved the overflow onto the
+         Present card, because it took the room from the one that needed it
+         most as well as from the one that did not need it at all.
+
+         So the room is asked for rather than assigned. There is no measuring
+         a string in an email, so this estimates: characters times their size
+         times a constant for this family. It does not have to be exact. It
+         has to be closer than pretending three different cards are the same
+         width, which is what it replaces. */
+      const EM = 0.52;
+      const wide = function (s, size) { return String(s == null ? '' : s).length * size * EM; };
+      const needOf = function (k) {
+        /* A heading can wrap and a line of the card cannot, so the heading
+           asks only for its longest word. Not Reached Office claiming the
+           width of all three took that room off the lines underneath. */
+        let most = Math.max.apply(null, String(k[0]).split(' ')
+          .map(function (word) { return wide(word, 10.5) + 8; }));
+        k[1].forEach(function (r, i) {
+          let n = wide((i + 1) + '_' + r.name, 10.5);
+          if (r.kind === 'night' && r.out) {
+            n += wide(' (' + clock(r['in']) + ' → ' + clock(r.out) + ')'
+                      + (r.worked ? (' · ' + r.worked) : ''), 9.5);
+          } else if (r.inMin != null) {
+            n += wide(' (' + clock(r['in']) + ')', 9.5);
+            if (r.late) n += wide(' - ' + minsSaid(r.late) + ' late'
+                                  + (r.excused ? ', excused' : ''), 9.5);
+          }
+          if (r.via === 'portal') n += 5;            // the mark on the time
+          if (n > most) most = n;
+        });
+        /* A slot heading is a line of the card too, and 19:00-4:00 · last night
+           is longer than anything under it. */
+        if (k[3]) k[1].forEach(function (r) {
+          const s = wide(r.shift, 9) + 10;
+          if (s > most) most = s;
+        });
+        return most + 14;                            // padding, border, breathing
+      };
+      /* Nothing may be squeezed to nothing, so a floor first and the shares
+         worked out again around it. */
+      const needs = kinds.map(needOf);
+      const asked = needs.reduce(function (a, b) { return a + b; }, 0) || 1;
+      const floored = needs.map(function (n) { return Math.max(14, n / asked * 100); });
+      const given = floored.reduce(function (a, b) { return a + b; }, 0) || 1;
+      const share = floored.map(function (s) { return Math.floor(s / given * 100); });
+      const cells = kinds.map(function (k, idx) {
         /* Numbered, so a card can be counted down at a glance and read back
            over the phone without losing the place, with the time they came
            in beside the name. One person is one line: a card is a quarter of
@@ -734,7 +779,7 @@ function dailyEmail(o) {
         } else {
           listHtml = k[1].map(lineOf).join('');
         }
-        return '<td width="' + Math.floor(weight(k) / total * 100) + '%" valign="top" style="padding:0 3px;">'
+        return '<td width="' + share[idx] + '%" valign="top" style="padding:0 3px;">'
           + '<div style="border:1px solid ' + LINE + ';border-radius:10px;padding:8px 6px;text-align:center;">'
           + '<div style="font-size:18px;font-weight:700;color:' + k[2] + ';line-height:1.1;">' + k[1].length + '</div>'
           + '<div style="font-size:10.5px;font-weight:600;color:' + SOFT + ';padding-bottom:4px;">' + esc(k[0]) + '</div>'
