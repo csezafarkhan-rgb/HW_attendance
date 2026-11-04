@@ -3138,9 +3138,13 @@ async function notifyNewRequests(orgId, added) {
       const base = { orgName: orgNameOf(kv.companyInfo), req: withRecord,
                      siteUrl: mailer.baseUrl(), intro: settings.leave.intro,
                      footer: settings.leave.footer };
-      /* The copy that decides it, to the people who may. */
+      /* The copy that decides it, to the people who may - and {approver} in
+         the office's own wording is whoever this copy is going to, so the
+         greeting names them rather than naming whoever the words happened to
+         be written for. */
       const decide = mailer.requestEmail(Object.assign({}, base, {
         links: linksFor({ k: 'req', org: orgId, id: r.id, s: 0 }),
+        approver: await approverNames(orgId, aud.to),
         heading: 'A request is waiting for a decision' }));
       const toMsg = { to: aud.to, cc: [], subject: decide.subject, html: decide.html };
       await logMail(orgId, 'request', toMsg, await mailer.send(toMsg));
@@ -3149,8 +3153,10 @@ async function notifyNewRequests(orgId, added) {
          difference between the two is the buttons, and a Cc line cannot take
          buttons off a message somebody has already been handed. */
       if (aud.cc.length) {
+        /* The told copy goes to the person who asked, so {approver} is them.
+           Anything else greets somebody by a name not on the message. */
         const told = mailer.requestEmail(Object.assign({}, base, {
-          links: null, heading: 'A request has been raised',
+          links: null, heading: 'A request has been raised', approver: r.empName,
           note: 'For information. The people who decide it have their own copy.' }));
         const ccMsg = { to: aud.cc, cc: [], subject: told.subject, html: told.html };
         await logMail(orgId, 'request', ccMsg, await mailer.send(ccMsg));
@@ -3182,6 +3188,17 @@ async function approverName(orgId, email) {
     if (r.rows[0] && String(r.rows[0].name || '').trim()) return String(r.rows[0].name).trim();
   } catch (e) { /* the address stands in for the name */ }
   return addr;
+}
+/* The same, for a message going to more than one of them at once: a new
+   request is one message to everybody who may decide it, so the greeting on
+   it names all of them or none. "Karan, Shivani and Nitish" rather than a
+   list of addresses. */
+async function approverNames(orgId, addrs) {
+  const out = [];
+  for (const a of (addrs || [])) out.push(await approverName(orgId, a));
+  if (!out.length) return '';
+  if (out.length === 1) return out[0];
+  return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
 }
 /* Whose leave goes through that first approver. Naming one used to send every
    request in the company through them; it is set against the name now, in the

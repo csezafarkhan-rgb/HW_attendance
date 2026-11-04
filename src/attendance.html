@@ -12837,9 +12837,16 @@ function buildExcelBackup(){
             + '<div class="em-lab">Subject <span>{n} {waiting} {unrequested} {org}</span></div>'
             + '<div class="em-row"><input type="text" id="emLvSubject" value="'
             +   mailEscape(text(lv.subject, W.leave.subject)) + '"></div>'
-            + '<div class="em-lab">Message at the top</div>'
+            /* One set of words goes to several different people - a message
+               each, to whoever may decide that person's leave - so the one
+               token worth knowing about here is the one that names them. */
+            + '<div class="em-lab">Message at the top <span>{approver} {org}</span></div>'
             + '<div class="em-row"><textarea id="emLvIntro" rows="3">'
             +   mailEscape(text(lv.intro, W.leave.intro)) + '</textarea></div>'
+            + '<div class="em-note">Write <b>{approver}</b> where the name should go and each '
+            +   'copy greets whoever it is going to — “Hello Karan,” on Karan’s, '
+            +   '“Hello Shivani and Nitish,” where both of them decide it. The copy that '
+            +   'goes to the person who asked greets them by their own name.</div>'
             + '<div class="em-lab">Note at the foot</div>'
             + '<div class="em-row"><textarea id="emLvFooter" rows="2">'
             +   mailEscape(text(lv.footer, W.leave.footer)) + '</textarea></div>';

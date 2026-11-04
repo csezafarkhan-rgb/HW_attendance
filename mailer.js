@@ -321,7 +321,11 @@ const DEFAULT_TEXT = {
     firstIntro: 'Hello {approver},\n\nA leave request is waiting for your word before it goes to the '
       + 'management for final approval. Approve or reject it from the buttons below.',
     subject: 'Leave \u00b7 {n} waiting for a decision',
-    intro: 'Hello,\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
+    /* Greeted by name, because one set of words goes to several different
+       people - leave is gathered by whoever may decide it, a message each -
+       and the first thing any of them looks for is that it is addressed to
+       them. {approver} is whoever this copy is going to. */
+    intro: 'Hello {approver},\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
     footer: 'Best regards,\n{org}'
   },
   decision: {
@@ -534,8 +538,16 @@ function requestCard(req, links, heading) {
     + '<div style="color:' + SOFT + ';font-size:13px;margin:2px 0 8px;">'
     +   esc(kindName(req.leaveType || req.type)) + (req.half ? (' · ' + esc(req.half)) : '')
     +   ' · ' + esc(dateRange(req.dateFrom, req.dateTo))
-    +   (req.message ? ('<br>“' + esc(String(req.message).slice(0, 300)) + '”') : '')
     + '</div>'
+    /* What the person actually typed, which is the whole of what the decision
+       turns on. It was a second grey line inside the grey line that carries
+       the kind and the dates, reading as more of the same bookkeeping - so it
+       gets a block of its own, in ink rather than grey, on a tint. */
+    + (req.message
+        ? ('<div style="margin:0 0 9px;padding:8px 11px;border-radius:7px;background:#FFF7DF;'
+           + 'border-left:3px solid #E8B931;color:' + INK + ';font-size:13px;line-height:1.5;">'
+           + '&ldquo;' + esc(String(req.message).slice(0, 300)) + '&rdquo;</div>')
+        : '')
     + recommended
     /* The year behind the request, where the message carries one. A digest of
        several people does not: it would be one of these a person. */
