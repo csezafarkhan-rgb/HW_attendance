@@ -604,7 +604,27 @@
     function clearError() {
       if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
     }
+    /* Where to go once they are in, for somebody who was sent here by a
+       button in an email and had to sign in first.
+
+       Only a path on this site, and only the one kind of page a sign-in is
+       ever demanded for. Anything else - another host, a protocol-relative
+       //elsewhere, a path of somebody else's choosing - is a stranger
+       deciding where this browser goes next, which is not what the box is
+       for. */
+    function returnTo() {
+      try {
+        var m = /[?&]next=([^&]+)/.exec(location.search || '');
+        if (!m) return '';
+        var p = decodeURIComponent(m[1]);
+        return /^\/e\/[A-Za-z0-9._~-]+$/.test(p) ? p : '';
+      } catch (e) { return ''; }
+    }
     function enter(user) {
+      /* Straight back to the decision they came for. Before the dashboard is
+         built, because the dashboard is not where they were going. */
+      var back = returnTo();
+      if (back) { location.replace(back); return; }
       window.HWAuth.user = user;
       var tierLabel = user.role === 'admin' ? ' · Super Admin'
                     : user.role === 'admin_view' ? ' · View Admin' : '';

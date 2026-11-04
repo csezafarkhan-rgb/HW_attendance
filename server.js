@@ -4145,15 +4145,24 @@ async function decidableBy(req, p) {
 }
 /* Said the same way on the page that asks and the one that acts, so a refusal
    never depends on which of the two somebody reached. */
-function refusalFor(may) {
+function refusalFor(may, token) {
   if (may.how === 'signin') {
+    /* And put back where they were sent, rather than left on the dashboard
+       to go and find it.
+
+       An approver is often an employee, whose own page has no Requests list
+       at all - this link is the only way they can answer anything. Signing
+       in and landing somewhere else was not a longer road to the decision,
+       it was no road. */
     return { code: 401, title: 'Sign in to decide this',
-      detail: 'The buttons in that email work for whoever the office named to decide this '
-            + 'person\u2019s leave. Sign in and it is on the Requests page, still waiting.' };
+      detail: 'The buttons in that email work for whoever the office named to decide '
+            + 'this person\u2019s leave. Sign in and you will be brought straight back here.',
+      link: mailer.baseUrl() + '/?next=' + encodeURIComponent('/e/' + token) };
   }
   return { code: 403, title: 'This one is not yours to decide',
     detail: (may.who ? ('It is with ' + may.who + '. ') : '')
-          + 'You were sent it so that you can see it, which is not the same as answering it.' };
+          + 'You were sent it so that you can see it, which is not the same as answering it.',
+    link: mailer.baseUrl() };
 }
 
 /* The page a button in an email opens. GET asks; POST acts - so a mail scanner
@@ -4168,8 +4177,8 @@ app.get('/e/:token', mailActionLimiter, async (req, res) => {
      waiting is not somebody\u2019s business if answering it never was. */
   const may = await decidableBy(req, p);
   if (may.how !== 'yes') {
-    const no = refusalFor(may);
-    return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, mailer.baseUrl()));
+    const no = refusalFor(may, req.params.token);
+    return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, no.link));
   }
   const done = await alreadySettled(p);
   if (done) return res.status(409).send(mailer.resultPage(done.title, done.detail, false));
@@ -4195,8 +4204,8 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
      only a page, and a POST can be made without ever having seen it. */
   const may = await decidableBy(req, p);
   if (may.how !== 'yes') {
-    const no = refusalFor(may);
-    return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, mailer.baseUrl()));
+    const no = refusalFor(may, req.params.token);
+    return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, no.link));
   }
   // Whatever was typed in the box on that page travels with the decision.
   const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim());

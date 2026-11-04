@@ -81,7 +81,7 @@ check('the page that asks checks first, before it says anything about the reques
 check('and the POST that acts checks again, because a POST need not have seen the page',
   (SRV.match(/const may = await decidableBy\(req, p\);/g) || []).length === 2, null);
 check('a refusal offers the way in rather than only saying no',
-  /mailer\.resultPage\(no\.title, no\.detail, false, mailer\.baseUrl\(\)\)/.test(SRV), null);
+  /mailer\.resultPage\(no\.title, no\.detail, false, no\.link\)/.test(SRV), null);
 check('and tells a copied-in reader who it is actually with',
   /It is with ' \+ may\.who \+ '\. '/.test(SRV), null);
 
@@ -265,6 +265,35 @@ check('the form asks for it rather than holding thirty',
   && /loadRequestWindow\(\)\.then\(applyFloor\);/.test(APP), null);
 check('and the floor is worked out again each time the form opens',
   /var applyFloor = function\(\)\{/.test(APP), null);
+
+/* ---- and signing in puts them back where they were sent ----
+   An approver is often an employee, and an employee's own page has no
+   Requests list on it. The link in the email is the only way they can answer
+   anything, so landing on the dashboard after signing in was not a longer
+   road to the decision - it was no road at all. */
+const AUTH = fs.readFileSync(path.join(REPO, 'public', 'hw-auth.js'), 'utf8');
+check('the sign-in page is told where to come back to',
+  /link: mailer\.baseUrl\(\) \+ '\/\?next=' \+ encodeURIComponent\('\/e\/' \+ token\)/.test(SRV),
+  null);
+check('and the refusal says so, rather than sending them off to look',
+  /brought straight back here/.test(SRV), null);
+check('both the page that asks and the POST that acts carry it',
+  (SRV.match(/refusalFor\(may, req\.params\.token\)/g) || []).length === 2, null);
+check('signing in goes there before the dashboard is built',
+  /var back = returnTo\(\);\s*\n\s*if \(back\) \{ location\.replace\(back\); return; \}/.test(AUTH),
+  null);
+/* Where it will and will not go: a box that takes a destination from the URL
+   is a box a stranger can point somewhere else. */
+{
+  const m = /return \/\^(\\\/e\\\/\[[^\]]+\]\+)\$\/\.test\(p\) \? p : '';/.exec(AUTH);
+  check('only a path on this site, and only the one kind of page', !!m, AUTH.indexOf('returnTo'));
+  const re = new RegExp('^\\/e\\/[A-Za-z0-9._~-]+$');
+  check('a decision link is taken', re.test('/e/abc123.DEF_x-y~z'), null);
+  check('another host is not', !re.test('https://evil.example/x'), null);
+  check('nor a protocol-relative one', !re.test('//evil.example/x'), null);
+  check('nor a different page on this site', !re.test('/admin'), null);
+  check('nor one dressed up to look like a decision link', !re.test('/e/../admin'), null);
+}
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
