@@ -868,9 +868,10 @@ process.env.SESSION_SECRET = SECRET;
                     role: 'employee', is_active: true });
     db.users.push({ id: 13, org_id: 1, email: 'shyam@homeweavers.net', name: 'Shyam Lal',
                     role: 'employee', is_active: true });
-    /* The arrangement the office works to: the management on every message,
-       the Gurgaon office through Karan, the Panipat factory through Munish
-       and Karan both. */
+    /* The arrangement the office works to: the Gurgaon office through Karan,
+       the Panipat factory through Munish and Karan both, and the management
+       named against nobody - so they decide only the rows nobody else is
+       named against, which is what an empty row has always meant. */
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
       leave: { to: ['nitish@homeweavers.net', 'shivani@homeweavers.net'], cc: [] } }));
     kvSet(1, 'approvalRoute', JSON.stringify({
@@ -899,10 +900,17 @@ process.env.SESSION_SECRET = SECRET;
     const decide = msgs.find(decides), told = msgs.find(m => !decides(m));
     check('a request is sent twice: a copy that decides and a copy that is told',
       msgs.length === 2 && !!decide && !!told, msgs.map(m => m.to));
-    check('the management and that person\u2019s own approver may decide it',
+    check('the approver named against that person may decide it',
       !!decide && JSON.stringify(addrs(decide)) === JSON.stringify(
-        ['karan@homeweavers.net', 'nitish@homeweavers.net', 'shivani@homeweavers.net']),
+        ['karan@homeweavers.net']),
       decide && decide.to);
+    /* And an owner nobody named against them is not on it at all. They used
+       to be on every leave message by standing; the office asked for the
+       table to mean what it says instead. */
+    check('and an owner nobody named against them is not on it',
+      !!decide && addrs(decide).indexOf('nitish@homeweavers.net') === -1
+      && !!told && (told.to || []).indexOf('nitish@homeweavers.net') === -1,
+      [decide && decide.to, told && told.to]);
     check('and the person who asked is told, with nothing on it to click',
       !!told && JSON.stringify(told.to) === JSON.stringify(['keshav@homeweavers.net']),
       told && told.to);
@@ -913,8 +921,7 @@ process.env.SESSION_SECRET = SECRET;
     const pan = msgs.find(decides);
     check('two approvers named against one person both get the deciding copy',
       !!pan && JSON.stringify(addrs(pan)) === JSON.stringify(
-        ['karan@homeweavers.net', 'munish@homeweavers.net',
-         'nitish@homeweavers.net', 'shivani@homeweavers.net']),
+        ['karan@homeweavers.net', 'munish@homeweavers.net']),
       pan && pan.to);
 
     /* A manager asking for leave is asking, not granting. */
@@ -1075,8 +1082,13 @@ process.env.SESSION_SECRET = SECRET;
       out.status === 200 && msgs.length === 2 && !!toKaran && !!toMgmt, msgs.map(m => m.to));
     check('the manager gets his own people and nobody else\u2019s',
       !!toKaran && /Keshav Garg/.test(toKaran.html) && !/Ravi Test/.test(toKaran.html));
-    check('the management get the lot, because they may decide the lot',
-      !!toMgmt && /Keshav Garg/.test(toMgmt.html) && /Ravi Test/.test(toMgmt.html));
+    /* The management used to be on everything. They are a column on the table
+       now, so they get what they are named against - and the rows nobody is
+       named against, which is what an empty row has always meant. */
+    check('the management get the rows nobody else is named against',
+      !!toMgmt && /Ravi Test/.test(toMgmt.html), toMgmt && toMgmt.to);
+    check('and not the ones somebody else was named against',
+      !!toMgmt && !/Keshav Garg/.test(toMgmt.html), toMgmt && toMgmt.to);
     check('including a day marked with no request behind it',
       !!toKaran && /no request/i.test(toKaran.html));
     /* A digest names several people, which is not theirs to read, so there is
@@ -1129,7 +1141,9 @@ process.env.SESSION_SECRET = SECRET;
   {
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], unrequested: true, requests: true,
       leave: { to: ['nitish@homeweavers.net'], cc: [] } }));
-    kvSet(1, 'approvalRoute', JSON.stringify({ 'Keshav Garg': ['karan@homeweavers.net'] }));
+    /* One person with a manager named against them, and one with nobody. */
+    kvSet(1, 'approvalRoute', JSON.stringify({ 'Keshav Garg': ['karan@homeweavers.net'],
+                                               'Ravi Test': [] }));
     kvSet(1, 'leaveRequests', JSON.stringify([]));
     await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
     await new Promise(r => setTimeout(r, 350));
@@ -1137,16 +1151,25 @@ process.env.SESSION_SECRET = SECRET;
     const day = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
     const before = sent.length;
     await asAdmin('PUT', '/api/kv/overrides', {
-      value: JSON.stringify({ ['Keshav Garg|' + day]: { cat: 'LEAVE', detail: 'CL', reason: 'family' } }),
+      value: JSON.stringify({
+        ['Keshav Garg|' + day]: { cat: 'LEAVE', detail: 'CL', reason: 'family' },
+        ['Ravi Test|' + day]: { cat: 'LEAVE', detail: 'CL', reason: 'family' } }),
       shared: true });
     await new Promise(r => setTimeout(r, 800));
     const msgs = sent.slice(before);
     const toKaran = msgs.find(m => (m.to || []).indexOf('karan@homeweavers.net') > -1);
     const toMgmt = msgs.find(m => (m.to || []).indexOf('nitish@homeweavers.net') > -1);
-    check('a day marked with no request reaches everyone who may decide it',
+    check('a day marked with no request reaches whoever may decide it',
       !!toKaran && !!toMgmt, msgs.map(m => m.to));
-    check('and each of them can act on their own copy',
+    check('each of them can act on their own copy',
       !!toKaran && /Approve/.test(toKaran.html) && /Approve/.test(toMgmt.html));
+    /* And each of them gets their own, not each other's. */
+    check('the manager gets the person named against him',
+      !!toKaran && /Keshav Garg/.test(toKaran.html) && !/Ravi Test/.test(toKaran.html),
+      toKaran && toKaran.to);
+    check('and the management get the one nobody was named against',
+      !!toMgmt && /Ravi Test/.test(toMgmt.html) && !/Keshav Garg/.test(toMgmt.html),
+      toMgmt && toMgmt.to);
 
     await asAdmin('PUT', '/api/kv/overrides', { value: JSON.stringify({}), shared: true });
     kvSet(1, 'leaveRequests', JSON.stringify([]));

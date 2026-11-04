@@ -226,8 +226,15 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       menu.indexOf('data-lv-tab') === -1 && menu.indexOf('data-lv-pane') === -1
       && ['emLvFirstTo', 'emLvFirstCc', 'emLvFirstIntro'].every(id => menu.indexOf(id) === -1),
       menu.indexOf('data-lv-tab'));
-    check('the management keep the box that says they are on every leave email',
-      menu.indexOf('emLvTo') > -1 && /on every leave email, and they can approve/.test(menu));
+    /* The management are a column on the table now rather than a rule behind
+       it: named against somebody they decide that person's leave, and not
+       named against them they are not on their email at all. */
+    check('the management box says they are a column like anybody else',
+      menu.indexOf('emLvTo') > -1 && /a column each below/.test(menu));
+    check('and says what a row nobody is named against falls back to',
+      /a column each below, and whoever decides a row/.test(menu));
+    check('the columns start with them',
+      /managementAddrs\(\)\.forEach\(take\);/.test(grab('approverColumns')));
     check('and the Cc box says plainly that it cannot decide anything',
       menu.indexOf('emLvCc') > -1 && /Also copied, never asked/.test(menu));
     check('there is a box for nominating approvers',
@@ -238,13 +245,26 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       /people\.map\(function\(e\)\{/.test(menu) && menu.indexOf('data-appr-for') > -1
       && menu.indexOf('data-appr-who') > -1);
     /* Nothing implicit: a row with nothing ticked says so in as many words,
-       so a new name never quietly inherits an arrangement nobody chose. */
-    check('a person with nobody ticked is told they are the management\u2019s alone',
-      /mine\.length \? '' : 'management only'/.test(menu));
+       so a new name never quietly inherits an arrangement nobody chose - and
+       it says it in the names of the people it means. */
+    check('a person with nobody ticked is told who decides instead',
+      /mine\.length \? '' : emptyRowSays\(\)/.test(menu));
+    check('and it names them rather than saying "management"',
+      /nobody named \\u2014 ' \+ said \+ ' decide/.test(grab('emptyRowSays')));
     check('it says who may decide and who is only told',
       /Everybody in To can approve it/.test(menu) && /no buttons on it/.test(menu));
     check('and that nobody approves their own',
-      /a manager asking for leave is asking, /.test(menu));
+      /a manager asking for leave is /.test(menu));
+    /* All three kinds on one list, so the list is the whole list. The third
+       is ticked and cannot be unticked: there is nowhere on the attendance
+       card to take a whole day, and a whole day away is somebody else's day
+       to plan around. */
+    check('a whole day is on the list of what must be asked for',
+      /A whole day \\u2014 always/.test(menu));
+    check('ticked, and not somebody\u2019s to untick',
+      /<input type="checkbox" checked disabled>/.test(menu));
+    check('and it carries no setting with it, because there is none to carry',
+      !/data-lv-ask="FULL"/.test(menu));
     /* The table writes its own store as it is ticked; the panel's Save writes
        the mail settings. One button saving both would be lying about one. */
     const whole = grab('renderEmailDropdown');

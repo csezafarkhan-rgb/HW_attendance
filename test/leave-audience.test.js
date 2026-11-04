@@ -73,18 +73,40 @@ const audience = (name, route, cc) =>
 const sorted = a => a.slice().sort();
 
 (async () => {
-  /* ---- the three kinds of people in the company ---- */
+  /* ---- whoever is named, and nobody else ----
+     The management used to be added to every leave email whether or not they
+     were named. They are a column on the table now, the same as anybody else,
+     and they get the message where they are ticked. */
   let a = await audience('Keshav Garg');
-  check('somebody in the Gurgaon office: the owners and their manager decide',
-    JSON.stringify(sorted(a.to)) === JSON.stringify(sorted(MGMT.concat([KARAN]))), a.to);
+  check('somebody in the Gurgaon office: the manager named against them decides',
+    JSON.stringify(sorted(a.to)) === JSON.stringify([KARAN]), a.to);
+  check('and an owner nobody named against them is not on it at all',
+    MGMT.every(m => a.to.indexOf(m) === -1 && a.cc.indexOf(m) === -1), [a.to, a.cc]);
   check('and they are told of it themselves, without a say in it',
     JSON.stringify(a.cc) === JSON.stringify(['keshav@homeweavers.net']), a.cc);
 
   a = await audience('Shyam Lal ESS');
-  check('somebody at the factory: both managers decide, and the owners',
-    JSON.stringify(sorted(a.to)) === JSON.stringify(sorted(MGMT.concat([MUNISH, KARAN]))), a.to);
+  check('somebody at the factory: both the managers named against them',
+    JSON.stringify(sorted(a.to)) === JSON.stringify(sorted([MUNISH, KARAN])), a.to);
   check('two names against one person are both read, not just the first',
     a.to.indexOf(MUNISH) > -1 && a.to.indexOf(KARAN) > -1, a.to);
+
+  /* ---- and a row with nobody on it ----
+     The one rule kept without being asked for. An empty row otherwise leaves
+     somebody's leave with nobody able to answer it, and a request that can
+     never be decided is worse than one decided by the wrong person. */
+  a = await audience('Aman Chandra', { 'Aman Chandra': [] });
+  check('nobody named at all: the management decide',
+    JSON.stringify(sorted(a.to)) === JSON.stringify(sorted(MGMT)), a.to);
+  a = await audience('Aman Chandra', {});
+  check('and a row that was never written reads the same way',
+    JSON.stringify(sorted(a.to)) === JSON.stringify(sorted(MGMT)), a.to);
+  /* An owner ticked against somebody is in TO because they were ticked, not
+     because they are an owner - which looks the same until nobody else is
+     ticked and they are the only name on it. */
+  a = await audience('Aman Chandra', { 'Aman Chandra': [MGMT[0]] });
+  check('an owner ticked alone decides alone',
+    JSON.stringify(a.to) === JSON.stringify([MGMT[0]]), a.to);
 
   /* ---- and nobody decides their own ---- */
   a = await audience('karan Ahuja');
@@ -130,7 +152,7 @@ const sorted = a => a.slice().sort();
   /* Case and stray spacing are the office's, not the rule's. */
   a = await audience('Keshav Garg', { 'Keshav Garg': ['  KARAN@Homeweavers.NET '] });
   check('an address typed in capitals is the same address',
-    a.to.indexOf(KARAN) > -1 && a.to.length === 3, a.to);
+    JSON.stringify(a.to) === JSON.stringify([KARAN]), a.to);
 
   /* ---- every address that may decide anything, for the panel to show ---- */
   check('the panel can be told who is named anywhere',
@@ -199,7 +221,7 @@ const sorted = a => a.slice().sort();
     const p = { approvalRoute: {}, MAIL_CFG: { settings: { leave: { approvers: [] } } },
                 accountNames: {}, authAccounts: {}, Object, String, console };
     vm.createContext(p);
-    ['approversFor', 'approverColumns', 'approverLabel']
+    ['approversFor', 'managementAddrs', 'approverColumns', 'approverLabel']
       .forEach(n => vm.runInContext(grab(APP, n), p));
     p.approvalRoute = { 'Keshav Garg': [KARAN], 'Shyam Lal ESS': [MUNISH, KARAN],
                         'karan Ahuja': [], 'Old Hand': KARAN, 'Older Hand': 'final' };

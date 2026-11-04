@@ -3234,8 +3234,23 @@ async function leaveAudience(orgId, settings, route, empName, mgmt) {
     if (!EMAIL_RE.test(k) || k === own || seen[k]) return;
     seen[k] = true; to.push(k);
   };
-  management.forEach(add);
-  approversOf(route, empName).forEach(add);
+  /* Whoever is named against this person, and nobody else.
+
+     The management used to be added to every leave email whether or not they
+     had been named, on the reasoning that an owner should see all of it. The
+     office wanted the table to mean what it says instead: a column each for
+     them, the same as anybody else, and ticked where they are wanted.
+
+     Named nobody at all, the management decide. That is what the row has
+     always meant, and it is the one rule worth keeping without being asked
+     for: an empty row otherwise leaves somebody's leave with nobody able to
+     answer it, and a request that can never be decided is worse than one
+     decided by the wrong person. */
+  const named = approversOf(route, empName);
+  (named.length ? named : management).forEach(add);
+  /* And if that leaves nobody - a manager who is the only name against their
+     own row - it falls back to the management, minus themselves. */
+  if (!to.length) management.forEach(add);
   const ccSeen = {}, cc = [];
   const addCc = a => {
     const k = String(a || '').trim().toLowerCase();

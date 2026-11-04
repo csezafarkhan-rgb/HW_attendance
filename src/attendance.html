@@ -2955,6 +2955,10 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .ed-visit #edVisitNote{ flex:1 1 220px; min-width:160px; }
 /* The reason for a part day is the whole of what the office is told about it,
    so it gets a line of its own and room to write a sentence in. */
+/* A setting that is shown rather than offered: ticked, dimmed, and not
+   wearing the cursor of something that can be pressed. */
+.em-row-fixed{ opacity:.72; cursor:default; }
+.em-row-fixed input{ cursor:default; }
 .ed-visit .pt-why{ margin-top:10px; }
 .ed-visit #edPartNote{ display:block; width:100%; height:auto; min-height:56px;
   padding:9px 10px; border:1px solid var(--line-dk); border-radius:9px; font:inherit;
@@ -9462,14 +9466,40 @@ function buildExcelBackup(){
     return out;
   }
   /* Every address named against anybody - the columns of the table. */
+  /* Who the management are, as the leave settings name them. They are a column
+     each now rather than a rule behind the table: the office wanted to say
+     which of them answers for whom, the same way it says it for anybody. */
+  function managementAddrs(){
+    return (((MAIL_CFG.settings || {}).leave || {}).to || []).map(function(a){
+      return String(a || '').trim().toLowerCase();
+    }).filter(function(a){ return a.indexOf('@') > -1; });
+  }
+  /* What a row with nobody ticked means, said in the names of the people it
+     means rather than in the word "management". Nobody named is the one rule
+     kept without being asked for: an empty row otherwise leaves somebody's
+     leave with nobody able to answer it, and a request that can never be
+     decided is worse than one decided by the wrong person. */
+  function emptyRowSays(){
+    var who = managementAddrs().map(approverLabel).map(function(n){
+      return (typeof dispName === 'function') ? dispName(n) : n;
+    });
+    if(!who.length) return 'nobody named \u2014 and no management set either';
+    var said = (who.length === 1) ? who[0]
+             : (who.slice(0, -1).join(', ') + ' and ' + who[who.length - 1]);
+    return 'nobody named \u2014 ' + said + ' decide';
+  }
   function approverColumns(){
     var seen = {}, out = [];
-    (((MAIL_CFG.settings || {}).leave || {}).approvers || []).forEach(function(a){
+    var take = function(a){
       var k = String(a || '').trim().toLowerCase();
       if(k.indexOf('@') > -1 && !seen[k]){ seen[k] = true; out.push(k); }
-    });
+    };
+    /* The management first, because they are the answer when nobody else is
+       named, and a column that means that belongs at the front. */
+    managementAddrs().forEach(take);
+    (((MAIL_CFG.settings || {}).leave || {}).approvers || []).forEach(take);
     Object.keys(approvalRoute || {}).forEach(function(n){
-      approversFor(n).forEach(function(a){ if(!seen[a]){ seen[a] = true; out.push(a); } });
+      approversFor(n).forEach(take);
     });
     return out;
   }
@@ -12742,23 +12772,35 @@ function buildExcelBackup(){
             + 'copy that goes to the person who asked.</div>'
             /* The first thing to settle about leave is what has to be asked
                for at all, so it is the first thing on the card. */
-            + '<div class="em-lab">What has to be asked for '
-            +   '<span>a whole day always is</span></div>'
+            + '<div class="em-lab">What has to be asked for</div>'
             + '<label class="em-row"><input type="checkbox" data-lv-ask="SHORT"'
             +   (askedFor('SHORT') ? ' checked' : '') + '>'
             +   '<span>A short leave \u2014 a quarter of the day</span></label>'
             + '<label class="em-row"><input type="checkbox" data-lv-ask="HALF"'
             +   (askedFor('HALF') ? ' checked' : '') + '>'
             +   '<span>A half day</span></label>'
+            /* The third kind, so the list is the whole list rather than the
+               two that happen to be settable. It is ticked and it cannot be
+               unticked: a whole day away is somebody else's day to plan
+               around, and there is nowhere on the attendance card to take one
+               - the card offers a part of today, and a whole day is a date
+               range starting whenever the person likes. */
+            + '<label class="em-row em-row-fixed" title="A whole day is always asked for">'
+            +   '<input type="checkbox" checked disabled>'
+            +   '<span>A whole day \u2014 always</span></label>'
             + '<div class="em-note">Unticked, it is taken on the person\u2019s own attendance '
             +   'card: it counts the moment they take it, nobody is asked, and the office is '
             +   'told. Ticked, it is asked for like any other leave and waits for a word. '
-            +   'Saved as you tick.</div>'
+            +   'Saved as you tick. A whole day is always asked for \u2014 it is somebody '
+            +   'else\u2019s day to plan around, and the card has nowhere to take one.</div>'
             + '<div class="em-lab" style="margin-top:14px;padding-top:11px;border-top:1px solid var(--line);">'
-            +   'Management <span>on every leave email, and they can approve '
-            +   'anything</span></div>'
+            +   'Management <span>a column each below, and whoever decides a row '
+            +   'nobody is named against</span></div>'
             + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
             +   mailEscape((lv.to || []).join(', ')) + '"></div>'
+            + '<div class="em-note">They used to be on every leave email whether or not '
+            +   'they were asked. They are a column below now, the same as anybody else, '
+            +   'and they get the email where they are ticked.</div>'
             + '<div class="em-lab">Also copied, never asked</div>'
             + '<div class="em-row"><input type="text" id="emLvCc" placeholder="comma separated" value="'
             +   mailEscape((lv.cc || []).join(', ')) + '"></div>'
@@ -12781,14 +12823,17 @@ function buildExcelBackup(){
                                + mailEscape(e.name) + '" data-appr-who="' + mailEscape(a) + '"'
                                + (mine.indexOf(a) > -1 ? ' checked' : '') + '></td>';
                            }).join('')
-                         + '<td class="em-appr-say">' + (mine.length ? '' : 'management only') + '</td></tr>';
+                         + '<td class="em-appr-say">' + (mine.length ? '' : emptyRowSays()) + '</td></tr>';
                      }).join('')
                    + '</table></div>')
                 : '<div class="em-note">Name an approver above and everybody appears here with a '
                   + 'box to tick.</div>')
-            + '<div class="em-note">Ticked, that person can approve this one\u2019s leave as well as '
-            +   'the management. Nobody approves their own: a manager asking for leave is asking, '
-            +   'not granting, and his own copy has no buttons on it. Saved as you tick.</div>'
+            + '<div class="em-note">Ticked, that person gets this one\u2019s leave email with '
+            +   'Approve and Reject on it. Unticked, they do not get it at all. A row with '
+            +   'nobody ticked goes to the management, so a request is never left with nobody '
+            +   'able to answer it. Nobody approves their own: a manager asking for leave is '
+            +   'asking, not granting, and his own copy has no buttons on it. Saved as you '
+            +   'tick.</div>'
             + '<div class="em-lab">Subject <span>{n} {waiting} {unrequested} {org}</span></div>'
             + '<div class="em-row"><input type="text" id="emLvSubject" value="'
             +   mailEscape(text(lv.subject, W.leave.subject)) + '"></div>'
@@ -12967,7 +13012,7 @@ function buildExcelBackup(){
             cb.disabled = false;
             var row = cb.parentNode && cb.parentNode.parentNode;
             var say = row && row.querySelector('.em-appr-say');
-            if(say) say.textContent = mine.length ? '' : 'management only';
+            if(say) say.textContent = mine.length ? '' : emptyRowSays();
             showUploadStatus(dispName(name) + (mine.length
               ? ('\u2019s leave can now be approved by ' + mine.join(', ') + ', and the management.')
               : '\u2019s leave is now the management\u2019s alone.'), false);
