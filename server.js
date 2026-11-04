@@ -1206,6 +1206,31 @@ app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
   res.json({ users: rows });
 });
 
+/* Who an address belongs to.
+
+   The day-off form is the one thing here that leaves the system on paper, and
+   it has to name a person rather than a mailbox. The page cannot read the
+   users table, and the store it was asking instead - authAccounts - is the
+   old local-login file, which has never held these accounts and so could
+   never answer. It answered with the address every time, which is why the
+   form printed one.
+
+   Addresses and names of the office's own accounts, which every leave message
+   already carries to everybody it goes to. Anybody signed in may ask: an
+   employee printing their own granted leave needs it as much as the office
+   does, and /api/users is the office's alone. */
+app.get('/api/account-names', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT email, name FROM users WHERE org_id = $1 AND is_active = TRUE', [req.session.orgId]);
+  const names = {};
+  rows.forEach(u => {
+    const e = String(u.email || '').trim().toLowerCase();
+    const n = String(u.name || '').trim();
+    if (e && n) names[e] = n;
+  });
+  res.json({ names });
+});
+
 app.post('/api/users', requireRole('admin'), async (req, res) => {
   const { email, password, name, role } = req.body || {};
   const e = String(email || '').trim().toLowerCase();

@@ -34,16 +34,19 @@ function grab(src, name) {
 }
 
 /* The two lookups the form leans on, run for real. */
-const ctx = { authAccounts: {}, empNames: {}, Object, String, console };
+const ctx = { accountNames: {}, authAccounts: {}, empNames: {}, Object, String, console };
 vm.createContext(ctx);
 vm.runInContext(grab(APP, 'approverLabel'), ctx);
 vm.runInContext(grab(APP, 'dispName'), ctx);
 
-ctx.authAccounts = {
-  'support@homeweavers.net': { role: 'admin', emp: 'Portal Admin' },
-  'KARAN@homeweavers.net':   { role: 'admin', emp: 'karan Ahuja' },
-  'nobody@homeweavers.net':  { role: 'admin' }            // a login with no person behind it
+/* The accounts people sign in with, as the server reports them: address to
+   name, lower-cased. */
+ctx.accountNames = {
+  'support@homeweavers.net': 'Portal Admin',
+  'karan@homeweavers.net':   'karan Ahuja'
 };
+/* And the old local-login file, which has never held any of them. */
+ctx.authAccounts = { admin: { username: 'zafar', password: '123' }, employees: {} };
 ctx.empNames = { 'karan Ahuja': 'Karan Ahuja' };
 
 /* ---- the lookup itself ---- */
@@ -53,6 +56,11 @@ check('and the spelling of the address does not matter',
   ctx.approverLabel('karan@homeweavers.net') === 'karan Ahuja', null);
 check('an address with nobody behind it stays an address',
   ctx.approverLabel('nobody@homeweavers.net') === 'nobody@homeweavers.net', null);
+/* Older records kept the username rather than the address. */
+check('a username from an older record finds its account',
+  ctx.approverLabel('support') === 'Portal Admin', null);
+check('and an empty approver is empty, not the word undefined',
+  ctx.approverLabel('') === '' && ctx.approverLabel(null) === '', null);
 check('and so does one the record has never heard of',
   ctx.approverLabel('stranger@example.com') === 'stranger@example.com', null);
 /* The name shown on the form is the name shown everywhere else. */

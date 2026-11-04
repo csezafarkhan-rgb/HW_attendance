@@ -197,7 +197,7 @@ const sorted = a => a.slice().sort();
      describe an arrangement the messages do not follow. */
   {
     const p = { approvalRoute: {}, MAIL_CFG: { settings: { leave: { approvers: [] } } },
-                authAccounts: {}, Object, String, console };
+                accountNames: {}, authAccounts: {}, Object, String, console };
     vm.createContext(p);
     ['approversFor', 'approverColumns', 'approverLabel']
       .forEach(n => vm.runInContext(grab(APP, n), p));
@@ -220,9 +220,11 @@ const sorted = a => a.slice().sort();
     p.MAIL_CFG.settings.leave.approvers = ['newboss@homeweavers.net'];
     check('an approver nominated but not yet named against anybody is a column too',
       p.approverColumns().indexOf('newboss@homeweavers.net') > -1, p.approverColumns());
-    /* A column headed with a person rather than a mailbox, where an account
-       carries the name. */
-    p.authAccounts = { [KARAN]: { emp: 'karan Ahuja' } };
+    /* A column headed with a person rather than a mailbox, where the server
+       knows whose account the address is. It used to ask authAccounts, which
+       is the old local-login file and has never held any of these - so every
+       column was headed with an address and so was the day-off form. */
+    p.accountNames = { [KARAN]: 'karan Ahuja' };
     check('a column is headed with the person where an account knows them',
       p.approverLabel(KARAN) === 'karan Ahuja' && p.approverLabel(MUNISH) === MUNISH);
   }

@@ -9445,8 +9445,31 @@ function buildExcelBackup(){
   }
   /* The name behind an address where an account carries one, so a column can
      be headed with a person rather than a mailbox. */
+  /* The office's own accounts, as the server knows them: address to name.
+     Asked for once at boot, because the form that needs it is printed on
+     demand and cannot wait for an answer. */
+  var accountNames = {};
+  function loadAccountNames(){
+    return fetch('/api/account-names', { credentials:'same-origin' })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ accountNames = (j && j.names) || {}; })
+      .catch(function(){ accountNames = {}; });
+  }
   function approverLabel(email){
-    var k = String(email || '').toLowerCase(), found = '';
+    var k = String(email || '').trim().toLowerCase(), found = '';
+    if(!k) return '';
+    /* The accounts people actually sign in with. This used to ask
+       authAccounts, which is the old local-login file and has never held
+       them - so the answer was the address, every time. */
+    if(accountNames[k]) return accountNames[k];
+    /* Older records kept the username rather than the address. Match it
+       against the part before the @, which is what a username was. */
+    if(k.indexOf('@') === -1){
+      Object.keys(accountNames).forEach(function(addr){
+        if(!found && addr.split('@')[0] === k) found = accountNames[addr];
+      });
+      if(found) return found;
+    }
     try{
       Object.keys(authAccounts || {}).forEach(function(u){
         var a = authAccounts[u] || {};
@@ -22440,7 +22463,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){
