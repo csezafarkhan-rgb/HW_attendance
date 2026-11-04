@@ -30,9 +30,10 @@ const missing = (name, shift) => ({
   label: 'Not Reached Office', inMin: null, shift, via: ''
 });
 /* What the pass in server.js turns a missing night worker into. */
-const onNights = (name, inT, shift, via) => ({
-  name, emp: name, 'in': inT, out: '', state: 'night', kind: 'night',
-  label: 'On nights', inMin: hhmm(inT), shift: shift + ' · last night', via: via || ''
+const onNights = (name, inT, outT, worked, shift, via) => ({
+  name, emp: name, 'in': inT, out: outT, state: 'night', kind: 'night',
+  label: 'On Night Shift', inMin: hhmm(inT), worked,
+  shift: shift + ' · last night', via: via || ''
 });
 
 const build = rows => mailer.dailyEmail({
@@ -52,15 +53,18 @@ const DAY = [
 
 /* ---- the card of his own ------------------------------------------------ */
 {
-  const html = build(DAY.concat([onNights('Aman Gupta', '19:04', '19:00-4:00')]));
-  check('there is a card for people on nights', html.indexOf('On nights') > -1, null);
+  const html = build(DAY.concat([onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00')]));
+  check('there is a card for people on nights', html.indexOf('On Night Shift') > -1, null);
   check('and he is on it', html.indexOf('1_Aman Gupta') > -1, null);
-  /* The hour he came in, in the same shape as every other card: the name, and
-     the time in brackets. Nothing else - not the out time, not the hours. */
-  check('it carries the hour he came in', /1_Aman Gupta<[^>]*>\s*\(7:04 PM\)/.test(html)
-    || html.indexOf('(7:04 PM)') > -1, null);
-  check('and nothing else beside it',
-    html.indexOf('4:04 AM') === -1 && html.indexOf('→') === -1, null);
+  /* The whole night, because a night is a span and not a moment: when it
+     began, when it ended, and how long it was. */
+  check('it carries the night he worked, end to end',
+    html.indexOf('(7:04 PM → 4:04 AM)') > -1, null);
+  check('and how long it was', /\(7:04 PM → 4:04 AM\) · 9:00/.test(html), null);
+  /* The span may fall to a second line in a narrow card. It may not break in
+     the middle: half an arrow at the end of a line is worse than a wrap. */
+  check('and the span itself never breaks across a line',
+    /white-space:nowrap[^"]*"> \(7:04 PM → 4:04 AM\) · 9:00<\/span>/.test(html), null);
   check('the slot says which night it was',
     html.indexOf('19:00-4:00 · last night') > -1, null);
 
@@ -75,7 +79,15 @@ const DAY = [
 /* A night nobody was on puts no empty card on the message. */
 {
   const html = build(DAY);
-  check('nobody on nights, no card for it', html.indexOf('On nights') === -1, null);
+  check('nobody on nights, no card for it', html.indexOf('On Night Shift') === -1, null);
+}
+
+/* Still in: the night has a start and no end yet, so there is nothing to
+   measure and the card says only when it began. */
+{
+  const html = build(DAY.concat([onNights('Aman Gupta', '19:04', '', '', '19:00-4:00')]));
+  check('a night still being worked shows its start and no span',
+    html.indexOf('(7:04 PM)') > -1 && html.indexOf('→') === -1, null);
 }
 
 /* ---- the mark for a time somebody put there themselves ------------------ */
@@ -114,6 +126,10 @@ const DAY = [
     /if \(!inAt\) return;/.test(SRV), null);
   check('the row carries the name the record keeps, to look yesterday up by',
     /return \{ name, emp: e\.name, via,/.test(SRV), null);
+  /* An out time on the far side of midnight reads as earlier than the in
+     time, so a plain subtraction came out fifteen hours short. */
+  check('a night that crosses midnight is measured across it',
+    /b <= a \? \(b \+ 24 \* 60 - a\) : \(b - a\)/.test(SRV), null);
   check('and the portal mark is only set where that is the time being shown',
     /const via = \(rec\.manual === true && typed && typed\.by === 'self'\) \? 'portal' : '';/
       .test(SRV), null);

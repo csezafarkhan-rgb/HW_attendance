@@ -2690,9 +2690,21 @@ async function buildDailyEmail(orgId, day, opts) {
       const seen = was[r.emp] || {};
       const inAt = seen['in'] || (typed && typed['in']) || '';
       if (!inAt) return;
-      r.state = 'night'; r.kind = 'night'; r.label = 'On nights';
+      const outAt = seen['in'] ? (seen.out || '')
+                  : ((typed && typed.out && typed.out !== '-') ? typed.out : '');
+      r.state = 'night'; r.kind = 'night'; r.label = 'On Night Shift';
       r['in'] = inAt;
+      r.out = outAt;
       r.inMin = hhmmToMinutes(inAt);
+      /* How long the night was. The out time is on the far side of midnight,
+         so it reads as earlier than the in time until a day is added to it;
+         left alone the sum came out as fifteen hours short. Still in and
+         there is nothing to measure yet. */
+      const a = hhmmToMinutes(inAt), b = hhmmToMinutes(outAt);
+      r.worked = (a == null || b == null) ? ''
+        : (function (mins) {
+            return Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
+          })(b <= a ? (b + 24 * 60 - a) : (b - a));
       r.via = (!seen['in'] && typed && typed.by === 'self') ? 'portal' : '';
       /* The slot says which night it was, so nobody reads the hour as this
          evening's. slotMin still sorts on the time at the front of it. */

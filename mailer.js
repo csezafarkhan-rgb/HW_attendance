@@ -607,7 +607,7 @@ function dailyEmail(o) {
       /* Beside the absent rather than among them: a night shift's working day
          is the one that ended this morning, and the hour on the card is the
          hour they came in on it. */
-      ['On nights', who('night'), '#4C46C6', true, true],
+      ['On Night Shift', who('night'), '#4C46C6', true, true],
       ['Visiting', who('visit'), '#7C3AED', false],
       ['On leave', who('leave'), '#B45309', false],
       ['Work from home', who('wfh'), '#2F6FE4', false]
@@ -672,6 +672,20 @@ function dailyEmail(o) {
              under the card rather than once against every name. */
           const via = r.via === 'portal'
             ? '<sup style="color:#4C46C6;font-weight:700;font-size:7.5px;">P</sup>' : '';
+          /* A night is a span rather than a moment: it began yesterday
+             evening and ended this morning, and the hours between are the
+             thing worth knowing about it. Too long for the one nowrap line
+             the other cards keep to, so the line may wrap - but the span
+             itself never breaks across one, because half of an arrow on the
+             end of a line is worse than a second line. */
+          if (r.kind === 'night' && r.out) {
+            return '<div style="line-height:1.45;">' + (i + 1) + '_' + esc(r.name)
+                 + '<span style="white-space:nowrap;color:' + SOFT + ';font-size:9.5px;">'
+                 +   ' (' + esc(clock(r['in'])) + ' → ' + esc(clock(r.out)) + ')'
+                 +   (r.worked ? ' · ' + esc(r.worked) : '')
+                 + '</span>' + via
+                 + '</div>';
+          }
           return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
                + (at ? time : '') + via
                + '</div>';
