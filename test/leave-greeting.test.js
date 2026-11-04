@@ -240,8 +240,16 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
       /intro: settings\.leave\.intro, footer: settings\.leave\.footer,/.test(sample), null);
     /* The request behind it does not exist, so it carries no buttons and says
        on its face that nobody has asked for the day. */
-    check('a sample carries nothing to press',
-      /links: null, heading: 'Sample/.test(sample), null);
+    /* The buttons are the thing the message exists to carry, and where they
+       sit is half of what there is to look at - so a preview without them is
+       not a preview of this message. They lead to the dashboard: the request
+       behind a sample does not exist, so a real link would be a button that
+       fails when pressed. */
+    check('a sample shows the buttons',
+      /links: \{ approve: mailer\.baseUrl\(\), reject: mailer\.baseUrl\(\) \},/.test(sample),
+      null);
+    check('and they decide nothing',
+      sample.indexOf("linksFor(") === -1, null);
     check('and says on the request itself that it is one',
       /Sample only - nobody has asked for this day\./.test(sample), null);
     check('nothing is saved for it',

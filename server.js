@@ -4139,9 +4139,15 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     orgName: orgNameOf(kv.companyInfo), req: req0, siteUrl: mailer.baseUrl(),
     intro: settings.leave.intro, footer: settings.leave.footer,
     approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
-    /* No links on it. A button on a sample would act on a request that does
-       not exist, and the office is reading this, not deciding it. */
-    links: null, heading: 'Sample \u2014 how this person\u2019s leave will arrive' });
+    /* The buttons are on it, because a preview without them is not a preview
+       of this message - they are the thing it exists to carry, and where they
+       sit decides whether it reads at a glance.
+
+       They lead to the dashboard rather than to a decision. The request behind
+       this does not exist, so a real link would be a button that fails when
+       pressed; the card says on its face that nobody has asked for the day. */
+    links: { approve: mailer.baseUrl(), reject: mailer.baseUrl() },
+    heading: 'Sample \u2014 how this person\u2019s leave will arrive' });
 
   if ((req.body && req.body.send) === 'test') {
     let to = String((req.user && req.user.email) || '').trim();
