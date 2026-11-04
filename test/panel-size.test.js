@@ -124,7 +124,14 @@ const bad = results.filter(x => !x).length;
     !/\.em-set\{[^}]*height:52vh/.test(APP) && !/\.em-set\{[^}]*max-height:560px/.test(APP),
     null);
   check('it stretches to whatever the panel has been dragged to',
-    /\.em-set\{ flex:1 1 auto;/.test(APP), null);
+    /\.em-dropdown \.em-set\{ flex:1 1 auto;/.test(APP), null);
+  /* The rule that pins everything else has to say "everything else". It said
+     `> *`, which is two classes and an element against the one class naming
+     the settings - so flex:none won and nothing stretched. */
+  check('and the rule pinning the rest leaves the settings out of it',
+    /\.em-dropdown \.em-pane > \*:not\(\.em-set\)\{ flex:none; \}/.test(APP), null);
+  check('with the settings named at least as strongly as the rule that pins',
+    /\.em-dropdown \.em-set\{/.test(APP) && !/^\.em-set\{ flex/m.test(APP), null);
   check('the panel is a column for it to stretch in',
     /\.month-dropdown\.em-dropdown\.open\{ display:flex; flex-direction:column; \}/.test(APP),
     null);
@@ -137,14 +144,13 @@ const bad = results.filter(x => !x).length;
     APP.indexOf('.month-dropdown.em-dropdown.open{') <
       APP.indexOf('.month-dropdown.open{display:block;}')
     && /\.month-dropdown\.em-dropdown\.open/.test(APP), null);
-  check('and everything above it keeps its own size',
-    /\.em-dropdown \.em-pane > \*\{ flex:none; \}/.test(APP), null);
+
   /* A flex child will not scroll inside its parent unless it is allowed to be
      smaller than its content. */
   check('the pane may be shorter than what is in it',
     /\.em-dropdown \.em-pane\{[^}]*min-height:0;/.test(APP), null);
   check('and the settings still scroll when they are longer than the panel',
-    /\.em-set\{[^}]*overflow-y:auto;/.test(APP), null);
+    /\.em-dropdown \.em-set\{[^}]*overflow-y:auto;/.test(APP), null);
 }
 
 console.log(bad ? ('FAILED ' + bad + ' of ' + results.length)

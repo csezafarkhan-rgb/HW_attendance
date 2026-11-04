@@ -905,9 +905,12 @@ body{
    and quietly undo the column. */
 .month-dropdown.em-dropdown.open{ display:flex; flex-direction:column; }
 .em-dropdown .em-pane{ display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
-/* Everything above the settings keeps its own size; only the settings stretch. */
-.em-dropdown .em-pane > *{ flex:none; }
-.em-set{ flex:1 1 auto; min-height:220px; overflow-y:auto; overflow-x:hidden; }
+/* Everything above the settings keeps its own size; only the settings stretch.
+   The settings are spelled out of this rather than left to a rule of their
+   own further down: `> *` names two classes and an element, `.em-set` names
+   one class, so the blanket flex:none beat it and nothing stretched at all. */
+.em-dropdown .em-pane > *:not(.em-set){ flex:none; }
+.em-dropdown .em-set{ flex:1 1 auto; min-height:220px; overflow-y:auto; overflow-x:hidden; }
 /* The six panes are each as wide as their own content; one width for all of
    them, so the panel does not widen and narrow either. */
 .em-dropdown [data-em-pane]{ width:100%; }
