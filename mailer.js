@@ -1219,13 +1219,28 @@ function requestEmail(o) {
                 kind: kindName(r.leaveType), dates: dateRange(r.dateFrom, r.dateTo) };
   if (o.approver) say.approver = o.approver;
   const intro = fillText(o.intro, say), footer = fillText(o.footer, say);
+  /* A copy with no buttons on it is somebody being told, not somebody being
+     asked - and the office's wording at the top is written for whoever
+     decides it. "Approve or reject it from the buttons" on a message that has
+     no buttons is the message contradicting itself, and the two copies then
+     read identically apart from a gap where the buttons were, which is how a
+     told copy gets mistaken for the only copy.
+
+     So on that copy the note takes the place of those words rather than
+     sitting above them, and says who does have the buttons. */
+  const telling = !o.links && o.note;
+  const top = telling
+    ? ('<div style="margin:0 0 14px;padding:10px 12px;border-radius:8px;'
+       + 'background:#FFF7DF;border-left:3px solid #E8B931;font-size:13px;'
+       + 'line-height:1.55;color:' + INK + ';">' + lines(fillText(o.note, say)) + '</div>')
+    : (intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+                  + lines(intro) + '</div>') : '');
   return {
     subject: (r.leaveType === 'PUNCH' ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
              + ' · ' + dateRange(r.dateFrom, r.dateTo),
     html: layout(o.orgName || 'Attendance',
       o.heading || 'A request is waiting for a decision', [
-      intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
-                 + lines(intro) + '</div>') : '',
+      top,
       requestCard(r, o.links, 'Raised ' + (r.createdAt ? fmtDay(String(r.createdAt).slice(0, 10)) : 'just now')),
       footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
                   + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>') : '',

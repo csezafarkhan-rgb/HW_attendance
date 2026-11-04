@@ -3155,9 +3155,16 @@ async function notifyNewRequests(orgId, added) {
       if (aud.cc.length) {
         /* The told copy goes to the person who asked, so {approver} is them.
            Anything else greets somebody by a name not on the message. */
+        /* Naming them rather than calling them "the people who decide it":
+           the whole point of this copy is that the reader can see the request
+           went somewhere, and a copy that says it went to somebody unnamed
+           reads like the message that should have gone to them. */
+        const deciders = await approverNames(orgId, aud.to);
         const told = mailer.requestEmail(Object.assign({}, base, {
           links: null, heading: 'A request has been raised', approver: r.empName,
-          note: 'For information. The people who decide it have their own copy.' }));
+          note: 'For information \u2014 there is nothing to decide on this copy. '
+              + (deciders ? ('It is with ' + deciders + ', who have the buttons.')
+                          : 'The people who decide it have their own copy.') }));
         const ccMsg = { to: aud.cc, cc: [], subject: told.subject, html: told.html };
         await logMail(orgId, 'request', ccMsg, await mailer.send(ccMsg));
       }
@@ -4197,7 +4204,22 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     if (!r.ok) return res.status(502).json(r);
     return res.json({ ok: true, sentTo: to });
   }
-  res.json({ ok: true, sample: true, to: aud.to, cc: aud.cc,
+  /* Both copies, not one with a Cc line under it. The people in CC are not
+     copied on the message above - they are sent a different one, with nothing
+     on it to press - and a preview that lists them under the message with the
+     buttons is showing the office something that never goes out. */
+  const told = aud.cc.length ? mailer.requestEmail({
+    orgName: orgNameOf(kv.companyInfo), req: req0, siteUrl: mailer.baseUrl(),
+    intro: settings.leave.intro, footer: settings.leave.footer,
+    links: null, approver: name,
+    note: 'For information \u2014 there is nothing to decide on this copy. '
+        + (await approverNames(orgId, aud.to) ? ('It is with '
+            + await approverNames(orgId, aud.to) + ', who have the buttons.')
+          : 'The people who decide it have their own copy.'),
+    heading: 'A request has been raised' }) : null;
+  const mails = [{ subject: mail.subject, to: aud.to, cc: [], html: mail.html }];
+  if (told) mails.push({ subject: told.subject, to: aud.cc, cc: [], html: told.html });
+  res.json({ ok: true, sample: true, to: aud.to, cc: aud.cc, mails: mails,
              preview: { subject: mail.subject, html: mail.html } });
 });
 
