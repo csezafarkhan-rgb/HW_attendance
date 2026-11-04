@@ -892,8 +892,19 @@ body{
    it jump - Work is six boxes, Month is two, and the whole window resized
    under the pointer every time. It keeps one height now: short tabs leave
    space at the foot, long ones scroll inside it. The tabs themselves stay put
-   at the top, which is the row being clicked. */
-.em-set{ height:52vh; min-height:300px; max-height:560px; overflow-y:auto; overflow-x:hidden; }
+   at the top, which is the row being clicked.
+
+   That height used to be its own - 52vh, never more than 560px - which was
+   right while the panel had a fixed height too. The panel can be dragged
+   since, and the settings went on keeping their 560px inside it: the Leave
+   card, which is now the longest of the six by a street, scrolled in a small
+   window with the panel half empty around it, and two scrollbars side by side
+   to say so. It fills the panel now, however tall the panel has been made. */
+.em-dropdown.open{ display:flex; flex-direction:column; }
+.em-dropdown .em-pane{ display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+/* Everything above the settings keeps its own size; only the settings stretch. */
+.em-dropdown .em-pane > *{ flex:none; }
+.em-set{ flex:1 1 auto; min-height:220px; overflow-y:auto; overflow-x:hidden; }
 /* The six panes are each as wide as their own content; one width for all of
    them, so the panel does not widen and narrow either. */
 .em-dropdown [data-em-pane]{ width:100%; }

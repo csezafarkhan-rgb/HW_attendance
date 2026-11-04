@@ -111,6 +111,32 @@ check('it cannot be dragged away to nothing',
 }
 
 const bad = results.filter(x => !x).length;
+/* ---- and the settings fill the panel rather than keeping a height of
+       their own inside it ----
+   52vh, never more than 560px, was right while the panel had a fixed height
+   too. The panel can be dragged now, and the settings went on keeping their
+   560px inside it - so the Leave card, the longest of the six by a street,
+   scrolled in a small window with the panel half empty around it, and two
+   scrollbars side by side to say so. */
+{
+  const css = APP.slice(APP.indexOf('.em-dropdown{'), APP.indexOf('.em-appr-wrap{'));
+  check('the settings box no longer carries a height of its own',
+    !/\.em-set\{[^}]*height:52vh/.test(APP) && !/\.em-set\{[^}]*max-height:560px/.test(APP),
+    null);
+  check('it stretches to whatever the panel has been dragged to',
+    /\.em-set\{ flex:1 1 auto;/.test(APP), null);
+  check('the panel is a column for it to stretch in',
+    /\.em-dropdown\.open\{ display:flex; flex-direction:column; \}/.test(APP), null);
+  check('and everything above it keeps its own size',
+    /\.em-dropdown \.em-pane > \*\{ flex:none; \}/.test(APP), null);
+  /* A flex child will not scroll inside its parent unless it is allowed to be
+     smaller than its content. */
+  check('the pane may be shorter than what is in it',
+    /\.em-dropdown \.em-pane\{[^}]*min-height:0;/.test(APP), null);
+  check('and the settings still scroll when they are longer than the panel',
+    /\.em-set\{[^}]*overflow-y:auto;/.test(APP), null);
+}
+
 console.log(bad ? ('FAILED ' + bad + ' of ' + results.length)
                 : ('ALL PASS (' + results.length + ' checks)'));
 process.exit(bad ? 1 : 0);
