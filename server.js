@@ -4265,10 +4265,18 @@ app.post('/api/mail/leave', requireRole('admin'), async (req, res) => {
   const r = await sendLeaveEmail(req.session.orgId, { preview: !!body.preview });
   if (body.preview && r.ok && r.mails) {
     keepPreview(req.session.userId, { mails: r.mails });
-    const first = r.mails[0];
+    /* Every message, not only the first.
+
+       One press stands behind several of them - leave is gathered by whoever
+       may decide it, one message each - and the window used to show the first
+       and name the rest. Naming a message is not reading it, and what the
+       office wanted to check was what each person is about to be told. */
+    const all = r.mails.map(x => ({ subject: x.subject, to: x.to || [], cc: x.cc || [],
+                                    html: x.html }));
+    const first = all[0];
     return res.json({ ok: true, preview: { subject: first.subject, html: first.html },
-                      to: first.to, cc: first.cc, messages: r.mails.length,
-                      others: r.mails.slice(1).map(x => ({ subject: x.subject, to: x.to })) });
+                      to: first.to, cc: first.cc, messages: all.length, mails: all,
+                      others: all.slice(1).map(x => ({ subject: x.subject, to: x.to })) });
   }
   res.status(r.ok ? 200 : 502).json(r);
 });

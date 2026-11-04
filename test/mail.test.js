@@ -1276,8 +1276,20 @@ process.env.SESSION_SECRET = SECRET;
     /if \(preview\) return \{ ok: true, mails: built\.mails \};/.test(srv));
   check('and holds every message behind that one press, not just the first',
     /keepPreview\(req\.session\.userId, \{ mails: r\.mails \}\)/.test(srv));
-  check('the window says what else goes, and to whom',
-    /pv\.others && pv\.others\.length/.test(app) && /and ' \+ pv\.others\.length \+ ' more/.test(app));
+  /* It used to show the first message and name the rest. Naming a message is
+     not reading it, and what the office is checking is what each person is
+     about to be told - so the window pages through all of them. */
+  check('the server hands back every message, not just the first',
+    /const all = r\.mails\.map\(x => \(\{ subject: x\.subject, to: x\.to \|\| \[\], cc: x\.cc \|\| \[\],/
+      .test(srv) && /messages: all\.length, mails: all/.test(srv));
+  check('the window reads them all rather than counting them',
+    /var mails = \(pv\.mails && pv\.mails\.length\) \? pv\.mails/.test(app)
+    && /'Message ' \+ \(at \+ 1\) \+ ' of ' \+ mails\.length/.test(app));
+  check('and one message is still one message, with no pager on it',
+    /var many = mails\.length > 1;/.test(app)
+    && /\? \('Send all ' \+ mails\.length\) : 'Send it'/.test(app));
+  check('it names who is only being told as well as who is asked',
+    /cc\.textContent = \(m\.cc && m\.cc\.length\) \? \('Cc ' \+ m\.cc\.join\(', '\)\) : '';/.test(app));
   check('pressing send posts the word alone, and what was read is what goes',
     /body\.send === 'preview'[\s\S]{0,400}for \(const msg of held\.mails\)/.test(srv));
   check('an expired preview is refused rather than rebuilt behind their back',
