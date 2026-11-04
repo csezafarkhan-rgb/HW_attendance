@@ -272,6 +272,15 @@ function query(sql, p) {
     db.users.forEach(u => { if (u.org_id === p[1] || u.org_id === p[0]) u.leave_approver = (u.id === p[0]); });
     return rows([]);
   }
+  /* The one account a session belongs to, which is how the gate works out
+     whose press a button in an email is. It used to fall through to the
+     catch-all below and come back with the admins, so the gate was being
+     handed somebody it had not asked for - and passed only because one of
+     them happened to be the approver. */
+  if (s.startsWith('SELECT email, name FROM users WHERE id = $1')) {
+    const hit = db.users.find(u => u.id === p[0] && u.org_id === p[1] && u.is_active);
+    return rows(hit ? [{ email: hit.email, name: hit.name }] : []);
+  }
   if (s.startsWith('SELECT email FROM users WHERE org_id = $1 AND is_active AND lower(COALESCE(name')) {
     const hit = db.users.find(u => u.org_id === p[0] && u.is_active
       && String(u.name || '').toLowerCase() === String(p[1]).toLowerCase());
@@ -379,7 +388,12 @@ process.env.SESSION_SECRET = SECRET;
   const reqs = JSON.parse(kvFind(1, 'leaveRequests').value);
   const ovs = JSON.parse(kvFind(1, 'overrides').value);
   check('pressing the button approves the request', done.status === 200 && reqs[0].status === 'approved', reqs[0]);
-  check('the approval is marked as made by email', reqs[0].approvedBy === 'email', reqs[0]);
+  /* Who granted it, by name. It used to say the word 'email', because
+     nothing on that path knew who had pressed the button - the link decided
+     for whoever held it. The gate establishes that now, so a request three
+     people could have answered says which of them did. */
+  check('the approval is marked with the name of whoever granted it',
+    reqs[0].approvedBy === 'Boss', reqs[0]);
   check('the day is marked on the record, stamped with the request',
     ovs['Asha Test|2026-09-25'] && ovs['Asha Test|2026-09-25'].reqId === 'req_1', ovs);
   check('a day already carrying another mark is left alone',
@@ -834,11 +848,23 @@ process.env.SESSION_SECRET = SECRET;
     { method: 'POST', headers: { Cookie: adminCookie } });
   await new Promise(r => setTimeout(r, 600));
   const told = sent[sent.length - 1];
+  /* The answer is addressed exactly as the question was - the same TO, the
+     same CC - so the two are a question and its answer in one thread rather
+     than two notices that happen to be about the same day. */
   check('the employee is told when their leave is decided',
-    sent.length === decidedBefore + 1 && (told.to || []).indexOf('keshav@homeweavers.net') > -1
-      && /approved/i.test(told.subject), told && { to: told.to, subject: told.subject });
+    sent.length === decidedBefore + 1
+      && (told.to || []).concat(told.cc || []).indexOf('keshav@homeweavers.net') > -1
+      && /approved/i.test(told.subject), told && { to: told.to, cc: told.cc, subject: told.subject });
   check('and the addresses saved on the Leave tab are copied',
     (told.cc || []).indexOf('support@x.com') > -1, told && told.cc);
+  /* The people who were asked to decide it learn what became of it. They used
+     to be left out: three are sent a request, one answers, and the other two
+     are still holding a question that has been settled. */
+  check('the people who were asked are told how it was answered',
+    (told.to || []).indexOf('boss@x.com') > -1, told && told.to);
+  check('and the person it is about reads it where they read the question',
+    (told.cc || []).indexOf('keshav@homeweavers.net') > -1
+    && (told.to || []).indexOf('keshav@homeweavers.net') === -1, [told.to, told.cc]);
   check('the message names the days it was about', /24 Sep’ 2026/.test(told.html));
 
   /* ---- who a message is addressed to ----
@@ -1093,8 +1119,10 @@ process.env.SESSION_SECRET = SECRET;
   await new Promise(r => setTimeout(r, 600));
   const refused = sent[sent.length - 1];
   check('a decision made on the portal is told the same way',
-    sent.length === portalBefore + 1 && (refused.to || [])[0] === 'keshav@homeweavers.net'
-      && /not approved/i.test(refused.subject), refused && refused.subject);
+    sent.length === portalBefore + 1
+      && (refused.cc || []).indexOf('keshav@homeweavers.net') > -1
+      && /not approved/i.test(refused.subject),
+    refused && { to: refused.to, cc: refused.cc, subject: refused.subject });
   await asAdmin('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(withRefusal), shared: true });
   await new Promise(r => setTimeout(r, 400));
   check('saving the same decision again tells nobody twice', sent.length === portalBefore + 1);

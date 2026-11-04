@@ -198,7 +198,7 @@ check('the request raised about them is sent to them',
   /if \(own\) addCc\(own\);/.test(SRV)
   && /const toMsg = \{ to: aud\.to, cc: aud\.cc, subject: decide\.subject/.test(SRV));
 check('and being on it does not let them decide it',
-  /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes' \};/.test(SRV)
+  /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes', name: myName \|\| mine \};/.test(SRV)
   && /if \(!EMAIL_RE\.test\(k\) \|\| k === own \|\| seen\[k\]\) return;/.test(SRV));
 check('and so does the one passing their recommendation on',
   /mailCc\(settings, 'leave'\)\.concat\(\s*await ownersOf\(orgId, \[req\.empName\]/.test(SRV));

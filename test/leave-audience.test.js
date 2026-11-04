@@ -179,9 +179,9 @@ const sorted = a => a.slice().sort();
     /const toMsg = \{ to: aud\.to, cc: aud\.cc, subject: decide\.subject/.test(raised), null);
   const gate = grab(SRV, 'decidableBy');
   check('a press is weighed against the account, not against the link',
-    /SELECT email FROM users WHERE id = \$1/.test(gate), null);
+    /SELECT email, name FROM users WHERE id = \$1/.test(gate), null);
   check('and it counts only if that account is one the message went TO',
-    /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes' \};/.test(gate), null);
+    /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes', name: myName \|\| mine \};/.test(gate), null);
   check('which is the list nobody is on for their own leave',
     /if \(!EMAIL_RE\.test\(k\) \|\| k === own \|\| seen\[k\]\) return;/.test(SRV), null);
   check('signed out, nothing is decided',

@@ -3503,8 +3503,21 @@ async function notifyDecision(orgId, req) {
     if (req.status !== 'approved' && req.status !== 'rejected') return;
     const settings = await mailSettings(orgId);
     if (!settings.leave.confirm) return;
-    const to = await employeeAddress(orgId, req.empName);
-    if (!to) return;                                   // no account, nobody to write to
+    /* Addressed exactly as the question was: the same TO, the same CC.
+
+       The answer used to go to the person who asked and to whatever was in
+       the Leave tab's Cc box, and nowhere else - so the people who had been
+       asked to decide it never learnt what became of it. Three are sent a
+       request, one answers, and the other two are left holding a question
+       that has been settled.
+
+       Built from the same audience the request was built from, so the two
+       messages are a question and its answer in one thread rather than two
+       notices that happen to be about the same day. */
+    const route = await approvalRouteOf(orgId);
+    const mgmt = await mailRecipients(orgId, settings, 'leave');
+    const aud = await leaveAudience(orgId, settings, route, req.empName, mgmt);
+    if (!aud.to.length) return;                        // nobody to write to
     const job = 'decision-email:' + orgId + ':' + req.id + ':' + req.status;
     const claimed = await pool.query(
       'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
@@ -3513,9 +3526,12 @@ async function notifyDecision(orgId, req) {
     const mail = mailer.decisionEmail({
       orgName: orgNameOf(kv.companyInfo), req, decision: req.status, siteUrl: mailer.baseUrl()
     });
-    const cc = mailCc(settings, 'leave');
-    const r = await mailer.send({ to, cc, subject: mail.subject, html: mail.html });
-    await logMail(orgId, 'decision', { to: [to], cc, subject: mail.subject, html: mail.html }, r);
+    /* The person who asked is on the CC line, where they were on the request
+       - the message is written to them, and they read it there as they read
+       the question there. */
+    const msg = { to: aud.to, cc: aud.cc, subject: mail.subject, html: mail.html };
+    const r = await mailer.send(msg);
+    await logMail(orgId, 'decision', msg, r);
   } catch (e) {
     console.error('the decision stands but its message failed:', e && e.message);
   }
@@ -3915,7 +3931,7 @@ function daysBetween(from, to) {
    the dashboard writes: the request's new status, and the marks an approval puts
    on the record. A day already carrying somebody else's mark is left alone, and
    a locked month is not touched at all. */
-async function applyEmailDecision(p, note) {
+async function applyEmailDecision(p, note, who) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -3963,9 +3979,17 @@ async function applyEmailDecision(p, note) {
       req.status = p.act === 'approve' ? 'approved' : 'rejected';
       req.updatedAt = now;
       if (note) req.adminNote = note;                  // the reason, in their own words
-      /* Whoever was sent it is whoever granted it, and the record says which of
-         them it was rather than the word 'email'. */
-      if (p.act === 'approve') req.approvedBy = byFirst ? (p.by || 'email') : 'email';
+      /* Who granted it, by name.
+
+         This used to write the word 'email' for anything that came from a
+         request link, because nothing on that path knew who had pressed it -
+         the link decided for whoever held it. The gate establishes that now,
+         so the record can name them, and a request three people could have
+         answered says which of them did.
+
+         A digest link still carries its own name in the link itself, and that
+         is used where the signed-in name is somehow missing. */
+      if (p.act === 'approve') req.approvedBy = who || (byFirst && p.by) || 'email';
       else delete req.approvedBy;
       summary = dispReq(req);
       decided = req;
@@ -4020,7 +4044,7 @@ async function applyEmailDecision(p, note) {
       /* One word settles it here too: whoever the day was sent to decides it.
          It used to be passed on to a super admin, which is the stage the office
          has asked to drop. */
-      if (p.act === 'approve') fresh.approvedBy = firstUnreq ? (p.by || 'email') : 'email';
+      if (p.act === 'approve') fresh.approvedBy = who || (firstUnreq && p.by) || 'email';
       reqs.push(fresh);
       summary = dispReq(fresh);
       decided = fresh;
@@ -4121,9 +4145,14 @@ async function decidableBy(req, p) {
   if (!req.session || !req.session.userId) return { how: 'signin' };
   if (String(req.session.orgId) !== String(p.org)) return { how: 'no' };
   const u = await pool.query(
-    'SELECT email FROM users WHERE id = $1 AND org_id = $2 AND is_active LIMIT 1',
+    'SELECT email, name FROM users WHERE id = $1 AND org_id = $2 AND is_active LIMIT 1',
     [req.session.userId, p.org]);
   const mine = String(u.rows[0] ? u.rows[0].email : '').trim().toLowerCase();
+  /* Their name, for the record to say who granted it. The gate is the only
+     place that knows - it is the one thing that worked out whose press this
+     is - so it hands the name on rather than letting the record fall back to
+     the word 'email'. */
+  const myName = String(u.rows[0] ? (u.rows[0].name || '') : '').trim();
   if (!EMAIL_RE.test(mine)) return { how: 'no' };
   /* Whose leave it is. An unrequested day carries the name; a request carries
      an id, and the name is on the request. */
@@ -4140,7 +4169,7 @@ async function decidableBy(req, p) {
   const route = await approvalRouteOf(p.org);
   const mgmt = await mailRecipients(p.org, settings, 'leave');
   const aud = await leaveAudience(p.org, settings, route, empName, mgmt);
-  if (aud.to.indexOf(mine) > -1) return { how: 'yes' };
+  if (aud.to.indexOf(mine) > -1) return { how: 'yes', name: myName || mine };
   return { how: 'no', who: await approverNames(p.org, aud.to) };
 }
 /* Said the same way on the page that asks and the one that acts, so a refusal
@@ -4208,7 +4237,8 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
     return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, no.link));
   }
   // Whatever was typed in the box on that page travels with the decision.
-  const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim());
+  const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim(),
+                                       may.name);
   res.status(out.ok ? 200 : 409).send(mailer.resultPage(out.title, out.detail, out.ok));
 });
 

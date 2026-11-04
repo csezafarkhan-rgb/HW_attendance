@@ -58,9 +58,15 @@ check('and the people who are only told are on the Cc line of that same message'
   /const toMsg = \{ to: aud\.to, cc: aud\.cc/.test(SRV), null);
 check('the sample shows it with its real Cc',
   /res\.json\(\{ ok: true, sample: true, to: aud\.to, cc: aud\.cc,/.test(SRV), null);
-/* The person who asked still hears, once, when it is answered. */
-check('and a decision is still written to them',
-  /const to = await employeeAddress\(orgId, req\.empName\);/.test(SRV), null);
+/* The person who asked still hears, once, when it is answered - and the
+   answer is addressed exactly as the question was, so it lands in the same
+   thread for everybody rather than starting a second one. */
+check('and the decision goes back to the room the request went to',
+  /const msg = \{ to: aud\.to, cc: aud\.cc, subject: mail\.subject, html: mail\.html \};/.test(SRV),
+  null);
+check('built from the same audience the request was built from',
+  (SRV.match(/await leaveAudience\(orgId, settings, route, req\.empName, mgmt\)/g) || []).length >= 1,
+  null);
 
 /* ---- and a Cc cannot decide it, because the link is no longer the authority ---- */
 check('who may press a button is worked out from the account, not the link',
@@ -70,7 +76,7 @@ check('nobody signed out decides anything',
 check('nor anybody from another office holding the link',
   /if \(String\(req\.session\.orgId\) !== String\(p\.org\)\) return \{ how: 'no' \};/.test(SRV), null);
 check('the account that is pressing it must be one the message went TO',
-  /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes' \};/.test(SRV), null);
+  /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes', name: myName \|\| mine \};/.test(SRV), null);
 /* leaveAudience keeps the person who asked out of TO whoever else they are,
    so this is also what stops somebody approving their own leave. */
 check('which is the list the person who asked is never on',
