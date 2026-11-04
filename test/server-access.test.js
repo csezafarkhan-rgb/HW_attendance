@@ -283,13 +283,20 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   const bossAll = (await boss('GET', '/api/kv-all')).body.values;
   check('admin still sees everything', 'salaries' in bossAll && JSON.parse(bossAll.leaveRequests).length === 3);
 
+  /* A request may not reach further back than a month, so the days these
+     raise have to be days somebody could still raise. They were written as
+     fixed dates in September, which were last week when this was written and
+     are now eight weeks gone - the test was quietly measuring the calendar.
+     Counted back from today instead, in the order they were in. */
+  const recent = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+
   // --- employee writes requests ---
   const tampered = [
     { id: 'req_a1', empName: 'Asha Test', dateFrom: '2026-09-10', dateTo: '2026-09-12', leaveType: 'CL', status: 'approved' },
     { id: 'req_a2', empName: 'Asha Test', dateFrom: '2026-09-20', dateTo: '2026-09-20', leaveType: 'Sick', status: 'approved', employeeReply: 'Fever, doctor note attached' },
-    { id: 'req_new_ok', empName: 'Asha Test', dateFrom: '2026-09-25', dateTo: '2026-09-26', leaveType: 'CL', status: 'approved', message: 'Wedding', approvedBy: 'boss@x.com' },
-    { id: 'req_new_xss', empName: 'Asha Test', dateFrom: '2026-09-27', dateTo: '2026-09-27', leaveType: 'x"><img src=x onerror=alert(1)>', status: 'pending' },
-    { id: 'req_fake', empName: 'Ravi Test', dateFrom: '2026-09-28', dateTo: '2026-09-28', leaveType: 'CL', status: 'pending' }
+    { id: 'req_new_ok', empName: 'Asha Test', dateFrom: recent(8), dateTo: recent(7), leaveType: 'CL', status: 'approved', message: 'Wedding', approvedBy: 'boss@x.com' },
+    { id: 'req_new_xss', empName: 'Asha Test', dateFrom: recent(6), dateTo: recent(6), leaveType: 'x"><img src=x onerror=alert(1)>', status: 'pending' },
+    { id: 'req_fake', empName: 'Ravi Test', dateFrom: recent(5), dateTo: recent(5), leaveType: 'CL', status: 'pending' }
   ];
   const put = await asha('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(tampered), shared: true });
   check('employee request save accepted', put.status === 200, put);
@@ -306,10 +313,10 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
 
   // --- forgot-to-punch requests ---
   const punchReqs = [
-    { id: 'req_punch_ok', empName: 'Asha Test', dateFrom: '2026-09-12', dateTo: '2026-09-12', leaveType: 'PUNCH', punchIn: '', punchOut: '18:40', message: 'reader missed me', status: 'approved' },
-    { id: 'req_punch_range', empName: 'Asha Test', dateFrom: '2026-09-12', dateTo: '2026-09-13', leaveType: 'PUNCH', punchIn: '9:30', message: 'x' },
-    { id: 'req_punch_notime', empName: 'Asha Test', dateFrom: '2026-09-12', dateTo: '2026-09-12', leaveType: 'PUNCH', message: 'x' },
-    { id: 'req_punch_badtime', empName: 'Asha Test', dateFrom: '2026-09-11', dateTo: '2026-09-11', leaveType: 'PUNCH', punchIn: '9:30<script>', punchOut: '18:00', message: 'x' }
+    { id: 'req_punch_ok', empName: 'Asha Test', dateFrom: recent(10), dateTo: recent(10), leaveType: 'PUNCH', punchIn: '', punchOut: '18:40', message: 'reader missed me', status: 'approved' },
+    { id: 'req_punch_range', empName: 'Asha Test', dateFrom: recent(10), dateTo: recent(9), leaveType: 'PUNCH', punchIn: '9:30', message: 'x' },
+    { id: 'req_punch_notime', empName: 'Asha Test', dateFrom: recent(10), dateTo: recent(10), leaveType: 'PUNCH', message: 'x' },
+    { id: 'req_punch_badtime', empName: 'Asha Test', dateFrom: recent(11), dateTo: recent(11), leaveType: 'PUNCH', punchIn: '9:30<script>', punchOut: '18:00', message: 'x' }
   ];
   await asha('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(punchReqs), shared: true });
   const afterPunch = JSON.parse(db.kv.find(r => r.key === 'leaveRequests').value);
@@ -318,6 +325,22 @@ function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' :
   check('a punch correction over a range or with no time refused', !afterPunch.find(r => r.id === 'req_punch_range') && !afterPunch.find(r => r.id === 'req_punch_notime'));
   const pBad = afterPunch.find(r => r.id === 'req_punch_badtime');
   check('a malformed time is dropped, the valid one kept', pBad && pBad.punchIn === '' && pBad.punchOut === '18:00', pBad);
+
+  /* A date typed by hand with the day and the month the wrong way round lands
+     months away rather than days. The page stops it; this is the same rule
+     where a page cannot be edited around it. */
+  const tooOld = [
+    { id: 'req_old_day', empName: 'Asha Test', dateFrom: recent(45), dateTo: recent(45),
+      leaveType: 'CL', message: 'typed 11/03 for 3/11', status: 'pending' },
+    { id: 'req_edge_in', empName: 'Asha Test', dateFrom: recent(29), dateTo: recent(29),
+      leaveType: 'CL', message: 'just inside', status: 'pending' }
+  ];
+  await asha('PUT', '/api/kv/leaveRequests', { value: JSON.stringify(tooOld), shared: true });
+  const afterOld = JSON.parse(db.kv.find(r => r.key === 'leaveRequests').value);
+  check('a request reaching further back than a month is refused',
+    !afterOld.find(r => r.id === 'req_old_day'), afterOld.map(r => r.id));
+  check('and one just inside the month is taken',
+    !!afterOld.find(r => r.id === 'req_edge_in'), afterOld.map(r => r.id));
 
   // --- admin stale copy keeps the new request ---
   const staleAdmin = JSON.parse(bossAll.leaveRequests);

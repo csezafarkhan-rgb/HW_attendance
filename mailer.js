@@ -493,9 +493,27 @@ function leaveRecordBlock(o) {
   if (away.length || waiting.length) {
     out.push('<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#FFF7E8;'
       + 'border:1px solid #F0DCB4;color:#6B4E12;font-size:12.5px;">'
-      + (away.length ? ('<b>' + esc(away.slice(0, 6).join(', '))
-          + (away.length > 6 ? (' and ' + (away.length - 6) + ' more') : '')
-          + (away.length === 1 ? ' is' : ' are') + ' already off then.</b>') : '')
+      + (function () {
+          /* Who else is away is read to answer one question - can the day be
+             covered - and a name on that line is taken to mean a day without
+             them. Somebody on a short leave is in for most of it, and listing
+             them beside a full day off answers the question wrongly in the
+             direction that matters: it says the office is two people down
+             when it is one.
+
+             Older callers hand this a list of names. Those are days off, as
+             they always were. */
+          const one = a => (a && typeof a === 'object') ? a : { name: a, part: false };
+          const all = away.map(one);
+          const listOf = (who, is, has) => esc(who.slice(0, 6).map(a => a.name).join(', '))
+            + (who.length > 6 ? (' and ' + (who.length - 6) + ' more') : '')
+            + (who.length === 1 ? is : has);
+          const full = all.filter(a => !a.part), part = all.filter(a => a.part);
+          return (full.length ? ('<b>' + listOf(full, ' is', ' are') + ' already off then.</b>') : '')
+            + (part.length ? ('<div style="font-size:11.5px;margin-top:'
+                + (full.length ? '2px' : '0') + ';">' + listOf(part, ' has', ' have')
+                + ' part of that day off.</div>') : '');
+        })()
       + (waiting.length ? ('<div style="font-size:11.5px;margin-top:' + (away.length ? '2px' : '0')
           + ';">Also waiting from them: '
           + waiting.map(w => esc(w.dates + ', ' + String(w.kind).toLowerCase())).join(' &middot; ')
@@ -1219,28 +1237,13 @@ function requestEmail(o) {
                 kind: kindName(r.leaveType), dates: dateRange(r.dateFrom, r.dateTo) };
   if (o.approver) say.approver = o.approver;
   const intro = fillText(o.intro, say), footer = fillText(o.footer, say);
-  /* A copy with no buttons on it is somebody being told, not somebody being
-     asked - and the office's wording at the top is written for whoever
-     decides it. "Approve or reject it from the buttons" on a message that has
-     no buttons is the message contradicting itself, and the two copies then
-     read identically apart from a gap where the buttons were, which is how a
-     told copy gets mistaken for the only copy.
-
-     So on that copy the note takes the place of those words rather than
-     sitting above them, and says who does have the buttons. */
-  const telling = !o.links && o.note;
-  const top = telling
-    ? ('<div style="margin:0 0 14px;padding:10px 12px;border-radius:8px;'
-       + 'background:#FFF7DF;border-left:3px solid #E8B931;font-size:13px;'
-       + 'line-height:1.55;color:' + INK + ';">' + lines(fillText(o.note, say)) + '</div>')
-    : (intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
-                  + lines(intro) + '</div>') : '');
   return {
     subject: (r.leaveType === 'PUNCH' ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
              + ' · ' + dateRange(r.dateFrom, r.dateTo),
     html: layout(o.orgName || 'Attendance',
       o.heading || 'A request is waiting for a decision', [
-      top,
+      intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+                 + lines(intro) + '</div>') : '',
       requestCard(r, o.links, 'Raised ' + (r.createdAt ? fmtDay(String(r.createdAt).slice(0, 10)) : 'just now')),
       footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
                   + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>') : '',

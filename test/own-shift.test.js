@@ -188,15 +188,18 @@ check('the panel says so, rather than leaving it to be discovered',
    behind it: all of them are about somebody, and all of them used to go round
    without them. The rule is the same everywhere, and so is its limit - a
    digest naming several people is not theirs to read. */
-/* They get a copy of their own now rather than a Cc on somebody else's, and
-   it has no buttons on it: being told about your own leave is not a vote on
-   it, and a Cc line cannot take the buttons off a message already handed
-   over. */
+/* They are on the message about their own leave - on its Cc line, where the
+   people who are only being told go. They were sent a second copy of their
+   own for a while, stripped of its buttons, because a signed link decided a
+   request for whoever held it and withholding the link was the only way to
+   withhold the right. The right is checked against the account now, so one
+   message serves everybody and their being on it decides nothing. */
 check('the request raised about them is sent to them',
   /if \(own\) addCc\(own\);/.test(SRV)
-  && /const ccMsg = \{ to: aud\.cc, cc: \[\], subject: told\.subject/.test(SRV));
-check('and the copy they get cannot decide it',
-  /links: null, heading: 'A request has been raised'/.test(SRV));
+  && /const toMsg = \{ to: aud\.to, cc: aud\.cc, subject: decide\.subject/.test(SRV));
+check('and being on it does not let them decide it',
+  /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes' \};/.test(SRV)
+  && /if \(!EMAIL_RE\.test\(k\) \|\| k === own \|\| seen\[k\]\) return;/.test(SRV));
 check('and so does the one passing their recommendation on',
   /mailCc\(settings, 'leave'\)\.concat\(\s*await ownersOf\(orgId, \[req\.empName\]/.test(SRV));
 /* A digest is not copied to anybody at all: it is addressed to the one person

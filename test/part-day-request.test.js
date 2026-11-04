@@ -41,7 +41,9 @@ const ctx = { Date, JSON, Object, Array, String, Number, Boolean, Math, console 
 vm.createContext(ctx);
 ['parseJson', 'clip', 'leavePolicyOf', 'selfKindsOf'].forEach(n => vm.runInContext(grab(SRV, n), ctx));
 [/const DAY_RE = [^\n]*/, /const EMP_CANCELLABLE = [^\n]*/,
- /const SELF_ABLE_KINDS = \[[^\]]*\];/, /const LEAVE_POLICY_DEFAULT = \{[^}]*\};/]
+ /const SELF_ABLE_KINDS = \[[^\]]*\];/, /const LEAVE_POLICY_DEFAULT = \{[^}]*\};/,
+ /* How far back a request may reach, and the hour the office counts it from. */
+ /const IST_MS = [^\n]*/, /const REQ_BACK_DAYS = [^\n]*/]
   .forEach(re => { const m = re.exec(SRV); if (!m) throw new Error('not found: ' + re); vm.runInContext(m[0], ctx); });
 vm.runInContext(grab(SRV, 'isPlainObject'), ctx);
 vm.runInContext(grab(SRV, 'mergeEmployeeRequests'), ctx);

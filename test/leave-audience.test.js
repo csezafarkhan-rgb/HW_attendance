@@ -159,21 +159,34 @@ const sorted = a => a.slice().sort();
     JSON.stringify(sorted(ctx.allApprovers(ROUTE))) === JSON.stringify(sorted([KARAN, MUNISH])),
     ctx.allApprovers(ROUTE));
 
-  /* ---- two copies, and only one of them can act ----
-     The whole of "CC cannot approve" rests on this: the deciding copy carries
-     links and the told copy carries null, so there is nothing to press. */
+  /* ---- one message, and only some of the people on it can act ----
+
+     This used to be two messages: the deciding copy carried links and the
+     told copy carried null, and withholding the buttons was the whole of
+     "CC cannot approve". It had to be, because a signed link decided a
+     request for whoever was holding it.
+
+     That is no longer where the authority sits. One message goes to everybody
+     now, buttons and all, and whether a press counts is decided from the
+     account pressing it. So the thing to check is no longer who was handed
+     what, but who the gate lets through. */
   const raised = grab(SRV, 'notifyNewRequests');
-  check('the deciding copy carries the buttons',
+  check('the message carries the buttons',
     /links: linksFor\(\{ k: 'req', org: orgId, id: r\.id, s: 0 \}\)/.test(raised), null);
-  check('and the told copy carries none',
-    /links: null, heading: 'A request has been raised'/.test(raised), null);
-  check('they are two messages, because a Cc line cannot remove a button',
-    (raised.match(/await mailer\.send\(/g) || []).length === 2, null);
-  check('the deciding copy is sent to the people who may decide, and nobody else',
-    /const toMsg = \{ to: aud\.to, cc: \[\], subject: decide\.subject/.test(raised), null);
-  check('and the told copy to everybody else',
-    /const ccMsg = \{ to: aud\.cc, cc: \[\], subject: told\.subject/.test(raised), null);
-  check('the card draws no buttons when it is handed none',
+  check('and there is one of it',
+    (raised.match(/await mailer\.send\(/g) || []).length === 1, null);
+  check('to the people who may decide, with the people who are only told on Cc',
+    /const toMsg = \{ to: aud\.to, cc: aud\.cc, subject: decide\.subject/.test(raised), null);
+  const gate = grab(SRV, 'decidableBy');
+  check('a press is weighed against the account, not against the link',
+    /SELECT email FROM users WHERE id = \$1/.test(gate), null);
+  check('and it counts only if that account is one the message went TO',
+    /if \(aud\.to\.indexOf\(mine\) > -1\) return \{ how: 'yes' \};/.test(gate), null);
+  check('which is the list nobody is on for their own leave',
+    /if \(!EMAIL_RE\.test\(k\) \|\| k === own \|\| seen\[k\]\) return;/.test(SRV), null);
+  check('signed out, nothing is decided',
+    /if \(!req\.session \|\| !req\.session\.userId\) return \{ how: 'signin' \};/.test(gate), null);
+  check('the card still draws no buttons when it is handed none',
     /\(links \? \('<div style="margin-top:12px;">'/.test(
       fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')), null);
 

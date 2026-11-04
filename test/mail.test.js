@@ -315,8 +315,15 @@ process.env.SESSION_SECRET = SECRET;
     });
     adminCookie = String(r.headers.get('set-cookie') || '').split(';')[0];
   }
-  const hit = async (method, url) => {
-    const r = await fetch(base + url, { method, redirect: 'manual' });
+  /* Pressing a button in an email is now done BY somebody: the link says
+     which request, the session says who, and only the people named against
+     that person count. So these presses carry the admin's cookie, the way a
+     real one carries whoever is signed in on the phone. Passing no cookie is
+     the signed-out case, and is checked on its own below. */
+  const hit = async (method, url, cookie) => {
+    const send = cookie === null ? undefined : (cookie || adminCookie);
+    const r = await fetch(base + url, {
+      method, redirect: 'manual', headers: send ? { Cookie: send } : {} });
     return { status: r.status, body: await r.text() };
   };
 
@@ -334,8 +341,34 @@ process.env.SESSION_SECRET = SECRET;
 
   const tok = payload => mailer.actionToken(payload, SECRET);
 
-  // --- the page a button opens ---
+  // --- who may press it ---
   const approveTok = tok({ k: 'req', org: 1, id: 'req_1', act: 'approve' });
+  {
+    /* Signed out, the link decides nothing - it used to decide for whoever
+       was holding it, which is how a copied-in reader could approve leave. */
+    const out = await hit('GET', '/e/' + approveTok, null);
+    check('a link pressed by nobody signed in is refused',
+      out.status === 401 && /Sign in to decide this/.test(out.body), out.status);
+    const outPost = await hit('POST', '/e/' + approveTok, null);
+    check('and posting straight at it, without the page, is refused too',
+      outPost.status === 401, outPost.status);
+    /* Signed in, but not one of the people named against this person. */
+    kvSet(1, 'approvalRoute', JSON.stringify({ 'Asha Test': ['someone-else@x.com'] }));
+    const notMine = await hit('GET', '/e/' + approveTok);
+    check('an account that is only copied in is refused',
+      notMine.status === 403 && /not yours to decide/.test(notMine.body), notMine.status);
+    check('and is told who it is actually with',
+      /someone-else@x\.com/.test(notMine.body), null);
+    const notMinePost = await hit('POST', '/e/' + approveTok);
+    check('that refusal holds on the POST, which is the one that acts',
+      notMinePost.status === 403, notMinePost.status);
+    const still = JSON.parse(kvFind(1, 'leaveRequests').value).find(r => r.id === 'req_1');
+    check('and the request is left exactly as it was',
+      still.status === 'pending', still.status);
+    kvSet(1, 'approvalRoute', JSON.stringify({}));
+  }
+
+  // --- the page a button opens ---
   const shown = await hit('GET', '/e/' + approveTok);
   check('the link opens a page that asks first', shown.status === 200 && /<form method="POST"/.test(shown.body), shown.status);
   const reqsStill = JSON.parse(kvFind(1, 'leaveRequests').value);
@@ -797,7 +830,8 @@ process.env.SESSION_SECRET = SECRET;
   ]));
   const decideTok = mailer.actionToken({ k: 'req', org: 1, id: 'req_k', act: 'approve' }, SECRET);
   const decidedBefore = sent.length;
-  await realFetch(base + '/e/' + decideTok, { method: 'POST' });
+  await realFetch(base + '/e/' + decideTok,
+    { method: 'POST', headers: { Cookie: adminCookie } });
   await new Promise(r => setTimeout(r, 600));
   const told = sent[sent.length - 1];
   check('the employee is told when their leave is decided',
@@ -898,8 +932,11 @@ process.env.SESSION_SECRET = SECRET;
 
     let msgs = await raise('req_gur', 'Keshav Garg', '2026-11-12');
     const decide = msgs.find(decides), told = msgs.find(m => !decides(m));
-    check('a request is sent twice: a copy that decides and a copy that is told',
-      msgs.length === 2 && !!decide && !!told, msgs.map(m => m.to));
+    /* One message, buttons and all. It used to be two - the second stripped of
+       its buttons - because the link decided for whoever held it. The gate
+       reads the account now, so everybody can be sent the same thing. */
+    check('a request is one message, to the people who may answer it',
+      msgs.length === 1 && !!decide && !told, msgs.map(m => m.to));
     check('the approver named against that person may decide it',
       !!decide && JSON.stringify(addrs(decide)) === JSON.stringify(
         ['karan@homeweavers.net']),
@@ -909,11 +946,15 @@ process.env.SESSION_SECRET = SECRET;
        table to mean what it says instead. */
     check('and an owner nobody named against them is not on it',
       !!decide && addrs(decide).indexOf('nitish@homeweavers.net') === -1
-      && !!told && (told.to || []).indexOf('nitish@homeweavers.net') === -1,
-      [decide && decide.to, told && told.to]);
-    check('and the person who asked is told, with nothing on it to click',
-      !!told && JSON.stringify(told.to) === JSON.stringify(['keshav@homeweavers.net']),
-      told && told.to);
+      && (decide.cc || []).indexOf('nitish@homeweavers.net') === -1,
+      [decide && decide.to, decide && decide.cc]);
+    /* The person who asked is on it, on the Cc line, where the people who are
+       only being told go. Being there decides nothing: the TO line is the
+       list the gate checks, and they are never on it for their own leave. */
+    check('and the person who asked is copied in, but not asked',
+      !!decide && (decide.cc || []).indexOf('keshav@homeweavers.net') > -1
+      && addrs(decide).indexOf('keshav@homeweavers.net') === -1,
+      [decide && decide.to, decide && decide.cc]);
 
     /* Two approvers named against one person, because the office asked for
        the factory's manager and the office's both. */
@@ -926,13 +967,16 @@ process.env.SESSION_SECRET = SECRET;
 
     /* A manager asking for leave is asking, not granting. */
     msgs = await raise('req_mgr', 'karan Ahuja', '2026-11-14');
-    const mgr = msgs.find(decides), mgrTold = msgs.find(m => !decides(m));
+    const mgr = msgs.find(decides);
     check('a manager\u2019s own leave goes to the management and not to himself',
       !!mgr && JSON.stringify(addrs(mgr)) === JSON.stringify(
         ['nitish@homeweavers.net', 'shivani@homeweavers.net']), mgr && mgr.to);
-    check('and he is told of it on a copy he cannot decide',
-      !!mgrTold && JSON.stringify(mgrTold.to) === JSON.stringify(['karan@homeweavers.net'])
-      && !decides(mgrTold), mgrTold && mgrTold.to);
+    /* He is an approver, and this is his own leave, so he is on the Cc line
+       like anybody else being told - and the gate will not take his press. */
+    check('and he is told of it without being able to decide it',
+      !!mgr && (mgr.cc || []).indexOf('karan@homeweavers.net') > -1
+      && addrs(mgr).indexOf('karan@homeweavers.net') === -1,
+      [mgr && mgr.to, mgr && mgr.cc]);
 
     /* Nobody named against them at all: the management, and that is all. */
     msgs = await raise('req_plain', 'Ravi Test', '2026-11-15');
@@ -941,15 +985,15 @@ process.env.SESSION_SECRET = SECRET;
       !!plain && JSON.stringify(addrs(plain)) === JSON.stringify(
         ['nitish@homeweavers.net', 'shivani@homeweavers.net']), plain && plain.to);
 
-    /* The office's standing copy list rides on the told copy and never on the
-       deciding one: being copied in is not a vote. */
+    /* The office's standing copy list sits on the Cc line: being copied in is
+       not a vote, and it is the TO line the gate weighs a press against. */
     kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
       leave: { to: ['nitish@homeweavers.net', 'shivani@homeweavers.net'], cc: ['watch@x.com'] } }));
     msgs = await raise('req_cc', 'Keshav Garg', '2026-11-16');
-    const ccTold = msgs.find(m => !decides(m)), ccDecide = msgs.find(decides);
+    const ccDecide = msgs.find(decides);
     check('an address in the Cc box is told, not asked',
-      !!ccTold && ccTold.to.indexOf('watch@x.com') > -1 && !decides(ccTold),
-      ccTold && ccTold.to);
+      !!ccDecide && (ccDecide.cc || []).indexOf('watch@x.com') > -1,
+      ccDecide && ccDecide.cc);
     check('and is not among the people who may decide',
       !!ccDecide && ccDecide.to.indexOf('watch@x.com') === -1, ccDecide && ccDecide.to);
 
@@ -1017,12 +1061,19 @@ process.env.SESSION_SECRET = SECRET;
     { id: 'req_n', empName: 'Keshav Garg', dateFrom: '2026-10-05', dateTo: '2026-10-05',
       leaveType: 'CL', status: 'pending', createdAt: '2026-10-01T04:00:00Z', updatedAt: '2026-10-01T04:00:00Z' }
   ]));
+  /* This one is about the box on the page and the words reaching the person
+     who asked, not about who may open it, so the office decides here. */
+  kvSet(1, 'mailSettings', JSON.stringify({ to: ['boss@x.com'], cc: [], requests: true,
+    leave: { to: ['boss@x.com'], cc: [], confirm: true } }));
+  kvSet(1, 'approvalRoute', JSON.stringify({}));
   const noteTok = mailer.actionToken({ k: 'req', org: 1, id: 'req_n', act: 'reject' }, SECRET);
-  const asks = await realFetch(base + '/e/' + noteTok).then(r => r.text());
+  const asks = await realFetch(base + '/e/' + noteTok,
+    { headers: { Cookie: adminCookie } }).then(r => r.text());
   check('the refusal page offers a box for a reason', /<textarea name="note"/.test(asks));
   const noteBefore = sent.length;
   await realFetch(base + '/e/' + noteTok, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: adminCookie },
     body: 'note=' + encodeURIComponent('We are short-handed that week')
   });
   await new Promise(r => setTimeout(r, 600));
@@ -1289,24 +1340,23 @@ process.env.SESSION_SECRET = SECRET;
      getting it wrong and nobody noticing until somebody approved their own
      leave. */
   {
+    /* The guarantee has not changed - the people who are only told cannot
+       decide anything - but what makes it true has. It used to be that they
+       were never handed a message with buttons on it. They are now, and the
+       buttons do not work for them: the gate reads the account, not the link.
+
+       What is still worth sweeping is the TO line, because that is the list
+       the gate checks against. Nobody may be on it for their own leave. */
     const decides = m => /Approve<\/span>|>Approve</.test(String(m.html || ''));
     const clickable = sent.filter(decides);
-    check('nothing that can be decided was ever sent with a Cc on it',
-      clickable.every(m => !(m.cc || []).length),
-      clickable.filter(m => (m.cc || []).length).map(m => m.cc));
-    /* The person who asked is on every leave message about them, and may
-       never be on one that can decide it - their own least of all. */
+    check('something that can be decided was in fact sent', clickable.length > 0,
+      sent.length);
     const asked = ['keshav@homeweavers.net', 'rahul@homeweavers.net',
-                   'ravi@homeweavers.net', 'quality@homeweavers.net'];
-    const handed = clickable.filter(m =>
-      (m.to || []).concat(m.cc || []).some(a => asked.indexOf(String(a).toLowerCase()) > -1));
-    check('and no employee was ever handed a copy they could decide with',
-      handed.length === 0, handed.map(m => m.to));
-    /* Said the other way round: every copy that went to somebody only being
-       told carried nothing to press. */
-    check('a message that is only telling somebody has nothing on it to press',
-      sent.filter(m => /For information/.test(String(m.html || ''))).every(m => !decides(m)),
-      null);
+                   'ravi@homeweavers.net', 'quality@homeweavers.net', 'asha@x.com'];
+    const inTo = clickable.filter(m =>
+      (m.to || []).some(a => asked.indexOf(String(a).toLowerCase()) > -1));
+    check('and no employee was ever in the TO of one, which is the list that counts',
+      inTo.length === 0, inTo.map(m => m.to));
   }
 
   srv.close();

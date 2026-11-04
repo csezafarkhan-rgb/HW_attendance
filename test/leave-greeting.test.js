@@ -171,12 +171,15 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
     check('nobody is nobody, not the word undefined',
       (await ctx.approverNames(1, [])) === '', null);
 
-    /* ---- and both copies are given a name to use ---- */
+    /* ---- and the message is given a name to use ----
+       There were two copies once, and the second was greeted by the person
+       who asked, because it was sent to them. There is one now, and it is
+       greeted by whoever may answer it. */
     const n = grab(SRV, 'notifyNewRequests');
-    check('the deciding copy is told who it is going to',
+    check('the message is told who it is going to',
       /approver: await approverNames\(orgId, greetedOf\(aud\.to, mgmt\)\),/.test(n), null);
-    check('and the told copy is given the person who asked',
-      /approver: r\.empName,/.test(n), null);
+    check('and nobody is greeted by a name that is not on it',
+      !/approver: r\.empName,/.test(n), null);
     /* The digest already knew; this is only that it still does. */
     const d = grab(SRV, 'leaveDigests');
     check('a digest greets the one person it is for',
@@ -215,10 +218,12 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
         JSON.stringify(['karan@x']), null);
     check('nobody at all stays nobody',
       JSON.stringify(ctx.greetedOf([], MG)) === JSON.stringify([]), null);
-    /* Who it GOES to is untouched: this is the first line, not the To line. */
+    /* Who it GOES to is untouched: this is the first line, not the To line.
+       It goes to everybody who may decide it, and is copied to everybody who
+       is only being told; the greeting narrows, the message does not. */
     check('the greeting is narrowed, the audience is not',
       /approver: await approverNames\(orgId, greetedOf\(aud\.to, mgmt\)\),/.test(SRV)
-      && /const toMsg = \{ to: aud\.to, cc: \[\],/.test(SRV), null);
+      && /const toMsg = \{ to: aud\.to, cc: aud\.cc,/.test(SRV), null);
 
     /* ---- and reading it before anybody asks for leave ----
        The only way to see this message used to be to wait for somebody to

@@ -2305,6 +2305,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .gate-field{margin-bottom:12px;}
 .gate-field label{font-size:11px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;}
 .gate-field input, .gate-field select{width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--line-dk);font-size:13px;font-family:'Inter',sans-serif;}
+.gate-say{font-size:11.5px;font-weight:700;color:var(--ink);margin-top:5px;}
+.gate-say.bad{color:#B23A34;}
 .gate-error{background:#F8E7E6;color:#B23A34;font-size:12px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:12px;display:none;}
 .gate-error.show{display:block;}
 .gate-link{font-size:11.5px;color:var(--ink-soft);text-align:center;margin-top:14px;cursor:pointer;text-decoration:underline;}
@@ -4390,8 +4392,13 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
              rather than asked for, so it is written by syncRequestTypes. -->
         <div class="gate-note" id="reqSelfNote"></div>
       </div>
-      <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/></div>
-      <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/></div>
+      <!-- A date box is typed into as often as it is picked from, and typed
+           into it is four numbers in an order that depends on the machine.
+           11/03 is the eleventh of March on one and the third of November on
+           another, and the person typing it cannot see which they got. So
+           each one says back, in words, the day it is actually holding. -->
+      <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/><div class="gate-say" id="reqSayFrom"></div></div>
+      <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/><div class="gate-say" id="reqSayTo"></div></div>
       <div class="gate-field" id="reqPunchWrap" style="display:none;">
         <label>The time you actually came in or left</label>
         <div style="display:flex;gap:10px;">
@@ -4413,6 +4420,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <div class="gate-field" id="reqReturnWrap">
         <label>Returning to work on</label>
         <input type="date" id="reqReturn"/>
+        <div class="gate-say" id="reqSayReturn"></div>
         <div style="font-size:10.5px;color:var(--ink-soft);margin-top:3px;">
           First day back. Filled in from your last day off — change it if you are back later.
         </div>
@@ -11206,6 +11214,14 @@ function buildExcelBackup(){
     document.getElementById('reqMessage').value = '';
     var rr = document.getElementById('reqReturn');
     if(rr){ rr.dataset.touched = ''; rr.value = returnDate(todayISO_full, viewRole && viewRole.name); }
+    /* Worked out as it opens, not once at boot: a page left open overnight
+       would otherwise still be offering yesterday's floor. */
+    var floor = earliestRequestDay();
+    ['reqDateFrom','reqDateTo'].forEach(function(id){
+      var box = document.getElementById(id);
+      if(box) box.min = floor;
+    });
+    sayRequestDates();
     document.getElementById('reqErr').classList.remove('show');
     requestModalOverlay.classList.add('open');
   });
@@ -11251,6 +11267,46 @@ function buildExcelBackup(){
       if((isPartDay(t.value) || t.value === 'PUNCH') && toEl) toEl.value = fromEl.value;
     });
   })();
+  /* The day in words, the way every message about it is written: 4 Nov’ 2026.
+     A month said in letters cannot be read as a day of the month. */
+  var REQ_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function dayInWords(iso){
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if(!m) return '';
+    return (+m[3]) + ' ' + REQ_MONTHS[(+m[2]) - 1] + '\u2019 ' + m[1];
+  }
+  /* How far back a request may reach. A day wrongly typed lands months away
+     rather than days, so the floor catches the mistake this is here to catch
+     - and a day off asked for last March is not a day off anybody can still
+     grant or refuse. */
+  var REQ_BACK_DAYS = 30;
+  function earliestRequestDay(){
+    var d = new Date();
+    d.setDate(d.getDate() - REQ_BACK_DAYS);
+    var p = function(n){ return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function sayRequestDates(){
+    var floor = earliestRequestDay();
+    [['reqDateFrom','reqSayFrom'], ['reqDateTo','reqSayTo'],
+     ['reqReturn','reqSayReturn']].forEach(function(pair){
+      var box = document.getElementById(pair[0]);
+      var out = document.getElementById(pair[1]);
+      if(!box || !out) return;
+      var said = dayInWords(box.value);
+      out.textContent = said;
+      /* The return date may be anything ahead; only the days being asked for
+         are held to the floor. */
+      var tooFar = pair[0] !== 'reqReturn' && box.value && box.value < floor;
+      out.className = 'gate-say' + (tooFar ? ' bad' : '');
+      if(tooFar) out.textContent = said + ' \u2014 more than ' + REQ_BACK_DAYS + ' days gone';
+    });
+  }
+  ['reqDateFrom','reqDateTo','reqReturn'].forEach(function(id){
+    var box = document.getElementById(id);
+    if(box){ box.addEventListener('change', sayRequestDates);
+             box.addEventListener('input', sayRequestDates); }
+  });
   document.getElementById('requestModalClose').addEventListener('click', function(){
     requestModalOverlay.classList.remove('open');
   });
@@ -11264,6 +11320,15 @@ function buildExcelBackup(){
     var err = document.getElementById('reqErr');
     if(!from || !to){ err.textContent = 'Please pick both dates.'; err.classList.add('show'); return; }
     if(to < from){ err.textContent = '"To" date must be on or after "From" date.'; err.classList.add('show'); return; }
+    /* Checked here as well as on the box, because min is only honoured by
+       the picker - a date typed straight into it goes through. */
+    var floor = earliestRequestDay();
+    if(from < floor){
+      err.textContent = 'You have picked ' + dayInWords(from) + ', which is more than '
+        + REQ_BACK_DAYS + ' days gone. Check the month \u2014 a date typed by hand is easily '
+        + 'a month out. Nothing before ' + dayInWords(floor) + ' can be asked for.';
+      err.classList.add('show'); return;
+    }
     var isPunch = type === 'PUNCH';
     var pIn = isPunch ? (document.getElementById('reqPunchIn') || {}).value || '' : '';
     var pOut = isPunch ? (document.getElementById('reqPunchOut') || {}).value || '' : '';

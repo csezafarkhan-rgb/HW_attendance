@@ -630,6 +630,8 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
    Read through here rather than used raw, so a key somebody has edited by
    hand, or has never written at all, still answers with something sane. */
 const SELF_ABLE_KINDS = ['SHORT', 'HALF'];
+/* How far back a request may reach, in days. The same number the page uses. */
+const REQ_BACK_DAYS = 30;
 const LEAVE_POLICY_DEFAULT = { SHORT: 'self', HALF: 'approval' };
 function leavePolicyOf(value) {
   const v = parseJson(value);
@@ -662,6 +664,15 @@ function mergeEmployeeRequests(storedValue, incomingValue, name, selfKinds) {
     if (!cur) {
       if (!/^req_[A-Za-z0-9_]{1,60}$/.test(r.id)) return;
       if (!DAY_RE.test(r.dateFrom) || !DAY_RE.test(r.dateTo) || r.dateTo < r.dateFrom) return;
+      /* Nothing from further back than a month. The page says so and stops
+         it there; this is the same rule where it cannot be edited out, and
+         it is the rule that catches a date typed by hand with the day and
+         the month the wrong way round - 11/03 for 3/11 lands eight months
+         ago rather than a week out, which is too far wrong to be a date
+         somebody meant. */
+      const floor = new Date(Date.now() + IST_MS - REQ_BACK_DAYS * 86400000)
+        .toISOString().slice(0, 10);
+      if (r.dateFrom < floor) return;
       if (!/^[A-Za-z]{1,16}$/.test(String(r.leaveType || ''))) return;
       /* A kind the office has said is taken rather than asked for. It is
          taken on the person's own card and counted the moment it is, so a
@@ -3146,28 +3157,21 @@ async function notifyNewRequests(orgId, added) {
         links: linksFor({ k: 'req', org: orgId, id: r.id, s: 0 }),
         approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
         heading: 'A request is waiting for a decision' }));
-      const toMsg = { to: aud.to, cc: [], subject: decide.subject, html: decide.html };
+      /* One request, one message: the people who may answer it in TO, and
+         the people who are only being told - the person who asked, first of
+         all - on the Cc line.
+
+         It used to be sent twice, the second copy stripped of its buttons,
+         because the buttons WERE the authority: a signed link decided a
+         request for whoever was holding it, so the only way to withhold the
+         authority was to withhold the link. Two near-identical messages for
+         one request, and the one with nothing to press reads like a mistake.
+
+         The authority sits on the account now rather than on the link (see
+         decidableBy), so everybody can be sent the same message and only the
+         people named against this person can act on it. */
+      const toMsg = { to: aud.to, cc: aud.cc, subject: decide.subject, html: decide.html };
       await logMail(orgId, 'request', toMsg, await mailer.send(toMsg));
-      /* And the copy that is only told - the person who asked, first of all.
-         Sent on its own rather than as a Cc on the message above, because the
-         difference between the two is the buttons, and a Cc line cannot take
-         buttons off a message somebody has already been handed. */
-      if (aud.cc.length) {
-        /* The told copy goes to the person who asked, so {approver} is them.
-           Anything else greets somebody by a name not on the message. */
-        /* Naming them rather than calling them "the people who decide it":
-           the whole point of this copy is that the reader can see the request
-           went somewhere, and a copy that says it went to somebody unnamed
-           reads like the message that should have gone to them. */
-        const deciders = await approverNames(orgId, aud.to);
-        const told = mailer.requestEmail(Object.assign({}, base, {
-          links: null, heading: 'A request has been raised', approver: r.empName,
-          note: 'For information \u2014 there is nothing to decide on this copy. '
-              + (deciders ? ('It is with ' + deciders + ', who have the buttons.')
-                          : 'The people who decide it have their own copy.') }));
-        const ccMsg = { to: aud.cc, cc: [], subject: told.subject, html: told.html };
-        await logMail(orgId, 'request', ccMsg, await mailer.send(ccMsg));
-      }
     }
   } catch (e) {
     console.error('request email failed (request itself was saved):', e && e.message);
@@ -3366,22 +3370,31 @@ async function leaveRecordFor(orgId, empName, req) {
     }
     /* Anybody else already away on one of those days - the fact most likely to
        turn a yes into a no, and the one nobody can see from the request. */
+    /* A whole day without them counts differently from a quarter of one, so
+       the two are kept apart. Whoever is away for a full day stays that way
+       whatever else is marked against them - a half day on top of a day off
+       is still a day off. */
     const away = {};
+    const mark = (name, part) => {
+      if (!name || name === empName) return;
+      away[name] = away[name] === false ? false : (part ? (name in away ? away[name] : true) : false);
+    };
+    const nameOn = (k, day) => (k.slice(k.lastIndexOf('|') + 1) === day)
+      ? k.slice(0, k.lastIndexOf('|')) : '';
     days.forEach(day => {
       Object.keys(overrides).forEach(k => {
         const v = overrides[k];
         if (!v || v.cat !== 'LEAVE') return;
-        const name = k.slice(0, k.lastIndexOf('|'));
-        if (k.slice(k.lastIndexOf('|') + 1) === day && name !== empName) away[name] = true;
+        mark(nameOn(k, day), false);
       });
-      Object.keys(halfDays).forEach(k => {
-        const name = k.slice(0, k.lastIndexOf('|'));
-        if (k.slice(k.lastIndexOf('|') + 1) === day && name !== empName) away[name] = true;
-      });
+      /* Every mark in here is a part of a day - that is what the store is. */
+      Object.keys(halfDays).forEach(k => { mark(nameOn(k, day), true); });
       requests.forEach(r => {
         if (!r || r.status !== 'approved' || r.empName === empName) return;
         if (r.leaveType === 'PUNCH' || r.leaveType === 'WFH' || r.leaveType === 'VISIT') return;
-        if (String(r.dateFrom) <= day && String(r.dateTo || r.dateFrom) >= day) away[r.empName] = true;
+        if (String(r.dateFrom) <= day && String(r.dateTo || r.dateFrom) >= day) {
+          mark(r.empName, PART_KINDS.indexOf(String(r.leaveType || '').toUpperCase()) > -1);
+        }
       });
     });
     /* And anything else of their own still waiting, which an approver saying
@@ -3394,7 +3407,8 @@ async function leaveRecordFor(orgId, empName, req) {
     if (!mine && !Object.keys(away).length && !alsoWaiting.length) return null;
     return {
       record: mine, asOf: snap.at || '', 
-      away: Object.keys(away).map(n => shown[n] || n).sort(),
+      away: Object.keys(away).map(n => ({ name: shown[n] || n, part: away[n] === true }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
       alsoWaiting
     };
   } catch (e) {
@@ -4065,6 +4079,61 @@ async function alreadySettled(p) {
   } catch (e) { return null; }      // if it cannot be read, the POST still guards
 }
 
+/* ---- who may press the buttons ----
+
+   A message about a request goes to the people who may answer it, with
+   whoever is only being told on the Cc line. They all hold the same link, and
+   a signed link used to be the whole of the authority: holding it was
+   permission, so the person who asked could approve their own leave by
+   opening their own copy.
+
+   So the authority moved off the link and onto the account. The link still
+   says which request this is and that it came from us; WHO is answering it is
+   the session, and the only sessions that count are the ones the office named
+   against that person - exactly the addresses the message went TO.
+
+   The cost is that an approver has to be signed in, which on a phone they
+   generally are. The alternative is a link that decides a request for anybody
+   it is forwarded to. */
+async function decidableBy(req, p) {
+  if (!req.session || !req.session.userId) return { how: 'signin' };
+  if (String(req.session.orgId) !== String(p.org)) return { how: 'no' };
+  const u = await pool.query(
+    'SELECT email FROM users WHERE id = $1 AND org_id = $2 AND is_active LIMIT 1',
+    [req.session.userId, p.org]);
+  const mine = String(u.rows[0] ? u.rows[0].email : '').trim().toLowerCase();
+  if (!EMAIL_RE.test(mine)) return { how: 'no' };
+  /* Whose leave it is. An unrequested day carries the name; a request carries
+     an id, and the name is on the request. */
+  let empName = p.k === 'unreq' ? String(p.e || '') : '';
+  if (!empName) {
+    const r = await pool.query(
+      'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL', [p.org, 'leaveRequests']);
+    const hit = (parseJson(r.rows[0] ? r.rows[0].value : null) || [])
+      .filter(x => x && x.id === p.id)[0];
+    empName = hit ? String(hit.empName || '') : '';
+  }
+  if (!empName) return { how: 'no' };
+  const settings = await mailSettings(p.org);
+  const route = await approvalRouteOf(p.org);
+  const mgmt = await mailRecipients(p.org, settings, 'leave');
+  const aud = await leaveAudience(p.org, settings, route, empName, mgmt);
+  if (aud.to.indexOf(mine) > -1) return { how: 'yes' };
+  return { how: 'no', who: await approverNames(p.org, aud.to) };
+}
+/* Said the same way on the page that asks and the one that acts, so a refusal
+   never depends on which of the two somebody reached. */
+function refusalFor(may) {
+  if (may.how === 'signin') {
+    return { code: 401, title: 'Sign in to decide this',
+      detail: 'The buttons in that email work for whoever the office named to decide this '
+            + 'person\u2019s leave. Sign in and it is on the Requests page, still waiting.' };
+  }
+  return { code: 403, title: 'This one is not yours to decide',
+    detail: (may.who ? ('It is with ' + may.who + '. ') : '')
+          + 'You were sent it so that you can see it, which is not the same as answering it.' };
+}
+
 /* The page a button in an email opens. GET asks; POST acts - so a mail scanner
    following every link cannot decide anything. */
 const mailActionLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
@@ -4073,6 +4142,13 @@ app.get('/e/:token', mailActionLimiter, async (req, res) => {
   res.set('Cache-Control', 'no-store').type('html');
   if (!p) return res.status(400).send(mailer.resultPage('That link has expired',
     'Links in an email are good for ' + mailer.ACTION_DAYS + ' days. Open the dashboard and decide there.', false));
+  /* Asked before anything is said about the request: whether it is still
+     waiting is not somebody\u2019s business if answering it never was. */
+  const may = await decidableBy(req, p);
+  if (may.how !== 'yes') {
+    const no = refusalFor(may);
+    return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, mailer.baseUrl()));
+  }
   const done = await alreadySettled(p);
   if (done) return res.status(409).send(mailer.resultPage(done.title, done.detail, false));
   const what = p.k === 'unreq'
@@ -4093,6 +4169,13 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
   res.set('Cache-Control', 'no-store').type('html');
   if (!p) return res.status(400).send(mailer.resultPage('That link has expired',
     'Open the dashboard and decide there.', false));
+  /* Checked again here, and this is the check that counts: the page above is
+     only a page, and a POST can be made without ever having seen it. */
+  const may = await decidableBy(req, p);
+  if (may.how !== 'yes') {
+    const no = refusalFor(may);
+    return res.status(no.code).send(mailer.resultPage(no.title, no.detail, false, mailer.baseUrl()));
+  }
   // Whatever was typed in the box on that page travels with the decision.
   const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim());
   res.status(out.ok ? 200 : 409).send(mailer.resultPage(out.title, out.detail, out.ok));
@@ -4204,22 +4287,9 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     if (!r.ok) return res.status(502).json(r);
     return res.json({ ok: true, sentTo: to });
   }
-  /* Both copies, not one with a Cc line under it. The people in CC are not
-     copied on the message above - they are sent a different one, with nothing
-     on it to press - and a preview that lists them under the message with the
-     buttons is showing the office something that never goes out. */
-  const told = aud.cc.length ? mailer.requestEmail({
-    orgName: orgNameOf(kv.companyInfo), req: req0, siteUrl: mailer.baseUrl(),
-    intro: settings.leave.intro, footer: settings.leave.footer,
-    links: null, approver: name,
-    note: 'For information \u2014 there is nothing to decide on this copy. '
-        + (await approverNames(orgId, aud.to) ? ('It is with '
-            + await approverNames(orgId, aud.to) + ', who have the buttons.')
-          : 'The people who decide it have their own copy.'),
-    heading: 'A request has been raised' }) : null;
-  const mails = [{ subject: mail.subject, to: aud.to, cc: [], html: mail.html }];
-  if (told) mails.push({ subject: told.subject, to: aud.cc, cc: [], html: told.html });
-  res.json({ ok: true, sample: true, to: aud.to, cc: aud.cc, mails: mails,
+  /* One message, and the Cc line on the preview is the real one: those people
+     are sent this, and cannot decide it. */
+  res.json({ ok: true, sample: true, to: aud.to, cc: aud.cc,
              preview: { subject: mail.subject, html: mail.html } });
 });
 
