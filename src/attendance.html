@@ -4316,8 +4316,9 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
           <option value="Other">Other</option>
           <option value="PUNCH">Forgot to punch (correct my time)</option>
         </select>
-        <div class="gate-note">A short leave or a half day is not asked for — take it on your
-          attendance card. It counts the moment you do, and the office is told.</div>
+        <!-- What this says depends on what the office has decided is taken
+             rather than asked for, so it is written by syncRequestTypes. -->
+        <div class="gate-note" id="reqSelfNote"></div>
       </div>
       <div class="gate-field"><label>From date</label><input type="date" id="reqDateFrom"/></div>
       <div class="gate-field"><label>To date</label><input type="date" id="reqDateTo"/></div>
@@ -5089,7 +5090,7 @@ function attachDismiss(el){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames','deskTimeIds',
+    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','leavePolicy','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames','deskTimeIds',
     'leaveRecord',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
@@ -9279,6 +9280,35 @@ function buildExcelBackup(){
      Only the exceptions are stored. Everybody else goes through both stages,
      which is what naming a first approver already meant - so a company that
      never opens this panel keeps exactly the arrangement it had. */
+  /* Which parts of a day are taken on somebody's own card and which are asked
+     for. The office sets it on the leave settings card, the server keeps it,
+     and both this page and the route that grants a part day read the same
+     answer - so the form and the card can never both offer the same thing, or
+     both refuse it.
+
+     A whole day is not in here. A whole day is always asked for. */
+  var LEAVE_POLICY_FALLBACK = { SHORT:'self', HALF:'approval' };
+  var leavePolicy = { SHORT:'self', HALF:'approval' };
+  function readPolicy(v){
+    var out = {};
+    ['SHORT','HALF'].forEach(function(k){
+      var said = String((v && v[k]) || '').toLowerCase();
+      out[k] = (said === 'self' || said === 'approval') ? said : LEAVE_POLICY_FALLBACK[k];
+    });
+    return out;
+  }
+  function loadLeavePolicy(){
+    return storage.get('leavePolicy', true).then(function(res){
+      var v = null;
+      if(res && res.value){ try{ v = JSON.parse(res.value); }catch(e){ v = null; } }
+      leavePolicy = readPolicy(v);
+    }).catch(function(){ leavePolicy = readPolicy(null); });
+  }
+  function saveLeavePolicy(){
+    return storage.set('leavePolicy', JSON.stringify(leavePolicy), true);
+  }
+  function takenOnOwnCard(kind){ return leavePolicy[kind] === 'self'; }
+  function askedFor(kind){ return leavePolicy[kind] === 'approval'; }
   var approvalRoute = {};
   function loadApprovalRoute(){
     return storage.get('approvalRoute', true).then(function(res){
@@ -9610,13 +9640,18 @@ function buildExcelBackup(){
            the same kind, which used to be replaced and then deleted on a
            revert, taking its half (AM/PM) and note with it. */
         if(curH && curH.reqId !== req.id){ kept++; return; }
+        /* Which half, but only where there is a half to name: a short leave
+           is a quarter of a day and has none, and 'First half' on one only
+           ever read as a mistake. */
+        var which = req.leaveType === 'HALF'
+                    ? (req.half === 'PM' ? 'Second half' : 'First half')
+                    : req.leaveType === 'SHORT' ? 'Short leave' : 'Three-quarter day';
         halfDays[key] = {
           reqId: req.id,
           kind: req.leaveType,
-          half: req.half || '',
+          half: req.leaveType === 'HALF' ? (req.half || '') : '',
           leave: 'CL',
-          note: (req.half === 'PM' ? 'Second half' : 'First half')
-                + (req.message ? (' \u00b7 ' + req.message) : ''),
+          note: which + (req.message ? (' \u00b7 ' + req.message) : ''),
           at: new Date().toISOString()
         };
         return;
@@ -10015,6 +10050,42 @@ function buildExcelBackup(){
   /* A request is no longer always leave, so the list has to name the kind. */
   /* The part-day sizes, matching what the grid can already mark. */
   function isPartDay(t){ return t === 'HALF' || t === 'SHORT' || t === 'THREEQ'; }
+  /* The part days this form offers, which is exactly the ones the office has
+     said must be asked for. The card offers the others, and nothing is in
+     both lists, because both are read off the one setting. */
+  var ASK_PART = [
+    { v:'SHORT', lab:'Short leave (a quarter of the day)' },
+    { v:'HALF',  lab:'Half day' }
+  ];
+  function syncRequestTypes(){
+    var sel = document.getElementById('reqLeaveType');
+    if(!sel) return;
+    var had = sel.value;
+    Array.prototype.slice.call(sel.options).forEach(function(o){
+      if(o.value === 'SHORT' || o.value === 'HALF') sel.removeChild(o);
+    });
+    /* Beside the other kinds of leave, above the ones that are not leave. */
+    var after = sel.querySelector('option[value="Sick"]');
+    ASK_PART.forEach(function(k){
+      if(!askedFor(k.v)) return;
+      var o = document.createElement('option');
+      o.value = k.v; o.textContent = k.lab;
+      if(after && after.nextSibling) sel.insertBefore(o, after.nextSibling);
+      else sel.appendChild(o);
+      after = o;
+    });
+    if(had && sel.querySelector('option[value="' + had + '"]')) sel.value = had;
+    var note = document.getElementById('reqSelfNote');
+    if(!note) return;
+    var own = [];
+    if(takenOnOwnCard('SHORT')) own.push('A short leave');
+    if(takenOnOwnCard('HALF')) own.push(own.length ? 'a half day' : 'A half day');
+    note.style.display = own.length ? '' : 'none';
+    if(own.length){
+      note.textContent = own.join(' or ') + ' is not asked for — take it on your '
+        + 'attendance card. It counts the moment you do, and the office is told.';
+    }
+  }
   var REQ_TYPE_LABEL = {CL:'Casual leave', Sick:'Sick leave',
                         SHORT:'Short leave', HALF:'Half day', THREEQ:'Three-quarter day',
                         WFH:'Work from home', VISIT:'Off-site visit', Other:'Other', PUNCH:'Punch correction'};
@@ -10973,6 +11044,9 @@ function buildExcelBackup(){
 
   var requestModalOverlay = document.getElementById('requestModalOverlay');
   document.getElementById('requestLeaveBtn').addEventListener('click', function(){
+    /* Read at the moment it opens rather than once at boot: the office can
+       change its mind while somebody has the page open. */
+    syncRequestTypes();
     document.getElementById('reqDateFrom').value = todayISO_full;
     document.getElementById('reqDateTo').value = todayISO_full;
     document.getElementById('reqMessage').value = '';
@@ -10988,8 +11062,12 @@ function buildExcelBackup(){
     var fromEl = document.getElementById('reqDateFrom');
     if(!t || !w) return;
     var sync = function(){
-      /* Every part-day is part of one day, and each needs to say which part. */
-      var isHalf = isPartDay(t.value);
+      /* Every part day is part of one day, so each is clamped to one. Only a
+         half day has to say WHICH half: a short leave is a quarter of a day
+         and there is no half of it to pick, and asking anyway would be a
+         question with no right answer on it. */
+      var oneDay = isPartDay(t.value);
+      var isHalf = t.value === 'HALF';
       var isPunch = t.value === 'PUNCH';
       w.style.display = isHalf ? '' : 'none';
       // A punch correction is one day and two times, with no day off to return from.
@@ -10999,8 +11077,8 @@ function buildExcelBackup(){
       /* Half of one day is the only sensible reading - a half day across a
          range would leave it unclear which days it applied to. */
       if(toEl){
-        toEl.disabled = isHalf || isPunch;
-        if((isHalf || isPunch) && fromEl) toEl.value = fromEl.value;
+        toEl.disabled = oneDay || isPunch;
+        if((oneDay || isPunch) && fromEl) toEl.value = fromEl.value;
       }
     };
     t.addEventListener('change', sync);
@@ -11044,8 +11122,12 @@ function buildExcelBackup(){
     var req = {
       id: 'req_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
       empName: viewRole.name,
-      dateFrom: from, dateTo: isPunch ? from : to, leaveType: type, message: msg,
-      half: (isPartDay(type) && document.getElementById('reqHalf'))
+      /* A part of a day is a part of ONE day, so it carries the day it
+         started on whatever the To box was last left showing. Only a half
+         day carries a half: there is no half of a short leave to pick. */
+      dateFrom: from, dateTo: (isPunch || isPartDay(type)) ? from : to,
+      leaveType: type, message: msg,
+      half: (type === 'HALF' && document.getElementById('reqHalf'))
               ? document.getElementById('reqHalf').value : '',
       returnOn: isPunch ? '' : ((document.getElementById('reqReturn') || {}).value || ''),
       punchIn: pIn, punchOut: pOut,
@@ -12522,7 +12604,22 @@ function buildExcelBackup(){
             + 'One word settles a request. <b>Everybody in To can approve it</b>; everybody in '
             + 'Cc is only told, and a copied-in message has no buttons on it \u2014 including the '
             + 'copy that goes to the person who asked.</div>'
-            + '<div class="em-lab">Management <span>on every leave email, and they can approve '
+            /* The first thing to settle about leave is what has to be asked
+               for at all, so it is the first thing on the card. */
+            + '<div class="em-lab">What has to be asked for '
+            +   '<span>a whole day always is</span></div>'
+            + '<label class="em-row"><input type="checkbox" data-lv-ask="SHORT"'
+            +   (askedFor('SHORT') ? ' checked' : '') + '>'
+            +   '<span>A short leave \u2014 a quarter of the day</span></label>'
+            + '<label class="em-row"><input type="checkbox" data-lv-ask="HALF"'
+            +   (askedFor('HALF') ? ' checked' : '') + '>'
+            +   '<span>A half day</span></label>'
+            + '<div class="em-note">Unticked, it is taken on the person\u2019s own attendance '
+            +   'card: it counts the moment they take it, nobody is asked, and the office is '
+            +   'told. Ticked, it is asked for like any other leave and waits for a word. '
+            +   'Saved as you tick.</div>'
+            + '<div class="em-lab" style="margin-top:14px;padding-top:11px;border-top:1px solid var(--line);">'
+            +   'Management <span>on every leave email, and they can approve '
             +   'anything</span></div>'
             + '<div class="em-row"><input type="text" id="emLvTo" placeholder="comma separated" value="'
             +   mailEscape((lv.to || []).join(', ')) + '"></div>'
@@ -12685,6 +12782,34 @@ function buildExcelBackup(){
         });
       };
     });
+    /* What has to be asked for is its own store too, and the same reasoning
+       applies: the panel's Save writes the mail settings and nothing else.
+       The page is redrawn on the way out because the card under the clock and
+       the request form both read this. */
+    (function(){
+      var pane = document.querySelector('[data-em-pane="lv"]');
+      if(!pane) return;
+      Array.prototype.forEach.call(pane.querySelectorAll('input[data-lv-ask]'), function(cb){
+        cb.addEventListener('change', function(){
+          var k = cb.getAttribute('data-lv-ask');
+          var was = leavePolicy[k];
+          leavePolicy[k] = cb.checked ? 'approval' : 'self';
+          cb.disabled = true;
+          saveLeavePolicy().then(function(){
+            cb.disabled = false;
+            syncRequestTypes();
+            try{ if(typeof renderEmpDayCard === 'function') renderEmpDayCard(); }catch(e){}
+            showUploadStatus((k === 'SHORT' ? 'A short leave' : 'A half day')
+              + (cb.checked ? ' is asked for now, and waits for a word.'
+                            : ' is taken on the person\u2019s own card now, and counts at once.'),
+              false);
+          }).catch(function(e){
+            leavePolicy[k] = was; cb.disabled = false; cb.checked = !cb.checked;
+            showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+          });
+        });
+      });
+    })();
     /* The table saves as it is ticked, not on the panel's own Save: that
        button writes the mail settings, and these are a different store. A
        button that saved one of them would be lying about the other. */
@@ -21671,6 +21796,8 @@ function buildExcelBackup(){
           : /already_taken/.test(why)    ? 'Today is already set to that.'
           : /nothing_to_undo/.test(why)  ? 'There is nothing to put back.'
           : /why_needed/.test(why)       ? 'Say why you are taking it.'
+          : /needs_request/.test(why)    ? 'That one is asked for now, not taken \u2014 use '
+                                           + 'Request time away.'
           : ('That did not go through (' + (why || 'no answer') + ').'), true);
           renderEmpDayCard();
         });
@@ -21823,6 +21950,18 @@ function buildExcelBackup(){
     { v:'HALF:AM', lab:'Half day \u2014 taking the first half off' },
     { v:'HALF:PM', lab:'Half day \u2014 taking the second half off' }
   ];
+  /* The hint under the dropdown, said in terms of whatever the office has
+     decided rather than in terms of half a day, which it used to assume. */
+  function partOwnWords(){
+    if(takenOnOwnCard('SHORT') && takenOnOwnCard('HALF')) return 'Up to half a day';
+    if(takenOnOwnCard('HALF')) return 'A half day';
+    return 'A short leave';
+  }
+  function partAskWords(){
+    if(takenOnOwnCard('SHORT') && takenOnOwnCard('HALF')) return 'Longer than that still needs a request.';
+    if(takenOnOwnCard('HALF')) return 'A short leave and anything longer than a half day need a request.';
+    return 'A half day and anything longer need a request.';
+  }
   function partSaid(kind, half){
     if(kind !== 'HALF') return 'Short leave';
     return 'Half day (' + (half === 'PM' ? 'second half' : 'first half') + ')';
@@ -21909,8 +22048,31 @@ function buildExcelBackup(){
         + (hd.reqId ? ' from a request you made.' : ' \u2014 entered by the office.') + '</span></div>';
     }
     var cur = hd ? (hd.kind === 'HALF' ? ('HALF:' + (hd.half === 'PM' ? 'PM' : 'AM')) : hd.kind) : '';
+    /* What the office lets people take rather than ask for. Nothing on the
+       list and nothing on the day: this section has nothing to offer, so it
+       is not drawn at all and the tile above it goes with it. */
+    var mine = PART_SELF.filter(function(k){ return takenOnOwnCard(k.v.split(':')[0]); });
+    if(!mine.length && !hd) return '';
+    /* One taken before the office changed its mind. It can be put back - the
+       day becomes a whole working day again, which costs nobody anything -
+       but it cannot be changed into something that now has to be asked for. */
+    if(!mine.length){
+      return '<div class="ed-visit ed-partrow">'
+        + '<div class="lab">Taking part of today off?</div>'
+        + '<div class="v-row"><span class="v-tag">' + shotEsc(hdMark(hd.kind)) + '</span>'
+        +   '<span class="v-why">' + shotEsc(partSaid(hd.kind, hd.half)) + '</span>'
+        +   '<button type="button" class="month-btn" id="edPartClear">Put it back</button></div>'
+        + '<div class="v-by">Time off is asked for now rather than taken, so this one can be '
+        +   'put back but not changed. Ask for the new one with Request time away.</div></div>';
+    }
+    /* A kind that is no longer offered still appears while it is on the day,
+       or the dropdown would say the person is taking nothing. */
+    var list = mine.slice();
+    if(cur && !list.some(function(k){ return k.v === cur; })){
+      list = list.concat(PART_SELF.filter(function(k){ return k.v === cur; }));
+    }
     var opts = '<option value="">Not taking time off today</option>'
-      + PART_SELF.map(function(k){
+      + list.map(function(k){
           return '<option value="' + k.v + '"' + (cur === k.v ? ' selected' : '') + '>'
             + shotEsc(k.lab) + '</option>';
         }).join('');
@@ -21936,9 +22098,8 @@ function buildExcelBackup(){
           ? ('Today counts as <b>' + shotEsc(partSaid(hd.kind, hd.half)) + '</b> \u2014 '
              + hdQty(hd.kind) + ' of a day off your casual leave. Nobody had to agree to it, '
              + 'and the office has been told.')
-          : ('Up to half a day counts the moment you submit it \u2014 nobody has to agree to it '
-             + '\u2014 and the office is told. Longer than that still needs a request. '
-             + 'Today only.'))
+          : (partOwnWords() + ' counts the moment you submit it \u2014 nobody has to agree to it '
+             + '\u2014 and the office is told. ' + partAskWords() + ' Today only.'))
       + '</div></div>';
   }
 
@@ -22254,7 +22415,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){

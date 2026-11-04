@@ -177,14 +177,20 @@ const sorted = a => a.slice().sort();
   check('and the settings have no first-stage lines left to fill in',
     !/firstTo|firstCc|firstIntro/.test(SRV), null);
 
-  /* ---- a short leave and a half day are not asked for at all ----
-     They are taken, on the person's own card, and counted the moment they
-     are - so a request for one is a road that no longer goes anywhere. */
-  check('the server refuses a request for one',
-    /if \(SELF_PART_KINDS\.indexOf\(String\(r\.leaveType \|\| ''\)\.toUpperCase\(\)\) > -1\) return;/
+  /* ---- what is taken and what is asked for is the office's to decide ----
+     It used to be settled in the code: both were taken. Now each kind is one
+     or the other, and the two sides of that rule read the same setting - so
+     nothing can be both, and nothing can be neither. */
+  check('the merge refuses a request for a kind that is taken',
+    /if \(\(selfKinds \|\| \[\]\)\.indexOf\(String\(r\.leaveType \|\| ''\)\.toUpperCase\(\)\) > -1\) return;/
       .test(grab(SRV, 'mergeEmployeeRequests')), null);
+  check('and is told which those are rather than deciding for itself',
+    /mergeEmployeeRequests\(stored, value, \(req\.user && req\.user\.name\) \|\| '',\s*selfKindsOf\(await leavePolicy\(req\.session\.orgId\)\)\)/
+      .test(SRV), null);
+  check('the route that grants one refuses a kind that is asked for',
+    /if \(kind && \(await leavePolicy\(orgId\)\)\[kind\] !== 'self'\)/.test(grab(SRV, 'takePartDay')), null);
   check('anything already asked for before still stands',
-    /this is only about new ones/.test(SRV), null);
+    /Only new ones: anything already asked for stands/.test(SRV), null);
 
   /* ---- the table the office reads it off ----
      The page has to read a row exactly as the server does, or the screen will
@@ -221,14 +227,20 @@ const sorted = a => a.slice().sort();
       p.approverLabel(KARAN) === 'karan Ahuja' && p.approverLabel(MUNISH) === MUNISH);
   }
 
-  /* ---- and the form no longer asks for what is taken ---- */
+  /* ---- and the form asks for exactly what is not taken ---- */
   {
     const form = APP.slice(APP.indexOf('<select id="reqLeaveType">'),
                            APP.indexOf('id="reqDateFrom"'));
-    check('the request form offers no short leave and no half day',
+    /* Nothing part-day is written into the form by hand. Both are put there,
+       or left out, by the one function that reads the setting - so the form
+       cannot drift out of step with the card. */
+    check('the request form hard-codes no part day either way',
       form.indexOf('value="SHORT"') === -1 && form.indexOf('value="HALF"') === -1, form.length);
-    check('and says where they are taken instead',
-      /take it on your[\s\S]{0,40}attendance card/.test(form));
+    const sync = grab(APP, 'syncRequestTypes');
+    check('it offers the ones that must be asked for',
+      /if\(!askedFor\(k\.v\)\) return;/.test(sync), null);
+    check('and says where the others are taken instead',
+      /take it on your[\s\S]{0,40}attendance card/.test(sync), null);
     /* The whole-day kinds are untouched: a day away is still somebody else's
        day to plan around. */
     check('a day of leave is still asked for',

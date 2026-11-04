@@ -193,6 +193,11 @@ function query(sql, p) {
       .sort((a, b) => (a.user_id === null ? 0 : 1) - (b.user_id === null ? 0 : 1))
       .map(r => ({ key: r.key, value: r.value, version: r.version, shared: r.user_id === null })));
   }
+  /* Reading a handful of shared keys at once - what leavePolicy does. */
+  if (s.startsWith('SELECT key, value FROM kv WHERE org_id = $1 AND user_id IS NULL AND key = ANY($2)')) {
+    return rows(db.kv.filter(r => r.org_id === p[0] && r.user_id === null && p[1].indexOf(r.key) > -1)
+      .map(r => ({ key: r.key, value: r.value })));
+  }
   return Promise.reject(new Error('fake db: unhandled SQL: ' + s.slice(0, 120)));
 }
 class FakePool {

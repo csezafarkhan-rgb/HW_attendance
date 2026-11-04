@@ -200,7 +200,10 @@ const EMP_KEYED_BY_DAY = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags',
 const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames',
                           'selfMark'];                                       // "Name"
 const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
-                      'weeklyLeverageMin', 'companyInfo', 'customShifts'];
+                      'weeklyLeverageMin', 'companyInfo', 'customShifts',
+                      /* Their own card has to know which parts of a day it may offer,
+                         and the answer is the office's rather than the page's. */
+                      'leavePolicy'];
 const EMP_VISIBLE_KEYS = EMP_KEYED_BY_DAY.concat(EMP_KEYED_BY_NAME, EMP_READABLE, ['leaveRequests', 'signatures']);
 
 function parseJson(s) { try { return JSON.parse(s); } catch (e) { return undefined; } }
@@ -610,12 +613,42 @@ function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
 /* Which of their own requests somebody may take back: the ones nobody has
    acted on. The page offers the button on exactly these, but the page is
    theirs to edit, so this is where it is decided. */
-/* The part of a day somebody may take for themselves. Declared here with the
-   rest of the shared vocabulary because two places read it: the route that
-   grants one, and the merge that refuses to let one be asked for. */
-const SELF_PART_KINDS = ['SHORT', 'HALF'];
+/* The parts of a day that are less than a whole one and, for each, whether it
+   is taken on somebody's own card or asked for.
+
+   It used to be settled in the code: both were taken, neither was asked for.
+   The office wants to be able to change its mind without a new release, and
+   has changed it once already - a short leave is still taken, a half day is
+   asked for again. A whole day is not in this list, because a whole day is
+   always asked for.
+
+   Two places read it, and they are the two sides of one rule: the route that
+   grants a part day refuses a kind that has to be asked for, and the merge
+   that takes in a request refuses a kind that is taken. So a kind is one or
+   the other, never both and never neither.
+
+   Read through here rather than used raw, so a key somebody has edited by
+   hand, or has never written at all, still answers with something sane. */
+const SELF_ABLE_KINDS = ['SHORT', 'HALF'];
+const LEAVE_POLICY_DEFAULT = { SHORT: 'self', HALF: 'approval' };
+function leavePolicyOf(value) {
+  const v = parseJson(value);
+  const out = {};
+  SELF_ABLE_KINDS.forEach(function (k) {
+    const said = String((isPlainObject(v) ? v[k] : '') || '').toLowerCase();
+    out[k] = (said === 'self' || said === 'approval') ? said : LEAVE_POLICY_DEFAULT[k];
+  });
+  return out;
+}
+function selfKindsOf(policy) {
+  return SELF_ABLE_KINDS.filter(function (k) { return policy[k] === 'self'; });
+}
+async function leavePolicy(orgId) {
+  const kv = await sharedKeys(orgId, ['leavePolicy']);
+  return leavePolicyOf(kv.leavePolicy);
+}
 const EMP_CANCELLABLE = ['pending', 'query', 'recommended'];
-function mergeEmployeeRequests(storedValue, incomingValue, name) {
+function mergeEmployeeRequests(storedValue, incomingValue, name, selfKinds) {
   const incoming = parseJson(incomingValue);
   if (!Array.isArray(incoming)) return null;
   const parsed = parseJson(storedValue);
@@ -630,13 +663,21 @@ function mergeEmployeeRequests(storedValue, incomingValue, name) {
       if (!/^req_[A-Za-z0-9_]{1,60}$/.test(r.id)) return;
       if (!DAY_RE.test(r.dateFrom) || !DAY_RE.test(r.dateTo) || r.dateTo < r.dateFrom) return;
       if (!/^[A-Za-z]{1,16}$/.test(String(r.leaveType || ''))) return;
-      /* A short leave and a half day are not asked for. They are taken, on
-         the person's own card, and counted the moment they are - so a request
-         for one is a road that no longer goes anywhere, and the page that
-         offered it has stopped. Refused here as well, because a page is the
-         person's to edit and an old one left open still has the old form on
-         it. Anything already asked for stands: this is only about new ones. */
-      if (SELF_PART_KINDS.indexOf(String(r.leaveType || '').toUpperCase()) > -1) return;
+      /* A kind the office has said is taken rather than asked for. It is
+         taken on the person's own card and counted the moment it is, so a
+         request for one is a road that goes nowhere, and the page does not
+         offer it. Refused here as well, because a page is the person's to
+         edit and an old one left open still has the old form on it.
+
+         Only new ones: anything already asked for stands, whatever the
+         office has decided since. */
+      if ((selfKinds || []).indexOf(String(r.leaveType || '').toUpperCase()) > -1) return;
+      /* A part of a day is a part of one day. Asked for across a range it
+         would leave nobody able to say which of the days it applied to, and
+         the mark it turns into has one date and no room for the rest. */
+      const kindUp = String(r.leaveType || '').toUpperCase();
+      if ((kindUp === 'HALF' || kindUp === 'SHORT' || kindUp === 'THREEQ')
+          && r.dateTo !== r.dateFrom) return;
       const TIME_RE = /^\d{1,2}:\d{2}$/;
       const punch = r.leaveType === 'PUNCH';
       // A punch correction is one day, with at least one corrected time.
@@ -1377,7 +1418,8 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         // Merged on the server rather than refused - see mergeEmployeeRequests.
         const stored = row ? row.value : '[]';
         if (req.session.role === 'employee') {
-          const merged = mergeEmployeeRequests(stored, value, (req.user && req.user.name) || '');
+          const merged = mergeEmployeeRequests(stored, value, (req.user && req.user.name) || '',
+                                               selfKindsOf(await leavePolicy(req.session.orgId)));
           if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_requests' }); }
           value = merged;
         } else {
@@ -1903,7 +1945,14 @@ async function takePartDay(orgId, name, userId, body) {
   const kind = String((body && body.kind) || '').trim().toUpperCase();
   /* An empty kind is how a day is put back: they took it, so they can untake
      it, on the same day and only while the mark is still their own. */
-  if (kind && SELF_PART_KINDS.indexOf(kind) === -1) return { code: 400, out: { error: 'bad_kind' } };
+  if (kind && SELF_ABLE_KINDS.indexOf(kind) === -1) return { code: 400, out: { error: 'bad_kind' } };
+  /* And whether this is one the office lets people take. Putting a day back
+     needs no permission whatever the answer: the day simply becomes a whole
+     working day again, which is what it would have been had nobody touched
+     it. */
+  if (kind && (await leavePolicy(orgId))[kind] !== 'self') {
+    return { code: 403, out: { error: 'needs_request' } };
+  }
   const half = kind === 'HALF'
     ? (String((body && body.half) || '').trim().toUpperCase() === 'PM' ? 'PM' : 'AM') : '';
   const why = clip(body && body.message, 500).trim();
@@ -3659,9 +3708,14 @@ function newPendingRequests(beforeText, afterText) {
 const PART_KINDS = ['HALF', 'SHORT', 'THREEQ'];
 function markForRequest(req) {
   if (PART_KINDS.indexOf(req.leaveType) > -1) {
+    /* Which half, but only where there is a half to name. A short leave is a
+       quarter of a day and has no half, and saying "First half" on one was a
+       sentence that only ever read as a mistake. */
+    const which = req.leaveType === 'HALF' ? (req.half === 'PM' ? 'Second half' : 'First half')
+                : req.leaveType === 'SHORT' ? 'Short leave' : 'Three-quarter day';
     return { key: 'halfDays', value: {
-      reqId: req.id, kind: req.leaveType, half: req.half || '', leave: 'CL',
-      note: (req.half === 'PM' ? 'Second half' : 'First half') + (req.message ? (' · ' + req.message) : ''),
+      reqId: req.id, kind: req.leaveType, half: req.leaveType === 'HALF' ? (req.half || '') : '',
+      leave: 'CL', note: which + (req.message ? (' · ' + req.message) : ''),
       at: new Date().toISOString() } };
   }
   const cat = req.leaveType === 'WFH' ? 'WFH' : req.leaveType === 'VISIT' ? 'VISIT' : 'LEAVE';

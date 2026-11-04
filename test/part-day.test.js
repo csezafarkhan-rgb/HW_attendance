@@ -65,6 +65,13 @@ function grab(src, name) {
   };
   const ctx = {
     pool: { connect: async () => client },
+    /* leavePolicy reads its one key straight off the pool rather than through
+       the transaction, so the stand-in answers for it the same way. */
+    sharedKeys: async (org, keys) => {
+      const o = {};
+      keys.forEach(k => { o[k] = ctx.__kv[k]; });
+      return o;
+    },
     lockedMonthsOf: async () => ctx.__locked,
     logChange: async () => {}, addHistory: async () => {},
     crypto: require('crypto'),
@@ -74,7 +81,10 @@ function grab(src, name) {
   vm.createContext(ctx);
   ['parseJson', 'clip', 'canon', 'isPlainObject', 'diffValue', 'clockDay',
    'parseShiftSpan', 'nightTurnsAt', 'shiftFor', 'ownDays'].forEach(n => vm.runInContext(grab(SRV, n), ctx));
-  vm.runInContext(/const SELF_PART_KINDS = \[[^\]]*\];/.exec(SRV)[0], ctx);
+  vm.runInContext(/const SELF_ABLE_KINDS = \[[^\]]*\];/.exec(SRV)[0], ctx);
+  vm.runInContext(/const LEAVE_POLICY_DEFAULT = \{[^}]*\};/.exec(SRV)[0], ctx);
+  ['leavePolicyOf', 'selfKindsOf'].forEach(n => vm.runInContext(grab(SRV, n), ctx));
+  vm.runInContext('async ' + grab(SRV, 'leavePolicy'), ctx);
   vm.runInContext('async ' + grab(SRV, 'takePartDay'), ctx);
 
   /* Today, as the thing under test will work it out: nobody here is on a
@@ -90,6 +100,11 @@ function grab(src, name) {
       overrides: JSON.stringify(st.overrides || {}),
       halfDays: JSON.stringify(st.halfDays || {}),
       leaveRequests: JSON.stringify(st.leaveRequests || []),
+      /* These checks are about what happens when a kind IS taken, so unless
+         one of them says otherwise both are. What the office actually has
+         set today, and what happens to a kind that is asked for, is the
+         block of its own further down. */
+      leavePolicy: JSON.stringify(st.policy || { SHORT: 'self', HALF: 'self' }),
     };
     ctx.__locked = st.locked || {};
     /* A reason is required, so everything meant to go through carries one.
@@ -362,6 +377,58 @@ function grab(src, name) {
     check('and there is somewhere in the settings to write that wording',
       /part: \(function \(\) \{/.test(SRV) && /isPlainObject\(ex\.part\)/.test(SRV), null);
 
+    /* ---- what is taken and what is asked for ----
+       It used to be settled in the code: both were taken, neither could be
+       asked for. The office sets it now, and the two sides of the rule read
+       the one answer - so a kind is taken or asked for, never both. */
+    {
+      const pol = ctx.leavePolicyOf;
+      check('left to itself, a short leave is taken and a half day is asked for',
+        pol(undefined).SHORT === 'self' && pol(undefined).HALF === 'approval', null);
+      check('a key edited into nonsense reads as the same two answers',
+        pol('{"SHORT":"maybe","HALF":[]}').SHORT === 'self'
+        && pol('{"SHORT":"maybe","HALF":[]}').HALF === 'approval', null);
+      check('and a key that is not even JSON does too',
+        pol('not json').SHORT === 'self', null);
+      check('what the office has set is what comes back',
+        pol('{"SHORT":"approval","HALF":"self"}').SHORT === 'approval'
+        && pol('{"SHORT":"approval","HALF":"self"}').HALF === 'self', null);
+      check('and only the taken ones are named as taken',
+        ctx.selfKindsOf(pol('{"SHORT":"self","HALF":"approval"}')).join() === 'SHORT', null);
+
+      /* The arrangement as it stands today: a short leave taken, a half day
+         asked for. */
+      const POL = { SHORT: 'self', HALF: 'approval' };
+      r = await run({ kind: 'HALF', half: 'PM', message: 'dentist' }, { policy: POL });
+      check('a half day cannot be taken when it has to be asked for', r.code === 403, r.out);
+      check('and is told so in a word the card can read',
+        r.out && r.out.error === 'needs_request', r.out);
+      check('nothing was written', r.parts === null, r.parts);
+      check('and no transaction was opened for it',
+        r.sql.indexOf('BEGIN') === -1, r.sql);
+      r = await run({ kind: 'SHORT', message: 'bank' }, { policy: POL });
+      check('a short leave still is taken', r.code === 200, r.out);
+      check('and lands on the day', !!(r.parts && r.parts[K('Keshav Garg')]), r.parts);
+
+      /* And the other way round, which is the whole point of the setting. */
+      const FLIP = { SHORT: 'approval', HALF: 'self' };
+      r = await run({ kind: 'SHORT', message: 'bank' }, { policy: FLIP });
+      check('turn it round and a short leave has to be asked for', r.code === 403, r.out);
+      r = await run({ kind: 'HALF', half: 'AM', message: 'dentist' }, { policy: FLIP });
+      check('and a half day is taken', r.code === 200, r.out);
+
+      /* Putting a day back is nobody's to refuse: the day simply becomes a
+         whole working day again, which is what it would have been had nobody
+         touched it. */
+      const had = {};
+      had[K('Keshav Garg')] = { kind: 'HALF', half: 'PM', leave: 'CL', by: 'self', why: 'dentist' };
+      r = await run({ kind: '' }, { policy: POL, halfDays: had });
+      check('a day already taken can be put back whatever the office has decided',
+        r.code === 200, r.out);
+      check('and the day comes off the record',
+        r.parts && !r.parts[K('Keshav Garg')], r.parts);
+    }
+
     /* ---- the card they take it from ---- */
     {
       const c3 = {
@@ -371,8 +438,11 @@ function grab(src, name) {
         String, Object, console,
       };
       vm.createContext(c3);
-      ['hdQty', 'hdLabel', 'hdMark', 'partSaid', 'partDayRow'].forEach(n => vm.runInContext(grab(APP, n), c3));
+      ['hdQty', 'hdLabel', 'hdMark', 'partSaid', 'partDayRow', 'takenOnOwnCard',
+       'partOwnWords', 'partAskWords'].forEach(n => vm.runInContext(grab(APP, n), c3));
       vm.runInContext(/var PART_SELF = \[[\s\S]*?\];/.exec(APP)[0], c3);
+      /* The card asks the same question of the same setting the server does. */
+      c3.leavePolicy = { SHORT: 'self', HALF: 'self' };
 
       let html = c3.partDayRow('Keshav Garg', TODAY);
       check('the card offers a short leave and either half of a day',
@@ -393,6 +463,33 @@ function grab(src, name) {
       /* Today only, like the hours and the visit beside it. */
       check('yesterday is not offered',
         c3.partDayRow('Keshav Garg', '2026-01-05') === '', null);
+
+      /* ---- and it offers only what the office lets them take ---- */
+      c3.leavePolicy = { SHORT: 'self', HALF: 'approval' };
+      html = c3.partDayRow('Keshav Garg', TODAY);
+      check('a half day that is asked for is not on the card',
+        /value="SHORT"/.test(html) && !/value="HALF/.test(html), null);
+      check('and the card says which way round it is',
+        /A short leave counts the moment you submit it/.test(html)
+        && /A half day and anything longer need a request/.test(html), null);
+
+      c3.leavePolicy = { SHORT: 'approval', HALF: 'approval' };
+      check('nothing left to take, and the section is not drawn at all',
+        c3.partDayRow('Keshav Garg', TODAY) === '', null);
+
+      /* One taken before the office changed its mind. It can be put back -
+         that costs nobody anything - but not changed into something that now
+         has to be asked for. */
+      c3.halfDays[K('Keshav Garg')] = { kind: 'SHORT', leave: 'CL', by: 'self', why: 'bank' };
+      html = c3.partDayRow('Keshav Garg', TODAY);
+      check('one taken before the change can still be put back',
+        /id="edPartClear"/.test(html), null);
+      check('but not changed',
+        !/id="edPartSave"/.test(html) && !/<select id="edPartKind"/.test(html), null);
+      check('and it says why',
+        /asked for now rather than taken/.test(html), null);
+      c3.halfDays = {};
+      c3.leavePolicy = { SHORT: 'self', HALF: 'self' };
 
       c3.halfDays[K('Keshav Garg')] = { kind: 'HALF', half: 'PM', by: 'self', why: 'dentist' };
       html = c3.partDayRow('Keshav Garg', TODAY);
