@@ -13533,6 +13533,12 @@ function buildExcelBackup(){
                   shown: emps.length, hidden: Math.max(0, EMPLOYEES.length - emps.length),
                   days: dates.length };
         var sheets = buildGridWorkbook();
+        /* What the message says is in the file, taken from the file rather
+           than from a sentence written beside it. The performance and leave
+           sheets are each built in a try of their own, so a month that could
+           not reckon one of them has a workbook with fewer tabs - and should
+           say so rather than promising what is not there. */
+        if(sheets) facts.sheetNames = sheets.map(function(sh){ return sh.name; });
         if(sheets) book = buildStyledXlsxMulti(sheets);
       }catch(e){
         console.error('the workbook could not be built', e);

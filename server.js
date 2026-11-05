@@ -3032,6 +3032,10 @@ async function sendMonthEmail(orgId, opts) {
     days: Number.isFinite(opts.days) ? opts.days : null,
     subject: settings.month.subject, intro: settings.month.intro, footer: settings.month.footer,
     fileName: fileSent, siteUrl: mailer.baseUrl(),
+    /* Named only where the file is actually going: a message that says
+       what is in the attachment, with no attachment, is a message
+       describing something nobody was sent. */
+    sheetNames: fileSent ? opts.sheetNames : null,
     sentAt: mailer.clock(Math.floor(istParts().min / 60) + ':'
                          + String(istParts().min % 60).padStart(2, '0'))
   });
@@ -4643,6 +4647,10 @@ app.post('/api/mail/month', requireRole('admin'), bigJson, async (req, res) => {
   }
   const out = await sendMonthEmail(req.session.orgId, {
     xlsx: body.xlsx, fileName: body.fileName,
+    /* The tabs in the workbook, named by whoever built it - the page knows
+       which sheets went in, and which were left out when one of them could
+       not be reckoned. */
+    sheetNames: Array.isArray(body.sheetNames) ? body.sheetNames : null,
     monthLabel: body.monthLabel, slug: body.slug,
     shown: Number(body.shown), hidden: Number(body.hidden), days: Number(body.days),
     preview: !!body.preview

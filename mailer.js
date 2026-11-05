@@ -1211,8 +1211,32 @@ function monthEmail(o) {
   if (o.fileName) {
     body.push('<div style="border:1px solid ' + LINE + ';border-left:3px solid ' + BLUE + ';border-radius:10px;'
       + 'padding:11px 13px;margin:0 0 10px;font-size:12.5px;line-height:1.5;">'
-      + '<b>' + esc(o.fileName) + '</b> is attached \u2014 one sheet with everybody side by '
-      + 'side, and one saying how they did over the month.'
+      /* Which sheets are in it, by the names on their tabs.
+
+         This used to describe them instead - 'one sheet with everybody side
+         by side, and one saying how they did' - which was a sentence about
+         two sheets in a workbook that carries three, and said none of the
+         names somebody would be looking for once they opened it. The leave
+         ledger and the performance reckoning are each built in a try of
+         their own and can be left out, so the number is not fixed either.
+
+         Nothing passed, it falls back to the old sentence: a caller that
+         does not say what is in the file cannot have it named. */
+      + '<b>' + esc(o.fileName) + '</b> is attached'
+      + (function () {
+          const names = (o.sheetNames || []).map(n => String(n || '').trim()).filter(Boolean);
+          if (!names.length) {
+            return ' \u2014 one sheet with everybody side by side, and one saying how '
+                 + 'they did over the month.';
+          }
+          const count = names.length === 1 ? 'one sheet'
+            : names.length === 2 ? 'two sheets'
+            : names.length === 3 ? 'three sheets'
+            : (names.length + ' sheets');
+          const said = names.length === 1 ? esc(names[0])
+            : esc(names.slice(0, -1).join(', ')) + ' and ' + esc(names[names.length - 1]);
+          return ' \u2014 ' + count + ': ' + said + '.';
+        })()
       + '</div>');
   }
   const footer = fillText(o.footer || words.footer, say);
