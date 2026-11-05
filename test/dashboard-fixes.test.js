@@ -470,26 +470,37 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
   }
 
   /* ---- the notice leaves on a fade, not a blink ----
-     It used to sit for ten seconds and then be hidden outright. Something that
-     vanishes between glances reads as a fault; a fade reads as the notice
-     finishing. The clear has to wait for the fade, or it cuts it off at the
-     first frame and the blink is back. */
+     It used to sit for ten seconds and then be hidden outright, then seven.
+     Three now: a green box over the record outstays its welcome faster than
+     it looks like it will. Something that vanishes between glances reads as a
+     fault, though, so it still fades - and the clear has to wait for the
+     fade, or it cuts it off at the first frame and the blink is back. */
   {
     const fn = /var away = function\(\)\{[\s\S]*?\n    \};/.exec(src);
-    check('the notice is given seven seconds', !!fn && /setTimeout\(away, 7000\)/.test(src),
-      (/setTimeout\(away, \d+\)/.exec(src) || [])[0]);
+    const dwell = /var UNDO_DWELL = (\d+);/.exec(src);
+    check('the notice is given three seconds', !!dwell && Number(dwell[1]) === 3000,
+      dwell && dwell[1]);
     check('it fades rather than being hidden outright',
       !!fn && /classList\.add\('going'\)/.test(fn[0]));
     check('and is only cleared once the fade has run',
       !!fn && /going'\);[\s\S]*?setTimeout\(function\(\)\{[\s\S]*?display = 'none'/.test(fn[0]),
       fn && fn[0].slice(-220));
     check('a pointer resting on it still holds it there',
-      !!fn && /matches\(':hover'\)\)\{ UNDO_TIMER = setTimeout\(away, 7000\)/.test(fn[0]));
+      !!fn && /matches\(':hover'\)\)\{ UNDO_TIMER = setTimeout\(away, UNDO_DWELL\)/.test(fn[0]));
+    /* One number, used by both waits - they were two copies of 7000, which is
+       two places to change and one to forget. */
+    check('and the two waits are the one number',
+      (src.match(/setTimeout\(away, UNDO_DWELL\)/g) || []).length === 2, null);
 
     const styles = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
+    const fade = /\.undo-import\{transition:opacity ([\d.]+)s/.exec(styles);
     check('the fade is a transition, long enough to see',
-      /\.undo-import\{transition:opacity 1\.1s/.test(styles)
-        && /\.undo-import\.going\{opacity:0/.test(styles));
+      !!fade && Number(fade[1]) >= 0.5 && /\.undo-import\.going\{opacity:0/.test(styles),
+      fade && fade[1]);
+    /* What somebody actually experiences is the two added together. */
+    check('and sitting plus fading is under four seconds',
+      !!dwell && !!fade && (Number(dwell[1]) + Number(fade[1]) * 1000) <= 4000,
+      dwell && fade && (Number(dwell[1]) + Number(fade[1]) * 1000));
     /* Somebody who has asked for less movement gets less of it. */
     check('and it is cut short for anyone who asked for less motion',
       /prefers-reduced-motion[\s\S]{0,200}\.undo-import\.going\{transform:none/.test(styles));
