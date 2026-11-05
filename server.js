@@ -3646,6 +3646,30 @@ function newlySelfExcused(beforeText, afterText) {
   });
   return out;
 }
+/* Whoever the office named to answer for these people's leave, added to a
+   list that already holds whoever it named for this kind of news.
+
+   A manager who answers for somebody's leave is the one who knows what was
+   agreed about their hours, and both of these messages went over their head
+   to the management - who then had to go and ask them anyway. A batch can
+   cover several people, so it is each of their own approvers rather than one
+   list for all of them.
+
+   Nobody is added for news about their own day: they are copied in by the
+   caller, where the people whose days these are go. */
+async function alsoTheirApprovers(orgId, to, names) {
+  const route = await approvalRouteOf(orgId);
+  const who = Array.from(new Set((names || []).filter(Boolean)));
+  const own = {};
+  for (const n of who) {
+    const a = String(await employeeAddress(orgId, n) || '').trim().toLowerCase();
+    if (a) own[a] = true;
+  }
+  who.forEach(n => approversOf(route, n).forEach(a => {
+    if (!own[a] && to.indexOf(a) < 0) to.push(a);
+  }));
+  return to;
+}
 /* The message about it. For reading, not for deciding: the day is already
    excused on the record, there are no buttons on it, and it goes to whoever
    the office named for this and nobody else - an empty list means nobody
@@ -3661,27 +3685,7 @@ async function notifySelfExcused(orgId, marks) {
     const to = settings.excused.final
       ? (await mailRecipients(orgId, settings, 'leave')).slice()
       : (settings.excused.to || []).slice();
-    /* And whoever the office named against these people, the same as a leave
-       request about them would go to.
-
-       A manager who answers for somebody's leave is the one who knows what
-       was agreed about their hours, and this went over their head to the
-       management, who then had to go and ask them anyway. A batch can cover
-       several people, so it is each of their own approvers rather than one
-       list for all of them.
-
-       Nobody is put here for their own mark: they are copied in further
-       down, where the people whose days these are go. */
-    const exRoute = await approvalRouteOf(orgId);
-    const theirOwn = {};
-    for (const n of Array.from(new Set(marks.map(m => m.empName)))) {
-      const a = String(await employeeAddress(orgId, n) || '').trim().toLowerCase();
-      if (a) theirOwn[a] = true;
-    }
-    Array.from(new Set(marks.map(m => m.empName)))
-      .forEach(n => approversOf(exRoute, n).forEach(a => {
-        if (!theirOwn[a] && to.indexOf(a) < 0) to.push(a);
-      }));
+    await alsoTheirApprovers(orgId, to, marks.map(m => m.empName));
     if (!to.length) return;
     const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'dayShifts', 'shiftAssignments',
@@ -3741,6 +3745,9 @@ async function notifyShiftChange(orgId, moves) {
     const to = settings.excused.final
       ? (await mailRecipients(orgId, settings, 'leave')).slice()
       : (settings.excused.to || []).slice();
+    /* The same reasoning as the excused mark: hours somebody set for
+       themselves are the business of whoever answers for their days. */
+    await alsoTheirApprovers(orgId, to, moves.map(m => m.empName));
     if (!to.length) return;
     const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'shiftAssignments']);

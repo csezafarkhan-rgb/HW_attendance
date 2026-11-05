@@ -86,13 +86,22 @@ check('the same band a leave request uses for the same thing',
 
 /* ---- it reaches the people who answer for them ---- */
 check('whoever is named against them is written to as well',
-  /const exRoute = await approvalRouteOf\(orgId\);/.test(SRV)
-  && /approversOf\(exRoute, n\)\.forEach\(a => \{/.test(SRV), null);
+  /async function alsoTheirApprovers\(orgId, to, names\) \{/.test(SRV)
+  && /who\.forEach\(n => approversOf\(route, n\)\.forEach\(a => \{/.test(SRV), null);
 check('each person’s own approvers, not one list for a whole batch',
-  /Array\.from\(new Set\(marks\.map\(m => m\.empName\)\)\)\s*\n\s*\.forEach\(n => approversOf/.test(SRV),
-  null);
-check('and nobody is written to about their own mark',
-  /if \(!theirOwn\[a\] && to\.indexOf\(a\) < 0\) to\.push\(a\);/.test(SRV), null);
+  /const who = Array\.from\(new Set\(\(names \|\| \[\]\)\.filter\(Boolean\)\)\);/.test(SRV), null);
+check('and nobody is written to about their own day',
+  /if \(!own\[a\] && to\.indexOf\(a\) < 0\) to\.push\(a\);/.test(SRV), null);
+/* An excused late mark and a shift somebody set for themselves are the same
+   kind of news about the same person, so they are addressed the same way -
+   out of one piece of code rather than two kept in step by hand. */
+check('the excused mark asks for them',
+  /await alsoTheirApprovers\(orgId, to, marks\.map\(m => m\.empName\)\);/.test(SRV), null);
+check('and so does a shift somebody set for themselves',
+  /await alsoTheirApprovers\(orgId, to, moves\.map\(m => m\.empName\)\);/.test(SRV), null);
+check('written once, asked for twice',
+  (SRV.match(/async function alsoTheirApprovers\(/g) || []).length === 1
+  && (SRV.match(/await alsoTheirApprovers\(/g) || []).length === 2, null);
 check('they are copied in instead, where the people whose days these are go',
   /cc\.push\.apply\(cc, await ownersOf\(orgId, marks\.map\(m => m\.empName\), to, cc\)\);/.test(SRV),
   null);
