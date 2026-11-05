@@ -2291,7 +2291,9 @@ const MAIL_DEFAULTS = {
      goes to and what it says. */
   month: { to: [], cc: [], subject: '', intro: '', footer: '' },
   /* A word before a holiday, so nobody turns up to a closed building. `days`
-     is how far ahead it goes out; `at` is the hour of that day, India time. */
+     is how many working days ahead it goes out - Monday to Friday, so a
+     weekend in between does not eat the notice; `at` is the hour of that day,
+     India time. */
   holiday: { on: true, days: 2, at: '10:00', to: [], cc: [], subject: '', intro: '', footer: '' },
   /* What everybody worked on, written by them and gathered into one message.
      It can ride out with the attendance record - the two are the same day's
@@ -3058,6 +3060,22 @@ async function holidaysFrom(orgId, fromDay, toDay) {
 }
 function daysApart(a, b) {
   return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+}
+/* The day that is `n` working days on from `day`, Monday to Friday.
+
+   The warning used to be counted in calendar days, which is not what anybody
+   means by it: three days before a Monday holiday is the Friday, one working
+   day of notice. Saturdays and Sundays are stepped over without being counted,
+   so `n` is always `n` days on which somebody is in to read the message. */
+function workingDaysAhead(day, n) {
+  const d = new Date(day + 'T00:00:00Z');
+  let left = Math.max(0, Math.round(Number(n) || 0));
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) left--;
+  }
+  return d.toISOString().slice(0, 10);
 }
 /* `days` ahead exactly, for the scheduled run; the next one coming, for a
    message sent by hand. */
@@ -4977,8 +4995,8 @@ async function dailyEmailTick() {
   for (const org of orgs.rows) {
     try {
       const s = await mailSettings(org.id);
-      /* Every holiday between today and `days` ahead gets its word, once,
-         whatever the daily message is doing.
+      /* Every holiday between today and `days` working days ahead gets its
+         word, once, whatever the daily message is doing.
 
          This used to ask for one date - exactly `days` off - and nothing else.
          That works only if the service is awake on that one day. It sleeps when
@@ -4990,8 +5008,7 @@ async function dailyEmailTick() {
          the next time the service wakes. A word the morning before is late, and
          still stops somebody turning up to a locked building. */
       if (s.holiday.on && min >= hhmmToMin(s.holiday.at)) {
-        const until = new Date(Date.now() + IST_MS + s.holiday.days * 86400000)
-          .toISOString().slice(0, 10);
+        const until = workingDaysAhead(day, s.holiday.days);
         for (const h of await holidaysFrom(org.id, day, until)) {
           const job = 'holiday-email:' + org.id + ':' + h.day;
           const claimed = await pool.query(
