@@ -232,16 +232,23 @@ function grab(src, name) {
                            SRV.indexOf('/* A day marked as leave on the grid'));
   /* Either the people who give the final word on leave, read from that list as
      it stands rather than copied, or addresses the office sets here. Not both,
-     and never a list nobody chose. */
+     and never a list nobody chose.
+
+     Worked out in selfMarkedAudience rather than here: the shift message and
+     the preview of both need the same answer, and three copies of it would be
+     three chances to disagree. */
+  const audience = grab(SRV, 'selfMarkedAudience');
   check('it can go to the people who give the final word on leave',
-    notify.indexOf('settings.excused.final') > -1
-    && notify.indexOf("mailRecipients(orgId, settings, 'leave')") > -1);
+    audience.indexOf('settings.excused.final') > -1
+    && audience.indexOf("mailRecipients(orgId, settings, 'leave')") > -1);
   check('or to addresses of its own where the office would rather',
-    notify.indexOf('(settings.excused.to || []).slice()') > -1);
+    audience.indexOf('(settings.excused.to || []).slice()') > -1);
   check('and with nobody on either, nothing is sent at all',
     notify.indexOf('if (!to.length) return;') > -1);
   check('nobody is copied twice',
-    notify.indexOf('.filter(a => to.indexOf(a) < 0)') > -1);
+    audience.indexOf('.filter(a => to.indexOf(a) < 0)') > -1);
+  check('and this message asks it rather than answering for itself',
+    /await selfMarkedAudience\(orgId, settings, marks\.map/.test(notify), null);
   check('how late they were is read off the record, not taken from the page',
     notify.indexOf('FROM records WHERE org_id = $1 AND day = ANY($2)') > -1);
   check('and the message is kept like every other',

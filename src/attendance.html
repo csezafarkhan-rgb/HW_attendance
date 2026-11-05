@@ -12883,6 +12883,9 @@ function buildExcelBackup(){
             +     '<span style="display:block;font-size:11px;color:var(--ink-soft);">'
             +     (lv.length ? (mailEscape(lv.join(', ')) + ' — kept in step with that list')
                              : 'nobody named on the Leave tab yet — nothing would be sent')
+            +     '<span style="display:block;">and whoever is named against'
+            +       ' that person in the approver table, the same as a leave request'
+            +       ' about them</span>'
             +     '</span></span></label>'
             + '<label class="em-row"><input type="radio" name="emExcWho" id="emExcOwn"'
             +   (fin ? '' : ' checked') + '><span>These addresses instead</span></label>'
@@ -13231,7 +13234,11 @@ function buildExcelBackup(){
        names shuts behind it rather than being left open on a card nobody can
        see it from. */
     function previewLabel(tab){
-      return (tab === 'lv' || tab === 'lt')
+      /* Three settings on the self-marked card, so three messages to read -
+         said on the button, because a window that opens on one of three with
+         no hint of the other two is a window somebody closes too early. */
+      if(tab === 'lt') return '\ud83d\udc41 Preview all three for an employee';
+      return (tab === 'lv')
         ? '\ud83d\udc41 Preview for an employee' : '\ud83d\udc41 Preview';
     }
     function showLeaveTools(which){

@@ -576,14 +576,8 @@ function requestCard(req, links, heading) {
                           + esc(dayCount(req)) + '</span>') : '')
     + '</div>'
     /* What the person actually typed, which is the whole of what the decision
-       turns on. It was a second grey line inside the grey line that carries
-       the kind and the dates, reading as more of the same bookkeeping - so it
-       gets a block of its own, in ink rather than grey, on a tint. */
-    + (req.message
-        ? ('<div style="margin:0 0 9px;padding:8px 11px;border-radius:7px;background:#FFF7DF;'
-           + 'border-left:3px solid #E8B931;color:' + INK + ';font-size:13px;line-height:1.5;">'
-           + '&ldquo;' + esc(String(req.message).slice(0, 300)) + '&rdquo;</div>')
-        : '')
+       turns on. */
+    + saidBand(req.message, { max: 300, margin: '0 0 9px' })
     + recommended
     /* The year behind the request, where the message carries one. A digest of
        several people does not: it would be one of these a person. */
@@ -1059,6 +1053,29 @@ function leaveEmail(o) {
    excused on the record - this is for reading, not for deciding - so the
    message carries no buttons at all, and says plainly that nothing is being
    asked of whoever gets it. */
+/* The words a person typed, as opposed to everything around them that the
+   system worked out.
+
+   Every message here is mostly bookkeeping - a name, a date, a kind, a span
+   of hours - and somewhere in the middle of it sits the one line somebody
+   actually wrote: why they were late, why they took the afternoon, what they
+   want the office to know. Set as another grey line among grey lines it reads
+   as more of the same, and it is the only part worth stopping on.
+
+   So it gets a block of its own, in ink rather than grey, on a tint. Written
+   once here because it had been written out longhand in each message and was
+   already drifting - some of them quoted it, some did not, and only two of
+   the six had the tint at all. */
+function saidBand(text, opts) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t) return '';
+  const o = opts || {};
+  const cut = o.max ? t.slice(0, o.max) : t;
+  const body = (o.quoted === false) ? esc(cut) : ('&ldquo;' + esc(cut) + '&rdquo;');
+  return '<div style="margin:' + (o.margin || '8px 0 0') + ';padding:8px 11px;'
+    + 'border-radius:7px;background:#FFF7DF;border-left:3px solid #E8B931;color:' + INK + ';'
+    + 'font-size:13px;line-height:1.5;">' + body + '</div>';
+}
 /* The people a message of this kind is about, for the office's own wording to
    name. One of them is their name; several is all of them, because a message
    saying 'Aman Chandra has marked their own late arrival' while carrying four
@@ -1106,15 +1123,9 @@ function excusedEmail(o) {
       + esc(late) + (it.came ? (' · in ' + esc(clock(it.came))) : '')
       + (it.shift ? (' · shift ' + esc(it.shift)) : '')
       + (it.changed ? ' · changed from what they said before' : '') + '</div>'
-      /* What they wrote is the whole of why this message exists - the rest
-         is the record restating itself. Drawn the way a leave request draws
-         the reason somebody gave, because it is the same thing: the one part
-         a person wrote rather than the system. */
-      + (it.note
-          ? ('<div style="margin:8px 0 0;padding:8px 11px;border-radius:7px;'
-             + 'background:#FFF7DF;border-left:3px solid #E8B931;color:' + INK + ';'
-             + 'font-size:13px;line-height:1.5;">“' + esc(it.note) + '”</div>')
-          : '')
+      /* What they wrote is the whole of why this message exists - the rest is
+         the record restating itself. */
+      + saidBand(it.note)
       + '</div>');
   });
   if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
@@ -1150,7 +1161,8 @@ function decisionEmail(o) {
     +   (yes ? 'Approved' : 'Not approved') + (r.approvedBy ? (' by ' + esc(r.approvedBy)) : '') + '</div>'
     + '<div style="font-weight:700;">' + esc(kindName(r.leaveType)) + (r.half ? (' \u00b7 ' + esc(r.half)) : '') + '</div>'
     + '<div style="color:' + SOFT + ';font-size:13px;margin-top:2px;">' + esc(dateRange(r.dateFrom, r.dateTo)) + '</div>'
-    + (r.message ? ('<div style="font-size:12.5px;margin-top:6px;">\u201c' + esc(String(r.message).slice(0, 300)) + '\u201d</div>') : '')
+    /* Their own words, on the message that answers them. */
+    + saidBand(r.message, { max: 300, margin: '6px 0 0' })
     + (r.adminNote ? ('<div style="font-size:12.5px;margin-top:6px;color:' + SOFT + ';">' + esc(r.adminNote) + '</div>') : '')
     + '</div>');
   const footer = fillText(o.footer || words.footer, say);
@@ -1240,7 +1252,10 @@ function holidayEmail(o) {
       + '<div style="font-size:13px;color:' + SOFT + ';margin-top:3px;">' + esc(h.when)
       +   (h.away != null ? (' \u00b7 ' + (h.away === 0 ? 'today' : h.away === 1 ? 'tomorrow'
                              : ('in ' + h.away + ' days'))) : '') + '</div>'
-      + (h.note ? ('<div style="font-size:12.5px;margin-top:6px;">' + esc(h.note) + '</div>') : '')
+      /* Whatever the office added about this one - which half the day is off,
+         who is still in. Not quoted: it is a note about the day rather than
+         somebody speaking. */
+      + saidBand(h.note, { quoted: false, margin: '6px 0 0' })
       + '</div>');
   });
   const footer = fillText(o.footer || words.footer, say);
@@ -1413,7 +1428,7 @@ function shiftEmail(o) {
       + (it.to ? ('<b>' + esc(it.to) + '</b>') : '<b>back to their usual hours</b>')
       + '<span style="color:' + SOFT + ';"> \u2014 '
       + (it.from ? ('was ' + esc(it.from)) : 'the day had no hours of its own before') + '</span></div>'
-      + (it.note ? ('<div style="font-size:13px;margin-top:6px;">\u201c' + esc(it.note) + '\u201d</div>') : '')
+      + saidBand(it.note)
       + '</div>');
   });
   if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
@@ -1479,7 +1494,7 @@ function partDayEmail(o) {
              + '<span style="color:' + SOFT + ';"> \u2014 ' + esc(it.qty || '') + ' taken'
              + (it.leave ? (' from their ' + esc(it.leave === 'Sick' ? 'sick leave' : 'casual leave')) : '')
              + '</span></div>'))
-      + (it.note ? ('<div style="font-size:13px;margin-top:6px;">\u201c' + esc(it.note) + '\u201d</div>') : '')
+      + saidBand(it.note)
       /* What they had taken for the same day before they changed their mind,
          so a second message about one day does not read as two days taken. */
       + (it.was ? ('<div style="font-size:12px;color:' + SOFT + ';margin-top:4px;">Changed from the '

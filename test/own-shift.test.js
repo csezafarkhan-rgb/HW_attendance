@@ -131,9 +131,13 @@ const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10
      the same person about their own day. */
   const notify = SRV.slice(SRV.indexOf('async function notifyShiftChange'),
                            SRV.indexOf('async function notifyShiftChange') + 2000);
+  /* Out of the same function the excused mark asks, so the two cannot drift
+     apart - which is the whole of what "same addresses" means. */
+  const shiftAudience = grab(SRV, 'selfMarkedAudience');
   check('it goes to the people the late setting names',
-    notify.indexOf('settings.excused.final') > -1
-    && notify.indexOf('(settings.excused.to || []).slice()') > -1);
+    shiftAudience.indexOf('settings.excused.final') > -1
+    && shiftAudience.indexOf('(settings.excused.to || []).slice()') > -1
+    && /await selfMarkedAudience\(orgId, settings, moves\.map/.test(notify));
   check('with nobody named, nothing is sent',
     notify.indexOf('if (!to.length) return;') > -1);
   check('and it is worded from the shift half of that setting',

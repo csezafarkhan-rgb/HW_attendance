@@ -3657,7 +3657,7 @@ function newlySelfExcused(beforeText, afterText) {
 
    Nobody is added for news about their own day: they are copied in by the
    caller, where the people whose days these are go. */
-async function alsoTheirApprovers(orgId, to, names) {
+async function alsoTheirApprovers(orgId, into, names, already) {
   const route = await approvalRouteOf(orgId);
   const who = Array.from(new Set((names || []).filter(Boolean)));
   const own = {};
@@ -3665,10 +3665,55 @@ async function alsoTheirApprovers(orgId, to, names) {
     const a = String(await employeeAddress(orgId, n) || '').trim().toLowerCase();
     if (a) own[a] = true;
   }
+  const taken = {};
+  (already || []).forEach(a => { taken[String(a || '').trim().toLowerCase()] = true; });
   who.forEach(n => approversOf(route, n).forEach(a => {
-    if (!own[a] && to.indexOf(a) < 0) to.push(a);
+    if (!own[a] && !taken[a] && into.indexOf(a) < 0) into.push(a);
   }));
-  return to;
+  return into;
+}
+/* Who hears about something somebody put on their own day.
+
+   Three messages come out of that one tab - a late arrival answered for, the
+   hours they set for today, a part of the day taken - and they are addressed
+   alike because they are the same kind of news. Worked out here rather than
+   three times over, so the preview and the thing it previews cannot disagree
+   and the office is never shown a list the real message does not use. */
+async function selfMarkedAudience(orgId, settings, names) {
+  const to = settings.excused.final
+    ? (await mailRecipients(orgId, settings, 'leave')).slice()
+    : (settings.excused.to || []).slice();
+  const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
+  /* On the Cc, not the TO.
+
+     Whoever the office typed into the box is who the message is addressed to
+     and nobody else - that bargain is the same on every tab in this panel,
+     and adding people to it would send somebody's late arrival to a manager
+     the office had deliberately left out.
+
+     Nothing is lost by copying them instead: there are no buttons on any of
+     these, so the TO line carries no authority here the way it does on a
+     leave request. They are being told either way. */
+  await alsoTheirApprovers(orgId, cc, names, to);
+  return { to, cc };
+}
+/* And the third of them, which has addresses of its own: a part of a day
+   taken is leave, and who should hear that is not the same question as who
+   should hear somebody came in late. Named nobody, it falls back to the
+   people who decide leave with the approvers copied in. */
+async function partTakenAudience(orgId, settings, names) {
+  const words = settings.excused.part || {};
+  const named = (words.to || []).length > 0;
+  const to = named ? (words.to || []).slice()
+                   : (await mailRecipients(orgId, settings, 'leave')).slice();
+  const cc = [];
+  const push = a => { if (a && to.indexOf(a) < 0 && cc.indexOf(a) < 0) cc.push(a); };
+  (words.cc || []).forEach(push);
+  if (!named) (await leaveApprovers(orgId, settings)).forEach(push);
+  /* And the people named against them, copied in for the same reason as the
+     other two: the addresses the office typed are the ones it addressed. */
+  await alsoTheirApprovers(orgId, cc, names, to);
+  return { to, cc, push };
 }
 /* The message about it. For reading, not for deciding: the day is already
    excused on the record, there are no buttons on it, and it goes to whoever
@@ -3682,12 +3727,8 @@ async function notifySelfExcused(orgId, marks) {
        stands. The office asked for this to reach the management who decide
        leave, and keeping a second copy of their addresses here would mean two
        lists to keep in step and one of them quietly wrong. */
-    const to = settings.excused.final
-      ? (await mailRecipients(orgId, settings, 'leave')).slice()
-      : (settings.excused.to || []).slice();
-    await alsoTheirApprovers(orgId, to, marks.map(m => m.empName));
+    const { to, cc } = await selfMarkedAudience(orgId, settings, marks.map(m => m.empName));
     if (!to.length) return;
-    const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'dayShifts', 'shiftAssignments',
                                         'lateThresholdMin']);
     const shownNames = parseJson(kv.empNames) || {};
@@ -3742,14 +3783,8 @@ async function notifyShiftChange(orgId, moves) {
   try {
     if (!mailer.ready() || !moves || !moves.length) return;
     const settings = await mailSettings(orgId);
-    const to = settings.excused.final
-      ? (await mailRecipients(orgId, settings, 'leave')).slice()
-      : (settings.excused.to || []).slice();
-    /* The same reasoning as the excused mark: hours somebody set for
-       themselves are the business of whoever answers for their days. */
-    await alsoTheirApprovers(orgId, to, moves.map(m => m.empName));
+    const { to, cc } = await selfMarkedAudience(orgId, settings, moves.map(m => m.empName));
     if (!to.length) return;
-    const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'shiftAssignments']);
     const shownNames = parseJson(kv.empNames) || {};
     const assigned = parseJson(kv.shiftAssignments) || {};
@@ -3814,14 +3849,10 @@ async function notifyPartDayTaken(orgId, items) {
        people who decide leave, with whoever holds the first word on it copied
        in, so the message goes somewhere sensible before anybody has typed
        anything at all. */
-    const named = (words.to || []).length > 0;
-    const to = named ? (words.to || []).slice()
-                     : (await mailRecipients(orgId, settings, 'leave')).slice();
+    /* The approvers are on this one too, the same as the other two: a day
+       taken without asking is exactly what they would have been asked. */
+    const { to, cc } = await partTakenAudience(orgId, settings, items.map(m => m.empName));
     if (!to.length) return;
-    const cc = [];
-    const push = a => { if (a && to.indexOf(a) < 0 && cc.indexOf(a) < 0) cc.push(a); };
-    (words.cc || []).forEach(push);
-    if (!named) (await leaveApprovers(orgId, settings)).forEach(push);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames']);
     const shownNames = parseJson(kv.empNames) || {};
     /* Said in days rather than in the fraction the record keeps: a reader of
@@ -4336,40 +4367,72 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
   const kv = await sharedKeys(orgId, ['companyInfo']);
   const day = new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
 
-  /* The other message somebody's own day can produce: a part of it taken on
-     their own card. It goes to different people and says a different thing,
-     so it is read the same way - by asking for it rather than by waiting for
-     somebody to take an afternoon off. */
+  /* The other three messages somebody's own day can produce, all off the one
+     tab: a late arrival answered for, the hours they set for today, and a
+     part of the day taken.
+
+     Three settings on that card, so three messages to read. It showed only
+     the third, which is the one with addresses of its own - so the two that
+     follow the Leave tab could not be looked at before somebody was late.
+
+     Each is built the way the thing that really sends it builds it, audience
+     and all, out of the same two functions those senders use. A preview that
+     works out its own answer is a preview of nothing. */
   if (String((req.body && req.body.kind) || '') === 'part') {
-    const words = settings.excused.part || {};
-    const named = (words.to || []).length > 0;
-    const to = named ? (words.to || []).slice() : mgmt.slice();
-    const cc = [];
-    const push = a => { if (a && to.indexOf(a) < 0 && cc.indexOf(a) < 0) cc.push(a); };
-    (words.cc || []).forEach(push);
-    if (!named) (await leaveApprovers(orgId, settings)).forEach(push);
+    const sampleNote = 'Sample only \u2014 nothing has actually been marked.';
+    const selfAud = await selfMarkedAudience(orgId, settings, [name]);
     const own = String(await employeeAddress(orgId, name) || '').trim().toLowerCase();
-    if (own) push(own);
-    const pmail = mailer.partDayEmail({
+    /* The person whose day it is, copied in as the senders copy them in. */
+    const withOwn = aud => {
+      const cc = (aud.cc || []).slice();
+      if (own && aud.to.indexOf(own) < 0 && cc.indexOf(own) < 0) cc.push(own);
+      return { to: aud.to, cc };
+    };
+    const words = settings.excused || {};
+    const built = [];
+    const add = (aud, mail) => {
+      if (!mail) return;
+      const a = withOwn(aud);
+      built.push({ subject: mail.subject, to: a.to, cc: a.cc, html: mail.html });
+    };
+    add(selfAud, mailer.excusedEmail({
       orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
       subject: words.subject, intro: words.intro, footer: words.footer,
+      items: [{ name: name, day: day, late: 48, came: '10:18', shift: '9:30-6:30',
+                note: sampleNote }]
+    }));
+    const sh = words.shift || {};
+    add(selfAud, mailer.shiftEmail({
+      orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
+      subject: sh.subject, intro: sh.intro, footer: sh.footer,
+      items: [{ name: name, day: day, from: '9:30-6:30', to: '11:00-8:00',
+                note: sampleNote }]
+    }));
+    const pt = words.part || {};
+    add(await partTakenAudience(orgId, settings, [name]), mailer.partDayEmail({
+      orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
+      subject: pt.subject, intro: pt.intro, footer: pt.footer,
       items: [{ name: name, day: day, kindName: 'Half day',
-                qty: 'half a day', half: 'PM', leave: 'CL',
-                note: 'Sample only - nobody has taken this afternoon.' }]
-    });
-    if (!pmail) return res.status(400).json({ error: 'nothing to build' });
+                qty: 'half a day', half: 'PM', leave: 'CL', note: sampleNote }]
+    }));
+    if (!built.length) return res.status(400).json({ error: 'nothing to build' });
     if ((req.body && req.body.send) === 'test') {
       let box = String((req.user && req.user.email) || '').trim();
-      if (!EMAIL_RE.test(box)) box = to[0] || '';
+      if (!EMAIL_RE.test(box)) box = (built[0].to || [])[0] || '';
       if (!box) return res.status(400).json({ error: 'Your account has no email address on it.' });
-      const m2 = { to: [box], cc: [], subject: '[Sample] ' + pmail.subject, html: pmail.html };
-      const r2 = await mailer.send(m2);
-      await logMail(orgId, 'partday', m2, r2);
-      if (!r2.ok) return res.status(502).json(r2);
-      return res.json({ ok: true, sentTo: box });
+      let bad = null;
+      for (const b of built) {
+        const m2 = { to: [box], cc: [], subject: '[Sample] ' + b.subject, html: b.html };
+        const r2 = await mailer.send(m2);
+        await logMail(orgId, 'partday', m2, r2);
+        if (!r2.ok && !bad) bad = r2;
+      }
+      if (bad) return res.status(502).json(bad);
+      return res.json({ ok: true, sentTo: box, count: built.length });
     }
-    return res.json({ ok: true, sample: true, to: to, cc: cc,
-                      preview: { subject: pmail.subject, html: pmail.html } });
+    return res.json({ ok: true, sample: true, mails: built,
+                      to: built[0].to, cc: built[0].cc,
+                      preview: { subject: built[0].subject, html: built[0].html } });
   }
   /* Said plainly on the request itself, so a copy of this landing in somebody's
      inbox cannot be mistaken for a day actually being asked for. */

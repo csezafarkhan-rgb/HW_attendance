@@ -285,10 +285,16 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
     check('four of the tabs borrow their own send button',
       /var BY_TAB = \{ att:'emSendDay', hol:'emSendHol', wk:'emSendWork', mo:'emSendMonth' \};/
         .test(APP), null);
-    /* The other two are about one person at a time, so they ask which. */
+    /* The other two are about one person at a time, so they ask which - and
+       the self-marked one says how many messages that person's card makes,
+       because a window opening on one of three with no sign of the other two
+       is a window somebody closes too early. */
     check('and the two about one person ask which person',
-      /tab === 'lv' \|\| tab === 'lt'/.test(grab(APP, 'previewLabel'))
+      /tab === 'lv'/.test(grab(APP, 'previewLabel'))
       && /Preview for an employee/.test(grab(APP, 'previewLabel')), null);
+    check('the self-marked one says there are three',
+      /tab === 'lt'/.test(grab(APP, 'previewLabel'))
+      && /Preview all three for an employee/.test(grab(APP, 'previewLabel')), null);
     check('the self-marked tab asks for its own kind of message',
       /\(on && on\.getAttribute\('data-em-tab'\) === 'lt'\) \? 'part' : 'leave'/.test(APP), null);
     check('the names shut when the tab changes',

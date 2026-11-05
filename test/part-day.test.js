@@ -340,7 +340,7 @@ function grab(src, name) {
        see. */
     const notify = grab(SRV, 'notifyPartDayTaken');
     check('it is addressed to whoever decides leave',
-      /mailRecipients\(orgId, settings, 'leave'\)/.test(notify), null);
+      /mailRecipients\(orgId, settings, 'leave'\)/.test(grab(SRV, 'partTakenAudience')), null);
     check('the person whose day it is is copied in',
       /ownersOf\(orgId, items\.map/.test(notify), null);
     check('and it is sent after the write, never waited for',
@@ -565,18 +565,26 @@ function grab(src, name) {
 
       const notify = grab(SRV, 'notifyPartDayTaken');
       /* Whoever is named on the tab is who it goes to - the same bargain
-         every other tab in this panel strikes. */
+         every other tab in this panel strikes. Worked out in its own function,
+         because the preview of this message has to reach the same answer. */
+      const partAud = grab(SRV, 'partTakenAudience');
       check('typed addresses are who it goes to',
-        /const named = \(words\.to \|\| \[\]\)\.length > 0;/.test(notify)
-        && /to = named \? \(words\.to \|\| \[\]\)\.slice\(\)/.test(notify), null);
+        /const named = \(words\.to \|\| \[\]\)\.length > 0;/.test(partAud)
+        && /to = named \? \(words\.to \|\| \[\]\)\.slice\(\)/.test(partAud), null);
       check('and nobody else - the approvers are not added on top of them',
-        /if \(!named\) \(await leaveApprovers\(orgId, settings\)\)\.forEach\(push\);/.test(notify), null);
+        /if \(!named\) \(await leaveApprovers\(orgId, settings\)\)\.forEach\(push\);/.test(partAud)
+        && !/alsoTheirApprovers\(orgId, to,/.test(partAud), null);
+      /* They are copied in instead. A message with no buttons on it gives its
+         TO line no authority, so being told is being told either way - and the
+         addresses the office typed stay the addresses it typed. */
+      check('they are copied in rather than added to the addresses typed',
+        /await alsoTheirApprovers\(orgId, cc, names, to\);/.test(partAud), null);
       check('named nobody, it still reaches whoever decides leave',
-        /: \(await mailRecipients\(orgId, settings, 'leave'\)\)\.slice\(\)/.test(notify), null);
+        /: \(await mailRecipients\(orgId, settings, 'leave'\)\)\.slice\(\)/.test(partAud), null);
       /* Whatever the office types, the person whose leave it is still sees
          the message about it. */
       check('and the person who took the day is copied in either way',
-        notify.indexOf('ownersOf(orgId, items.map') > notify.indexOf('if (!named)'), null);
+        notify.indexOf('ownersOf(orgId, items.map') > notify.indexOf('partTakenAudience'), null);
 
       check('there is wording it comes with, so the boxes are not blank',
         !!mailer.DEFAULT_TEXT.partDay && /\{kind\}/.test(mailer.DEFAULT_TEXT.partDay.subject),
