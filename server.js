@@ -2413,6 +2413,33 @@ async function mailSettings(orgId) {
     })()
   };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
+
+  /* One sign-off, on every message.
+
+     Every tab has a footer box of its own, and each was filled in with the
+     words this came with - so an office that changed its sign-off changed it
+     on one tab and went on signing everything else 'Best regards, <the
+     org>'. The name of the company is not a sign-off; it is what the
+     letterhead already says. And nobody wants to type the same three lines
+     into seven boxes to be rid of it.
+
+     So a tab that has not been given a sign-off of its own uses the one on
+     the Leave tab. A tab where the office HAS written something different
+     keeps it: this fills a blank and replaces the words it shipped with, and
+     never anything somebody actually wrote. */
+  const SHIPPED_FOOT = 'Best regards,\n{org}';
+  const signOff = String(s.leave.footer || '').trim() || SHIPPED_FOOT;
+  const theirs = f => {
+    const t = String(f || '').trim();
+    return (!t || t === SHIPPED_FOOT) ? signOff : f;
+  };
+  s.footer = theirs(s.footer);
+  s.holiday.footer = theirs(s.holiday.footer);
+  s.month.footer = theirs(s.month.footer);
+  s.tasks.footer = theirs(s.tasks.footer);
+  s.excused.footer = theirs(s.excused.footer);
+  s.excused.shift.footer = theirs(s.excused.shift.footer);
+  s.excused.part.footer = theirs(s.excused.part.footer);
   return s;
 }
 /* What else sees it. A tab's own Cc box, and nothing else once that tab names
@@ -3634,6 +3661,27 @@ async function notifySelfExcused(orgId, marks) {
     const to = settings.excused.final
       ? (await mailRecipients(orgId, settings, 'leave')).slice()
       : (settings.excused.to || []).slice();
+    /* And whoever the office named against these people, the same as a leave
+       request about them would go to.
+
+       A manager who answers for somebody's leave is the one who knows what
+       was agreed about their hours, and this went over their head to the
+       management, who then had to go and ask them anyway. A batch can cover
+       several people, so it is each of their own approvers rather than one
+       list for all of them.
+
+       Nobody is put here for their own mark: they are copied in further
+       down, where the people whose days these are go. */
+    const exRoute = await approvalRouteOf(orgId);
+    const theirOwn = {};
+    for (const n of Array.from(new Set(marks.map(m => m.empName)))) {
+      const a = String(await employeeAddress(orgId, n) || '').trim().toLowerCase();
+      if (a) theirOwn[a] = true;
+    }
+    Array.from(new Set(marks.map(m => m.empName)))
+      .forEach(n => approversOf(exRoute, n).forEach(a => {
+        if (!theirOwn[a] && to.indexOf(a) < 0) to.push(a);
+      }));
     if (!to.length) return;
     const cc = (settings.excused.cc || []).filter(a => to.indexOf(a) < 0);
     const kv = await sharedKeys(orgId, ['companyInfo', 'empNames', 'dayShifts', 'shiftAssignments',

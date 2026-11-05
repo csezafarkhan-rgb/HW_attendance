@@ -307,7 +307,7 @@ const DEFAULT_TEXT = {
   },
   excused: {
     subject: 'Late excused \u00b7 {who} \u00b7 {date}',
-    intro: 'Hello,\n\nSomebody has marked their own late arrival as excused and said why. '
+    intro: 'Hello,\n\n{who} has marked their own late arrival as excused and said why. '
       + 'Nothing is being asked of you \u2014 it is already on the record, and can be '
       + 'changed on the day itself if it is wrong.',
     footer: 'Best regards,\n{org}'
@@ -1059,6 +1059,21 @@ function leaveEmail(o) {
    excused on the record - this is for reading, not for deciding - so the
    message carries no buttons at all, and says plainly that nothing is being
    asked of whoever gets it. */
+/* The people a message of this kind is about, for the office's own wording to
+   name. One of them is their name; several is all of them, because a message
+   saying 'Aman Chandra has marked their own late arrival' while carrying four
+   of them names the wrong three.
+
+   Capped at three, because this goes in subject lines as well as openings and
+   a subject that lists nine people is a subject nobody can read in a list of
+   mail. Past that it counts the rest. */
+function namesIn(items) {
+  const out = (items || []).map(it => String((it && it.name) || '').trim()).filter(Boolean);
+  if (!out.length) return '';
+  if (out.length === 1) return out[0];
+  if (out.length > 3) return out.slice(0, 3).join(', ') + ' and ' + (out.length - 3) + ' more';
+  return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
+}
 function excusedEmail(o) {
   const items = (o.items || []).filter(Boolean);
   if (!items.length) return null;
@@ -1067,7 +1082,12 @@ function excusedEmail(o) {
   /* The office's own words where it has written any, and the ones this message
      comes with where it has not - the same bargain every other message here
      strikes. {n} is how many are being reported. */
-  const say = { n: String(items.length), org: o.orgName || 'Attendance' };
+  /* {who} and {date} reach the wording here as they already did on the other
+     two messages of this kind - this one offered them to the subject line and
+     nowhere else, so an office writing its own opening had no way to say who
+     it was about and wrote 'Somebody'. */
+  const say = { n: String(items.length), org: o.orgName || 'Attendance',
+                who: namesIn(items), date: fmtDay(items[0].day) };
   const written = fillText(o.intro, say).trim();
   body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
     + (written
@@ -1086,15 +1106,22 @@ function excusedEmail(o) {
       + esc(late) + (it.came ? (' · in ' + esc(clock(it.came))) : '')
       + (it.shift ? (' · shift ' + esc(it.shift)) : '')
       + (it.changed ? ' · changed from what they said before' : '') + '</div>'
-      + '<div style="font-size:13px;margin-top:6px;">“' + esc(it.note) + '”</div>'
+      /* What they wrote is the whole of why this message exists - the rest
+         is the record restating itself. Drawn the way a leave request draws
+         the reason somebody gave, because it is the same thing: the one part
+         a person wrote rather than the system. */
+      + (it.note
+          ? ('<div style="margin:8px 0 0;padding:8px 11px;border-radius:7px;'
+             + 'background:#FFF7DF;border-left:3px solid #E8B931;color:' + INK + ';'
+             + 'font-size:13px;line-height:1.5;">“' + esc(it.note) + '”</div>')
+          : '')
       + '</div>');
   });
   if (o.siteUrl) body.push('<div style="margin-top:14px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const foot = fillText(o.footer, say).trim();
   if (foot) body.push('<div style="margin-top:14px;font-size:12.5px;color:' + SOFT
     + ';line-height:1.6;">' + esc(foot).replace(/\n/g, '<br>') + '</div>');
-  const subject = fillText(o.subject, Object.assign({
-    who: items[0].name, date: fmtDay(items[0].day) }, say)).trim();
+  const subject = fillText(o.subject, say).trim();
   return {
     subject: subject || (one
       ? ('Late excused · ' + items[0].name + ' · ' + fmtDay(items[0].day))
@@ -1367,7 +1394,7 @@ function shiftEmail(o) {
   if (!items.length) return null;
   const one = items.length === 1;
   const say = { n: String(items.length), org: o.orgName || 'Attendance',
-                who: items[0].name, date: fmtDay(items[0].day) };
+                who: namesIn(items), date: fmtDay(items[0].day) };
   const body = [];
   const written = fillText(o.intro, say).trim();
   body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
@@ -1422,7 +1449,7 @@ function partDayEmail(o) {
      and the heading should not say the opposite of the message under it. */
   const allBack = items.every(function (it) { return it.removed; });
   const say = { n: String(items.length), org: o.orgName || 'Attendance',
-                who: items[0].name, date: fmtDay(items[0].day),
+                who: namesIn(items), date: fmtDay(items[0].day),
                 kind: items[0].kindName || 'Part day' };
   const body = [];
   const written = fillText(o.intro, say).trim();
