@@ -222,8 +222,19 @@ check('rather than picking between them itself',
 check('the window is read when the page loads, not when a form opens',
   /loadRequestWindow, loadDeskTime/.test(APP), null);
 check('so the list and the server agree about how far back it goes',
-  /return earliestRequestDay\(\);/.test(grab(APP, 'ewFloor'))
+  /back = earliestRequestDay\(\);/.test(grab(APP, 'ewFloor'))
   && /backDaysOf\(settings\.leave\.backDays\)/.test(owed), null);
+/* And neither of them opens on last month. A reminder that leads with 26 Oct
+   asks somebody to reopen a month already counted and paid, while the message
+   itself promises this is quicker than being asked at the end of the month.
+   The window says what may still be filed; the month says what is worth
+   chasing, and they are not the same question. */
+check('the message starts no earlier than the first of this month',
+  /const since = monthFloor\(/.test(owed), null);
+check('and the page takes the same floor',
+  /return back > first \? back : first;/.test(grab(APP, 'ewFloor')), null);
+check('the later of the two wins, so a short window is still obeyed',
+  /return since > first \? since : first;/.test(grab(SRV, 'monthFloor')), null);
 
 /* ---- the day a cell opens ----
    A cell saying "14 min late · said why" opened onto a panel that showed

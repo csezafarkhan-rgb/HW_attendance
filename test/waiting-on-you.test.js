@@ -116,7 +116,7 @@ check('nothing older than the request form can reach for',
   /if\(u\.empName !== name \|\| u\.dateFrom < floor\) return;/.test(gather)
   && /if\(d < floor \|\| d > todayISO_full\) return;/.test(gather), null);
 check('and the floor is the form’s own, not a second number',
-  /return earliestRequestDay\(\);/.test(grab(APP, 'ewFloor')), null);
+  /back = earliestRequestDay\(\);/.test(grab(APP, 'ewFloor')), null);
 check('a day they were signed off for is not lateness',
   /if\(onApprovedLeave\(name, d\)\) return;/.test(gather), null);
 check('nor a lateness already answered, by them or by the office',
@@ -125,6 +125,145 @@ check('an archived request is nobody’s job',
   /if\(r\.archived\) return;/.test(gather), null);
 check('the oldest is put first, because that is the one being forgotten',
   /return y\.age - x\.age;/.test(gather), null);
+
+/* ---- this month, and no further back ----
+   A reminder that opens on 26 Oct asks somebody to reopen a month already
+   counted and paid, and the message's own promise - quicker now than at the
+   end of the month - is about this month. The form may still reach back
+   thirty days; what is worth chasing is a different question. */
+{
+  const floor = grab(APP, 'ewFloor');
+  check('the list never opens on last month',
+    /var first = String\(todayISO_full\)\.slice\(0, 8\) \+ '01';/.test(floor)
+    && /return back > first \? back : first;/.test(floor), null);
+  check('and the form’s own window still applies when it is the shorter one',
+    /back = earliestRequestDay\(\);/.test(floor), null);
+  const mf = grab(SRV, 'monthFloor');
+  const mctx = vm.createContext({ String });
+  vm.runInContext(mf, mctx);
+  check('the message takes the same floor the page does',
+    mctx.monthFloor('2026-10-07', '2026-11-06') === '2026-11-01',
+    mctx.monthFloor('2026-10-07', '2026-11-06'));
+  check('and a shorter back window still wins over the month',
+    mctx.monthFloor('2026-11-04', '2026-11-06') === '2026-11-04',
+    mctx.monthFloor('2026-11-04', '2026-11-06'));
+  check('mid-month, the first of the month is where it starts',
+    mctx.monthFloor('2026-11-01', '2026-11-20') === '2026-11-01', null);
+  check('the reminder asks for it from that floor',
+    /const since = monthFloor\(new Date\(now\.getTime\(\) - back \* 86400000\)/
+      .test(SRV), null);
+}
+
+/* ---- the morning happening now ----
+   Every other thing on this list is about a day gone by. This one is about
+   a morning still running: somebody at their desk at a quarter past twelve
+   with nothing on the record, which the page could see and said nothing
+   about. It is also the only item that gets worse while the page is open. */
+{
+  const base = {
+    console, Date, Math, isNaN, String, Number, Object, Array,
+    todayISO_full: '2026-11-06',
+    lateThresholdMin: 10,
+    toMin: s => { const m = /^(\d+):(\d+)$/.exec(String(s)); return m ? (+m[1] * 60 + +m[2]) : null; },
+  };
+  const run = (over) => {
+    const c = vm.createContext(Object.assign({}, base, over));
+    vm.runInContext(grab(APP, 'ewClockItem'), c);
+    return c.ewClockItem('Munish Dhamija');
+  };
+  const ok = {
+    empWorkingDay: () => '2026-11-06',
+    marksOwn: () => true,
+    onApprovedLeave: () => false,
+    weeklyOffDay: () => null,
+    getRecord: () => null,
+    getShift: () => '10:00-19:00',
+    nowHHMM: () => '12:18',
+  };
+  const got = run(ok);
+  check('a morning past the start with nothing on the record is raised',
+    !!got && got.job === 'clockin', got);
+  check('and it says how far past the start it is',
+    !!got && got.mins === 138, got && got.mins);
+  check('on today, not on some other day',
+    !!got && got.day === '2026-11-06', got && got.day);
+
+  check('nothing before the start time',
+    run(Object.assign({}, ok, { nowHHMM: () => '09:40' })) === null, null);
+  /* The same threshold the record counts lateness by. Two numbers for one
+     question is how a page ends up disagreeing with itself in front of
+     somebody. */
+  check('nor inside the grace the record itself allows',
+    run(Object.assign({}, ok, { nowHHMM: () => '10:09' })) === null, null);
+  check('but just outside it, yes',
+    (run(Object.assign({}, ok, { nowHHMM: () => '10:11' })) || {}).mins === 11, null);
+  check('not once they have clocked in',
+    run(Object.assign({}, ok, { getRecord: () => ({ 'in': '10:04' }) })) === null, null);
+  /* A card reader records the arrival whether anybody is told to or not, so
+     this would be telling somebody to press a button they do not have. */
+  check('not for somebody whose time the reader marks',
+    run(Object.assign({}, ok, { marksOwn: () => false })) === null, null);
+  check('not on a day they are signed off for',
+    run(Object.assign({}, ok, { onApprovedLeave: () => true })) === null, null);
+  check('not on a weekly off',
+    run(Object.assign({}, ok, { weeklyOffDay: () => ({ weeklyOff: true }) })) === null, null);
+  check('and not when nobody knows what time they start',
+    run(Object.assign({}, ok, { getShift: () => '' })) === null, null);
+  /* A night shift before the turn: the card's day is yesterday and the start
+     was yesterday's, so now is a day further on. Wrapped modulo would read an
+     hour before a six o'clock start as twenty-three hours late. */
+  const night = run(Object.assign({}, ok, {
+    empWorkingDay: () => '2026-11-05', getShift: () => '18:00-3:00',
+    nowHHMM: () => '00:30',
+  }));
+  check('a night shift counts from the evening it began',
+    !!night && night.mins === 390, night && night.mins);
+  check('and an hour before a night shift starts is not twenty-three hours late',
+    run(Object.assign({}, ok, { getShift: () => '18:00-3:00', nowHHMM: () => '17:00' }))
+      === null, null);
+
+  check('it leads the list, because it is the one still getting worse',
+    /\(y\.job === 'clockin' \? 1 : 0\) - \(x\.job === 'clockin' \? 1 : 0\)/.test(gather), null);
+  /* Outside the floor the rest answer to on purpose: that floor is about how
+     far back is worth chasing, and on the first of a month a night shift
+     begun yesterday would fall off the one list it exists for. */
+  check('and the month floor does not swallow it',
+    !/ewClockItem[\s\S]{0,80}floor/.test(gather), null);
+
+  /* Two answers, because there are two reasons nothing is on the record and
+     the page cannot tell them apart. Asking only the first would push
+     somebody on leave to clock in to make the band go away. */
+  check('it asks whether they are here, or off',
+    /data-ew-clock="1"/.test(grab(APP, 'renderEmpWaiting')) && /data-ew-off="/.test(grab(APP, 'renderEmpWaiting')), null);
+  check('“off today” opens the form on today',
+    /ewOpenForm\(b\.getAttribute\('data-ew-off'\), '', ''/.test(grab(APP, 'ewWire')), null);
+  /* Nothing is picked for them: which kind of day off it is changes what it
+     costs, and the page does not know which. */
+  check('with no kind chosen on their behalf',
+    /if\(t && kind\)\{/.test(grab(APP, 'ewOpenForm')), null);
+  check('and said as today rather than as a day off their record',
+    /Filled in for today\./.test(grab(APP, 'renderEmpWaiting')) || /Filled in for today\./.test(APP), null);
+  /* Clocking in writes a time only the office can correct afterwards, and the
+     card is the one place that shows the time about to be written. */
+  check('“clock in” goes to the button rather than pressing it',
+    /querySelector\('#ckIn'\)/.test(grab(APP, 'ewGoToClock'))
+    && !/#ckIn'\)[\s\S]{0,40}\.click\(\)/.test(grab(APP, 'ewGoToClock')), null);
+  check('and pressing it clears the band instead of leaving the nag up',
+    /renderEmpDayCard\(\);[\s\S]{0,260}renderEmpWaiting\(\);/.test(APP), null);
+
+  /* The figure moves on its own - and in place, because the panel below it
+     may have a half-typed reason in it. */
+  const tick = grab(APP, 'ewClockTick');
+  check('the figure is moved rather than the panel redrawn',
+    /el\.textContent = minsSaid\(due\.mins\)/.test(tick)
+    && /return;/.test(tick), null);
+  check('and the panel is rebuilt only when it has come due or stopped being true',
+    /if\(!!el !== !!due\) renderEmpWaiting\(\);/.test(tick), null);
+  check('off the same clock as the card, so the two cannot drift apart',
+    /ewClockTick\(\);/.test(APP), null);
+  check('and never for somebody reading another person’s card',
+    /viewRole\.role !== 'employee'\)\) return;/.test(tick), null);
+}
 
 /* ---- whose panel it is ---- */
 const render = grab(APP, 'renderEmpWaiting');

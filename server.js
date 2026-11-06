@@ -689,6 +689,14 @@ function backDaysOf(v) {
   const n = Math.floor(Number(v));
   return n > 0 ? Math.max(1, Math.min(365, n)) : REQ_BACK_DAYS;
 }
+/* Nothing before the first of the month `today` falls in. What is chased and
+   what may still be filed are two different questions: a form may reach back
+   thirty days, but a month that has been counted and paid is the office's to
+   settle, not something to reopen by email. */
+function monthFloor(since, today) {
+  const first = String(today).slice(0, 8) + '01';
+  return since > first ? since : first;
+}
 const LEAVE_POLICY_DEFAULT = { SHORT: 'self', HALF: 'approval' };
 function leavePolicyOf(value) {
   const v = parseJson(value);
@@ -3854,7 +3862,13 @@ async function pendingByEmployee(orgId, settings) {
   const back = backDaysOf(settings.leave.backDays);
   const now = new Date(Date.now() + IST_MS);
   const today = now.toISOString().slice(0, 10);
-  const since = new Date(now.getTime() - back * 86400000).toISOString().slice(0, 10);
+  /* This month only. The back window says how far a form may reach; the month
+     says how far it is worth chasing. A reminder that opens on 26 Oct is
+     asking somebody to reopen a month that has already been counted and paid,
+     and the message's own promise - quicker now than at the end of the month -
+     is about this month. So the later of the two floors wins. */
+  const since = monthFloor(new Date(now.getTime() - back * 86400000)
+                             .toISOString().slice(0, 10), today);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'empNames',
                                       'dayShifts', 'shiftAssignments', 'lateThresholdMin',
                                       'lateExcuses', 'manualRecords', 'officialLeaves']);

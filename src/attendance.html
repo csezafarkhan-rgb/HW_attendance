@@ -2325,6 +2325,11 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .ew-tag.half{background:#EDE9FE;color:#4C3BA8;} .ew-tag.short{background:#E0F2FE;color:#075E8C;}
 .ew-tag.threeq{background:#E0F2FE;color:#075E8C;} .ew-tag.full{background:#FFF3DF;color:#B26B00;}
 .ew-tag.late{background:#FDE7E4;color:#C0392B;} .ew-tag.ask{background:#FDE7E4;color:#C0392B;}
+/* The one item about the morning happening now rather than a day gone by.
+   It is the only thing on the list that gets worse while the page is open,
+   so it is the only thing on the list that is coloured. */
+.ew-tag.now{background:#C0392B;color:#fff;}
+.ew-i.now{background:#FDE7E4;border-color:#F3C4BD;}
 .ew-age{flex:none;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;white-space:nowrap;}
 .ew-age.hot{background:#C0392B;color:#fff;} .ew-age.warm{background:#FFF3DF;color:#B26B00;}
 .ew-b{flex:none;border:1px solid var(--line-dk);background:var(--panel);color:var(--ink);border-radius:7px;padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;}
@@ -2347,7 +2352,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .ew-none.ew-warn{color:#8A5A12;background:#FFF7DF;border-left:3px solid #E8B931;border-radius:7px;font-weight:600;line-height:1.5;}
 /* Where the waiting list just sent them, held for a moment so the
    scroll does not end on a page of identical cards. */
-.req-card.ew-flash{outline:2px solid var(--brand,#3B7DF5);outline-offset:2px;transition:outline-color .6s ease;}
+.req-card.ew-flash,.ew-flash{outline:2px solid var(--brand,#3B7DF5);outline-offset:2px;transition:outline-color .6s ease;}
 .ew-why{padding:9px 11px;border-top:1px solid var(--line);background:var(--panel2);}
 .ew-why textarea{width:100%;box-sizing:border-box;min-height:52px;padding:7px 9px;border:1px solid var(--line-dk);border-radius:7px;font:inherit;font-size:12.5px;resize:vertical;}
 .ew-why .row{display:flex;gap:7px;align-items:center;margin-top:7px;flex-wrap:wrap;}
@@ -21757,12 +21762,21 @@ function buildExcelBackup(){
   }
   /* The same window the request form reaches back over. Further back than
      that is the office's to settle, and nagging somebody about a day they
-     are no longer allowed to file for would be asking the impossible. */
+     are no longer allowed to file for would be asking the impossible.
+
+     And never before the first of this month. What may still be filed and
+     what is worth chasing are two questions: a form may reach back thirty
+     days, but a month already counted and paid is the office's to settle.
+     The reminder email takes the same floor, so the list on this page and
+     the message about that list cannot open on different days. */
   function ewFloor(){
-    try{ return earliestRequestDay(); }catch(e){
+    var back;
+    try{ back = earliestRequestDay(); }catch(e){
       var d = new Date(); d.setDate(d.getDate() - 30);
-      return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+      back = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
     }
+    var first = String(todayISO_full).slice(0, 8) + '01';
+    return back > first ? back : first;
   }
   function ewKindTag(t){
     if(t === 'HALF')   return { cls:'half',   txt:'Half day' };
@@ -21779,8 +21793,75 @@ function buildExcelBackup(){
     return n + (n === 1 ? ' day' : ' days') + ' off your ' + of;
   }
 
+  /* Is a morning running with nothing on the record for it? Its own function
+     because the clock asks it again every twenty seconds, and because it is
+     the one thing on this list whose answer changes while nobody touches the
+     page. */
+  function ewClockItem(name){
+    var day = empWorkingDay();
+    /* Only for somebody who marks their own time. A card reader records an
+       arrival whether anybody is told to or not, so telling a card user to
+       clock in is telling them to press a button they do not have. */
+    if(!marksOwn(name)) return null;
+    /* A day signed off, a half day already taken, a holiday - onApprovedLeave
+       asks all three, and is what the late list asks, so the two agree. */
+    if(onApprovedLeave(name, day)) return null;
+    var off = weeklyOffDay(name, day, null);
+    if(off && off.weeklyOff) return null;
+    var rec = getRecord(name, day);
+    if(rec && rec['in']) return null;
+    var startAt = (getShift(name, day) || '').split('-')[0] || '';
+    var st = toMin(startAt), nw = toMin(nowHHMM());
+    if(st === null || nw === null || isNaN(st) || isNaN(nw)) return null;
+    /* On a night shift before the turn the card's day is yesterday and the
+       start was yesterday's, so now is a day further on. Said this way rather
+       than wrapped modulo, which would read an hour before a six o'clock
+       start as twenty-three hours late. */
+    var mins = (day === todayISO_full) ? (nw - st) : (nw + 1440 - st);
+    /* Past the same threshold the record counts lateness by, so the band
+       appears as the morning starts going late rather than at a second figure
+       only this panel would know. */
+    if(mins <= (lateThresholdMin || 10)) return null;
+    return { job:'clockin', day:day, mins:mins, start:startAt, age:0 };
+  }
+  /* The figure moves on its own, because it is the only thing here that gets
+     worse while somebody reads it. Moved in place rather than by redrawing:
+     the panel below may have a half-typed reason in it, and a redraw would
+     throw that away to update a number. */
+  function ewClockTick(){
+    var box = document.getElementById('empWaiting');
+    if(!box) return;
+    var name = (viewRole && viewRole.name) || '';
+    if(!name || (viewRole && viewRole.role && viewRole.role !== 'employee')) return;
+    var el = box.querySelector('#ewSince');
+    var due = null;
+    try{ due = ewClockItem(name); }catch(e){ return; }
+    if(el && due){ el.textContent = minsSaid(due.mins) + ' past your start'; return; }
+    /* It has only just come due, or it has just stopped being true. Either
+       way the panel is now saying something that is not so. */
+    if(!!el !== !!due) renderEmpWaiting();
+  }
+
   function ewGather(name){
     var mine = [], theirs = [], floor = ewFloor();
+
+    /* 0. Today, and they have not clocked in. The one thing on this list that
+       is not about a day gone by: it is the morning happening now, and it
+       stops being true the moment they press the button.
+
+       Deliberately outside the floor every other item answers to. That floor
+       is about how far back it is worth chasing; this is about the present
+       moment, and on the first of a month a night shift that began yesterday
+       would otherwise fall off a list it is the whole point of.
+
+       Only for somebody who marks their own time. A card reader records an
+       arrival whether anybody is told to or not, so telling a card user to
+       clock in is telling them to press a button they do not have.
+
+       Past the same threshold the record counts lateness by, so the band
+       appears at the moment the morning starts going late rather than at a
+       second figure only this panel would know. */
+    try{ var ck = ewClockItem(name); if(ck) mine.push(ck); }catch(e){}
 
     /* 1. Leave the record holds that no form accounts for. */
     try{
@@ -21839,7 +21920,14 @@ function buildExcelBackup(){
     });
 
     var byAge = function(x, y){ return y.age - x.age; };   // the oldest shouts loudest
-    return { mine: mine.sort(byAge), theirs: theirs.sort(byAge) };
+    mine.sort(byAge);
+    /* The oldest shouting loudest is the right order for days gone by. A
+       morning still running is not one of them, and it is the only item here
+       that gets worse while the page is open - so it leads. */
+    mine.sort(function(x, y){
+      return (y.job === 'clockin' ? 1 : 0) - (x.job === 'clockin' ? 1 : 0);
+    });
+    return { mine: mine, theirs: theirs.sort(byAge) };
   }
   function ewAge(n){
     if(n < 1) return '';
@@ -21882,6 +21970,22 @@ function buildExcelBackup(){
           + '<button type="button" class="ew-b p" data-ew-form="' + shotEsc(it.day)
           + '" data-ew-kind="' + shotEsc(it.type) + '" data-ew-half="' + shotEsc(it.half || '')
           + '">Fill the form</button></div>';
+      }
+      /* The morning happening now. Two answers, because there are two
+         reasons nothing is on the record and the page cannot tell them
+         apart: they are here and forgot to press the button, or they are
+         not coming in. Asking only the first would push somebody on leave
+         to clock in to make the band go away. */
+      if(it.job === 'clockin'){
+        return '<div class="ew-i now"><span class="ew-tag now">Not clocked in</span>'
+          + '<div class="g"><b id="ewSince">' + shotEsc(minsSaid(it.mins))
+          + ' past your start</b>'
+          + (it.start ? (' · usually ' + shotEsc(fmtTime(it.start))) : '')
+          + '<div class="sub">Nothing on the record for today yet. The time is '
+          + 'taken when you press, so it keeps growing until you do.</div></div>'
+          + '<button type="button" class="ew-b" data-ew-off="' + shotEsc(it.day)
+          + '">I’m off today</button>'
+          + '<button type="button" class="ew-b p" data-ew-clock="1">Clock in</button></div>';
       }
       if(it.job === 'late'){
         var open = (EW_OPEN_WHY === it.day);
@@ -22059,6 +22163,38 @@ function buildExcelBackup(){
         ewGoToRequest(b.getAttribute('data-ew-reply') || b.getAttribute('data-ew-see'));
       };
     });
+    /* To the button, not instead of it. Clocking in writes a time that only
+       the office can correct afterwards, and the card is the one place that
+       shows the time about to be written - so the band says it is owed and
+       the card is where it is paid. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-clock]'), function(b){
+      b.onclick = function(){ ewGoToClock(); };
+    });
+    /* Not coming in is an answer to the same question, and the form is where
+       it is said. Nothing is picked for them: which kind of day off it is
+       changes what it costs, and the page does not know. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-off]'), function(b){
+      b.onclick = function(){
+        ewOpenForm(b.getAttribute('data-ew-off'), '', '',
+          'Filled in for today. Choose what kind of day it is, add the reason '
+          + 'and send it.');
+      };
+    });
+  }
+  /* The clock-in button on the day card, brought to them and made to catch
+     the eye. */
+  function ewGoToClock(){
+    var card = document.getElementById('empDayCard');
+    var btn = card ? card.querySelector('#ckIn') : null;
+    var go = btn || card;
+    if(!go) return;
+    try{ go.scrollIntoView({ behavior:'smooth', block:'center' }); }
+    catch(e){ try{ go.scrollIntoView(); }catch(e2){} }
+    if(btn){
+      btn.classList.add('ew-flash');
+      setTimeout(function(){ btn.classList.remove('ew-flash'); }, 1800);
+      try{ btn.focus({ preventScroll:true }); }catch(e){ try{ btn.focus(); }catch(e2){} }
+    }
   }
   /* The request form, opened on the day it is about.
 
@@ -22066,7 +22202,7 @@ function buildExcelBackup(){
      to find the day again, open the form, and type the date a second time has
      been told about a job rather than helped with it. The form opens on that
      date, with the kind already chosen. */
-  function ewOpenForm(day, kind, half){
+  function ewOpenForm(day, kind, half, said){
     var open = document.getElementById('requestLeaveBtn');
     if(!open) return;
     open.click();                                   // sets today, then we move it
@@ -22092,7 +22228,8 @@ function buildExcelBackup(){
        filled half of it in - which is exactly what happened. */
     var err = document.getElementById('reqErr');
     if(err){
-      err.textContent = 'Filled in from the day on your record. Add the reason and send it.';
+      err.textContent = said
+        || 'Filled in from the day on your record. Add the reason and send it.';
       err.classList.add('show');
       err.style.background = 'var(--panel2)';
       err.style.color = 'var(--ink-soft)';
@@ -22528,6 +22665,10 @@ function buildExcelBackup(){
           st: 'PR', by: 'self', at: new Date().toISOString() };
         refreshActivePage();
         renderEmpDayCard();
+        /* The band above the card is asking for exactly this. Pressing the
+           button and having the nag stay put is the page telling somebody
+           they still owe what they have just paid. */
+        try{ renderEmpWaiting(); }catch(e){}
         /* Where the card reader already had them in earlier, or out later, that
            time stands and the press did not move it. Saying so is the difference
            between a button that looks broken and one that is doing the right
@@ -22620,6 +22761,10 @@ function buildExcelBackup(){
       if(c) c.textContent = fmtTime(nowHHMM());
       var run = document.getElementById('ckRun');
       if(run && man && man['in']) run.textContent = ckRunning(man['in']);
+      /* The band above says how long past the start it is, off the same
+         clock. One timer for both, so the two faces of one fact cannot drift
+         apart on the same screen. */
+      try{ ewClockTick(); }catch(e){}
     };
     if(CK_TIMER) clearInterval(CK_TIMER);
     /* Once a second while the day is running, so the figure is a clock rather
