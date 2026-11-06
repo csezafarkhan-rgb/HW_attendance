@@ -1132,6 +1132,13 @@ function remindEmail(o) {
     } else if (it.job === 'late') {
       tag = minsSaid(it.mins) + ' late';
       said = 'In at ' + esc(clock(it.came)) + ', and nothing said about it yet.';
+    } else if (it.job === 'absent') {
+      /* The most expensive of the four, so it says what it costs rather than
+         leaving somebody to work that out from a blank. */
+      tag = 'Nothing on the record';
+      said = 'Never clocked in, and no form for it. It counts as a full day '
+           + 'absent until you say it was leave, or that you were here and the '
+           + 'clock missed you.';
     } else {
       tag = 'A question';
       said = it.asked ? ('\u201c' + esc(String(it.asked).slice(0, 200)) + '\u201d')

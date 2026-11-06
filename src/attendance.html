@@ -2329,6 +2329,9 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
    It is the only thing on the list that gets worse while the page is open,
    so it is the only thing on the list that is coloured. */
 .ew-tag.now{background:#C0392B;color:#fff;}
+/* A day with nothing on it at all. Red, not amber: it costs a whole day until
+   somebody says what it was. */
+.ew-tag.gap{background:#FDE7E4;color:#C0392B;}
 .ew-i.now{background:#FDE7E4;border-color:#F3C4BD;}
 .ew-age{flex:none;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;white-space:nowrap;}
 .ew-age.hot{background:#C0392B;color:#fff;} .ew-age.warm{background:#FFF3DF;color:#B26B00;}
@@ -21842,6 +21845,19 @@ function buildExcelBackup(){
     if(!!el !== !!due) renderEmpWaiting();
   }
 
+  /* Has any form been filed over this day at all? A request that was refused
+     or taken back accounts for nothing; anything else does, a punch
+     correction included - "I was here, the clock is wrong" is an answer to
+     the same question as "I was off", and a day with either on it is not a
+     day anybody is still owed an answer for. */
+  function ewSpokenFor(name, day){
+    return (leaveRequests || []).some(function(r){
+      if(!r || r.empName !== name) return false;
+      if(r.status === 'rejected' || r.status === 'cancelled') return false;
+      return day >= r.dateFrom && day <= (r.dateTo || r.dateFrom);
+    });
+  }
+
   function ewGather(name){
     var mine = [], theirs = [], floor = ewFloor();
 
@@ -21874,7 +21890,16 @@ function buildExcelBackup(){
     }catch(e){}
 
     /* 2. A late morning with nothing said about it - not by them, and not by
-          the office either. A day they were signed off for is not lateness. */
+          the office either. A day they were signed off for is not lateness.
+
+       2b. And, in the same pass, a working day with nothing on it at all.
+           That one fell straight through here: the loop asked for an arrival
+           time and left the moment there wasn't one, so a day somebody simply
+           never clocked in for was the one kind of gap this panel could not
+           see. It is also the most expensive kind - it counts as a full day
+           absent until somebody says otherwise. One pass, so a day cannot be
+           both raised as late and raised as missing. */
+    var mineDay = empWorkingDay();
     (allSelectedDates() || []).forEach(function(d){
       if(d < floor || d > todayISO_full) return;
       if(onApprovedLeave(name, d)) return;
@@ -21882,7 +21907,20 @@ function buildExcelBackup(){
          what the grid and the day card read - so this asks it rather than
          settling the same question a third time and risking a third answer. */
       var use = getRecord(name, d);
-      if(!use || !use['in']) return;
+      if(!use || !use['in']){
+        /* Today is the clock-in item's, not this one's: the day is still
+           running and nothing is owed for it yet. */
+        if(d >= mineDay) return;
+        if(beforeJoining(name, d)) return;
+        var woff = weeklyOffDay(name, d, use);
+        if(woff && woff.weeklyOff) return;
+        /* Anything the office has already written against the day is theirs,
+           and leave with no form behind it is item 1's. */
+        if(getOverride(name, d)) return;
+        if(ewSpokenFor(name, d)) return;
+        mine.push({ job:'absent', day:d, age:ewDaysSince(d) });
+        return;
+      }
       var l = null;
       try{ l = getLateEarly(name, use); }catch(e){ return; }
       if(!l || l.late <= (lateThresholdMin || 10)) return;
@@ -21986,6 +22024,22 @@ function buildExcelBackup(){
           + '<button type="button" class="ew-b" data-ew-off="' + shotEsc(it.day)
           + '">I’m off today</button>'
           + '<button type="button" class="ew-b p" data-ew-clock="1">Clock in</button></div>';
+      }
+      /* A working day with nothing on it at all. The same two answers as the
+         morning above, asked about a day gone by: they were off, or they were
+         here and the clock missed them. Until one of them is given it counts
+         as a full day absent, which is why this says what it costs. */
+      if(it.job === 'absent'){
+        return '<div class="ew-i"><span class="ew-tag gap">Nothing on the record</span>'
+          + '<div class="g"><b>' + shotEsc(fmtDayShortish(it.day)) + '</b>'
+          + ' · never clocked in, and no form for it'
+          + '<div class="sub">It counts as a full day absent until one of these '
+          + 'says otherwise.</div></div>'
+          + ewAge(it.age)
+          + '<button type="button" class="ew-b" data-ew-here="' + shotEsc(it.day)
+          + '">I was here</button>'
+          + '<button type="button" class="ew-b p" data-ew-off="' + shotEsc(it.day)
+          + '">I was off</button></div>';
       }
       if(it.job === 'late'){
         var open = (EW_OPEN_WHY === it.day);
@@ -22175,9 +22229,22 @@ function buildExcelBackup(){
        changes what it costs, and the page does not know. */
     Array.prototype.forEach.call(box.querySelectorAll('[data-ew-off]'), function(b){
       b.onclick = function(){
-        ewOpenForm(b.getAttribute('data-ew-off'), '', '',
-          'Filled in for today. Choose what kind of day it is, add the reason '
-          + 'and send it.');
+        var d = b.getAttribute('data-ew-off');
+        ewOpenForm(d, '', '',
+          'Filled in for ' + (d === todayISO_full ? 'today' : fmtDayShortish(d))
+          + '. Choose what kind of day it is, add the reason and send it.');
+      };
+    });
+    /* The other answer to a day with nothing on it: they were here and the
+       clock missed them. That is a correction, not leave, and the form
+       already has the kind for it - so this opens the one path the office
+       already has rather than inventing a second way to write a time. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-here]'), function(b){
+      b.onclick = function(){
+        var d = b.getAttribute('data-ew-here');
+        ewOpenForm(d, 'PUNCH', '',
+          'Filled in for ' + fmtDayShortish(d)
+          + '. Say the times you were in and out, and send it to be corrected.');
       };
     });
   }

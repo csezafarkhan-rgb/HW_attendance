@@ -25,6 +25,7 @@ const vm = require('vm');
 const REPO = path.join(__dirname, '..');
 const APP = fs.readFileSync(path.join(REPO, 'src', 'attendance.html'), 'utf8');
 const SRV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+const MAILER = fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8');
 
 let pass = 0, fail = 0;
 function check(what, ok, got) {
@@ -154,6 +155,100 @@ check('the oldest is put first, because that is the one being forgotten',
       .test(SRV), null);
 }
 
+/* ---- a day with nothing on it at all ----
+   The one gap this panel could not see. The loop that finds a late morning
+   asks for an arrival time and leaves the moment there isn't one, so a day
+   somebody never clocked in for fell straight through - while being the most
+   expensive kind of gap there is, because it counts as a full day absent
+   until somebody says otherwise. */
+{
+  check('a working day with nothing on it is raised',
+    /mine\.push\(\{ job:'absent', day:d, age:ewDaysSince\(d\) \}\);/.test(gather), null);
+  /* One pass over the days, so a date cannot come out both late and missing. */
+  check('found in the same pass as lateness, not a second one',
+    (gather.match(/allSelectedDates\(\)/g) || []).length === 1, null);
+  check('today is the clock-in item’s, not this one’s',
+    /if\(d >= mineDay\) return;/.test(gather), null);
+  check('nobody is chased for a day before they joined',
+    /if\(beforeJoining\(name, d\)\) return;/.test(gather), null);
+  check('nor for a weekly off',
+    /var woff = weeklyOffDay\(name, d, use\);[\s\S]{0,60}woff\.weeklyOff\) return;/.test(gather),
+    null);
+  check('nor a holiday or a day signed off, which onApprovedLeave already asks',
+    gather.indexOf('onApprovedLeave(name, d)') < gather.indexOf("job:'absent'"), null);
+  check('a day the office has written against is theirs, not this list’s',
+    /if\(getOverride\(name, d\)\) return;/.test(gather), null);
+  check('and a day a form already covers is not asked for twice',
+    /if\(ewSpokenFor\(name, d\)\) return;/.test(gather), null);
+  /* A punch correction answers the same question as a leave form: both say
+     what the day was. Only a refused or withdrawn one accounts for nothing. */
+  {
+    const spoke = grab(APP, 'ewSpokenFor');
+    const c = vm.createContext({ String, Array });
+    vm.runInContext('var leaveRequests = [];' + spoke, c);
+    const set = rs => { c.leaveRequests = rs; };
+    set([{ empName: 'M', status: 'pending', dateFrom: '2026-11-05', dateTo: '2026-11-05' }]);
+    check('a request waiting on somebody still covers the day',
+      c.ewSpokenFor('M', '2026-11-05') === true, null);
+    set([{ empName: 'M', status: 'approved', leaveType: 'PUNCH',
+           dateFrom: '2026-11-05', dateTo: '2026-11-05' }]);
+    check('so does a punch correction',
+      c.ewSpokenFor('M', '2026-11-05') === true, null);
+    set([{ empName: 'M', status: 'rejected', dateFrom: '2026-11-05', dateTo: '2026-11-05' }]);
+    check('a refused one covers nothing',
+      c.ewSpokenFor('M', '2026-11-05') === false, null);
+    set([{ empName: 'M', status: 'cancelled', dateFrom: '2026-11-05', dateTo: '2026-11-05' }]);
+    check('nor one taken back',
+      c.ewSpokenFor('M', '2026-11-05') === false, null);
+    set([{ empName: 'M', status: 'approved', dateFrom: '2026-11-02', dateTo: '2026-11-06' }]);
+    check('a range covers every day inside it',
+      c.ewSpokenFor('M', '2026-11-05') === true
+      && c.ewSpokenFor('M', '2026-11-07') === false, null);
+    set([{ empName: 'Other', status: 'approved', dateFrom: '2026-11-05', dateTo: '2026-11-05' }]);
+    check('and somebody else’s form covers nothing of theirs',
+      c.ewSpokenFor('M', '2026-11-05') === false, null);
+  }
+  /* The same two answers as the morning still running, asked about a day gone
+     by. Neither is picked for them. */
+  const rr = grab(APP, 'renderEmpWaiting');
+  check('it asks whether they were off, or here',
+    /data-ew-here="/.test(rr) && /job === 'absent'/.test(rr), null);
+  check('and says what it costs until one of them is given',
+    /counts as a full day absent/.test(rr), null);
+  check('“I was here” is a punch correction, which the form already has',
+    /ewOpenForm\(d, 'PUNCH', ''/.test(grab(APP, 'ewWire')), null);
+  check('and the form is filled in for that day, not for today',
+    /d === todayISO_full \? 'today' : fmtDayShortish\(d\)/.test(grab(APP, 'ewWire')), null);
+
+  /* The message about the list has to find it too, or the page says seven and
+     the email says four. */
+  check('the reminder walks the days rather than the rows it has',
+    /if \(iso >= today\) break;/.test(SRV)
+    && /add\(name, \{ job: 'absent', day \}\);/.test(SRV), null);
+  check('and asks the roster who was meant to be in',
+    /SELECT name FROM employees WHERE org_id = \$1 AND is_active/.test(SRV), null);
+  check('Sunday is off for everybody, Saturday for whoever has it set so',
+    /if \(dow === 0 \|\| \(dow === 6 && satOff\)\) return;/.test(SRV), null);
+  check('a day already marked, or already filed for, is not asked for again',
+    /if \(marked\[key\] \|\| filed\[key\]\) return;/.test(SRV), null);
+  check('a typed time counts as marked, same as a punch',
+    /Object\.keys\(manual\)\.forEach/.test(SRV), null);
+  check('and nobody is chased for a day before they joined',
+    /if \(join && day < join\) return;/.test(SRV), null);
+  {
+    const nj = grab(SRV, 'normJoinDay');
+    const c = vm.createContext({ String });
+    vm.runInContext(nj, c);
+    check('a joining date reads the same on both sides',
+      c.normJoinDay('2026-3-4') === '2026-03-04'
+      && c.normJoinDay('4/3/2026') === '2026-03-04', c.normJoinDay('4/3/2026'));
+    check('and something unreadable chases nobody',
+      c.normJoinDay('') === '' && c.normJoinDay('rubbish') === '', null);
+  }
+  check('the message says what the day costs, as the page does',
+    /Never clocked in, and no form for it/.test(MAILER), null);
+}
+
 /* ---- the morning happening now ----
    Every other thing on this list is about a day gone by. This one is about
    a morning still running: somebody at their desk at a quarter past twelve
@@ -235,14 +330,14 @@ check('the oldest is put first, because that is the one being forgotten',
      somebody on leave to clock in to make the band go away. */
   check('it asks whether they are here, or off',
     /data-ew-clock="1"/.test(grab(APP, 'renderEmpWaiting')) && /data-ew-off="/.test(grab(APP, 'renderEmpWaiting')), null);
-  check('“off today” opens the form on today',
-    /ewOpenForm\(b\.getAttribute\('data-ew-off'\), '', ''/.test(grab(APP, 'ewWire')), null);
+  check('“off today” opens the form on that day',
+    /ewOpenForm\(d, '', ''/.test(grab(APP, 'ewWire')), null);
   /* Nothing is picked for them: which kind of day off it is changes what it
      costs, and the page does not know which. */
   check('with no kind chosen on their behalf',
     /if\(t && kind\)\{/.test(grab(APP, 'ewOpenForm')), null);
-  check('and said as today rather than as a day off their record',
-    /Filled in for today\./.test(grab(APP, 'renderEmpWaiting')) || /Filled in for today\./.test(APP), null);
+  check('and said as the day it is about rather than as a day off their record',
+    /'Filled in for ' \+ \(d === todayISO_full \? 'today'/.test(APP), null);
   /* Clocking in writes a time only the office can correct afterwards, and the
      card is the one place that shows the time about to be written. */
   check('“clock in” goes to the button rather than pressing it',

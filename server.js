@@ -693,6 +693,20 @@ function backDaysOf(v) {
    what may still be filed are two different questions: a form may reach back
    thirty days, but a month that has been counted and paid is the office's to
    settle, not something to reopen by email. */
+/* A joining date reduced to YYYY-MM-DD, whatever a restored backup or a hand
+   edit left behind - an ISO date, a d/m/y, or a full timestamp. The page does
+   the same, because the comparison it is for is a string one and otherwise
+   means nothing. Anything unreadable hands back '', which chases nobody for a
+   day they may not have been employed on. */
+function normJoinDay(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/.exec(s);
+  if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  return '';
+}
 function monthFloor(since, today) {
   const first = String(today).slice(0, 8) + '01';
   return since > first ? since : first;
@@ -3871,7 +3885,8 @@ async function pendingByEmployee(orgId, settings) {
                              .toISOString().slice(0, 10), today);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'empNames',
                                       'dayShifts', 'shiftAssignments', 'lateThresholdMin',
-                                      'lateExcuses', 'manualRecords', 'officialLeaves']);
+                                      'lateExcuses', 'manualRecords', 'officialLeaves',
+                                      'joinDates', 'satPolicy']);
   const overrides = parseJson(kv.overrides) || {};
   const halfDays = parseJson(kv.halfDays) || {};
   const requests = parseJson(kv.leaveRequests) || [];
@@ -3926,6 +3941,65 @@ async function pendingByEmployee(orgId, settings) {
     const start = shiftStartMin(dayShifts[key] || shiftInForce(assigned, name, day) || '9:30-6:30');
     if (start == null || came - start <= threshold) return;
     add(name, { job: 'late', day, mins: came - start, came: inAt });
+  });
+
+  /* 2b. A working day with nothing on it at all.
+
+     By definition there is no row in the records table for it, which is why
+     reading that table and nothing else could never see it - the loop above
+     asks for an arrival time and leaves the moment there isn't one. So the
+     days are walked instead and the roster asked who was meant to be in.
+
+     It is the most expensive gap of the lot: it counts as a full day absent
+     until somebody says it was leave, or says they were here and the clock
+     missed them. */
+  const joined = parseJson(kv.joinDates) || {};
+  const sat = parseJson(kv.satPolicy) || {};
+  const marked = {};                       // "name|day" -> something was recorded
+  recs.rows.forEach(r => {
+    const day = (r.day instanceof Date) ? r.day.toISOString().slice(0, 10)
+                                        : String(r.day).slice(0, 10);
+    if (r.data && r.data['in']) marked[r.employee + '|' + day] = true;
+  });
+  Object.keys(manual).forEach(k => { if (manual[k] && manual[k]['in']) marked[k] = true; });
+  /* Any form filed over the day, a punch correction included: "I was here,
+     the clock is wrong" answers the same question as "I was off". Only a
+     refused or withdrawn one accounts for nothing. */
+  const filed = {};
+  requests.forEach(r => {
+    if (!r || r.status === 'rejected' || r.status === 'cancelled') return;
+    for (let d = new Date(r.dateFrom + 'T00:00:00Z');
+         d <= new Date((r.dateTo || r.dateFrom) + 'T00:00:00Z');
+         d.setUTCDate(d.getUTCDate() + 1)) {
+      filed[r.empName + '|' + d.toISOString().slice(0, 10)] = true;
+    }
+  });
+  const roster = await pool.query(
+    'SELECT name FROM employees WHERE org_id = $1 AND is_active', [orgId]);
+  const days = [];
+  for (let d = new Date(since + 'T00:00:00Z'); ; d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    if (iso >= today) break;              // today is still running; nothing is owed yet
+    days.push(iso);
+  }
+  roster.rows.forEach(row => {
+    const name = row.name;
+    const join = normJoinDay(joined[name]);
+    /* Sunday is a weekly off for everybody; a Saturday is one for whoever has
+       it set that way. The same two rules the grid draws by. */
+    const satOff = ((sat[name] || {}).mode || 'WFH') === 'OFF';
+    days.forEach(day => {
+      const key = name + '|' + day;
+      if (join && day < join) return;
+      const dow = new Date(day + 'T00:00:00Z').getUTCDay();
+      if (dow === 0 || (dow === 6 && satOff)) return;
+      if (holidays[day]) return;
+      if (marked[key] || filed[key]) return;
+      /* Anything the office has written against the day is theirs to settle,
+         and leave with no form behind it is item 1's. */
+      if (overrides[key] || halfDays[key]) return;
+      add(name, { job: 'absent', day });
+    });
   });
 
   /* 3. A question waiting on their answer. */

@@ -191,8 +191,11 @@ check('a day with a part of it already taken is not chased as lateness',
   /if \(halfDays\[key\]\) return;/.test(owed), null);
 check('nor a holiday nobody was due in on',
   /if \(holidays\[day\]\) return;/.test(owed), null);
+/* Asked for by name rather than by where it sits in the list: the list grew
+   when a missing day became something to chase, and pinning the last entry
+   made that growth look like a holiday going unread. */
 check('and the holidays are actually read to know that',
-  /'manualRecords', 'officialLeaves'\]\);/.test(SRV)
+  /'officialLeaves'/.test(owed)
   && /const holidays = parseJson\(kv\.officialLeaves\) \|\| \{\};/.test(SRV), null);
 /* Their own page has never counted these - onApprovedLeave asks the same
    question - so this is also the two sides agreeing. */
