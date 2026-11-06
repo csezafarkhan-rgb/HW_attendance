@@ -175,5 +175,55 @@ check('previewing it asks which employee',
 check('and says so where there is nothing to preview',
   /has nothing outstanding/.test(SRV), null);
 
+/* ---- three ways two pieces of code answered one question differently ----
+
+   Found by reading what a real person would actually be sent rather than by
+   reading the checks above, which all passed while every one of these was
+   wrong. They share a shape: the panel on somebody's own page and the message
+   about it each worked something out, and the two did not agree. */
+
+/* A part of a day already taken is not a late morning. Somebody with the
+   morning off arrives in the afternoon, and against a 9:30 start that reads
+   as four hours late - which is how a half day logged "Car Accident" came out
+   of this as a lecture about punctuality. Two others were short leaves the
+   office had itself recorded with the note "Late". */
+check('a day with a part of it already taken is not chased as lateness',
+  /if \(halfDays\[key\]\) return;/.test(owed), null);
+check('nor a holiday nobody was due in on',
+  /if \(holidays\[day\]\) return;/.test(owed), null);
+check('and the holidays are actually read to know that',
+  /'manualRecords', 'officialLeaves'\]\);/.test(SRV)
+  && /const holidays = parseJson\(kv\.officialLeaves\) \|\| \{\};/.test(SRV), null);
+/* Their own page has never counted these - onApprovedLeave asks the same
+   question - so this is also the two sides agreeing. */
+check('which is the same question their own page asks',
+  /if\(onApprovedLeave\(name, d\)\) return;/.test(APP)
+  && /if\(getHalfDay\(empName, dateStr\)\) return true;/.test(APP), null);
+
+/* A time typed against a day beats the punch, because a correction is the
+   whole reason a typed time exists. The panel took the typed one, this took
+   the punch, and a corrected morning read two ways depending on which told
+   you about it. */
+check('a typed time beats the punch when the reminder reckons lateness',
+  /const inAt = \(m && m\['in'\]\) \? m\['in'\] : \(data\['in'\] \|\| ''\);/.test(SRV), null);
+check('and the hour it reports is the one it reckoned from',
+  /came: inAt \}\);/.test(SRV), null);
+/* The page already had something that settles this. Asking it beats settling
+   the same question a third time and getting a third answer. */
+check('the panel asks the one thing that already settles it',
+  /var use = getRecord\(name, d\);/.test(APP), null);
+check('rather than picking between them itself',
+  !/var use = \(man && man\['in'\]\) \? man : rec;/.test(APP), null);
+
+/* How far back a request may reach is the office's to set, and the panel used
+   the shipped thirty until somebody opened the request form - so an office
+   that shortened the window had a page offering days the server would refuse.
+   Which is the fault this whole file exists because of. */
+check('the window is read when the page loads, not when a form opens',
+  /loadRequestWindow, loadDeskTime/.test(APP), null);
+check('so the list and the server agree about how far back it goes',
+  /return earliestRequestDay\(\);/.test(grab(APP, 'ewFloor'))
+  && /backDaysOf\(settings\.leave\.backDays\)/.test(owed), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -3857,7 +3857,7 @@ async function pendingByEmployee(orgId, settings) {
   const since = new Date(now.getTime() - back * 86400000).toISOString().slice(0, 10);
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'empNames',
                                       'dayShifts', 'shiftAssignments', 'lateThresholdMin',
-                                      'lateExcuses', 'manualRecords']);
+                                      'lateExcuses', 'manualRecords', 'officialLeaves']);
   const overrides = parseJson(kv.overrides) || {};
   const halfDays = parseJson(kv.halfDays) || {};
   const requests = parseJson(kv.leaveRequests) || [];
@@ -3866,6 +3866,7 @@ async function pendingByEmployee(orgId, settings) {
   const assigned = parseJson(kv.shiftAssignments) || {};
   const excuses = parseJson(kv.lateExcuses) || {};
   const manual = parseJson(kv.manualRecords) || {};
+  const holidays = parseJson(kv.officialLeaves) || {};
   const threshold = Number(parseJson(kv.lateThresholdMin)) || 10;
   const out = {};
   const add = (name, item) => { (out[name] = out[name] || []).push(item); };
@@ -3888,14 +3889,29 @@ async function pendingByEmployee(orgId, settings) {
     /* A day signed off, worked from home or spent at a customer is not a
        morning anybody was late for. */
     if (ov && (ov.cat === 'LEAVE' || ov.cat === 'WFH' || ov.cat === 'VISIT')) return;
+    /* Nor is a part of a day already taken. Somebody with the morning off
+       arrives in the afternoon, and against a 9:30 start that reads as four
+       hours late - which is how a half day for "Car Accident" came out of
+       this as a nag about punctuality. Their own page has never counted
+       these (onApprovedLeave asks the same question), so this agreeing with
+       it is also the two sides saying the same thing. */
+    if (halfDays[key]) return;
+    /* And a holiday nobody was due in on. */
+    if (holidays[day]) return;
     if (excuses[key]) return;                      // already answered, either way
     const data = r.data || {};
     const m = manual[key];
-    const came = hhmmToMinutes(data['in'] || (m && m['in']) || '');
+    /* A time typed against the day wins over the punch, which is how the
+       person's own page reads it - getRecord hands back the typed record
+       where there is one, so the grid, their day card and this all reckon
+       the same morning the same way. A correction that the office made is
+       the whole point of there being a typed time at all. */
+    const inAt = (m && m['in']) ? m['in'] : (data['in'] || '');
+    const came = hhmmToMinutes(inAt);
     if (came == null) return;
     const start = shiftStartMin(dayShifts[key] || shiftInForce(assigned, name, day) || '9:30-6:30');
     if (start == null || came - start <= threshold) return;
-    add(name, { job: 'late', day, mins: came - start, came: data['in'] || (m && m['in']) || '' });
+    add(name, { job: 'late', day, mins: came - start, came: inAt });
   });
 
   /* 3. A question waiting on their answer. */

@@ -21786,9 +21786,10 @@ function buildExcelBackup(){
     (allSelectedDates() || []).forEach(function(d){
       if(d < floor || d > todayISO_full) return;
       if(onApprovedLeave(name, d)) return;
-      var rec = getRecord(name, d);
-      var man = manualRecords[name + '|' + d];
-      var use = (man && man['in']) ? man : rec;
+      /* getRecord already settles a typed time against a punched one, and is
+         what the grid and the day card read - so this asks it rather than
+         settling the same question a third time and risking a third answer. */
+      var use = getRecord(name, d);
       if(!use || !use['in']) return;
       var l = null;
       try{ l = getLateEarly(name, use); }catch(e){ return; }
@@ -23553,7 +23554,13 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc,
+      /* How far back a request may reach. Read at boot because the waiting
+         list uses it too, and it used to be read only when the request form
+         opened - so an office that shortened the window had a page offering
+         days the server would refuse, which is the very fault this list
+         exists to stop somebody hitting. */
+      loadRequestWindow, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
       loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
       loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
   }).then(function(){
