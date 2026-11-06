@@ -168,5 +168,58 @@ check('a fault in it is caught, so the record still draws',
 check('and it is drawn above the day card, which only reaches yesterday',
   APP.indexOf('id="empWaiting"') < APP.indexOf('id="empDayCard"'), null);
 
+/* ---- which of the two answers sends mail, said before it is pressed ----
+   One of these takes minutes off the record and puts an email in somebody's
+   inbox within the minute. Both of those are things a person should know
+   they are about to do, so the card says so while they are choosing rather
+   than afterwards - and the server is the proof of which one it is. */
+{
+  const tell = vm.createContext({ Array, String, Object });
+  vm.runInContext("var approvalRoute = { 'R': ['a@x.net','b@x.net'] };", tell);
+  vm.runInContext("var N = { 'a@x.net':'Ann Approver', 'b@x.net':'Bob Boss' };"
+    + "function approverLabel(e){ return N[String(e).toLowerCase()] || e; }", tell);
+  vm.runInContext(grab(APP, 'ewWhyTell'), tell);
+
+  const exc = tell.ewWhyTell('exc', 'R');
+  const late = tell.ewWhyTell('late', 'R');
+  check('excusing a day says it is emailed, before it is pressed',
+    /emailed to the management/.test(exc), exc.slice(0, 90));
+  check('and names whoever answers for that person',
+    /Ann Approver, Bob Boss/.test(exc), exc.slice(0, 110));
+  check('and says the minutes come off',
+    /minutes come off this day/.test(exc), null);
+  check('and that nobody is being asked',
+    /told, not asked/.test(exc), null);
+  /* Named as far as the page can honestly name them. The management list is
+     the office's own and is not on an employee's page, so it is not invented. */
+  check('nobody named against them is not a list made up',
+    !/ and /.test(tell.ewWhyTell('exc', 'Nobody').split('straight away')[0]),
+    tell.ewWhyTell('exc', 'Nobody').slice(0, 80));
+  check('the personal one says plainly that nothing is emailed',
+    /Nothing is emailed/.test(late), late);
+  check('and that the minutes stay', /minutes stay on the day/.test(late), null);
+  check('with nothing picked it asks rather than describing either',
+    /Which was it\?/.test(tell.ewWhyTell('', 'R')), null);
+
+  /* The claim rests on the server actually skipping the personal one. If that
+     filter ever goes, the card would be promising silence it cannot keep. */
+  check('and the server really does skip the personal one',
+    /\|\| v\.kind === 'late'\) return;/.test(SRV), null);
+  check('while the excused one is what it sends',
+    /function newlySelfExcused\(beforeText, afterText\)/.test(SRV)
+    && /notifySelfExcused\(req\.session\.orgId, fresh\.slice\(0, 10\)\)/.test(SRV), null);
+}
+
+/* ---- and neither is chosen for them ---- */
+check('nothing is picked to begin with',
+  /var pick = '';/.test(grab(APP, 'ewWire')), null);
+check('so saving asks which it was first',
+  /if\(!pick\)\{ showUploadStatus\('Say which it was first\.', true\); return; \}/.test(APP), null);
+check('the choice that sends mail is marked as well as worded',
+  /tell\.className = 'ew-none' \+ \(pick === 'exc' \? ' ew-warn' : ''\);/.test(APP), null);
+check('and the two screens word the one question the same way',
+  /Excuse the day/.test(APP) && /Late — personal/.test(APP)
+  && !/Ask for it to be excused/.test(APP) && !/It was my fault/.test(APP), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

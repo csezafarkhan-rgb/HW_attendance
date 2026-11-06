@@ -2331,6 +2331,9 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .ew-b.p{background:var(--brand,#3B7DF5);border-color:var(--brand,#3B7DF5);color:#fff;}
 .ew-b.r{background:#C0392B;border-color:#C0392B;color:#fff;}
 .ew-none{padding:9px 11px;font-size:11.5px;color:var(--ink-dim);}
+/* The choice that sends mail, marked as well as worded. A warning set in
+   the same grey as the rest of the card is a warning somebody skims. */
+.ew-none.ew-warn{color:#8A5A12;background:#FFF7DF;border-left:3px solid #E8B931;border-radius:7px;font-weight:600;line-height:1.5;}
 /* Where the waiting list just sent them, held for a moment so the
    scroll does not end on a page of identical cards. */
 .req-card.ew-flash{outline:2px solid var(--brand,#3B7DF5);outline-offset:2px;transition:outline-color .6s ease;}
@@ -21870,23 +21873,71 @@ function buildExcelBackup(){
     return '<div class="ew-why" data-ew-box="' + shotEsc(day) + '">'
       + '<textarea id="ewNote" maxlength="300" placeholder="What happened?"></textarea>'
       + '<div class="row">'
-      +   '<button type="button" class="ew-pick on" data-ew-pick="exc">Ask for it to be excused</button>'
-      +   '<button type="button" class="ew-pick" data-ew-pick="late">It was my fault</button>'
+      +   '<button type="button" class="ew-pick" data-ew-pick="exc">Excuse the day</button>'
+      +   '<button type="button" class="ew-pick" data-ew-pick="late">Late — personal</button>'
       +   '<button type="button" class="ew-b p" data-ew-save="' + shotEsc(day) + '">Save</button>'
       + '</div>'
-      + '<div class="ew-none" style="padding:6px 0 0">Either way the office is told. '
-      + 'Excused takes the mark off the day; the other leaves it and says why.</div>'
+      + '<div class="ew-none" id="ewTell" style="padding:6px 0 0">'
+      +   'Which was it? Either one counts from the moment you save it.</div>'
       + '</div>';
+  }
+  /* What the one they have picked will actually do, in the day card's own
+     telling - the two screens write the same entry and must not describe the
+     same save differently.
+
+     The question is what caused it rather than whose fault it was. Work
+     making somebody late is the one that takes the minutes off, which is why
+     it cannot be saved without a reason. Neither is a request: both count
+     from the moment they are saved, and nobody is asked. */
+  function ewWhyTell(pick, name){
+    if(pick === 'late'){
+      return 'The minutes stay on the day. The note is for the record, so next '
+           + 'month nobody has to remember why. Nothing is emailed — the office '
+           + 'reads it with the evening summary.';
+    }
+    if(pick === 'exc'){
+      /* Said before they press it, not after. This one takes minutes off the
+         record and puts an email in somebody's inbox within the minute, and
+         both of those are things a person should know they are about to do.
+
+         Who it reaches is named as far as the page can honestly name them:
+         whoever answers for this person's leave is theirs to see, and the
+         management list is the office's own and is not on this page. */
+      var who = '';
+      try{
+        var named = (approvalRoute || {})[name];
+        var list = (named == null || named === '' || named === 'final') ? []
+                 : (Array.isArray(named) ? named : [named]);
+        var labels = list.map(function(x){ return approverLabel(x); }).filter(Boolean);
+        if(labels.length) who = ' and ' + labels.join(', ');
+      }catch(e){}
+      return '✉ This is emailed to the management' + who + ' straight away. '
+           + 'The minutes come off this day — they are told, not asked. '
+           + 'For when work made it so: a meeting, a visit that ran over, an errand '
+           + 'for the office.';
+    }
+    return 'Which was it? Either one counts from the moment you save it.';
   }
 
   function ewWire(box, name){
-    var pick = 'exc';
+    /* Nothing picked to begin with. One of these takes minutes off the record,
+       and offering it already chosen is a nudge towards the answer that
+       changes the day - which is not the page's nudge to give. */
+    var pick = '';
     Array.prototype.forEach.call(box.querySelectorAll('[data-ew-pick]'), function(b){
       b.onclick = function(){
         pick = b.getAttribute('data-ew-pick');
         Array.prototype.forEach.call(box.querySelectorAll('[data-ew-pick]'), function(o){
           o.classList.toggle('on', o === b);
         });
+        var tell = box.querySelector('#ewTell');
+        if(tell){
+          tell.textContent = ewWhyTell(pick, name);
+          /* The one that sends mail is marked as well as worded, because a
+             warning that reads like the rest of the page is a warning
+             somebody skims past. */
+          tell.className = 'ew-none' + (pick === 'exc' ? ' ew-warn' : '');
+        }
       };
     });
     Array.prototype.forEach.call(box.querySelectorAll('[data-ew-why]'), function(b){
@@ -21901,6 +21952,10 @@ function buildExcelBackup(){
         var day = b.getAttribute('data-ew-save');
         var ta = box.querySelector('#ewNote');
         var note = ta ? ta.value.trim() : '';
+        if(!pick){ showUploadStatus('Say which it was first.', true); return; }
+        /* A reason is what the office would otherwise have to come and ask
+           for - and on the excused one it is the whole of why the minutes
+           came off. */
         if(!note){ showUploadStatus('Say what the reason was first.', true);
                    if(ta) ta.focus(); return; }
         /* The same entry the day card writes, so one reason does not read two
@@ -21912,8 +21967,10 @@ function buildExcelBackup(){
         saveLateExcuses().then(function(){
           EW_OPEN_WHY = null;
           showUploadStatus(pick === 'late'
-            ? 'Saved. The day still counts as late.'
-            : 'Sent. The office has been told.', false);
+            ? 'Saved. The minutes stay on the day — the note is only so that '
+              + 'nobody has to remember why.'
+            : 'Marked excused. The minutes are off this day and the email has gone.',
+            false);
           refreshActivePage(); renderEmpWaiting();
         }).catch(function(e){
           b.disabled = false;
