@@ -12875,7 +12875,10 @@ function buildExcelBackup(){
       /* A late day answered for is its own message to its own people, and it
          was living at the foot of the attendance pane, below everything that
          pane is actually about. Nobody found it there. */
-      +   '<button type="button" class="em-tab" data-em-tab="lt">Self-marked</button></div>'
+      +   '<button type="button" class="em-tab" data-em-tab="lt">Self-marked</button>'
+      /* The only message here written to the person it is about rather than
+         to the office, which is why it sits at the end on its own. */
+      +   '<button type="button" class="em-tab" data-em-tab="rm">Reminders</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
       + '<div class="em-lab">To <span>blank: every Super Admin</span></div>'
@@ -13221,6 +13224,45 @@ function buildExcelBackup(){
             +   mailEscape(text(h.footer, W.holiday.footer)) + '</textarea></div>'
             + '</div>';
         })()
+      /* ---- reminders, to each person about their own loose ends ---- */
+      + (function(){
+          var r = s.remind || {};
+          var DOW = [['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],
+                     ['5','Friday'],['6','Saturday'],['0','Sunday']];
+          var day = String(r.weekday == null ? 5 : r.weekday);
+          return '<div data-em-pane="rm" style="display:none;">'
+            + '<div class="em-note" style="padding-top:0;">The one message here that goes '
+            +   'to the person it is about, and to nobody else. It lists what their own '
+            +   'record is still waiting on them for \u2014 leave taken with no form behind '
+            +   'it, a late morning nothing has been said about, a question somebody asked '
+            +   'back. Anybody with nothing outstanding is not written to at all.</div>'
+            + '<label class="em-row"><input type="checkbox" id="emRmDaily"'
+            +   (r.daily === true ? ' checked' : '') + '>'
+            +   '<span>Every day, at</span></label>'
+            + '<div class="em-row em-indent"><input type="text" id="emRmDailyAt" value="'
+            +   mailEscape(r.dailyAt || '10:00') + '" size="5"><span>India time</span></div>'
+            + '<label class="em-row"><input type="checkbox" id="emRmWeekly"'
+            +   (r.weekly === true ? ' checked' : '') + '>'
+            +   '<span>Once a week, on</span></label>'
+            + '<div class="em-row em-indent"><select id="emRmDay">'
+            +   DOW.map(function(d){ return '<option value="' + d[0] + '"'
+                  + (d[0] === day ? ' selected' : '') + '>' + d[1] + '</option>'; }).join('')
+            +   '</select><span>at</span>'
+            +   '<input type="text" id="emRmWeeklyAt" value="'
+            +   mailEscape(r.weeklyAt || '10:00') + '" size="5"><span>India time</span></div>'
+            + '<div class="em-note">Both switched on is still one message on that day \u2014 '
+            +   'a person is reminded once or not at all.</div>'
+            + '<div class="em-lab">Subject <span>{who} {n} {date} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emRmSubject" value="'
+            +   mailEscape(text(r.subject, W.remind.subject)) + '"></div>'
+            + '<div class="em-lab">Message at the top <span>{who} {n} {date} {org}</span></div>'
+            + '<div class="em-row"><textarea id="emRmIntro" rows="4">'
+            +   mailEscape(text(r.intro, W.remind.intro)) + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emRmFooter" rows="2">'
+            +   mailEscape(text(r.footer, W.remind.footer)) + '</textarea></div>'
+            + '</div>';
+        })()
       /* ---- the full month ---- */
       + (function(){
           var m = s.month || {};
@@ -13287,7 +13329,9 @@ function buildExcelBackup(){
          said on the button, because a window that opens on one of three with
          no hint of the other two is a window somebody closes too early. */
       if(tab === 'lt') return '\ud83d\udc41 Preview all three for an employee';
-      return (tab === 'lv')
+      /* The reminder is one person's own loose ends, so it asks which person
+         for the same reason the leave message does. */
+      return (tab === 'lv' || tab === 'rm')
         ? '\ud83d\udc41 Preview for an employee' : '\ud83d\udc41 Preview';
     }
     function showLeaveTools(which){
@@ -13331,7 +13375,10 @@ function buildExcelBackup(){
         b.onclick = function(){
           var name = b.getAttribute('data-lv-who');
           var on = document.querySelector('[data-em-tab].on');
-          var kind = (on && on.getAttribute('data-em-tab') === 'lt') ? 'part' : 'leave';
+          /* Three cards ask about one person, and each wants a different
+             message built for them. */
+          var onTab = on ? on.getAttribute('data-em-tab') : '';
+          var kind = onTab === 'lt' ? 'part' : onTab === 'rm' ? 'remind' : 'leave';
           b.disabled = true;
           var was = b.textContent;
           b.textContent = 'Building\u2026';
@@ -13778,6 +13825,16 @@ function buildExcelBackup(){
           footer: document.getElementById('emLvFooter').value,
           confirm: !!(document.getElementById('emConfirm') || {}).checked,
           backDays: parseInt((document.getElementById('emLvBack') || {}).value, 10) || 30
+        },
+        remind: {
+          daily: document.getElementById('emRmDaily').checked,
+          dailyAt: document.getElementById('emRmDailyAt').value.trim() || '10:00',
+          weekly: document.getElementById('emRmWeekly').checked,
+          weekday: parseInt(document.getElementById('emRmDay').value, 10),
+          weeklyAt: document.getElementById('emRmWeeklyAt').value.trim() || '10:00',
+          subject: document.getElementById('emRmSubject').value.trim(),
+          intro: document.getElementById('emRmIntro').value,
+          footer: document.getElementById('emRmFooter').value
         },
         month: {
           to: list('emMoTo'), cc: list('emMoCc'),

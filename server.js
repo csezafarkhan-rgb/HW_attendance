@@ -377,6 +377,29 @@ function nightTurnsAt(sh) {
   const ends = sh.endMin - 24 * 60;
   return Math.round((ends + sh.startMin) / 2);
 }
+/* The days somebody may still answer for a late arrival of their own.
+
+   Clocking in, setting a day's hours, saying where they are: all of those are
+   about now, and ownDays holds them to today for good reason - nobody clocks
+   in for last Tuesday. Saying WHY last Tuesday was late is a different thing.
+   It moves no time; it explains a mark already on the record, and the office
+   is better off hearing it late than never.
+
+   The window is the one the request form reaches back over, so the page
+   cannot offer a day the server will then drop on the floor - which is
+   exactly what it did: the panel listed a fortnight of unanswered mornings,
+   every save came back 200, and the merge discarded all of them in silence. */
+function ownExcusableDays(shift, backDays) {
+  const out = ownDays(shift);                 // today, or the night just worked
+  const now = new Date(Date.now() + IST_MS);
+  const today = now.toISOString().slice(0, 10);
+  const n = backDaysOf(backDays);
+  for (let i = 1; i <= n; i++) {
+    const d = new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10);
+    if (d < today && out.indexOf(d) < 0) out.push(d);
+  }
+  return out;
+}
 function ownDays(shift) {
   const now = new Date(Date.now() + IST_MS);
   const today = now.toISOString().slice(0, 10);
@@ -594,12 +617,16 @@ function newlyOwnShifts(beforeText, afterText, name) {
   return out;
 }
 const EXCUSE_MAX = 300;
-function mergeEmployeeExcuses(storedValue, incomingValue, name, shift) {
+function mergeEmployeeExcuses(storedValue, incomingValue, name, shift, backDays) {
   const incoming = parseJson(incomingValue);
   if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return null;
   const parsed = parseJson(storedValue);
   const out = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  const days = ownDays(shift);
+  /* Back as far as a request may reach, rather than today alone. A reason
+     given for a morning three weeks ago explains a mark already on the
+     record and moves no time. Their own days still, and never one the office
+     has written. */
+  const days = ownExcusableDays(shift, backDays);
   const mine = k => {
     const i = String(k).lastIndexOf('|');
     return i > 0 && String(k).slice(0, i) === name && days.indexOf(String(k).slice(i + 1)) > -1;
@@ -1475,8 +1502,11 @@ app.put('/api/kv/:key', requireAuth, async (req, res) => {
         value = merged;
       } else if (key === 'lateExcuses' && req.session.role === 'employee') {
         excusesBefore = row ? row.value : '{}';
+        /* The same window the request form reaches over, so what the page
+           offers and what this accepts cannot drift apart. */
         const merged = mergeEmployeeExcuses(row ? row.value : '{}', value,
-                                            (req.user && req.user.name) || '', empShift);
+                                            (req.user && req.user.name) || '', empShift,
+                                            (await mailSettings(req.session.orgId)).leave.backDays);
         if (merged === null) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'bad_excuse' }); }
         value = merged;
       } else if (key === 'leaveRequests') {
@@ -2428,6 +2458,22 @@ async function mailSettings(orgId) {
       };
     })()
   };
+  /* The reminder to the person themselves. Off until the office turns it on:
+     this is the only message here that writes to an employee on a schedule
+     rather than because something happened, and one switched on by default
+     would start nagging a company that never asked for it. */
+  const rm = isPlainObject(s.remind) ? s.remind : {};
+  const hhmm = (v, dflt) => (/^\d{1,2}:\d{2}$/.test(String(v)) ? String(v) : dflt);
+  s.remind = {
+    daily: rm.daily === true,
+    dailyAt: hhmm(rm.dailyAt, '10:00'),
+    weekly: rm.weekly === true,
+    /* 0 is Sunday, so 5 is Friday - the end of the week, which is when an
+       office asks for the week's loose ends. */
+    weekday: (Number(rm.weekday) >= 0 && Number(rm.weekday) <= 6) ? Math.floor(Number(rm.weekday)) : 5,
+    weeklyAt: hhmm(rm.weeklyAt, '10:00'),
+    subject: clip(rm.subject, 200), intro: clip(rm.intro, 2000), footer: clip(rm.footer, 2000)
+  };
   if (!/^\d{1,2}:\d{2}$/.test(String(s.dailyAt))) s.dailyAt = MAIL_DEFAULTS.dailyAt;
 
   /* One sign-off, on every message.
@@ -2456,6 +2502,7 @@ async function mailSettings(orgId) {
   s.excused.footer = theirs(s.excused.footer);
   s.excused.shift.footer = theirs(s.excused.shift.footer);
   s.excused.part.footer = theirs(s.excused.part.footer);
+  s.remind.footer = theirs(s.remind.footer);
   return s;
 }
 /* What else sees it. A tab's own Cc box, and nothing else once that tab names
@@ -3751,6 +3798,120 @@ async function partTakenAudience(orgId, settings, names) {
   await alsoTheirApprovers(orgId, cc, names, to);
   return { to, cc, push };
 }
+/* One round of reminders: a message each to the people who have something
+   outstanding, and nothing at all to anybody who does not.
+
+   Claimed for the day rather than for the hour, so an office running both the
+   daily and the weekly one gets a single message on a Friday rather than two
+   within the minute. */
+async function sendRemindersOnce(orgId, day, settings) {
+  const job = 'remind-email:' + orgId + ':' + day;
+  const claimed = await pool.query(
+    'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
+  if (!claimed.rows.length) return { ok: true, already: true };
+  const kv = await sharedKeys(orgId, ['companyInfo']);
+  const owed = await pendingByEmployee(orgId, settings);
+  const names = Object.keys(owed);
+  let sent = 0;
+  for (const name of names.slice(0, 200)) {
+    const items = owed[name];
+    if (!items || !items.length) continue;
+    /* Theirs alone. No office copy, no manager on it: a reminder somebody
+       else is reading is a report about them, which is a different message
+       with a different effect on whoever opens it. */
+    const to = await employeeAddress(orgId, name);
+    if (!to) continue;                       // no account, nobody to write to
+    const mail = mailer.remindEmail({
+      orgName: orgNameOf(kv.companyInfo), name: items.shownName || name, day: day,
+      items: items, siteUrl: mailer.baseUrl(),
+      subject: settings.remind.subject, intro: settings.remind.intro,
+      footer: settings.remind.footer
+    });
+    if (!mail) continue;
+    const msg = { to: [to], cc: [], subject: mail.subject, html: mail.html };
+    const r = await mailer.send(msg);
+    await logMail(orgId, 'remind', msg, r);
+    if (r.ok) sent++;
+  }
+  /* Nothing went out at all - nobody owes anything, or nobody has an account.
+     The claim is given back so a later hour can try again rather than the day
+     being spent on a round that sent nothing. */
+  if (!sent) await pool.query('DELETE FROM maintenance_done WHERE job = $1', [job]);
+  return { ok: true, sent: sent, owed: names.length };
+}
+/* ---- what one person still owes the record ----
+
+   The same three things their own page lists, worked out here so a reminder
+   can be sent to somebody who has not opened that page in a fortnight - which
+   is the only person a reminder is for.
+
+   Leave the record holds with no form behind it. A late morning nobody has
+   explained. A question somebody asked back. A request still waiting on an
+   approver is deliberately NOT here: that one is not theirs to finish, and a
+   message telling somebody to get on with a thing they cannot do is a message
+   that teaches them to ignore the next one. */
+async function pendingByEmployee(orgId, settings) {
+  const back = backDaysOf(settings.leave.backDays);
+  const now = new Date(Date.now() + IST_MS);
+  const today = now.toISOString().slice(0, 10);
+  const since = new Date(now.getTime() - back * 86400000).toISOString().slice(0, 10);
+  const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'empNames',
+                                      'dayShifts', 'shiftAssignments', 'lateThresholdMin',
+                                      'lateExcuses', 'manualRecords']);
+  const overrides = parseJson(kv.overrides) || {};
+  const halfDays = parseJson(kv.halfDays) || {};
+  const requests = parseJson(kv.leaveRequests) || [];
+  const shown = parseJson(kv.empNames) || {};
+  const dayShifts = parseJson(kv.dayShifts) || {};
+  const assigned = parseJson(kv.shiftAssignments) || {};
+  const excuses = parseJson(kv.lateExcuses) || {};
+  const manual = parseJson(kv.manualRecords) || {};
+  const threshold = Number(parseJson(kv.lateThresholdMin)) || 10;
+  const out = {};
+  const add = (name, item) => { (out[name] = out[name] || []).push(item); };
+
+  /* 1. Leave on the record that no form accounts for. */
+  unrequestedFrom(overrides, halfDays, requests, since).forEach(u => {
+    add(u.empName, { job: 'form', day: u.dateFrom, dayTo: u.dateTo,
+                     type: u.leaveType, half: u.half || '' });
+  });
+
+  /* 2. A late morning with nothing said about it - by them or by the office. */
+  const recs = await pool.query(
+    'SELECT employee, day, data FROM records WHERE org_id = $1 AND day >= $2 AND day <= $3',
+    [orgId, since, today]);
+  recs.rows.forEach(r => {
+    const day = (r.day instanceof Date) ? r.day.toISOString().slice(0, 10)
+                                        : String(r.day).slice(0, 10);
+    const name = r.employee, key = name + '|' + day;
+    const ov = overrides[key];
+    /* A day signed off, worked from home or spent at a customer is not a
+       morning anybody was late for. */
+    if (ov && (ov.cat === 'LEAVE' || ov.cat === 'WFH' || ov.cat === 'VISIT')) return;
+    if (excuses[key]) return;                      // already answered, either way
+    const data = r.data || {};
+    const m = manual[key];
+    const came = hhmmToMinutes(data['in'] || (m && m['in']) || '');
+    if (came == null) return;
+    const start = shiftStartMin(dayShifts[key] || shiftInForce(assigned, name, day) || '9:30-6:30');
+    if (start == null || came - start <= threshold) return;
+    add(name, { job: 'late', day, mins: came - start, came: data['in'] || (m && m['in']) || '' });
+  });
+
+  /* 3. A question waiting on their answer. */
+  requests.forEach(r => {
+    if (!r || r.archived || r.status !== 'query') return;
+    add(r.empName, { job: 'reply', day: r.dateFrom, type: r.leaveType,
+                     asked: r.adminNote || '' });
+  });
+
+  /* Oldest first: the one being forgotten is the one worth leading with. */
+  Object.keys(out).forEach(n => {
+    out[n].sort((a, b) => String(a.day).localeCompare(String(b.day)));
+    out[n].shownName = shown[n] || n;
+  });
+  return out;
+}
 /* The message about it. For reading, not for deciding: the day is already
    excused on the record, there are no buttons on it, and it goes to whoever
    the office named for this and nobody else - an empty list means nobody
@@ -4414,6 +4575,37 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
      Each is built the way the thing that really sends it builds it, audience
      and all, out of the same two functions those senders use. A preview that
      works out its own answer is a preview of nothing. */
+  /* What this person's reminder would say today, built from what they
+     actually owe rather than from an invented day - a preview of a nag is
+     only worth reading if it is the nag they would really get. Somebody with
+     nothing outstanding has no message, and the office is told that rather
+     than shown an empty one. */
+  if (String((req.body && req.body.kind) || '') === 'remind') {
+    const owed = (await pendingByEmployee(orgId, settings))[name] || [];
+    const mail = owed.length ? mailer.remindEmail({
+      orgName: orgNameOf(kv.companyInfo), name: name, day: day, items: owed,
+      siteUrl: mailer.baseUrl(), subject: settings.remind.subject,
+      intro: settings.remind.intro, footer: settings.remind.footer }) : null;
+    if (!mail) {
+      return res.status(400).json({ error: name + ' has nothing outstanding — '
+        + 'no reminder would be sent. Try somebody with a day still to answer for.' });
+    }
+    const to = String(await employeeAddress(orgId, name) || '').trim();
+    if ((req.body && req.body.send) === 'test') {
+      let box = String((req.user && req.user.email) || '').trim();
+      if (!EMAIL_RE.test(box)) box = to;
+      if (!box) return res.status(400).json({ error: 'Your account has no email address on it.' });
+      const m2 = { to: [box], cc: [], subject: '[Sample] ' + mail.subject, html: mail.html };
+      const r2 = await mailer.send(m2);
+      await logMail(orgId, 'remind', m2, r2);
+      if (!r2.ok) return res.status(502).json(r2);
+      return res.json({ ok: true, sentTo: box });
+    }
+    /* Addressed to them and to nobody else, which is the whole arrangement:
+       a reminder somebody else is reading is a report about them. */
+    return res.json({ ok: true, sample: true, to: to ? [to] : [], cc: [],
+                      preview: { subject: mail.subject, html: mail.html } });
+  }
   if (String((req.body && req.body.kind) || '') === 'part') {
     const sampleNote = 'Sample only \u2014 nothing has actually been marked.';
     const selfAud = await selfMarkedAudience(orgId, settings, [name]);
@@ -5047,6 +5239,16 @@ async function dailyEmailTick() {
         try { await sendTasksOnce(org.id, day, s); }
         catch (e) { console.error('work email:', e && e.message); }
       }
+      /* The reminder to each person about their own loose ends. Daily, or on
+         the one weekday the office picked, or both - and one message either
+         way, because the claim is on the day. */
+      try {
+        const dow = new Date(day + 'T00:00:00Z').getUTCDay();
+        const dueDaily = s.remind.daily && min >= hhmmToMin(s.remind.dailyAt);
+        const dueWeekly = s.remind.weekly && dow === s.remind.weekday
+                          && min >= hhmmToMin(s.remind.weeklyAt);
+        if (dueDaily || dueWeekly) await sendRemindersOnce(org.id, day, s);
+      } catch (e) { console.error('reminder email:', e && e.message); }
       if (!s.daily || min < hhmmToMin(s.dailyAt)) continue;
       const job = 'daily-email:' + org.id + ':' + day;
       const claimed = await pool.query(

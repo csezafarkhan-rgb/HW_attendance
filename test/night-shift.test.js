@@ -176,9 +176,15 @@ const ok = s => { vm.runInContext('__v = validShift(' + JSON.stringify(s) + ')',
   check('and says so, the date not being today\u2019s',
     /your shift started this day/.test(APP));
 
-  /* The merges all judge it the same way, from one read of the shifts. */
+  /* The merges all judge it the same way, from one read of the shifts.
+     Three ask ownDays outright. The fourth - a reason for a late arrival -
+     reaches back over the window a request may be filed in, and starts that
+     window from the same answer, so a night worker's "today" is the night
+     they just worked there too. */
   check('every merge is given the shift to judge it by',
-    (SRV.match(/const days = ownDays\(shift\);/g) || []).length === 4);
+    (SRV.match(/const days = ownDays\(shift\);/g) || []).length === 3
+    && /const days = ownExcusableDays\(shift, backDays\);/.test(SRV)
+    && /const out = ownDays\(shift\);/.test(SRV));
   check('and the route reads it once for all of them',
     /let empShift = '';/.test(SRV)
       && /\['manualRecords', 'overrides', 'lateExcuses', 'dayShifts'\]\.indexOf\(key\) > -1/.test(SRV));

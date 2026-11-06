@@ -305,6 +305,21 @@ const DEFAULT_TEXT = {
       + 'already counted as it reads below.',
     footer: 'Best regards,\n{org}'
   },
+  /* A word to one person about their own card, and to nobody else.
+
+     Every other message here is the office being told something. This one is
+     a person being reminded to do a thing only they can do, so it is short,
+     it is theirs alone, and it does not carry the apparatus of a report. */
+  /* What one person still owes the record. Theirs alone, so it opens with
+     their name and asks for nothing from anybody else. */
+  remind: {
+    subject: '{n} thing(s) waiting on you \u00b7 {date}',
+    intro: 'Hi {who},\n\nA few days on your record still need something from you. '
+      + 'None of it changes what is already counted \u2014 it is the reason that is '
+      + 'missing, and it is quicker to give now than to be asked for at the end of '
+      + 'the month.',
+    footer: 'Best regards,\n{org}'
+  },
   excused: {
     subject: 'Late excused \u00b7 {who} \u00b7 {date}',
     intro: 'Hello,\n\n{who} has marked their own late arrival as excused and said why. '
@@ -1091,6 +1106,57 @@ function namesIn(items) {
   if (out.length > 3) return out.slice(0, 3).join(', ') + ' and ' + (out.length - 3) + ' more';
   return out.slice(0, -1).join(', ') + ' and ' + out[out.length - 1];
 }
+/* What one person still owes, listed for them and sent to them alone.
+
+   An office that wants to know who is behind has the evening message for
+   that. This one exists for the person who has not opened their own page in
+   a fortnight, so it carries no record, no figures and nobody else's name -
+   just the days, what each one wants, and the way in. */
+function remindEmail(o) {
+  const items = (o.items || []).filter(Boolean);
+  if (!items.length) return null;
+  const words = DEFAULT_TEXT.remind;
+  const say = { who: o.name || '', org: o.orgName || 'Attendance',
+                n: String(items.length), date: fmtDay(o.day) };
+  const body = [];
+  const intro = fillText(o.intro || words.intro, say);
+  if (intro) body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
+    + lines(intro) + '</div>');
+  const KIND = { HALF: 'Half day', SHORT: 'Short leave', THREEQ: 'Three-quarter day' };
+  items.forEach(function (it) {
+    let tag, said;
+    if (it.job === 'form') {
+      tag = KIND[it.type] || 'Full day';
+      said = 'Taken on your record with no form behind it. The day is already '
+           + 'counted \u2014 the form puts the reason on file.';
+    } else if (it.job === 'late') {
+      tag = minsSaid(it.mins) + ' late';
+      said = 'In at ' + esc(clock(it.came)) + ', and nothing said about it yet.';
+    } else {
+      tag = 'A question';
+      said = it.asked ? ('\u201c' + esc(String(it.asked).slice(0, 200)) + '\u201d')
+                      : 'Somebody asked a question about this one.';
+    }
+    body.push('<div style="padding:10px 12px;margin-bottom:8px;border:1px solid ' + LINE + ';'
+      + 'border-radius:10px;">'
+      + '<div style="font-size:13.5px;"><b>' + esc(dateRange(it.day, it.dayTo || it.day))
+      + '</b><span style="color:' + SOFT + ';"> \u00b7 ' + esc(tag) + '</span></div>'
+      + '<div style="font-size:12.5px;color:' + SOFT + ';margin-top:3px;">' + said + '</div>'
+      + '</div>');
+  });
+  if (o.siteUrl) body.push('<div style="margin-top:14px;">'
+    + button(o.siteUrl, 'Open your record', 'approve') + '</div>');
+  const foot = fillText(o.footer || words.footer, say).trim();
+  if (foot) body.push('<div style="margin-top:16px;padding-top:12px;border-top:1px solid '
+    + LINE + ';font-size:12px;color:' + SOFT + ';">' + lines(foot) + '</div>');
+  const subject = fillText(o.subject || words.subject, say).trim();
+  return {
+    subject: subject || (items.length + ' waiting on you'),
+    html: layout(o.orgName || 'Attendance',
+      items.length === 1 ? 'One thing is waiting on you'
+                         : (items.length + ' things are waiting on you'), body)
+  };
+}
 function excusedEmail(o) {
   const items = (o.items || []).filter(Boolean);
   if (!items.length) return null;
@@ -1544,7 +1610,8 @@ module.exports = {
   conf, ready, baseUrl, send,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
-  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail, shiftEmail, partDayEmail, leaveRecordBlock, requestCard, confirmPage, resultPage, clock, minsSaid,
+  dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail,
+  remindEmail, shiftEmail, partDayEmail, leaveRecordBlock, requestCard, confirmPage, resultPage, clock, minsSaid,
   passwordEmail, passwordPage,
   DEFAULT_TEXT, fillText
 };

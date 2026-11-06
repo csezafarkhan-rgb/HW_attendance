@@ -19,10 +19,14 @@ const lift = re => { const m = re.exec(SRC); if (!m) throw new Error('not found:
 [/function parseJson\(s\) \{[\s\S]*?\n\}/,
  /function parseShiftSpan\(str\) \{[\s\S]*?\n\}/,
  /function ownDays\(shift\) \{[\s\S]*?\n\}/,
+ /* How far back a reason for a late arrival may still be given. */
+ /const REQ_BACK_DAYS = [^\n]*/,
+ /function backDaysOf\(v\) \{[\s\S]*?\n\}/,
  /const TIME_RE = [^\n]*/,
  /const EXCUSE_MAX = [^\n]*/,
  /function mergeEmployeeManual\(storedValue, incomingValue, name, selfMarkValue, shift\) \{[\s\S]*?\n\}/,
- /function mergeEmployeeExcuses\(storedValue, incomingValue, name, shift\) \{[\s\S]*?\n\}/,
+ /function mergeEmployeeExcuses\(storedValue, incomingValue, name, shift, backDays\) \{[\s\S]*?\n\}/,
+ /function ownExcusableDays\(shift, backDays\) \{[\s\S]*?\n\}/,
  /const VISIT_DETAIL_MAX = [^\n]*/,
  /const VISIT_REASON_MAX = [^\n]*/,
  /function mergeEmployeeVisit\(storedValue, incomingValue, name, selfMarkValue, shift\) \{[\s\S]*?\n\}/
