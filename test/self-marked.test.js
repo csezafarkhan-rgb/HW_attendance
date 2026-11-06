@@ -525,10 +525,11 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
   check('the server checks the clock as well, with a little slack for theirs',
     /const cap = now\.getUTCHours\(\) \* 60 \+ now\.getUTCMinutes\(\) \+ 2;/.test(SRC));
 
-  /* Both cards fill the space the month leaves, rather than the dead band
-     under the whole page. */
+  /* All three cards fill the space the month leaves, rather than the dead
+     band under the whole page. What is waiting on them comes first: the day
+     card is about today, and a thing left behind is read first or not at all. */
   check('their day and their work log sit under the calendar',
-    /<div class="emp-split-main">[\s\S]{0,400}id="empCalGrid"[\s\S]{0,400}id="empDayCard"[\s\S]{0,200}id="empTasksCard"/.test(APP),
+    /<div class="emp-split-main">[\s\S]*?id="empCalGrid"[\s\S]*?id="empWaiting"[\s\S]*?id="empDayCard"[\s\S]*?id="empTasksCard"[\s\S]*?<\/div>\s*<aside/.test(APP),
     (/<div class="emp-split-main">[\s\S]{0,200}/.exec(APP) || [])[0]);
 }
 

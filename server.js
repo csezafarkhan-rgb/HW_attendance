@@ -205,7 +205,8 @@ const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
                          and the answer is the office's rather than the page's. */
                       'leavePolicy'];
 const EMP_VISIBLE_KEYS = EMP_KEYED_BY_DAY.concat(EMP_KEYED_BY_NAME, EMP_READABLE,
-                                                 ['leaveRequests', 'signatures', 'mailSettings']);
+                                                 ['leaveRequests', 'signatures', 'mailSettings',
+                                                  'approvalRoute']);
 
 function parseJson(s) { try { return JSON.parse(s); } catch (e) { return undefined; } }
 function ownRequests(value, name) {
@@ -221,6 +222,19 @@ function valueForEmployee(key, value, name, requestsValue) {
      are none of an employee's business. One number in there is: how far back
      their own request form may reach. So they are handed that and nothing
      else - a window onto one field rather than the key. */
+  /* Who answers for their leave, and only theirs.
+
+     Somebody looking at a request of their own that has been sitting for a
+     week should be able to see who it is sitting with - 'ask your manager'
+     is no use to somebody who does not know which manager. Who answers for
+     everybody else is the office's business, so they are handed their own
+     row of that table and nothing else. */
+  if (key === 'approvalRoute') {
+    const v = parseJson(value);
+    const row = (isPlainObject(v) && Object.prototype.hasOwnProperty.call(v, name))
+      ? v[name] : null;
+    return JSON.stringify(row == null ? {} : { [name]: row });
+  }
   if (key === 'mailSettings') {
     const v = parseJson(value);
     const lv = (isPlainObject(v) && isPlainObject(v.leave)) ? v.leave : {};

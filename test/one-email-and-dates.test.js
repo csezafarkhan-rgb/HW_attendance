@@ -263,7 +263,13 @@ check('and the call site reads it from the office\u2019s own settings',
 /* An employee has to obey it, so they are allowed to read it - and only it,
    because the rest of that key is addresses. */
 check('an employee may read the number',
-  /'leaveRequests', 'signatures', 'mailSettings'\]/.test(SRV), null);
+  /'leaveRequests', 'signatures', 'mailSettings',/.test(SRV), null);
+/* And who answers for their own leave, so a request of theirs that has been
+   sitting a week can say who it is sitting with. Their own row of that table
+   and nobody else's - who answers for everybody is the office's business. */
+check('and who answers for their own leave',
+  /'approvalRoute'\]\);/.test(SRV)
+  && /return JSON\.stringify\(row == null \? \{\} : \{ \[name\]: row \}\);/.test(SRV), null);
 check('and is handed that field alone, not the addresses around it',
   /return JSON\.stringify\(\{ leave: \{ backDays: backDaysOf\(lv\.backDays\) \} \}\);/.test(SRV), null);
 check('the form asks for it rather than holding thirty',
