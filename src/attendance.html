@@ -21858,6 +21858,31 @@ function buildExcelBackup(){
     });
   }
 
+  /* The days this panel is about: the floor to today, walked.
+
+     It used to walk allSelectedDates() - the months ticked on the admin
+     grid's month picker - which is a different question that happened to
+     hand back dates. A page whose grid sat on September searched September
+     for days that can only be in November: three unanswered days of this
+     month, and a panel reporting nothing to settle. Nobody would have
+     guessed from looking at it, because it was not empty by mistake, it was
+     confidently empty about the wrong month.
+
+     Every record is loaded at once and keyed by name and date, so walking a
+     range costs nothing and depends on nothing but the two ends of it. The
+     count is capped because a floor that somehow came back as rubbish should
+     draw a short list, not spin. */
+  function ewDays(floor){
+    var out = [], d = new Date(floor + 'T00:00:00');
+    if(isNaN(d.getTime())) return out;
+    var end = new Date(todayISO_full + 'T00:00:00');
+    for(var i = 0; d <= end && i < 400; i++){
+      out.push(isoOf(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }
+
   function ewGather(name){
     var mine = [], theirs = [], floor = ewFloor();
 
@@ -21900,8 +21925,7 @@ function buildExcelBackup(){
            absent until somebody says otherwise. One pass, so a day cannot be
            both raised as late and raised as missing. */
     var mineDay = empWorkingDay();
-    (allSelectedDates() || []).forEach(function(d){
-      if(d < floor || d > todayISO_full) return;
+    ewDays(floor).forEach(function(d){
       if(onApprovedLeave(name, d)) return;
       /* getRecord already settles a typed time against a punched one, and is
          what the grid and the day card read - so this asks it rather than

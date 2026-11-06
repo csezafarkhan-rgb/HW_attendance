@@ -115,7 +115,7 @@ check('and otherwise it names whoever the office named against them',
 /* ---- what it refuses to nag about ---- */
 check('nothing older than the request form can reach for',
   /if\(u\.empName !== name \|\| u\.dateFrom < floor\) return;/.test(gather)
-  && /if\(d < floor \|\| d > todayISO_full\) return;/.test(gather), null);
+  && /ewDays\(floor\)\.forEach/.test(gather), null);
 check('and the floor is the form’s own, not a second number',
   /back = earliestRequestDay\(\);/.test(grab(APP, 'ewFloor')), null);
 check('a day they were signed off for is not lateness',
@@ -166,7 +166,28 @@ check('the oldest is put first, because that is the one being forgotten',
     /mine\.push\(\{ job:'absent', day:d, age:ewDaysSince\(d\) \}\);/.test(gather), null);
   /* One pass over the days, so a date cannot come out both late and missing. */
   check('found in the same pass as lateness, not a second one',
-    (gather.match(/allSelectedDates\(\)/g) || []).length === 1, null);
+    (gather.match(/ewDays\(floor\)\.forEach/g) || []).length === 1, null);
+  /* The days are the floor to today, walked. Not the months ticked on the
+     admin grid's picker, which is a different question that happens to hand
+     back dates - a page whose grid sat on September searched September for
+     days that can only be in November and reported nothing to settle. */
+  check('the days walked are this panel\u2019s own, not the grid\u2019s month picker',
+    !/allSelectedDates\(\)/.test(gather), null);
+  {
+    const c = vm.createContext({ Date, isNaN, Array });
+    vm.runInContext('var todayISO_full = "2026-11-06";'
+      + 'function isoOf(d){ return d.getFullYear() + "-" '
+      + '+ ("0"+(d.getMonth()+1)).slice(-2) + "-" + ("0"+d.getDate()).slice(-2); }'
+      + grab(APP, 'ewDays'), c);
+    check('it walks from the floor to today, today included',
+      JSON.stringify(c.ewDays('2026-11-03'))
+        === JSON.stringify(['2026-11-03','2026-11-04','2026-11-05','2026-11-06']),
+      c.ewDays('2026-11-03'));
+    check('a floor after today walks nothing rather than backwards',
+      c.ewDays('2026-11-09').length === 0, c.ewDays('2026-11-09'));
+    check('and a floor that is rubbish draws a short list rather than spinning',
+      c.ewDays('not-a-day').length === 0 && c.ewDays('2020-01-01').length === 400, null);
+  }
   check('today is the clock-in item’s, not this one’s',
     /if\(d >= mineDay\) return;/.test(gather), null);
   check('nobody is chased for a day before they joined',
