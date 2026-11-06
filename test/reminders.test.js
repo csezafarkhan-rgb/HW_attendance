@@ -225,5 +225,42 @@ check('so the list and the server agree about how far back it goes',
   /return earliestRequestDay\(\);/.test(grab(APP, 'ewFloor'))
   && /backDaysOf\(settings\.leave\.backDays\)/.test(owed), null);
 
+/* ---- the day a cell opens ----
+   A cell saying "14 min late · said why" opened onto a panel that showed
+   nothing of what was said. It drew the office's excuse and stopped, and a
+   reason somebody gives for their own lateness is deliberately not that -
+   the getters keep the two apart because only one takes the minutes off. So
+   the cell advertised a note the panel behind it would not show. */
+const day = grab(APP, 'openReadOnlyDetail');
+check('a reason they gave for themselves is shown',
+  /var pl = getLatePlea\(name, dateStr\);/.test(day)
+  && /they said why/.test(day), null);
+check('and an excuse the office gave is still shown',
+  /late \\u00b7 excused/.test(day) || /late \u00b7 excused/.test(day), null);
+check('lateness with nothing said is said plainly',
+  /nothing said about it/.test(day), null);
+check('a part of the day taken says which half and off which balance',
+  /hdLabel\(hd\.kind\)/.test(day)
+  && /second half/.test(day) && /off ' \+ hd\.leave/.test(day), null);
+check('leaving early is there too, excused or not',
+  /if\(rec && isEarly\(name, rec\)\)\{/.test(day), null);
+check('and a holiday carries its name and note',
+  /if\(hol\) note\('Holiday/.test(day), null);
+check('a mispunch flag is kept',
+  /if\(mp\) note\('Flagged as a mispunch'/.test(day), null);
+/* Each note names what it is before quoting what was written: a reason on
+   its own does not say whether it excused the day or only explained it. */
+check('every note says what it is before what was written',
+  /\+ '<b>' \+ escapeHtml\(head\) \+ '<\/b>'/.test(day), null);
+check('and a day with nothing on it says so',
+  /Nothing written about this day/.test(day), null);
+/* The cell and the panel read the same getters, so they cannot disagree
+   about what a day holds - which was the whole fault. */
+check('the panel reads the same getters the cell does',
+  ['getLatePlea', 'getLateExcuse', 'getEarlyExcuse', 'getHalfDay', 'getOfficialLeave']
+    .every(g => new RegExp(g + '\\(').test(day)), null);
+check('and the colour follows what it means',
+  /'ok'\);/.test(day) && /'wait'\);/.test(day) && /'late'\);/.test(day), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

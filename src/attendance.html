@@ -2331,6 +2331,17 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .ew-b.p{background:var(--brand,#3B7DF5);border-color:var(--brand,#3B7DF5);color:#fff;}
 .ew-b.r{background:#C0392B;border-color:#C0392B;color:#fff;}
 .ew-none{padding:9px 11px;font-size:11.5px;color:var(--ink-dim);}
+/* Everything written about one day, under its times. Each note says what
+   it is before it says what was written, because a reason on its own does
+   not tell you whether it excused the day or merely explained it. */
+.day-notes{margin-top:10px;display:flex;flex-direction:column;gap:6px;text-align:left;}
+.day-notes.empty{font-size:12px;color:var(--ink-dim);text-align:center;margin-top:12px;}
+.day-note{padding:8px 11px;border-radius:8px;background:var(--panel2);border-left:3px solid var(--line-dk);font-size:12.5px;line-height:1.5;}
+.day-note b{display:block;font-size:12px;}
+.day-note span{display:block;margin-top:2px;color:var(--ink-soft);}
+.day-note.ok{background:#E3F6EC;border-left-color:#0A7A42;}
+.day-note.wait{background:#FFF7DF;border-left-color:#E8B931;}
+.day-note.late,.day-note.early{background:#FDE7E4;border-left-color:#C0392B;}
 /* The choice that sends mail, marked as well as worded. A warning set in
    the same grey as the rest of the card is a warning somebody skims. */
 .ew-none.ew-warn{color:#8A5A12;background:#FFF7DF;border-left:3px solid #E8B931;border-radius:7px;font-weight:600;line-height:1.5;}
@@ -23493,10 +23504,50 @@ function buildExcelBackup(){
       '<div class="punch-item"><div class="k">Duration</div><div class="v">'+(rec&&rec.dur?rec.dur:'—')+'</div></div>'+
       '<div class="punch-item"><div class="k">Status</div><div class="v" style="font-size:12px;">'+(rec?STATUS_LABEL[rec.st]:'—')+'</div></div>'+
       '</div>';
-    var noteHtml = '';
-    if(ov && ov.reason) noteHtml += '<div class="save-note" style="text-align:left;">Note: '+ov.reason.replace(/</g,'&lt;')+'</div>';
-    if(mp) noteHtml += '<div class="save-note" style="text-align:left;">Flagged as mispunch'+(mp.note?': '+mp.note.replace(/</g,'&lt;'):'')+'</div>';
-    if(lx) noteHtml += '<div class="save-note" style="text-align:left;">Late arrival excused'+(lx.note?': '+lx.note.replace(/</g,'&lt;'):'')+'</div>';
+    /* Everything written about this day, in one place.
+
+       The cell says "14 min late · said why" and this showed nothing of what
+       was said: it drew the office's excuse and stopped. A reason somebody
+       gives for their own lateness is deliberately not that - the getters
+       keep the two apart because only one of them takes the minutes off - so
+       the cell was advertising a note the panel behind it would not show.
+
+       The same getters the cell reads, so the two cannot disagree about what
+       a day holds. */
+    var pl = getLatePlea(name, dateStr);
+    var ex = getEarlyExcuse(name, dateStr);
+    var hd = getHalfDay(name, dateStr);
+    var hol = getOfficialLeave(dateStr);
+    var le = rec ? getLateEarly(name, rec) : null;
+    var notes = [];
+    var note = function(head, body, cls){
+      notes.push('<div class="day-note' + (cls ? (' ' + cls) : '') + '">'
+        + '<b>' + escapeHtml(head) + '</b>'
+        + (body ? ('<span>“' + escapeHtml(body) + '”</span>') : '')
+        + '</div>');
+    };
+    if(hol) note('Holiday · ' + (hol.name || hol), (hol && hol.note) || '');
+    if(ov && ov.reason) note(ovText || 'Marked on the record', ov.reason);
+    /* A part of a day taken, and off which balance - which the cell shows as
+       a single letter in the corner and nothing else. */
+    if(hd) note((hdLabel(hd.kind) || 'Part day')
+           + (hd.half ? (' · ' + (hd.half === 'PM' ? 'second half' : 'first half')) : '')
+           + (hd.leave ? (' · off ' + hd.leave) : ''), hd.note || '');
+    /* The lateness itself, then what was said about it: excused by the office,
+       excused for themselves, or owned with a reason. */
+    if(rec && isLate(name, rec)){
+      if(lx) note(minsSaid(le.late || 0) + ' late · excused', lx.note || '', 'ok');
+      else if(pl) note(minsSaid(le.late || 0) + ' late · they said why', pl.note || '', 'wait');
+      else note(minsSaid(le.late || 0) + ' late · nothing said about it', '', 'late');
+    }
+    if(rec && isEarly(name, rec)){
+      note(minsSaid(le.early || 0) + ' early' + (ex ? ' · excused' : ''),
+           (ex && ex.note) || '', ex ? 'ok' : 'early');
+    }
+    if(mp) note('Flagged as a mispunch', mp.note || '');
+    var noteHtml = notes.length
+      ? ('<div class="day-notes">' + notes.join('') + '</div>')
+      : '<div class="day-notes empty">Nothing written about this day.</div>';
     modalBody.innerHTML = statusHtml + punchHtml + noteHtml;
     modalOverlay.classList.add('open');
   }
