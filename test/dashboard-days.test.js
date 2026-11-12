@@ -319,6 +319,24 @@ check('a cell with nothing in it is not made to look hoverable',
     && !/s\.lateDays\+' days, '/.test(src), null);
   check('the hours-worked caption says which days its percentage came from',
     /% of owed, counting to yesterday/.test(src), null);
+  /* All seven read "Name — something", and one of them lost its space in the
+     editing of the other six: "Aman Chandra— 4 days over the break". Checked
+     as a set, because a separator is exactly the sort of thing nobody reads
+     twice. */
+  {
+    const callouts = ['Highest score', 'Needs attention', 'Most improved', 'Biggest drop',
+                      'Most extra hours', 'Most time out', 'Most lateness'];
+    /* Stated as the defect rather than as the shape: a dash sitting straight
+       against the closing quote, with no space to separate it from the name
+       that goes before it. */
+    const bad = callouts.filter(t => {
+      const line = new RegExp("t:'" + t + "'[^\\n]*").exec(src);
+      if (!line) return true;
+      return /\+'(—|\\u2014)/.test(line[0]);
+    });
+    check('every callout separates the name from the figure the same way',
+      bad.length === 0, bad);
+  }
 }
 
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');

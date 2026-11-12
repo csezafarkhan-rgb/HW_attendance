@@ -18664,7 +18664,7 @@ function buildExcelBackup(){
       var outMost = stats.filter(function(x){ return x.breakOverDays > 0; })
         .sort(function(a,b){ return b.breakOverMin - a.breakOverMin; })[0];
       if(outMost)
-        out.push({k:'warn', t:'Most time out', d:nm(outMost)+'— '+nDays(outMost.breakOverDays)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' break, '+fmtMin(outMost.breakOverMin)+' beyond it'});
+        out.push({k:'warn', t:'Most time out', d:nm(outMost)+' — '+nDays(outMost.breakOverDays)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' break, '+fmtMin(outMost.breakOverMin)+' beyond it'});
       var lateSum = stats.slice().sort(function(a,b){ return b.totalLateMin - a.totalLateMin; })[0];
       if(lateSum && lateSum.lateDays > 0)
         out.push({k:'info', t:'Most lateness', d:nm(lateSum)+' \u2014 '+nDays(lateSum.lateDays)+', '+fmtMin(lateSum.totalLateMin)+' in total'});
