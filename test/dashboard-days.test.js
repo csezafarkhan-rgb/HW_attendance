@@ -251,5 +251,75 @@ check('a cell with nothing in it is not made to look hoverable',
     && /if\(dateStr >= todayISO_full\) return;/.test(src), null);
 }
 
+/* ---- a month that is not over yet ----
+   Hours owed counted every day in the range, so on the twelfth of a month the
+   month had already asked for all of itself. "45:16 of 187:00 hrs" - 24% of
+   the hours met, a figure that could not have passed forty whatever anybody
+   did, and that rose on its own as the month ran out. A quarter of the score
+   rides on it, which is most of why every name showed a drop.
+
+   The week reckoning beside it has always left a date still to come out
+   entirely. This asks the same question the same way. */
+{
+  /* Ravi's fixture runs 1-14 June. Pretend it is the 10th: the 10th onwards
+     has not finished, and cannot have asked for its hours yet. */
+  const whole = ctx.computeEmployeeStats('Ravi', DATES);     // todayISO_full is 2026-07-01
+  const part = (() => {
+    const saved = ctx.todayISO_full;
+    vm.runInContext('todayISO_full = "2026-06-10";', ctx);
+    const r = ctx.computeEmployeeStats('Ravi', DATES);
+    vm.runInContext('todayISO_full = "' + saved + '";', ctx);
+    return r;
+  })();
+  check('a finished month asks for all of its hours',
+    whole.owedMin > 0 && whole.owedMin === part.owedMin + ctx.owedMinutes('Ravi', '2026-06-10')
+      + ctx.owedMinutes('Ravi', '2026-06-12'),
+    { whole: whole.owedMin, part: part.owedMin });
+  check('a month still running asks only for the days that are over',
+    part.owedMin < whole.owedMin, { part: part.owedMin, whole: whole.owedMin });
+  /* The other half of it: a ratio with today on one side and not the other
+     would read over a hundred per cent all afternoon and fall back at
+     midnight. */
+  check('the hours counted against them stop at the same day',
+    part.workedDoneMin <= part.workedMin && part.workedDoneMin < whole.workedMin,
+    { done: part.workedDoneMin, all: part.workedMin });
+  check('while the worked total still shows today, because it is a total',
+    part.workedMin === whole.workedMin, { part: part.workedMin, whole: whole.workedMin });
+  check('so hours met is taken from the days that are over',
+    part.hoursMetPct === Math.round(part.workedDoneMin / part.owedMin * 100),
+    { pct: part.hoursMetPct });
+  /* The fault's own shape: owed complete while worked had barely started. */
+  check('and a part-finished month is no longer measured against the whole of it',
+    part.hoursMetPct > Math.round(part.workedDoneMin / whole.owedMin * 100),
+    { now: part.hoursMetPct, was: Math.round(part.workedDoneMin / whole.owedMin * 100) });
+  check('a finished month is unchanged by any of it',
+    whole.workedDoneMin === whole.workedMin
+    && whole.hoursMetPct === Math.round(whole.workedMin / whole.owedMin * 100),
+    { done: whole.workedDoneMin, all: whole.workedMin });
+  /* The score reads the same pair, or it would disagree with the column. */
+  check('the score measures the hours the same way the column does',
+    /s\.workedDoneMin == null \? \(s\.workedMin \|\| 0\) : s\.workedDoneMin/.test(src), null);
+  /* The comparison period is cut to the same number of days, or every count
+     on the page reads as a drop for three weeks of every month. */
+  check('last month is compared only as far as this one has got',
+    /prevDates = prevDates\.filter\(function\(d\)\{ return d\.slice\(8\) <= cut; \}\);/.test(src)
+    && /var running = dates\.filter\(function\(d\)\{ return d >= todayISO_full; \}\)\.length > 0;/
+         .test(src), null);
+  check('and it says so, rather than quietly comparing a shorter month',
+    /' to the ' \+ parseInt\(cut, 10\) \+ 'th'/.test(src), null);
+}
+
+/* ---- what the callouts call people, and how they count ---- */
+{
+  check('the callouts name people the way the rest of the page does',
+    !/d:byScore\[0\]\.name/.test(src) && !/d:lateSum\.name/.test(src)
+    && !/d:outMost\.name/.test(src) && !/d:over\.name/.test(src), null);
+  check('and one day is a day, not “1 days”',
+    !/\+' days over the '/.test(src) && !/lateSum\.lateDays\+' days, '/.test(src)
+    && !/s\.lateDays\+' days, '/.test(src), null);
+  check('the hours-worked caption says which days its percentage came from',
+    /% of owed, counting to yesterday/.test(src), null);
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

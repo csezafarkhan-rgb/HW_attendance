@@ -17953,7 +17953,22 @@ function buildExcelBackup(){
         if(xw > 0){ extraMin += xw; extraDays++; }
         return;
       }
-      owedMin += req;
+      /* A day that has not finished has not asked for its hours yet.
+
+         This used to add the whole month on the first morning of it, so the
+         hours owed were complete while the hours worked had barely started.
+         On the twelfth of November the figure read "45:16 of 187:00" and
+         called it 24% of the hours met - a number that could not have
+         exceeded forty per cent whatever anybody did, and that climbed on its
+         own as the month ran out. It took a quarter of the score with it,
+         which is most of why every name on the table showed a drop.
+
+         The week reckoning beside this one has always known better: a date
+         still to come is left out entirely, and today joins on its arrival
+         alone because its hours are settled tomorrow when the out time
+         arrives. The same rule, asked the same way, so the two cannot
+         disagree about what the month has asked for. */
+      if(ds < todayISO_full) owedMin += req;
       var recX = getRecord(empName, ds);
       var leX  = recX ? getLateEarly(empName, recX) : null;
       if(getLateExcuse(empName, ds)){ excusedLate++;  if(leX) excusedLateMin  += leX.late  || 0; }
@@ -17970,16 +17985,30 @@ function buildExcelBackup(){
        away from the desk. Only days where all three are real: not a manual
        entry (no break data), not a mispunch, not today (still running). */
     var totalDurMin=0, inDurMin=0, outDurMin=0, durDays=0, breakOkDays=0, breakOverDays=0, breakOverMin=0, inOfficeSum=0;
+    /* Worked hours twice over, and they are not the same figure.
+
+       workedMin is everything, today included, because the Worked Hrs column
+       is a total and somebody who has been in since nine expects to see it.
+       workedDoneMin stops at the end of yesterday, and it is the one measured
+       against the hours owed - which now also stop there. A ratio with today
+       on one side and not the other would read over a hundred per cent all
+       afternoon and fall back at midnight. */
+    var workedDoneMin = 0;
+    var tally = function(dateStr){
+      var w = workedMinutes(empName, dateStr);
+      workedMin += w;
+      if(dateStr < todayISO_full) workedDoneMin += w;
+    };
     dates.forEach(function(dateStr){
       if(getOfficialLeave(dateStr)) return; // holiday isn't a working day
       var ov = getOverride(empName, dateStr);
       // Hours come from the same function the grid footer and the header meter
       // use, so the dashboard cannot report a different total for the same days.
       if(ov){
-        if(ov.cat==='WFH'){ wfhDays++; presentDays++; workedMin += workedMinutes(empName, dateStr); }
-        else if(ov.cat==='VISIT'){ visitDays++; presentDays++; workedMin += workedMinutes(empName, dateStr); }
+        if(ov.cat==='WFH'){ wfhDays++; presentDays++; tally(dateStr); }
+        else if(ov.cat==='VISIT'){ visitDays++; presentDays++; tally(dateStr); }
         else if(ov.cat==='LEAVE'){ leaveDays++; }
-        else { presentDays++; workedMin += workedMinutes(empName, dateStr); }
+        else { presentDays++; tally(dateStr); }
         return;
       }
       var rec = getRecord(empName, dateStr);
@@ -18010,7 +18039,7 @@ function buildExcelBackup(){
       if(rec.st==='PR' || rec.st==='HD'){
         if(rec.st==='HD') halfDays++;
         presentDays++;
-        workedMin += workedMinutes(empName, dateStr);
+        tally(dateStr);
         // A Saturday worked from home by arrangement is a WFH day, whether or
         // not anyone marked an override on it.
         if(new Date(dateStr+'T00:00:00').getDay() === 6 && getSatPolicy(empName).mode === 'WFH') wfhDays++;
@@ -18075,7 +18104,8 @@ function buildExcelBackup(){
       owedMin:owedMin, extraMin:extraMin, extraDays:extraDays,
       weekExtraMin:weekExtra, weekShortMin:weekShort,
       holidayDays:holidayDays, offDays:offDays, mispunches:mispunches,
-      hoursMetPct: owedMin > 0 ? Math.round(workedMin / owedMin * 100) : 100,
+      workedDoneMin:workedDoneMin,
+      hoursMetPct: owedMin > 0 ? Math.round(workedDoneMin / owedMin * 100) : 100,
       attendancePct: expected>0 ? Math.round(presentDays/expected*100) : 100,
       onTimePct: presentDays>0 ? Math.round(onTime/presentDays*100) : 100,
       punctualityPct: presentDays>0 ? Math.round(kept/presentDays*100) : 100,
@@ -18121,7 +18151,12 @@ function buildExcelBackup(){
      down on the desk figure. */
   var SCORE_GIVEN_FULL = 0.05;     // a twentieth of the target, given over, scores the lot
   function perfScore(s){
-    var worked = (s.workedMin || 0) + (s.excusedMin || 0);
+    /* Against the hours owed, which stop at the end of yesterday - so the
+       hours counted stop there too. Excused time stays whole: a late arrival
+       is settled the moment somebody walks in, which is the same reason the
+       week reckoning lets today count for its arrival alone. */
+    var worked = (s.workedDoneMin == null ? (s.workedMin || 0) : s.workedDoneMin)
+               + (s.excusedMin || 0);
     var hoursMet = s.owedMin > 0 ? Math.min(100, Math.round(worked / s.owedMin * 100)) : 100;
     var kept = s.punctualityPct == null ? s.onTimePct : s.punctualityPct;
     var inOffice = s.inOfficePct == null ? 100 : s.inOfficePct;
@@ -18320,6 +18355,7 @@ function buildExcelBackup(){
   /* One person, in depth: this month against last, against the team, and month
      by month across the year. The table answers "who"; this answers "why". */
   function renderEmpDetail(name, dates, stats, prevBy, prevLabel, trendMonths, trendBy){
+    var edDays = function(n){ return n + (n === 1 ? ' day' : ' days'); };
     var s = null;
     stats.forEach(function(x){ if(x.name === name) s = x; });
     if(!s) return '';
@@ -18392,12 +18428,19 @@ function buildExcelBackup(){
                       s.shortLeaveDays?(s.shortLeaveDays+' short'):'' ].filter(Boolean).join(', ') || '\u2014', '')
                 + row('Work from home', s.wfhDays || '\u2014', '')
                 + row('Off-site visits', s.visitDays || '\u2014', '')
-                + row('Late', s.lateDays ? (s.lateDays+' days, '+fmtMin(s.totalLateMin)) : '\u2014',
+                + row('Late', s.lateDays ? (edDays(s.lateDays)+', '+fmtMin(s.totalLateMin)) : '\u2014',
                       s.excusedLate ? (s.excusedLate+' excused') : '')
-                + row('Left early', s.earlyDays ? (s.earlyDays+' days, '+fmtMin(s.totalEarlyMin)) : '\u2014',
+                + row('Left early', s.earlyDays ? (edDays(s.earlyDays)+', '+fmtMin(s.totalEarlyMin)) : '\u2014',
                       s.excusedEarly ? (s.excusedEarly+' excused') : '')
                 + row('Hours owed', fmtMin(s.owedMin), '')
-                + row('Hours worked', fmtMin(s.workedMin), s.hoursMetPct+'% of owed')
+                /* The total includes today; the percentage beside it cannot,
+                   because the hours owed stop at the end of yesterday. Where
+                   the two differ it says so, rather than showing a figure and
+                   a percentage that were not taken from the same days. */
+                + row('Hours worked', fmtMin(s.workedMin),
+                      (s.workedDoneMin != null && s.workedDoneMin !== s.workedMin)
+                        ? (s.hoursMetPct+'% of owed, counting to yesterday')
+                        : (s.hoursMetPct+'% of owed'))
                 + row('Total duration', s.durDays ? (fmtMin(s.totalDurMin)+' · '+fmtMin(s.avgTotalDurMin)+' a day') : '—',
                       s.durDays ? (s.durDays+' punch days') : '')
                 + row('In duration', s.durDays ? (fmtMin(s.inDurMin)+' · '+fmtMin(s.avgInDurMin)+' a day') : '—',
@@ -18450,8 +18493,28 @@ function buildExcelBackup(){
       if(m < 1){ m = 12; y -= 1; }
       return y+'-'+pad2(m);
     })();
+    /* And only as much of it as has gone by in this one.
+
+       Every count on this page was being read against a whole previous month
+       while this month was twelve days old: worked hours down 1158, work from
+       home down 56, late arrivals down 15. None of those were changes in
+       anybody's behaviour, they were the calendar, and they were reported as
+       drops in red against people's names. The percentages were honest - a
+       ratio does not care how many days it is over - which is what made the
+       counts beside them look trustworthy.
+
+       So the comparison is cut to the same number of days: the eleventh of
+       November against the eleventh of October. A month already finished is
+       compared whole, as it always was. */
     var prevDates = prevYM ? eachDateInMonth(prevYM) : [];
     var prevLabel = prevYM ? monthLabel(prevYM) : '';
+    var running = dates.filter(function(d){ return d >= todayISO_full; }).length > 0;
+    if(running && prevDates.length){
+      var done = dates.filter(function(d){ return d < todayISO_full; }).sort();
+      var cut = done.length ? done[done.length - 1].slice(8) : '00';
+      prevDates = prevDates.filter(function(d){ return d.slice(8) <= cut; });
+      prevLabel = prevLabel + (cut === '00' ? '' : ' to the ' + parseInt(cut, 10) + 'th');
+    }
     var prevBy = {};
     if(prevDates.length){
       emps.forEach(function(e){
@@ -18568,12 +18631,23 @@ function buildExcelBackup(){
       // same renderer below rather than hand back its array.
       var out = DASH_KPI ? kpiInsights(DASH_KPI) : [];
       if(DASH_KPI) return renderInsights(out);
+      /* Said the way the rest of the page says it. These six lines named
+         people by the record's own name while the table above them, the
+         detail panel beside them and the KPI list all call dispName - so an
+         office that had renamed somebody would read two different names for
+         one person on one screen. Nothing shows it today, which is exactly
+         how it survived. */
+      var nm = function(x){ return dispName(x.name); };
+      /* And a day is a day. "1 days" is the sort of thing that makes a reader
+         wonder what else was not looked at. */
+      var nDays = function(n){ return n + (n === 1 ? ' day' : ' days'); };
       var byScore = stats.slice().sort(function(a,b){ return b.score - a.score; });
       if(byScore.length){
-        out.push({k:'good', t:'Highest score', d:byScore[0].name+' \u2014 '+byScore[0].score});
+        out.push({k:'good', t:'Highest score', d:nm(byScore[0])+' \u2014 '+byScore[0].score});
         if(byScore.length > 2 && byScore[byScore.length-1].score < 75){
           var w = byScore[byScore.length-1];
-          out.push({k:'warn', t:'Needs attention', d:w.name+' \u2014 score '+w.score+', '+w.lateDays+' late, '+w.absentDays+' absent'});
+          out.push({k:'warn', t:'Needs attention', d:nm(w)+' \u2014 score '+w.score+', '
+            + nDays(w.lateDays)+' late, '+nDays(w.absentDays)+' absent'});
         }
       }
       var moved = stats.map(function(x){
@@ -18581,19 +18655,19 @@ function buildExcelBackup(){
         return q ? {name:x.name, d:x.score - perfScore(q)} : null;
       }).filter(Boolean).sort(function(a,b){ return b.d - a.d; });
       if(moved.length && moved[0].d >= 3)
-        out.push({k:'good', t:'Most improved', d:moved[0].name+' \u2014 up '+Math.round(moved[0].d)+' points on '+prevLabel});
+        out.push({k:'good', t:'Most improved', d:nm(moved[0])+' \u2014 up '+Math.round(moved[0].d)+' points on '+prevLabel});
       if(moved.length > 1 && moved[moved.length-1].d <= -3)
-        out.push({k:'warn', t:'Biggest drop', d:moved[moved.length-1].name+' \u2014 down '+Math.abs(Math.round(moved[moved.length-1].d))+' points on '+prevLabel});
+        out.push({k:'warn', t:'Biggest drop', d:nm(moved[moved.length-1])+' \u2014 down '+Math.abs(Math.round(moved[moved.length-1].d))+' points on '+prevLabel});
       var over = stats.slice().sort(function(a,b){ return b.netMin - a.netMin; })[0];
       if(over && over.netMin > 0)
-        out.push({k:'info', t:'Most extra hours', d:over.name+' \u2014 '+fmtMin(over.netMin)+' above target'});
+        out.push({k:'info', t:'Most extra hours', d:nm(over)+' \u2014 '+fmtMin(over.netMin)+' above target'});
       var outMost = stats.filter(function(x){ return x.breakOverDays > 0; })
         .sort(function(a,b){ return b.breakOverMin - a.breakOverMin; })[0];
       if(outMost)
-        out.push({k:'warn', t:'Most time out', d:outMost.name+' — '+outMost.breakOverDays+' days over the '+fmtMin(BREAK_ALLOW_MIN)+' break, '+fmtMin(outMost.breakOverMin)+' beyond it'});
+        out.push({k:'warn', t:'Most time out', d:nm(outMost)+'— '+nDays(outMost.breakOverDays)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' break, '+fmtMin(outMost.breakOverMin)+' beyond it'});
       var lateSum = stats.slice().sort(function(a,b){ return b.totalLateMin - a.totalLateMin; })[0];
       if(lateSum && lateSum.lateDays > 0)
-        out.push({k:'info', t:'Most lateness', d:lateSum.name+' \u2014 '+lateSum.lateDays+' days, '+fmtMin(lateSum.totalLateMin)+' in total'});
+        out.push({k:'info', t:'Most lateness', d:nm(lateSum)+' \u2014 '+nDays(lateSum.lateDays)+', '+fmtMin(lateSum.totalLateMin)+' in total'});
       if(!out.length) return '';
       return renderInsights(out.slice(0,6));
     }
