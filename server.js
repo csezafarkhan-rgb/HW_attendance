@@ -5078,14 +5078,32 @@ function dtClock(v) {
   if (/am/i.test(s) && h === 12) h = 0;
   return ('0' + h).slice(-2) + ':' + m[2];
 }
-/* Durations come as a count of seconds. A number small enough to be minutes is
-   taken as minutes rather than as a few seconds at a desk, because the one
-   reading that is certainly wrong is the one that turns a working day into a
-   rounding error. */
+/* Durations come as a count of seconds. Always, whatever the count is.
+
+   This used to guess: above 1440 it divided, at or below it kept the number
+   as minutes, on the reasoning that a small number was more likely to be a
+   short span wrongly labelled than a few seconds at a desk. The guess had no
+   case to answer - DeskTime sends seconds and sends nothing else - and it
+   quietly multiplied by sixty every duration under twenty-four minutes.
+
+   So Rahul's quarter of an hour on the 7th, 905 seconds, was stored as 905
+   minutes and read back as fifteen hours at the computer. The guard that
+   existed to stop a working day becoming a rounding error did the exact
+   reverse of its own purpose: it turned a rounding error into a working day,
+   and then into a day and a half.
+
+   Fifty-four stored records looked wrong at first count. Eight of them were:
+   every one is a day where the computer woke for a few minutes, and every one
+   divided by sixty lands on that day's own arrive-to-leave span to the
+   minute. The other forty-six are days with no arrival recorded, where
+   DeskTime reports a full 86400 at work - 1440 after dividing, which is
+   right, and which is also how a corrupted value looks from the outside.
+   Nothing could be told apart by the size of the number alone, which is why
+   guessing from it was never going to hold. */
 function dtMinutes(v) {
   const n = Number(v);
   if (!isFinite(n) || n <= 0) return 0;
-  return n > 1440 ? Math.round(n / 60) : Math.round(n);
+  return Math.round(n / 60);
 }
 /* DeskTime keeps its own roll of names, and they are not the record's names.
    Only the ones that differ are mapped; anything unmapped stands as it is, so

@@ -47,14 +47,37 @@ function grab(src, name) {
   check('nothing at all is nothing, not a guess',
     ctx.dtClock('') === '' && ctx.dtClock(null) === '' && ctx.dtClock('working') === '');
 
-  /* Durations come as seconds. The one reading that must not happen is a
-     working day turning into a rounding error. */
+  /* Durations come as seconds. Always - which this used to guess at, keeping
+     anything at or under 1440 as minutes on the reasoning that a small number
+     was more likely a short span wrongly labelled. The guess multiplied every
+     duration under twenty-four minutes by sixty, and this file asserted that
+     it did: dtMinutes(533) === 533 was a check written around the fault. */
   check('a day at the desk in seconds becomes minutes',
     ctx.dtMinutes(29160) === 486, ctx.dtMinutes(29160));
-  check('a number too small to be a day of seconds is taken as minutes',
-    ctx.dtMinutes(533) === 533, ctx.dtMinutes(533));
+  check('and so does a quarter of an hour, which used to become fifteen hours',
+    ctx.dtMinutes(905) === 15, ctx.dtMinutes(905));
+  check('a few minutes at the machine stay a few minutes',
+    ctx.dtMinutes(264) === 4 && ctx.dtMinutes(425) === 7 && ctx.dtMinutes(298) === 5,
+    [ctx.dtMinutes(264), ctx.dtMinutes(425), ctx.dtMinutes(298)]);
+  /* The boundary the old guess turned on, from either side. A day with no
+     arrival recorded comes back as a full 86400 at work, and 1440 minutes is
+     what that should read as - the same number the fault produced from 1440
+     seconds, which is why no rule about the size of the number could have
+     separated the two. */
+  check('a whole day at work is a whole day, not twenty-four minutes',
+    ctx.dtMinutes(86400) === 1440, ctx.dtMinutes(86400));
+  check('and twenty-four minutes is twenty-four minutes',
+    ctx.dtMinutes(1440) === 24 && ctx.dtMinutes(1441) === 24,
+    [ctx.dtMinutes(1440), ctx.dtMinutes(1441)]);
   check('nothing, or less than nothing, is no time at all',
     ctx.dtMinutes(0) === 0 && ctx.dtMinutes(-5) === 0 && ctx.dtMinutes('x') === 0);
+  /* Half a minute is not nothing, but it rounds to nothing, and nothing is
+     what the page should say rather than a minute that was not worked. */
+  check('under half a minute rounds away rather than up',
+    ctx.dtMinutes(29) === 0 && ctx.dtMinutes(31) === 1,
+    [ctx.dtMinutes(29), ctx.dtMinutes(31)]);
+  check('no guess about the size of the number is left in',
+    !/1440/.test(grab(SRV, 'dtMinutes')), grab(SRV, 'dtMinutes'));
 
   /* DeskTime's roll of names is not the record's roll. */
   const map = { 'Karan': 'karan Ahuja', 'rahul': 'Rahul Mishra' };
