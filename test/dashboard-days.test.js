@@ -204,5 +204,52 @@ check('a cell with nothing in it is not made to look hoverable',
     !/ranked by score:[^<]*break/i.test(src), said.trim());
 }
 
+/* ---- a day with no row at all ----
+   Attendance read 100% for somebody with one marked day in a month and
+   nothing else: a day with no record left the denominator as well as the
+   numerator, so the figure rose as the record emptied. Somebody who never
+   clocked in all month scored full marks for attendance.
+
+   'Gap' is nobody the fixtures above know, so every getter hands back
+   nothing for every day - which is exactly the shape being tested. */
+{
+  const gap = ctx.computeEmployeeStats('Gap', DATES);
+  /* Of the fourteen: two Sundays and two Saturdays owe nothing, one is a
+     holiday. Nine working days, every one of them bare. */
+  check('a working day with no record counts as an absence',
+    gap.absentDays === 9, { absent: gap.absentDays, expected: 9 });
+  check('so somebody with nothing on the month reads nought, not full marks',
+    gap.attendancePct === 0, gap.attendancePct);
+  check('and the bare days are not counted as present',
+    gap.presentDays === 0 && gap.workedMin === 0, gap);
+  /* The days that owe nothing still owe nothing. A Sunday is not an absence
+     and neither is a holiday - which is the question the record cannot
+     answer for a missing row, so owedMinutes is asked instead. */
+  check('a Sunday, a Saturday off and a holiday are none of them absences',
+    gap.absentDays === DATES.length - 5, { absent: gap.absentDays, of: DATES.length });
+  check('the holiday is still counted as one',
+    gap.holidayDays === 1, gap.holidayDays);
+  /* A day still running is nobody's absence yet. */
+  const ahead = ctx.computeEmployeeStats('Gap', ['2026-07-01', '2026-07-02', '2026-07-03']);
+  check('today and the days after it are not absences',
+    ahead.absentDays === 0, ahead.absentDays);
+
+  /* The reported shape: one day marked, the rest of the month empty. It read
+     100% off that single day. */
+  const one = ctx.computeEmployeeStats('Ravi', ['2026-06-01', '2026-06-02', '2026-06-03']);
+  check('a month that is genuinely all marked is unaffected',
+    one.attendancePct === 100 && one.absentDays === 0, one.attendancePct);
+  const mixed = ctx.computeEmployeeStats('Ravi',
+    ['2026-06-01', '2026-06-15', '2026-06-16', '2026-06-17']);
+  check('but one marked day beside three empty ones is not full attendance',
+    mixed.attendancePct === 25 && mixed.absentDays === 3,
+    { pct: mixed.attendancePct, absent: mixed.absentDays });
+  /* The same question the waiting list asks of the same day, so the panel
+     that calls it unanswered and the figure that counts it cannot disagree. */
+  check('the question put is whether they were due in, not what the row says',
+    /if\(!owedMinutes\(empName, dateStr\)\) return;/.test(src)
+    && /if\(dateStr >= todayISO_full\) return;/.test(src), null);
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

@@ -17983,7 +17983,28 @@ function buildExcelBackup(){
         return;
       }
       var rec = getRecord(empName, dateStr);
-      if(!rec) return;
+      if(!rec){
+        /* A day with no row at all. This used to count as nothing, and
+           nothing is not what it is: the person was due in and the record
+           has no trace of them.
+
+           Counting it as nothing meant it left the denominator as well as
+           the numerator, so somebody with one marked day in a month read
+           100% attendance off that single day - a figure that rose as the
+           record emptied. The comment below already says this reckoning once
+           read 100% against every name and said nothing at all; this was the
+           rest of that same fault, left in because a missing row has no
+           status to switch on.
+
+           Whether they were due in is a question the record cannot answer,
+           so it is put to owedMinutes - the same one the loop above asks,
+           which knows Sundays, holidays and whose Saturday is whose. A day
+           still running is nobody's absence yet. */
+        if(dateStr >= todayISO_full) return;
+        if(!owedMinutes(empName, dateStr)) return;
+        absentDays++;
+        return;
+      }
       if(rec.st==='WO') return;
       if(rec.st==='AB'){ absentDays++; return; }
       if(rec.st==='PR' || rec.st==='HD'){
