@@ -47,8 +47,13 @@ check('in-office: each day\'s in duration against its total less the allowance, 
 /* 30 turning up, 25 keeping the day, 25 doing the hours, 15 at the desk, 5 for
    time given over. Full marks on the last is a twentieth of the target given
    back - here 2700 minutes owed, so 135 of surplus. */
+/* durDays says the desk figure was actually measured on something. Without it
+   the fifteen is left out of the weighing altogether - which is the point of
+   that rule, and makes this fixture a measured person rather than a man who
+   works from home and used to be handed the fifteen for nothing. */
 const perfect = { attendancePct: 100, punctualityPct: 100, onTimePct: 100, presentDays: 5,
-                  workedMin: 2700, inOfficePct: 100, owedMin: 2700, weekExtraMin: 135 };
+                  workedMin: 2700, inOfficePct: 100, durDays: 5,
+                  owedMin: 2700, weekExtraMin: 135 };
 const with_ = o => ctx.perfScore(Object.assign({}, perfect, o));
 check('a month that met everything and gave time over scores 100',
   ctx.perfScore(perfect) === 100, ctx.perfScore(perfect));

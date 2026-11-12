@@ -192,13 +192,17 @@ check('a cell with nothing in it is not made to look hoverable',
      not, while leaving out the time given, which is. A page that explains
      itself wrongly is worse than one that does not explain itself, so the
      weights it prints are held to the ones perfScore actually uses. */
-  const score = /function perfScore[\s\S]*?return[^;]*;/.exec(src)[0];
-  const weights = (score.match(/0\.\d+\*/g) || []).map(w => Math.round(parseFloat(w) * 100));
+  /* The weights live in a list now - one pair per question - because the desk
+     figure is only weighed where there is something to weigh. Read from that
+     list, so the printed line and the arithmetic still have to agree. */
+  const score = /function perfScore[\s\S]*?\n  \}/.exec(src)[0];
+  const weights = (score.match(/\[(0\.\d+), /g) || [])
+    .map(w => Math.round(parseFloat(w.slice(1)) * 100));
   const said = (/ranked by score: ([^<]*)/.exec(src) || [])[1] || '';
   const printed = (said.match(/(\d+)%/g) || []).map(x => parseInt(x, 10));
   check('the weights printed over the table are the weights the score uses',
     weights.length === 5 && printed.length === 5
-      && weights.every((w, i) => w === printed[i]),
+      && weights.slice().sort().join() === printed.slice().sort().join(),
     { inPerfScore: weights, printed: printed, said: said.trim() });
   check('and it no longer calls breaks a part of the score',
     !/ranked by score:[^<]*break/i.test(src), said.trim());
@@ -307,6 +311,65 @@ check('a cell with nothing in it is not made to look hoverable',
          .test(src), null);
   check('and it says so, rather than quietly comparing a shorter month',
     /' to the ' \+ parseInt\(cut, 10\) \+ 'th'/.test(src), null);
+}
+
+/* ---- the desk figure, where there is no desk to figure ----
+   It is worked out from punch times, and somebody who works wholly from home
+   has none. Scoring them 100 on it was meant to mean "not marked down", but
+   100 is marked up: it is the one component a measured person can only lose
+   on, so the untracked beat the tracked on a question neither was asked. */
+{
+  vm.runInContext('var SCORE_GIVEN_FULL = '
+    + (/SCORE_GIVEN_FULL = ([\d.]+)/.exec(src) || [, '0.05'])[1] + ';', ctx);
+  vm.runInContext(lift(src, 'perfScore'), ctx);
+  const base = { attendancePct: 80, punctualityPct: 80, onTimePct: 80,
+                 owedMin: 1000, workedDoneMin: 800, workedMin: 800, excusedMin: 0,
+                 weekExtraMin: 0 };
+  const tracked   = Object.assign({}, base, { durDays: 10, inOfficePct: 90 });
+  const untracked = Object.assign({}, base, { durDays: 0,  inOfficePct: 100 });
+  const sTracked = ctx.perfScore(tracked), sUn = ctx.perfScore(untracked);
+  /* 0.30*80 + 0.25*80 + 0.25*80 + 0.05*0 = 64, over a weight of 0.85 = 75.
+     Which is to say: they are scored as though the desk figure had come out
+     at their own average across everything else, rather than at a hundred. */
+  check('with nothing to measure, the four that remain carry the score',
+    sUn === Math.round((0.30*80 + 0.25*80 + 0.25*80 + 0.05*0) / 0.85), sUn);
+  /* The same person with the desk measured at 90 scores 81.5 -> 82: the
+     component is now earned rather than given. */
+  check('and a measured desk figure still counts for its fifteen',
+    sTracked === Math.round((0.30*80 + 0.25*80 + 0.25*80 + 0.05*0 + 0.15*90)), sTracked);
+  check('so being untracked is no longer worth more than being good at it',
+    ctx.perfScore(Object.assign({}, base, { durDays: 10, inOfficePct: 100 })) > sUn,
+    { perfectDesk: ctx.perfScore(Object.assign({}, base, { durDays: 10, inOfficePct: 100 })),
+      noDesk: sUn });
+  /* It used to be a straight gift of fifteen points. */
+  check('the free full marks are gone',
+    sUn < Math.round(0.30*80 + 0.25*80 + 0.25*80 + 0.05*0 + 0.15*100), sUn);
+  /* Which is the fair line: a measured person whose desk figure lands on that
+     same average scores exactly what an unmeasured one does. Above it they
+     gain, below it they lose, and nobody is punished for being measured. */
+  check('a desk figure equal to that average scores the same as no figure',
+    ctx.perfScore(Object.assign({}, base, { durDays: 10, inOfficePct: sUn })) === sUn,
+    { tracked: ctx.perfScore(Object.assign({}, base, { durDays: 10, inOfficePct: sUn })),
+      untracked: sUn });
+  check('and below it they lose, which is the whole point',
+    ctx.perfScore(Object.assign({}, base, { durDays: 10, inOfficePct: 40 })) < sUn, null);
+  check('a tracked person is weighed over the whole hundred',
+    /if\(s\.durDays > 0 && s\.inOfficePct != null\) parts\.push\(\[0\.15, s\.inOfficePct\]\);/
+      .test(src), null);
+
+  /* The sheet works the score out again with its own formula. Left at a flat
+     0.15 it would read the now-blank desk cell as a nought and dock fifteen
+     points from exactly the people this was changed for. */
+  check('the exported formula leaves the desk out when there is no figure',
+    /IF\(ISNUMBER\('\s*\+\s*cell\('At desk %', rowNo\)\s*\+\s*'\),0\.15\*/.test(src), null);
+  check('and divides by the weight it actually used',
+    /\)\/IF\(ISNUMBER\('\s*\+\s*cell\('At desk %', rowNo\)\s*\+\s*'\),1,0\.85\)/.test(src), null);
+  check('the sheet writes no figure where the page shows a dash',
+    /\(st\.durDays > 0 && st\.inOfficePct != null\)/.test(src), null);
+  /* The page explains its own weights above the table. It had to stop saying
+     something that is no longer true for everybody on it. */
+  check('and the page says what it does when there is nothing to measure',
+    /the other four carry the score/.test(src), null);
 }
 
 /* ---- what the callouts call people, and how they count ---- */

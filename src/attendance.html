@@ -7052,16 +7052,24 @@ function ensureDirPerm(dir, byClick, mode){
            desk, 5 for time given past what the weeks asked for. Written as the
            sum itself, so the spreadsheet works it out and anybody can see what it
            is made of and try it with a different weighting. */
+        /* The desk figure only where there is one, and divided by the weight
+           actually used - the same rule perfScore follows, written out so the
+           sheet and the page cannot come to different numbers for one person.
+           Left as a plain 0.15 it would read a blank desk cell as a nought and
+           dock fifteen points from everybody who works from home, which is the
+           opposite of the fault it was changed to fix and worse than it. */
         { f:'ROUND((0.30*' + cell('Attendance %', rowNo)
              + '+0.25*' + cell('Punctuality %', rowNo)
              + '+0.25*' + cell('Hours met %', rowNo)
-             + '+0.15*' + cell('At desk %', rowNo)
+             + '+IF(ISNUMBER(' + cell('At desk %', rowNo) + '),0.15*'
+             + cell('At desk %', rowNo) + ',0)'
              /* Time given past what the weeks asked for is worth ten points,
                 worked out here rather than in a column of its own: a twentieth
                 of the target given over earns the lot, and more earns no more. */
              + '+0.05*IFERROR(MIN(1,' + cell('Weekly extra', rowNo) + '/('
              + cell('Target hours', rowNo) + '*' + SCORE_GIVEN_FULL + ')),0)'
-             + ')*100,0)',
+             + ')/IF(ISNUMBER(' + cell('At desk %', rowNo) + '),1,0.85)'
+             + '*100,0)',
           s:band },
         { v:wk.v, s: wk.s === 'none' ? zeb : wk.s },
         /* Over and under across the weeks, each on its own. A week forty
@@ -7081,8 +7089,13 @@ function ensureDirPerm(dir, byClick, mode){
         { f:'IFERROR(MIN(1,' + cell('Hours worked', rowNo) + '/'
              + cell('Target hours', rowNo) + '),0)', s: zeb + '||p' },
         /* Off the punch times - how much of the day was spent at the desk - so
-           it has no columns of its own to be worked out from. */
-        { n:(st.inOfficePct == null ? 100 : st.inOfficePct) / 100, s: zeb + '||p' },
+           it has no columns of its own to be worked out from. Blank where
+           there were no punches: the page shows a dash for those and the sheet
+           used to write 100%, which is the same free full marks the score used
+           to hand out, exported to somewhere nobody would check it against. */
+        (st.durDays > 0 && st.inOfficePct != null)
+          ? { n: st.inOfficePct / 100, s: zeb + '||p' }
+          : { v:'', s: zeb },
 
         /* What the days asked for, what the readers saw, what was forgiven,
            and the two of those added up - as the sum itself, so the addition is
@@ -18159,12 +18172,28 @@ function buildExcelBackup(){
                + (s.excusedMin || 0);
     var hoursMet = s.owedMin > 0 ? Math.min(100, Math.round(worked / s.owedMin * 100)) : 100;
     var kept = s.punctualityPct == null ? s.onTimePct : s.punctualityPct;
-    var inOffice = s.inOfficePct == null ? 100 : s.inOfficePct;
     var given = s.owedMin > 0
       ? Math.min(100, Math.round((s.weekExtraMin || 0) / (s.owedMin * SCORE_GIVEN_FULL) * 100))
       : 0;
-    return Math.round(0.30*s.attendancePct + 0.25*kept + 0.25*hoursMet
-                      + 0.15*inOffice + 0.05*given);
+    /* Five questions, but only the ones that can be asked of this person.
+
+       The desk figure is worked out from punch times, and somebody who works
+       wholly from home has none. That used to score them 100 on it, under the
+       heading that they should not be marked down for it - but 100 is not
+       "not marked down", it is marked up. It is the one component a measured
+       person can only lose on: the man whose breaks were counted carried 90
+       there while three people nobody measured carried 100 apiece, and it was
+       fifteen points of every score on the table.
+
+       Left out of the weighing entirely now, and the four that remain carry
+       the score between them in the same proportions as before. A question
+       that could not be asked is not answered either way, and nobody is ahead
+       for having no reader data. */
+    var parts = [[0.30, s.attendancePct], [0.25, kept], [0.25, hoursMet], [0.05, given]];
+    if(s.durDays > 0 && s.inOfficePct != null) parts.push([0.15, s.inOfficePct]);
+    var weight = 0, total = 0;
+    parts.forEach(function(p){ weight += p[0]; total += p[0] * p[1]; });
+    return weight > 0 ? Math.round(total / weight) : 0;
   }
   /* The arrow points the way the number moved; the colour says whether that
      direction is good for this metric - fewer absences is an improvement,
@@ -18850,7 +18879,9 @@ function buildExcelBackup(){
       +   '<span style="font-weight:500;font-size:11px;color:var(--ink-soft);" '
       +     'title="Hover any heading to see what that column means and how it is worked out.">'
       +     '\u2014 ranked by score: 30% attendance, 25% punctuality, 25% hours met, '
-      +     '15% at the desk, 5% time given</span>'
+      +     '15% at the desk, 5% time given. Where there are no punches to '
+      +     'measure the desk figure on, the other four carry the score '
+      +     'between them.</span>'
       +   (atHome.length
             ? ('<label class="dash-hidewfh" title="' + atHome.map(function(x){ return shotEsc(dispName(x.name)); }).join(', ')
                + ' worked every day from home this month, so there are no punches behind their figures">'

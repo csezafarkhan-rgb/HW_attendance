@@ -14,7 +14,22 @@ function grab(name) {
        apostrophe down there ("the button's label") used to send it off the end
        and spin for ever, which reads as a hung suite rather than as a typo. */
     if (c === '"' || c === "'") { const q = c; k++; while (k < src.length && src[k] !== q) { if (src[k] === '\\') k++; k++; } continue; }
-    if (c === '/' && /[=(,:!&|?{};\s]/.test(src[k - 1] || '') && src[k + 1] !== '/' && src[k + 1] !== '*') {
+    /* Is this slash a regex, or a division? The test used to look only at the
+       character immediately before it, which on "total / weight" is a space -
+       and a space is in the list, so a plain division was read as the start of
+       a regex and the scan ran on to the next slash in the file. With an even
+       number of divisions the damage cancelled out and nobody noticed; adding
+       one more sent the slicer clean past the end of the function it had been
+       asked for, into code mentioning things that function does not.
+
+       The character that settles it is the last one that is not whitespace. A
+       name, a closing bracket or a digit before a slash means division; an
+       operator or an opening bracket means a regex is starting. */
+    const prev = (function () {
+      for (let j = k - 1; j >= 0; j--) if (!/\s/.test(src[j])) return src[j];
+      return '';
+    })();
+    if (c === '/' && /[=(,:!&|?{};[]/.test(prev) && src[k + 1] !== '/' && src[k + 1] !== '*') {
       // a regex literal: skip to its closing slash
       k++; let inClass = false;
       while (k < src.length && (src[k] !== '/' || inClass)) { if (src[k] === '\\') k++; else if (src[k] === '[') inClass = true; else if (src[k] === ']') inClass = false; k++; }
