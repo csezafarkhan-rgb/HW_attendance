@@ -12863,6 +12863,10 @@ function buildExcelBackup(){
        wording is shown in the box rather than hidden behind a placeholder:
        what is on screen is what goes out, and it can be edited from there. */
     var W = MAIL_CFG.defaults || {daily:{}, month:{}, leave:{}, holiday:{}, tasks:{}};
+    /* A server that has not been restarted since the correction tab was added
+       sends no wording for it, and a box reading "undefined" is worse than an
+       empty one. */
+    if(!W.punch) W.punch = {subject:'', intro:'', footer:''};
     W.month = W.month || {};
     W.tasks = W.tasks || {};
     W.excused = W.excused || {};
@@ -12910,6 +12914,10 @@ function buildExcelBackup(){
       +   '<button type="button" class="em-tab" data-em-tab="lt">Self-marked</button>'
       /* The only message here written to the person it is about rather than
          to the office, which is why it sits at the end on its own. */
+      /* A correction is not leave and does not belong behind the Leave tab:
+         it takes no day and costs no balance, and it was going out under the
+         leave wording with a year of balances printed under it. */
+      +   '<button type="button" class="em-tab" data-em-tab="pn">Punch fix</button>'
       +   '<button type="button" class="em-tab" data-em-tab="rm">Reminders</button></div>'
       + '<div data-em-pane="att">'
       /* Who it goes to. Every Super Admin is written to whatever is here. */
@@ -13295,6 +13303,32 @@ function buildExcelBackup(){
             +   mailEscape(text(r.footer, W.remind.footer)) + '</textarea></div>'
             + '</div>';
         })()
+      /* ---- a time put right ---- */
+      + (function(){
+          var p = s.punch || {};
+          return '<div data-em-pane="pn" style="display:none;">'
+            + '<div class="em-note" style="padding-top:0;">Somebody forgot to punch and is '
+            +   'asking for the time on their record to be corrected. It is not leave: no '
+            +   'day is taken and no balance moves, so this message carries the times they '
+            +   'are asking for and nothing about their leave year. Approving it writes '
+            +   'those times onto the day.</div>'
+            + '<div class="em-lab">To <span>blank: whoever decides their leave</span></div>'
+            + '<div class="em-row"><input type="text" id="emPnTo" placeholder="comma separated" value="'
+            +   mailEscape((p.to || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Cc <span>the person who asked is always copied</span></div>'
+            + '<div class="em-row"><input type="text" id="emPnCc" placeholder="comma separated" value="'
+            +   mailEscape((p.cc || []).join(', ')) + '"></div>'
+            + '<div class="em-lab">Subject <span>{name} {dates} {org}</span></div>'
+            + '<div class="em-row"><input type="text" id="emPnSubject" value="'
+            +   mailEscape(text(p.subject, W.punch.subject)) + '"></div>'
+            + '<div class="em-lab">Message at the top <span>{approver} {name} {dates} {org}</span></div>'
+            + '<div class="em-row"><textarea id="emPnIntro" rows="4">'
+            +   mailEscape(text(p.intro, W.punch.intro)) + '</textarea></div>'
+            + '<div class="em-lab">Note at the foot</div>'
+            + '<div class="em-row"><textarea id="emPnFooter" rows="2">'
+            +   mailEscape(text(p.footer, W.punch.footer)) + '</textarea></div>'
+            + '</div>';
+        })()
       /* ---- the full month ---- */
       + (function(){
           var m = s.month || {};
@@ -13410,7 +13444,8 @@ function buildExcelBackup(){
           /* Three cards ask about one person, and each wants a different
              message built for them. */
           var onTab = on ? on.getAttribute('data-em-tab') : '';
-          var kind = onTab === 'lt' ? 'part' : onTab === 'rm' ? 'remind' : 'leave';
+          var kind = onTab === 'lt' ? 'part' : onTab === 'rm' ? 'remind'
+                   : onTab === 'pn' ? 'punch' : 'leave';
           b.disabled = true;
           var was = b.textContent;
           b.textContent = 'Building\u2026';
@@ -13867,6 +13902,12 @@ function buildExcelBackup(){
           subject: document.getElementById('emRmSubject').value.trim(),
           intro: document.getElementById('emRmIntro').value,
           footer: document.getElementById('emRmFooter').value
+        },
+        punch: {
+          to: list('emPnTo'), cc: list('emPnCc'),
+          subject: document.getElementById('emPnSubject').value.trim(),
+          intro: document.getElementById('emPnIntro').value,
+          footer: document.getElementById('emPnFooter').value
         },
         month: {
           to: list('emMoTo'), cc: list('emMoCc'),

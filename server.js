@@ -2445,6 +2445,25 @@ async function mailSettings(orgId) {
        say, not ours. */
     backDays: backDaysOf(lv.backDays)
   };
+  /* A punch correction is not leave. It costs no balance, it takes no day,
+     and the only thing it asks is that a time on the record be put right -
+     yet it went out under the leave wording, with the year's casual and sick
+     balances printed under it and a year-at-a-glance below that. None of it
+     bore on the decision, and the one thing that did - the times being asked
+     for - was nowhere on the message at all.
+
+     Its own tab, so the office can send it somewhere else and word it as what
+     it is. Empty addresses fall back to whoever decides leave, which is where
+     these were going before and is the sensible default for an office that
+     never opens the tab. */
+  const pn = isPlainObject(s.punch) ? s.punch : {};
+  s.punch = {
+    to: (Array.isArray(pn.to) ? pn.to : []).map(x => String(x).trim())
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    cc: (Array.isArray(pn.cc) ? pn.cc : []).map(x => String(x).trim())
+      .filter(x => EMAIL_RE.test(x)).slice(0, 20),
+    subject: clip(pn.subject, 200), intro: clip(pn.intro, 2000), footer: clip(pn.footer, 2000)
+  };
   const ex = isPlainObject(s.excused) ? s.excused : {};
   s.excused = {
     final: ex.final !== false,
@@ -2525,6 +2544,7 @@ async function mailSettings(orgId) {
   s.excused.shift.footer = theirs(s.excused.shift.footer);
   s.excused.part.footer = theirs(s.excused.part.footer);
   s.remind.footer = theirs(s.remind.footer);
+  s.punch.footer = theirs(s.punch.footer);
   return s;
 }
 /* What else sees it. A tab's own Cc box, and nothing else once that tab names
@@ -3296,13 +3316,24 @@ async function notifyNewRequests(orgId, added) {
     const mgmt = await mailRecipients(orgId, settings, 'leave');
     const kv = await sharedKeys(orgId, ['companyInfo']);
     for (const r of added.slice(0, 5)) {
-      const aud = await leaveAudience(orgId, settings, route, r.empName, mgmt);
+      /* A punch correction is not leave, and from here on it is not treated
+         as any: its own audience, its own wording, and no leave record under
+         it. The balances were printed against a request that cannot touch
+         them - a year of casual and sick, and a month-by-month strip, none of
+         it bearing on whether a clock reading is right. */
+      const punch = r.leaveType === 'PUNCH';
+      const aud = punch
+        ? await punchAudience(orgId, settings, route, r.empName, mgmt)
+        : await leaveAudience(orgId, settings, route, r.empName, mgmt);
       if (!aud.to.length) continue;
       /* The year behind this one request, for whoever has to decide it. */
-      const withRecord = Object.assign({}, r, { leaveRecord: await leaveRecordFor(orgId, r.empName, r) });
+      const withRecord = punch ? r
+        : Object.assign({}, r, { leaveRecord: await leaveRecordFor(orgId, r.empName, r) });
       const base = { orgName: orgNameOf(kv.companyInfo), req: withRecord,
-                     siteUrl: mailer.baseUrl(), intro: settings.leave.intro,
-                     footer: settings.leave.footer };
+                     siteUrl: mailer.baseUrl(),
+                     intro: punch ? settings.punch.intro : settings.leave.intro,
+                     footer: punch ? settings.punch.footer : settings.leave.footer,
+                     subjectText: punch ? settings.punch.subject : '' };
       /* The copy that decides it, to the people who may - and {approver} in
          the office's own wording is whoever this copy is going to, so the
          greeting names them rather than naming whoever the words happened to
@@ -3310,7 +3341,8 @@ async function notifyNewRequests(orgId, added) {
       const decide = mailer.requestEmail(Object.assign({}, base, {
         links: linksFor({ k: 'req', org: orgId, id: r.id, s: 0 }),
         approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
-        heading: 'A request is waiting for a decision' }));
+        heading: punch ? 'A time correction is waiting for a decision'
+                       : 'A request is waiting for a decision' }));
       /* One request, one message: the people who may answer it in TO, and
          the people who are only being told - the person who asked, first of
          all - on the Cc line.
@@ -3459,6 +3491,32 @@ async function leaveAudience(orgId, settings, route, empName, mgmt) {
      that they never see is one they cannot correct. */
   if (own) addCc(own);
   mailCc(settings, 'leave').forEach(addCc);
+  return { to, cc, own };
+}
+/* And who decides a punch correction, which is a different question with the
+   same default answer.
+
+   Typed addresses on its own tab are who it goes to and nobody else - the
+   bargain every tab in that panel strikes. An empty tab falls back to the
+   leave audience, which is where these went before the tab existed, so an
+   office that never opens it sees no change. */
+async function punchAudience(orgId, settings, route, empName, mgmt) {
+  const own = String(await employeeAddress(orgId, empName) || '').trim().toLowerCase();
+  const named = (settings.punch.to || []).map(x => String(x).trim().toLowerCase())
+    .filter(x => EMAIL_RE.test(x) && x !== own);
+  if (!named.length) return await leaveAudience(orgId, settings, route, empName, mgmt);
+  const seen = {}, to = [];
+  named.forEach(a => { if (!seen[a]) { seen[a] = true; to.push(a); } });
+  const ccSeen = {}, cc = [];
+  const addCc = a => {
+    const k = String(a || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(k) || seen[k] || ccSeen[k]) return;
+    ccSeen[k] = true; cc.push(k);
+  };
+  /* The person who asked sees it either way: it is their own time being put
+     right, and a correction decided behind them is one they cannot query. */
+  if (own) addCc(own);
+  (settings.punch.cc || []).forEach(addCc);
   return { to, cc, own };
 }
 /* Every address that may decide anything at all, for the panel to show and
@@ -4684,6 +4742,27 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
      only worth reading if it is the nag they would really get. Somebody with
      nothing outstanding has no message, and the office is told that rather
      than shown an empty one. */
+  /* A time put right, built the way the real one is: the same audience
+     function, the same card, the same refusal to print a leave year under a
+     request that cannot touch one. The times are invented because no such
+     request exists, and the card says so on its face. */
+  if (String((req.body && req.body.kind) || '') === 'punch') {
+    const route = await approvalRouteOf(orgId);
+    const aud = await punchAudience(orgId, settings, route, name, mgmt);
+    const r0 = { id: 'sample', empName: name, dateFrom: day, dateTo: day,
+                 leaveType: 'PUNCH', punchIn: '09:41', punchOut: '', status: 'pending',
+                 message: 'Sample only - nobody has asked for this correction.',
+                 createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const mail = mailer.requestEmail({
+      orgName: orgNameOf(kv.companyInfo), req: r0, siteUrl: mailer.baseUrl(),
+      intro: settings.punch.intro, footer: settings.punch.footer,
+      subjectText: settings.punch.subject,
+      approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
+      links: { approve: mailer.baseUrl(), reject: mailer.baseUrl() },
+      heading: 'Sample — how a time correction will arrive' });
+    return res.json({ ok: true, sample: true, to: aud.to, cc: aud.cc,
+                      preview: { subject: mail.subject, html: mail.html } });
+  }
   if (String((req.body && req.body.kind) || '') === 'remind') {
     const owed = (await pendingByEmployee(orgId, settings))[name] || [];
     const mail = owed.length ? mailer.remindEmail({

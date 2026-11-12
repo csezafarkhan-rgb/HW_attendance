@@ -132,9 +132,13 @@ const REC = {
   check('and into the one that passes a recommendation on',
     /leaveRecord: await leaveRecordFor\(orgId, req\.empName, req\)/.test(SRV));
   /* A digest of several people would be one of these each. */
+  /* And never on a punch correction, which takes no day and moves no
+     balance: a year of casual and sick under it is a column of figures the
+     decision cannot touch. Refused here as well as at the sender, because
+     this card is drawn from several places. */
   check('the card draws it only where the message carries one',
-    /req\.leaveRecord \? leaveRecordBlock\(req\.leaveRecord\) : ''/.test(
-      fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')));
+    /\(req\.leaveRecord && req\.leaveType !== 'PUNCH'\)\s*\?\s*leaveRecordBlock\(req\.leaveRecord\)/
+      .test(fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')));
 }
 
 /* ---- the digest, when it happens to be about one request ----
@@ -160,7 +164,7 @@ const REC = {
   check('a digest of several carries none of them',
     !/Their leave record/.test(mk(2).html));
   check('and the card draws only what it is handed, the deciding being the sender’s',
-    /req\.leaveRecord \? leaveRecordBlock/.test(
+    /\(req\.leaveRecord && req\.leaveType !== 'PUNCH'\)/.test(
       fs.readFileSync(path.join(REPO, 'mailer.js'), 'utf8')));
   check('the sender decides that by counting what is in the message',
     /const only = \(pending\.length \+ unreq\.length === 1\)/.test(SRV)

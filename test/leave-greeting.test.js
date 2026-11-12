@@ -298,9 +298,10 @@ const INTRO = 'Hello {approver},\n\nThe leave below is waiting for a decision.';
     /* Three cards ask about one person, and each wants a different message
        built for them: the leave request, the three self-marked ones, and the
        reminder of what that person still owes. */
+    /* Four now: the correction is not leave and cannot be previewed as any. */
     check('the self-marked tab asks for its own kind of message',
-      /var kind = onTab === 'lt' \? 'part' : onTab === 'rm' \? 'remind' : 'leave';/.test(APP),
-      null);
+      /onTab === 'lt' \? 'part' : onTab === 'rm' \? 'remind'/.test(APP)
+      && /onTab === 'pn' \? 'punch' : 'leave'/.test(APP), null);
     check('the names shut when the tab changes',
       /if\(who\) who\.style\.display = 'none';/.test(grab(APP, 'showLeaveTools')), null);
     check('and the label is set for whichever tab opens',

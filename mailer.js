@@ -343,10 +343,26 @@ const DEFAULT_TEXT = {
     intro: 'Hello {approver},\n\nThe leave below is waiting for a decision. Approve or reject it from the buttons \u2014 each asks once before it does anything.',
     footer: 'Best regards,\n{org}'
   },
+  /* A correction asks for a reading on the clock to be put right. It takes no
+     day, costs no balance and waits on nobody's leave - so it says none of
+     those things, and says instead the one thing it is for. */
+  punch: {
+    subject: 'Punch correction \u00b7 {name} \u00b7 {dates}',
+    intro: 'Hello {approver},\n\nThe time below was missed on the record and is waiting '
+      + 'for a decision. Approving it writes the times shown onto that day; no leave is '
+      + 'taken and no balance changes. Approve or reject it from the buttons \u2014 each '
+      + 'asks once before it does anything.',
+    footer: 'Best regards,\n{org}'
+  },
   decision: {
     subject: 'Your {kind} \u00b7 {dates} \u00b7 {decision}',
     introYes: 'Hello {name},\n\nYour leave has been approved. The days below are on the record.',
     introNo: 'Hello {name},\n\nYour leave was not approved. Please speak to your manager if that is not what you expected.',
+    /* The same answer, for a request that took no day. */
+    introPunchYes: 'Hello {name},\n\nYour punch correction has been approved. The times below '
+      + 'are now on your record for that day.',
+    introPunchNo: 'Hello {name},\n\nYour punch correction was not approved, so the day stands as '
+      + 'it was. Please speak to your manager if that is not what you expected.',
     footer: 'Best regards,\n{org}'
   },
   month: {
@@ -559,12 +575,42 @@ function label(t) {
 function dayCount(req) {
   const t = String(req.leaveType || req.type || '');
   if (t === 'HALF' || t === 'SHORT' || t === 'THREEQ') return '';
+  /* A correction is about one day's clock, not about a day being taken. "1
+     day" beside it reads as a day of leave, which is the one thing it is
+     not. */
+  if (t === 'PUNCH') return '';
   const a = new Date(String(req.dateFrom) + 'T00:00:00Z');
   const b = new Date(String(req.dateTo || req.dateFrom) + 'T00:00:00Z');
   if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
   let n = Math.round((b - a) / 86400000) + 1;
   if (n < 1) n = 1;
   return n + (n === 1 ? ' day' : ' days');
+}
+/* The times a punch correction is actually asking for.
+
+   The whole of what the decision turns on, and the message carried none of
+   it: whoever opened it was shown a name, a date, a sentence of apology and a
+   year of leave balances, and had to go to the dashboard to find out what
+   times were being claimed. One of the two may be missing - somebody who
+   punched in and forgot to punch out corrects the one end - so the end that
+   stands is said to stand rather than left blank for a reader to guess at. */
+function punchTimes(req) {
+  const a = String(req.punchIn || '').trim(), b = String(req.punchOut || '').trim();
+  if (!a && !b) return '';
+  const cell = (label, v) =>
+    '<td style="padding:0 18px 0 0;vertical-align:top;">'
+    + '<div style="font-size:10.5px;font-weight:700;letter-spacing:.07em;'
+    +   'text-transform:uppercase;color:' + SOFT + ';">' + esc(label) + '</div>'
+    + '<div style="font-size:16px;font-weight:700;color:' + INK + ';margin-top:2px;">'
+    +   (v ? esc(clock(v)) : '<span style="font-size:13px;font-weight:600;color:' + SOFT
+              + ';">unchanged</span>') + '</div></td>';
+  return '<div style="border:1px solid ' + LINE + ';border-radius:8px;padding:10px 12px;'
+    + 'margin:0 0 9px;background:#F7F9FC;">'
+    + '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+    +   'color:' + SOFT + ';margin-bottom:6px;">The times they are asking for</div>'
+    + '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+    +   cell('In', a) + cell('Out', b)
+    + '</tr></table></div>';
 }
 function requestCard(req, links, heading) {
   /* Leave can be granted in two stages: one person looks at every request first
@@ -592,11 +638,19 @@ function requestCard(req, links, heading) {
     + '</div>'
     /* What the person actually typed, which is the whole of what the decision
        turns on. */
+    /* What is being asked for comes before why. On a correction the times are
+       the request; the sentence underneath is the reason for it. */
+    + punchTimes(req)
     + saidBand(req.message, { max: 300, margin: '0 0 9px' })
     + recommended
     /* The year behind the request, where the message carries one. A digest of
-       several people does not: it would be one of these a person. */
-    + (req.leaveRecord ? leaveRecordBlock(req.leaveRecord) : '')
+       several people does not: it would be one of these a person. And a punch
+       correction never does - it takes no day and costs no balance, so a year
+       of casual and sick under it is a column of figures the decision cannot
+       touch. Refused here as well as upstream, because this card is drawn
+       from several places and one of them forgetting would put it back. */
+    + ((req.leaveRecord && req.leaveType !== 'PUNCH')
+        ? leaveRecordBlock(req.leaveRecord) : '')
     + (links ? ('<div style="margin-top:12px;">'
         + button(links.approve, 'Approve', 'approve')
         + button(links.reject, 'Reject', 'reject') + '</div>') : '')
@@ -1223,7 +1277,14 @@ function decisionEmail(o) {
   const say = { name: r.empName || '', kind: kindName(r.leaveType), dates: dateRange(r.dateFrom, r.dateTo),
                 decision: yes ? 'approved' : 'not approved', org: o.orgName || 'Attendance' };
   const body = [];
-  const intro = fillText(o.intro || (yes ? words.introYes : words.introNo), say);
+  /* The answer to a correction is not the answer to leave. "Your leave has
+     been approved" for a man who forgot to punch is the same mistake the
+     request itself used to make, arriving a second time and to the person it
+     is about. */
+  const punch = r.leaveType === 'PUNCH';
+  const intro = fillText(o.intro || (punch
+      ? (yes ? words.introPunchYes : words.introPunchNo)
+      : (yes ? words.introYes : words.introNo)), say);
   if (intro) {
     body.push('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
       + lines(intro) + '</div>');
@@ -1234,6 +1295,10 @@ function decisionEmail(o) {
     +   (yes ? 'Approved' : 'Not approved') + (r.approvedBy ? (' by ' + esc(r.approvedBy)) : '') + '</div>'
     + '<div style="font-weight:700;">' + esc(kindName(r.leaveType)) + (r.half ? (' \u00b7 ' + esc(r.half)) : '') + '</div>'
     + '<div style="color:' + SOFT + ';font-size:13px;margin-top:2px;">' + esc(dateRange(r.dateFrom, r.dateTo)) + '</div>'
+    /* And the times, so the answer says what went onto the record rather than
+       only that something did. A correction approved without them leaves the
+       person to go and look up what they were given. */
+    + (punch ? ('<div style="margin-top:9px;">' + punchTimes(r) + '</div>') : '')
     /* Their own words, on the message that answers them. */
     + saidBand(r.message, { max: 300, margin: '6px 0 0' })
     + (r.adminNote ? ('<div style="font-size:12.5px;margin-top:6px;color:' + SOFT + ';">' + esc(r.adminNote) + '</div>') : '')
@@ -1246,7 +1311,8 @@ function decisionEmail(o) {
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
   return { subject: subject, html: layout(o.orgName || 'Attendance',
-    yes ? 'Your leave is approved' : 'Your leave was not approved', body) };
+    punch ? (yes ? 'Your time has been corrected' : 'Your correction was not approved')
+          : (yes ? 'Your leave is approved' : 'Your leave was not approved'), body) };
 }
 
 /* The whole month, rather than the day: the record as a picture and the same
@@ -1375,10 +1441,17 @@ function requestEmail(o) {
   const say = { name: r.empName || '', org: o.orgName || 'Attendance',
                 kind: kindName(r.leaveType), dates: dateRange(r.dateFrom, r.dateTo) };
   if (o.approver) say.approver = o.approver;
-  const intro = fillText(o.intro, say), footer = fillText(o.footer, say);
+  const punch = r.leaveType === 'PUNCH';
+  const words = punch ? DEFAULT_TEXT.punch : null;
+  const intro = fillText(o.intro || (words ? words.intro : ''), say);
+  const footer = fillText(o.footer || (words ? words.footer : ''), say);
+  /* The office's own subject where it has written one on the correction tab,
+     and the one this comes with where it has not - the same bargain every
+     other tab strikes. */
+  const said = punch ? fillText(o.subjectText || '', say).trim() : '';
   return {
-    subject: (r.leaveType === 'PUNCH' ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
-             + ' · ' + dateRange(r.dateFrom, r.dateTo),
+    subject: said || ((punch ? 'Punch correction' : kindName(r.leaveType)) + ' · ' + r.empName
+             + ' · ' + dateRange(r.dateFrom, r.dateTo)),
     html: layout(o.orgName || 'Attendance',
       o.heading || 'A request is waiting for a decision', [
       intro ? ('<div style="margin:0 0 14px;font-size:13.5px;line-height:1.55;">'
