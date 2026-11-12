@@ -355,17 +355,29 @@ check('and says it again when the kind changes, because the kind sets the cost',
    The Users page is where a name is typed and the only page that can see
    both accounts at once, so it says so there. */
 const SHELL = fs.readFileSync(path.join(REPO, 'src', 'shell.template.html'), 'utf8');
-check('the address is found by name, lowest id winning silently',
-  /lower\(COALESCE\(name, ''\)\) = lower\(\$2\) ORDER BY id LIMIT 1/.test(SRV), null);
+/* It no longer wins silently, because it no longer wins. The comment above
+   described the fault exactly and the answer at the time was to print it on
+   the Users page - which left the mail still going to the wrong man, now with
+   a note elsewhere saying so. The lookup refuses to choose. */
+check('the address is not guessed at when two accounts answer to the name',
+  /lower\(COALESCE\(name, ''\)\) = lower\(\$2\) ORDER BY id`/.test(SRV)
+  && !/ORDER BY id LIMIT 1`/.test(SRV)
+  && /if \(hits\.length > 1\) \{/.test(SRV), null);
+check('and the page says what that means rather than naming a winner',
+  /so nobody is copied as them on their own requests/.test(SHELL)
+  && !/goes to ' \+ wins\.email/.test(SHELL), null);
 check('the users page gathers the active accounts by name',
   /var byName = \{\};/.test(SHELL)
   && /if\(u\.is_active === false\) return;/.test(SHELL), null);
 check('a name on more than one active account is a clash',
   /var clashes = Object\.keys\(byName\)\.filter\(function\(k\)\{ return byName\[k\]\.length > 1; \}\);/
     .test(SHELL), null);
-check('and the warning names the account the mail actually reaches',
-  /var wins = who\.slice\(\)\.sort\(function\(a,b\)\{ return a\.id - b\.id; \}\)\[0\];/.test(SHELL)
-  && /leave mail for them goes to ' \+ wins\.email \+ ' only\./.test(SHELL), null);
+/* There is no account the mail reaches any more, so the warning names none.
+   Naming a winner was only ever a description of the guess, and the guess is
+   what was wrong. */
+check('and the warning names both accounts, and no winner among them',
+  /who\.map\(function\(u\)\{ return u\.email; \}\)\.join\(' and '\)/.test(SHELL)
+  && !/var wins = /.test(SHELL), null);
 check('it says what to do about it',
   /Give one of them a different name, or switch the spare account off\./.test(SHELL), null);
 check('and the rows themselves are flagged, so it can be acted on',

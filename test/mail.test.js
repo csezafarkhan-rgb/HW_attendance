@@ -281,10 +281,14 @@ function query(sql, p) {
     const hit = db.users.find(u => u.id === p[0] && u.org_id === p[1] && u.is_active);
     return rows(hit ? [{ email: hit.email, name: hit.name }] : []);
   }
-  if (s.startsWith('SELECT email FROM users WHERE org_id = $1 AND is_active AND lower(COALESCE(name')) {
-    const hit = db.users.find(u => u.org_id === p[0] && u.is_active
+  /* Every account of that name, not the first one found: the real query stopped
+     taking the lowest id the day two accounts turned out to share a name and a
+     man's leave went to his colleague. The stub hands back all of them so the
+     refusal to guess can actually be exercised. */
+  if (s.startsWith('SELECT id, email FROM users WHERE org_id = $1 AND is_active AND lower(COALESCE(name')) {
+    const hits = db.users.filter(u => u.org_id === p[0] && u.is_active
       && String(u.name || '').toLowerCase() === String(p[1]).toLowerCase());
-    return rows(hit ? [{ email: hit.email }] : []);
+    return rows(hits.map(u => ({ id: u.id, email: u.email })));
   }
   if (s.startsWith('SELECT email FROM users')) {
     return rows(db.users.filter(u => u.org_id === p[0] && u.is_active && u.role === 'admin').map(u => ({ email: u.email })));

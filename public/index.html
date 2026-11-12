@@ -3351,12 +3351,16 @@ function _initLoginGateReal(startWorkspace){
         warn.appendChild(t);
         clashes.forEach(function(k){
           var who = byName[k];
-          /* Lowest id wins, which is the one the mail actually reaches. */
-          var wins = who.slice().sort(function(a,b){ return a.id - b.id; })[0];
+          /* It used to say the mail went to the lowest id, which is what the
+             lookup did: it took the first account it found and sent that
+             person's leave there. One of those guesses was wrong, and a man's
+             leave was arriving in a colleague's inbox with nothing anywhere
+             to say so. Nothing is guessed now - the lookup hands back no
+             address at all - so this says the thing that is now true. */
           var line = document.createElement('div');
           line.textContent = '\u201c' + (who[0].name || '') + '\u201d is on '
             + who.map(function(u){ return u.email; }).join(' and ')
-            + ' \u2014 leave mail for them goes to ' + wins.email + ' only.';
+            + ' \u2014 so nobody is copied as them on their own requests.';
           warn.appendChild(line);
         });
         var fix = document.createElement('div');

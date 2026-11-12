@@ -1293,7 +1293,11 @@ app.get('/api/users', requireRole('admin', 'admin_view'), async (req, res) => {
        FROM users WHERE org_id = $1 ORDER BY email`,
     [req.session.orgId]
   );
-  res.json({ users: rows });
+  /* And the names more than one active account answers to. Sent with the list
+     because the list is where somebody can act on it, and because the harm it
+     does is silent: nobody is copied as a name two accounts share, and the
+     only sign of it is a person quietly not receiving their own requests. */
+  res.json({ users: rows, sharedNames: await duplicateAccountNames(req.session.orgId) });
 });
 
 /* Who an address belongs to.
@@ -3675,12 +3679,44 @@ async function ownersOf(orgId, names, to, cc) {
   }
   return out;
 }
+/* The address behind a name on the record - which is the only thread tying an
+   employee to an account, so it had better not be guessed at.
+
+   It used to take the lowest id and go. Two active accounts carried the name
+   "Munish Dhamija" - his own, and a second one on another man's address that
+   had been renamed for a test and never renamed back - and the lower id was
+   the other man's. So every message that copies in "the person who asked"
+   sent Munish's leave to somebody else's inbox, and went on doing it quietly,
+   because picking one of two is indistinguishable from finding the one.
+
+   Nobody is worth guessing at. An address that is merely absent costs a
+   person a copy of their own request; an address guessed wrong puts their
+   leave, their lateness and their reasons in front of a colleague. So where
+   two accounts answer to one name this hands back nothing at all and says so
+   loudly enough to be found. */
 async function employeeAddress(orgId, empName) {
   const r = await pool.query(
-    `SELECT email FROM users WHERE org_id = $1 AND is_active
-       AND lower(COALESCE(name, '')) = lower($2) ORDER BY id LIMIT 1`, [orgId, String(empName || '')]);
-  const email = r.rows[0] ? String(r.rows[0].email || '') : '';
-  return EMAIL_RE.test(email) ? email : '';
+    `SELECT id, email FROM users WHERE org_id = $1 AND is_active
+       AND lower(COALESCE(name, '')) = lower($2) ORDER BY id`, [orgId, String(empName || '')]);
+  const hits = r.rows.filter(x => EMAIL_RE.test(String(x.email || '')));
+  if (hits.length > 1) {
+    console.error('two active accounts are named "' + String(empName || '') + '" ('
+      + hits.map(x => x.email).join(', ') + '). Nobody is copied as them until one is '
+      + 'renamed - guessing would send their leave to the wrong person.');
+    return '';
+  }
+  return hits.length ? String(hits[0].email) : '';
+}
+/* The names two or more active accounts answer to. Nothing can tell them
+   apart afterwards, so the office is shown them rather than left to notice
+   that somebody stopped being copied on their own requests. */
+async function duplicateAccountNames(orgId) {
+  const r = await pool.query(
+    `SELECT COALESCE(name, '') AS name, array_agg(email ORDER BY id) AS emails
+       FROM users WHERE org_id = $1 AND is_active AND COALESCE(name, '') <> ''
+      GROUP BY lower(COALESCE(name, '')), COALESCE(name, '')
+     HAVING count(*) > 1`, [orgId]);
+  return r.rows.map(x => ({ name: x.name, emails: x.emails }));
 }
 
 /* Once a request is settled - from the buttons in an email or on the portal -
@@ -3706,15 +3742,30 @@ async function notifyDecision(orgId, req) {
        notices that happen to be about the same day. */
     const route = await approvalRouteOf(orgId);
     const mgmt = await mailRecipients(orgId, settings, 'leave');
-    const aud = await leaveAudience(orgId, settings, route, req.empName, mgmt);
+    /* And a correction's answer goes where its question went. The line above
+       said the two were built from the same audience, and for a punch
+       correction that stopped being true the moment corrections got a tab of
+       their own: the question went to the addresses typed there and the
+       answer came back to whoever decides leave. An office that separated the
+       two would have had half a conversation in each inbox. */
+    const aud = req.leaveType === 'PUNCH'
+      ? await punchAudience(orgId, settings, route, req.empName, mgmt)
+      : await leaveAudience(orgId, settings, route, req.empName, mgmt);
     if (!aud.to.length) return;                        // nobody to write to
     const job = 'decision-email:' + orgId + ':' + req.id + ':' + req.status;
     const claimed = await pool.query(
       'INSERT INTO maintenance_done (job) VALUES ($1) ON CONFLICT (job) DO NOTHING RETURNING job', [job]);
     if (!claimed.rows.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
+    /* Signed the way every other message is signed. This was the one that was
+       not: an office that had set its sign-off saw it on the request, on the
+       reminder, on the month and on the holiday, and then the answer to the
+       request came back signed with the name this code ships with. The whole
+       point of one sign-off is that there is no message it does not reach,
+       and this was the message the person who asked actually waits for. */
     const mail = mailer.decisionEmail({
-      orgName: orgNameOf(kv.companyInfo), req, decision: req.status, siteUrl: mailer.baseUrl()
+      orgName: orgNameOf(kv.companyInfo), req, decision: req.status, siteUrl: mailer.baseUrl(),
+      footer: req.leaveType === 'PUNCH' ? settings.punch.footer : settings.leave.footer
     });
     /* The person who asked is on the CC line, where they were on the request
        - the message is written to them, and they read it there as they read

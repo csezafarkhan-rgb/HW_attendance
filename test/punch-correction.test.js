@@ -183,5 +183,40 @@ check('the preview on that tab previews this message',
 check('a tab opened against an older server shows empty boxes, not undefined',
   /if\(!W\.punch\) W\.punch = \{subject:'', intro:'', footer:''\};/.test(APP), null);
 
+/* ---- and the answer goes where the question went ----
+   The decision was built from the leave audience whatever the request was,
+   so the moment corrections got a tab of their own an office that pointed
+   them elsewhere would have had the question in one inbox and the answer in
+   another. The comment above it had been promising the opposite for months. */
+check('a correction’s decision goes to the correction’s audience',
+  /req\.leaveType === 'PUNCH'\s*\n?\s*\? await punchAudience\(orgId, settings, route, req\.empName, mgmt\)/
+    .test(SRV), null);
+check('and leave’s decision still goes to leave’s',
+  /: await leaveAudience\(orgId, settings, route, req\.empName, mgmt\);/.test(SRV), null);
+/* One sign-off, on every message - and this was the message it never reached,
+   which is the one the person who asked actually waits for. */
+check('the decision carries the office’s own sign-off',
+  /footer: req\.leaveType === 'PUNCH' \? settings\.punch\.footer : settings\.leave\.footer/
+    .test(SRV), null);
+
+/* ---- one name, two accounts ----
+   The only thread tying a person on the record to an account is the name. Two
+   active accounts carried one name and the lower id won, so a man's leave was
+   copied to a colleague's address - quietly, because picking one of two looks
+   exactly like finding the one. */
+check('an address two accounts answer to is not guessed at',
+  /if \(hits\.length > 1\) \{/.test(SRV)
+  && /return '';/.test(SRV), null);
+check('and the office is told, rather than left to notice the silence',
+  /async function duplicateAccountNames\(orgId\)/.test(SRV)
+  && /sharedNames: await duplicateAccountNames\(req\.session\.orgId\)/.test(SRV), null);
+/* Said in one place - the Users page, where the name is typed and where both
+   accounts can be seen at once. A second warning elsewhere would be a second
+   thing to keep true, which is the fault this whole audit kept finding. */
+check('said on the page where it can be put right, and only there',
+  /so nobody is copied as them on their own requests/
+    .test(fs.readFileSync(path.join(REPO, 'src', 'shell.template.html'), 'utf8'))
+  && !/is on two accounts/.test(APP), null);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
