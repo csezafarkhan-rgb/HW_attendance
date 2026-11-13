@@ -213,6 +213,23 @@ check('and the office is told, rather than left to notice the silence',
 /* Said in one place - the Users page, where the name is typed and where both
    accounts can be seen at once. A second warning elsewhere would be a second
    thing to keep true, which is the fault this whole audit kept finding. */
+/* ---- and a message going nowhere says why ----
+   "To nobody" is true and useless: it tells the office the reminder will not
+   arrive and nothing about what to do, while both reasons are a minute's
+   work on the Users page. One man had six unanswered days and no way to be
+   told about any of them. */
+check('the preview says why there is no address',
+  /async function whyNoAddress\(orgId, empName\)/.test(SRV)
+  && /two accounts are named/.test(SRV)
+  && /no active account on this portal is named/.test(SRV), null);
+check('and hands that reason to the preview window',
+  /toNote: to \? '' : await whyNoAddress\(orgId, name\)/.test(SRV)
+  && /pv\.toNote/.test(APP), null);
+/* The real sender skipped them without a word, week after week. */
+check('the sender says it too, rather than skipping in silence',
+  /no reminder sent to/.test(SRV)
+  && !/if \(!to\) continue;/.test(SRV), null);
+
 check('said on the page where it can be put right, and only there',
   /so nobody is copied as them on their own requests/
     .test(fs.readFileSync(path.join(REPO, 'src', 'shell.template.html'), 'utf8'))

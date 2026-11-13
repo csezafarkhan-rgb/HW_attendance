@@ -12708,7 +12708,12 @@ function buildExcelBackup(){
     var draw = function(){
       var m = mails[at] || mails[0];
       wrap.querySelector('.em-prev-subj').textContent = m.subject || '';
-      wrap.querySelector('.em-prev-to').textContent = 'To ' + ((m.to || []).join(', ') || 'nobody')
+      /* Why it is going nowhere, where the server knows. "To nobody" is true
+         and useless: it says the message will not arrive and nothing about
+         what to do, and both reasons are a minute's work on the Users page. */
+      wrap.querySelector('.em-prev-to').textContent = 'To '
+        + ((m.to || []).join(', ') || 'nobody')
+        + (((m.to || []).length === 0 && pv.toNote) ? (' — ' + pv.toNote) : '')
         + (pv.attached === true ? ' · the record is attached'
            : (pv.attached === false ? ' · without the picture' : ''));
       /* Who is only being told. It is half of what the office is checking - a

@@ -3707,6 +3707,30 @@ async function employeeAddress(orgId, empName) {
   }
   return hits.length ? String(hits[0].email) : '';
 }
+/* Why there is no address for somebody, in words the office can act on.
+
+   "To nobody" is a true answer and a useless one: it tells whoever is
+   looking at a preview that the message will not arrive, and nothing about
+   what to do. Both reasons are fixable in a minute on the Users page, and
+   neither is guessable from the outside. */
+async function whyNoAddress(orgId, empName) {
+  const name = String(empName || '').trim();
+  if (!name) return '';
+  const r = await pool.query(
+    `SELECT email FROM users WHERE org_id = $1 AND is_active
+       AND lower(COALESCE(name, '')) = lower($2) ORDER BY id`, [orgId, name]);
+  const hits = r.rows.filter(x => EMAIL_RE.test(String(x.email || '')));
+  if (hits.length > 1) {
+    return 'two accounts are named “' + name + '” ('
+      + hits.map(x => x.email).join(' and ') + '), so the record cannot tell '
+      + 'which inbox is theirs. Rename one on the Users page.';
+  }
+  if (!hits.length) {
+    return 'no active account on this portal is named “' + name
+      + '”. Add one, or rename the account that belongs to them, on the Users page.';
+  }
+  return '';
+}
 /* The names two or more active accounts answer to. Nothing can tell them
    apart afterwards, so the office is shown them rather than left to notice
    that somebody stopped being copied on their own requests. */
@@ -3951,7 +3975,14 @@ async function sendRemindersOnce(orgId, day, settings) {
        else is reading is a report about them, which is a different message
        with a different effect on whoever opens it. */
     const to = await employeeAddress(orgId, name);
-    if (!to) continue;                       // no account, nobody to write to
+    if (!to) {
+      /* Said rather than skipped. Somebody with six unanswered days and no
+         resolvable address went un-reminded week after week, and the only
+         trace of it was a person who never complained about a reminder. */
+      console.error('no reminder sent to "' + name + '": '
+        + ((await whyNoAddress(orgId, name)) || 'no address could be found.'));
+      continue;
+    }
     const mail = mailer.remindEmail({
       orgName: orgNameOf(kv.companyInfo), name: items.shownName || name, day: day,
       items: items, siteUrl: mailer.baseUrl(),
@@ -4836,8 +4867,15 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
       return res.json({ ok: true, sentTo: box });
     }
     /* Addressed to them and to nobody else, which is the whole arrangement:
-       a reminder somebody else is reading is a report about them. */
+       a reminder somebody else is reading is a report about them.
+
+       And where there is no address, why - because "To nobody" on its own
+       tells the office the message will not arrive and nothing about what to
+       do, while the two reasons it can happen are both a minute's work on
+       the Users page. This one had six days outstanding and no way to be
+       told about any of them. */
     return res.json({ ok: true, sample: true, to: to ? [to] : [], cc: [],
+                      toNote: to ? '' : await whyNoAddress(orgId, name),
                       preview: { subject: mail.subject, html: mail.html } });
   }
   if (String((req.body && req.body.kind) || '') === 'part') {

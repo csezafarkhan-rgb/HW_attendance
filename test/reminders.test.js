@@ -123,8 +123,13 @@ check('it is addressed to the person it is about',
   /const to = await employeeAddress\(orgId, name\);/.test(send), null);
 check('with nobody copied in',
   /const msg = \{ to: \[to\], cc: \[\], subject: mail\.subject, html: mail\.html \};/.test(send), null);
+/* Still passed over rather than guessed at - but no longer in silence. A man
+   with six unanswered days and two accounts under his name went un-reminded
+   week after week, and the only trace was that he never complained. */
 check('and somebody with no account is passed over rather than guessed at',
-  /if \(!to\) continue;/.test(send), null);
+  /if \(!to\) \{/.test(send) && /continue;/.test(send), null);
+check('and the skipping is said out loud, with the reason',
+  /no reminder sent to/.test(send) && /whyNoAddress\(orgId, name\)/.test(send), null);
 
 /* ---- what it does and does not chase ---- */
 const owed = grab(SRV, 'pendingByEmployee');
