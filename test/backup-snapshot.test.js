@@ -141,6 +141,27 @@ const listOf = name => {
     (/\.catch\(function\(e\)\{[^}]*\}/.exec(card) || [])[0]);
 }
 
+/* ---- both share buttons keep the day's copy, and keep it on the press ----
+   They sit beside each other offering the same thing, and only one of them
+   did it. The screenshot button takes the copy the moment it is pressed; the
+   email button waited until the server reported the message sent, so pressing
+   it, reading the preview and closing it left the day with no backup at all.
+   The note above keepACopy had been saying "both paths" the whole time. */
+{
+  const page = fs.readFileSync(path.join(__dirname, '..', 'src', 'attendance.html'), 'utf8');
+  const shot = /function captureScreenshot\(\)\{[\s\S]{0,400}/.exec(page)[0];
+  const dayBtn = /if\(dayBtn\) dayBtn\.onclick = function\(\)\{[\s\S]{0,900}/.exec(page)[0];
+  check('the screenshot button keeps a copy when pressed',
+    /keepACopy\(\);/.test(shot), null);
+  check('and so does the email button, on the press rather than on the way back',
+    /keepACopy\(\);/.test(dayBtn)
+    && dayBtn.indexOf('keepACopy();') < dayBtn.indexOf('Rendering the record'), null);
+  /* Taken once a day, so the copy is not written twice when the message does
+     go out - and the late call is gone rather than left to double up. */
+  check('the copy is no longer taken again once the message has gone',
+    !/screenshot attached\.'\)\);\s*\n\s*keepACopy\(\);/.test(page), null);
+}
+
 console.log(results.every(Boolean) ? 'ALL PASS (' + results.length + ')' : 'SOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;
 })();

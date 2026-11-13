@@ -13593,12 +13593,22 @@ function buildExcelBackup(){
     var dayBtn = document.getElementById('emSendDay');
     if(dayBtn) dayBtn.onclick = function(){
       dayBtn.disabled = true;
+      /* The copy is taken on the press, the way the screenshot button takes
+         it, and not on the way back from a message that went out.
+
+         Both buttons were meant to keep the day's backup - the note above
+         keepACopy says so - but this one waited until the server reported the
+         message sent. Press it, read the preview, close it, and the day had
+         no backup: the two buttons sat beside each other promising the same
+         thing and only one of them did it. Pressing either is the moment
+         somebody is looking at the record, which is the moment worth keeping,
+         whether or not they go on to send anything. */
+      keepACopy();
       msg('Rendering the record…');
       var names = visibleEmployees().map(function(e){ return e.name; });
       var told = function(j){
         msg('Sent to ' + (j.to || 0) + ' address' + ((j.to === 1) ? '' : 'es')
             + (j.attached ? ', screenshot attached.' : ' — without the screenshot.'));
-        keepACopy();                       // the record has gone out: keep the day's backup too
       };
       /* Sending it is one press away, but not this press: the server builds the
          message and hands it back to be looked at first. */
