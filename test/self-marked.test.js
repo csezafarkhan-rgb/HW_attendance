@@ -286,8 +286,11 @@ const parse = v => (v === null || v === false) ? v : JSON.parse(v);
      requests - and a day out on a visit, which is merged under guard. */
   check('an employee may write those six things, and still nothing else',
     /EMPLOYEE_WRITABLE = \['leaveRequests', 'dailyTasks', 'manualRecords', 'lateExcuses',\s*'overrides', 'dayShifts'\]/.test(SRC));
+  /* Named rather than pinned to the end of the list, which is where it was:
+     the list grew when somebody could be taken off attendance, and a check
+     that reads the last entry turns a new arrangement into a failure. */
   check('they read only their own row of who marks their own attendance',
-    /EMP_KEYED_BY_NAME = \[[\s\S]{0,120}'selfMark'\]/.test(SRC));
+    /EMP_KEYED_BY_NAME = \[[\s\S]{0,160}'selfMark'/.test(SRC));
   check('and a day they marked late themselves does not count as excused in the daily message',
     /if \(v && typeof v === 'object' && \(v\.pending === true \|\| v\.kind === 'late'\)\) return;/.test(SRC));
   /* Both merges are reached from the write, and only for an employee. */

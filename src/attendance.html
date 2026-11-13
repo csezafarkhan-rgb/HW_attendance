@@ -5236,7 +5236,7 @@ function attachDismiss(el){
   var BACKUP_KEYS = ['customDataset','manualRecords','overrides','mispunchFlags','lateExcuses',
     'leaveDeductions','leaveRequests','officialLeaves','shiftAssignments','visibleEmployees','earlyExcuses','dayShifts','customShifts','halfDays','manualLeave','satPolicy','dailyTasks',
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
-    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','leavePolicy','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames','deskTimeIds',
+    'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','offAttendance','leavePolicy','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames','deskTimeIds',
     'leaveRecord',
     'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
@@ -9160,6 +9160,32 @@ function buildExcelBackup(){
   function saveSatPolicy(){
     return storage.set('satPolicy', JSON.stringify(satPolicy), true).catch(function(e){ console.error(e); });
   }
+  /* ---- people who are not on attendance ----
+
+     Some names on the roster do not mark attendance at all: managers who are
+     here because they take leave and approve it, not because anybody expects
+     them to clock in. Nothing said so, so the record treated them as people
+     who clock in and never do - a weekly reminder seven lines long, every
+     line reading "Nothing on the record", for seven ordinary working days
+     nobody ever expected them to mark.
+
+     A name absent from this is on attendance, so an office that never opens
+     the panel sees no change at all. */
+  var offAttendance = {};   // emp -> true
+  function loadOffAttendance(){
+    return storage.get('offAttendance', true).then(function(res){
+      if(res && res.value){ try{ offAttendance = JSON.parse(res.value); }catch(e){ offAttendance = {}; } }
+    }).catch(function(){ offAttendance = {}; });
+  }
+  function saveOffAttendance(){
+    return storage.set('offAttendance', JSON.stringify(offAttendance), true).catch(function(e){ console.error(e); });
+  }
+  /* A missing store is not an error: it means nobody has been named yet, and
+     a page that threw on it would be a page that failed for every office
+     that has never used this. */
+  function isOffAttendance(name){
+    return !!(offAttendance && offAttendance[name]);
+  }
   /* Minutes owed on one date, before anything that happened on it. */
   /* Hours actually put in on one date - total duration, first punch to last,
      plus off-site or work-from-home time. Saturdays included: whether a Saturday
@@ -9342,7 +9368,12 @@ function buildExcelBackup(){
     var known = {}; order.forEach(function(n){ known[n]=true; });
     var extra = EMPLOYEES.filter(function(e){ return !known[e.name]; }).map(function(e){ return e.name; });
     var fullOrder = order.concat(extra);
-    return fullOrder.map(function(n){ return employeesByName[n]; }).filter(Boolean);
+    /* Dropped here, where the roster is built, rather than where it is drawn.
+       The grid, the performance table, the exports and everything else made
+       from visibleEmployees come through this one function, so they lose the
+       column together instead of one at a time and disagreeing in between. */
+    return fullOrder.filter(function(n){ return !isOffAttendance(n); })
+      .map(function(n){ return employeesByName[n]; }).filter(Boolean);
   }
   function loadMispunchFlags(){
     return storage.get('mispunchFlags', true).then(function(res){
@@ -17572,6 +17603,16 @@ function buildExcelBackup(){
               (marksOwn(e.name) ? ' checked' : '')+'>'+
             '<span>Marks own</span>'+
           '</label>'+
+          /* Somebody who does not mark attendance at all: a manager who is on
+             the roster because they take leave and approve it, not because
+             anybody expects them to clock in. Beside "Marks own" because the
+             two answer the same question - how does this person's day reach
+             the record - and the answer here is that it does not. */
+          '<label class="shf-self" title="No column on the attendance grid, and never chased for a day. Leave and approvals are unaffected.">'+
+            '<input type="checkbox" data-off-emp="'+e.name.replace(/"/g,'&quot;')+'"'+
+              (isOffAttendance(e.name) ? ' checked' : '')+'>'+
+            '<span>Not on attendance</span>'+
+          '</label>'+
           /* Who approves whose leave was set here and worded over on the
              Email panel, so neither screen ever showed one person's
              arrangement whole. It is one table on the Leave tab now. */
@@ -17680,6 +17721,27 @@ function buildExcelBackup(){
             : ' no longer marks their own attendance.'), false);
         }).catch(function(e){
           cb.disabled = false; cb.checked = !cb.checked;
+          showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
+        });
+      });
+    });
+    /* Taking somebody off attendance, or putting them back on it. The grid is
+       redrawn because the column goes with them, and the panel is redrawn
+       because the rows are grouped by how people work. */
+    Array.prototype.forEach.call(shiftDropdown.querySelectorAll('input[data-off-emp]'), function(cb){
+      cb.addEventListener('change', function(){
+        var name = cb.getAttribute('data-off-emp');
+        if(cb.checked) offAttendance[name] = true; else delete offAttendance[name];
+        cb.disabled = true;
+        saveOffAttendance().then(function(){
+          cb.disabled = false;
+          showUploadStatus(dispName(name) + (cb.checked
+            ? ' is off the attendance grid, and will not be chased for a day again.'
+            : ' is back on attendance.'), false);
+          renderShiftDropdown(); renderTable();
+        }).catch(function(e){
+          cb.disabled = false; cb.checked = !cb.checked;
+          delete offAttendance[name];
           showUploadStatus('That did not save (' + ((e && e.message) || 'no answer') + ').', true);
         });
       });
@@ -21694,7 +21756,10 @@ function buildExcelBackup(){
       if(d && DATASET_SOURCE === 'server' && (d.records || d.employees)) applyDataset(d);
       return Promise.all([loadOverrides, loadManualRecords, loadHalfDays, loadLateExcuses,
         loadEarlyExcuses, loadLeaveRequests, loadOfficialLeaves, loadDayShifts,
-        loadShiftAssignments, loadManualLeave, loadEmpNames, loadSelfMark].map(safe));
+        loadShiftAssignments, loadManualLeave, loadEmpNames, loadSelfMark,
+        /* Their own page chases them for missing days too, so it has to know
+           the same thing the office's does. */
+        loadOffAttendance].map(safe));
     }).then(function(){
       EMP_SYNC_AT = Date.now();
       var changed = empSyncSig() !== before;
@@ -22067,6 +22132,11 @@ function buildExcelBackup(){
 
   function ewGather(name){
     var mine = [], theirs = [], floor = ewFloor();
+    /* Somebody who is not on attendance is not behind on it. Their requests
+       still sit in the other column - they take leave like anybody else, and
+       a question waiting on their reply is still theirs to answer - but no
+       day is ever raised against them, and neither is a morning. */
+    var off = isOffAttendance(name);
 
     /* 0. Today, and they have not clocked in. The one thing on this list that
        is not about a day gone by: it is the morning happening now, and it
@@ -22084,7 +22154,7 @@ function buildExcelBackup(){
        Past the same threshold the record counts lateness by, so the band
        appears at the moment the morning starts going late rather than at a
        second figure only this panel would know. */
-    try{ var ck = ewClockItem(name); if(ck) mine.push(ck); }catch(e){}
+    if(!off){ try{ var ck = ewClockItem(name); if(ck) mine.push(ck); }catch(e){} }
 
     /* 1. Leave the record holds that no form accounts for. */
     try{
@@ -22107,7 +22177,7 @@ function buildExcelBackup(){
            absent until somebody says otherwise. One pass, so a day cannot be
            both raised as late and raised as missing. */
     var mineDay = empWorkingDay();
-    ewDays(floor).forEach(function(d){
+    (off ? [] : ewDays(floor)).forEach(function(d){
       if(onApprovedLeave(name, d)) return;
       /* getRecord already settles a typed time against a punched one, and is
          what the grid and the day card read - so this asks it rather than
@@ -24023,7 +24093,7 @@ function buildExcelBackup(){
       catch(e){ console.warn('load threw', e); return Promise.resolve(); }
     };
     return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadOffAttendance, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc,
       /* How far back a request may reach. Read at boot because the waiting
          list uses it too, and it used to be read only when the request form
          opened - so an office that shortened the window had a page offering

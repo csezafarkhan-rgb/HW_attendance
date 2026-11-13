@@ -115,7 +115,7 @@ check('and otherwise it names whoever the office named against them',
 /* ---- what it refuses to nag about ---- */
 check('nothing older than the request form can reach for',
   /if\(u\.empName !== name \|\| u\.dateFrom < floor\) return;/.test(gather)
-  && /ewDays\(floor\)\.forEach/.test(gather), null);
+  && /ewDays\(floor\)\)\.forEach/.test(gather), null);
 check('and the floor is the form’s own, not a second number',
   /back = earliestRequestDay\(\);/.test(grab(APP, 'ewFloor')), null);
 check('a day they were signed off for is not lateness',
@@ -166,7 +166,7 @@ check('the oldest is put first, because that is the one being forgotten',
     /mine\.push\(\{ job:'absent', day:d, age:ewDaysSince\(d\) \}\);/.test(gather), null);
   /* One pass over the days, so a date cannot come out both late and missing. */
   check('found in the same pass as lateness, not a second one',
-    (gather.match(/ewDays\(floor\)\.forEach/g) || []).length === 1, null);
+    (gather.match(/ewDays\(floor\)\)\.forEach/g) || []).length === 1, null);
   /* The days are the floor to today, walked. Not the months ticked on the
      admin grid's picker, which is a different question that happens to hand
      back dates - a page whose grid sat on September searched September for

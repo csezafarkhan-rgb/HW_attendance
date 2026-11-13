@@ -198,7 +198,7 @@ const EMP_KEYED_BY_DAY = ['overrides', 'halfDays', 'dayShifts', 'mispunchFlags',
                           'lateExcuses', 'earlyExcuses', 'manualLeave', 'leaveDeductions',
                           'dailyTasks', 'deskTime'];  // "Name|date"
 const EMP_KEYED_BY_NAME = ['joinDates', 'satPolicy', 'shiftAssignments', 'empNames',
-                          'selfMark'];                                       // "Name"
+                          'selfMark', 'offAttendance'];                      // "Name"
 const EMP_READABLE = ['officialLeaves', 'earlyThresholdMin', 'lateThresholdMin',
                       'weeklyLeverageMin', 'companyInfo', 'customShifts',
                       /* Their own card has to know which parts of a day it may offer,
@@ -4026,7 +4026,7 @@ async function pendingByEmployee(orgId, settings) {
   const kv = await sharedKeys(orgId, ['overrides', 'halfDays', 'leaveRequests', 'empNames',
                                       'dayShifts', 'shiftAssignments', 'lateThresholdMin',
                                       'lateExcuses', 'manualRecords', 'officialLeaves',
-                                      'joinDates', 'satPolicy']);
+                                      'joinDates', 'satPolicy', 'offAttendance']);
   const overrides = parseJson(kv.overrides) || {};
   const halfDays = parseJson(kv.halfDays) || {};
   const requests = parseJson(kv.leaveRequests) || [];
@@ -4095,6 +4095,12 @@ async function pendingByEmployee(orgId, settings) {
      missed them. */
   const joined = parseJson(kv.joinDates) || {};
   const sat = parseJson(kv.satPolicy) || {};
+  /* Managers and the like, on the roster because they take leave and approve
+     it rather than because anybody expects them to clock in. Every working
+     day of theirs read as a day with nothing on it, so the Friday reminder
+     arrived seven lines long and every line was a day nobody had ever asked
+     them to mark. */
+  const offDuty = parseJson(kv.offAttendance) || {};
   const marked = {};                       // "name|day" -> something was recorded
   recs.rows.forEach(r => {
     const day = (r.day instanceof Date) ? r.day.toISOString().slice(0, 10)
@@ -4124,6 +4130,10 @@ async function pendingByEmployee(orgId, settings) {
   }
   roster.rows.forEach(row => {
     const name = row.name;
+    /* Not on attendance: no day is owed, so none can be missing. Checked
+       before the days are walked rather than inside them, because the
+       question is about the person and not about any date. */
+    if (offDuty[name]) return;
     const join = normJoinDay(joined[name]);
     /* Sunday is a weekly off for everybody; a Saturday is one for whoever has
        it set that way. The same two rules the grid draws by. */
