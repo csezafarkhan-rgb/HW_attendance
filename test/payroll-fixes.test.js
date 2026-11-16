@@ -87,7 +87,7 @@ const shiftMin = (sh, t) => toMin(t);        // a day shift reads straight off t
   };
   vm.createContext(ctx);
   vm.runInContext('function pad2(n){ return (n<10?"0":"")+n; }', ctx);
-  ['eachDateInMonth', 'statutory', 'owedMinutes', 'computePay'].forEach(n => vm.runInContext(lift(src, n), ctx));
+  ['eachDateInMonth', 'statutory', 'approvedMinutes', 'owedMinutes', 'computePay'].forEach(n => vm.runInContext(lift(src, n), ctx));
 
   const p = ctx.computePay('A', '2026-06');
   check('the slip counts leave taken on a Saturday or a Sunday', p.leaveDays === 5, p.leaveDays);

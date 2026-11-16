@@ -265,7 +265,10 @@ function grab(src, name) {
   check('and a day out on a visit is not asked of the computer at all',
     /A day out on a visit is a day away from the/.test(APP));
   check('which is the whole shift on a weekday and the Saturday policy on a Saturday',
-    /function owedMinutes\(emp, dateStr\)[\s\S]{0,420}sp\.mode === 'WFH'\)  return Math\.round\(\(sp\.hours\|\|0\) \* 60\)/.test(APP));
+    /* The window is wide enough for the approved-hours branch that now sits
+       between the holiday check and this one: what is being pinned is that a
+       Saturday still follows the policy, not how many lines precede it. */
+    /function owedMinutes\(emp, dateStr\)[\s\S]{0,1200}sp\.mode === 'WFH'\)  return Math\.round\(\(sp\.hours\|\|0\) \* 60\)/.test(APP));
   check('a day nobody worked at all is still a dash',
     facts.indexOf('if(worked > 0)') > -1);
 

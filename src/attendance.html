@@ -8754,6 +8754,22 @@ function buildExcelBackup(){
   var state = { selectedMonths:[defaultMonth], search:'', showWeekStatus:true, hideSunday:false };
 
   var overrides = {};
+  /* The hours a day may be approved for, as a short list rather than a box to
+     type into. An office agreeing a shorter day agrees a round number of
+     hours, and a list cannot be typed wrong. The empty one is first because
+     it is the ordinary case: no agreement, so the day asks for the shift. */
+  var OWED_CHOICES = [
+    ['',      'Full day (the usual shift)'],
+    ['0:00',  'Off — nothing owed'],
+    ['1:00',  '1 hour'],
+    ['2:00',  '2 hours'],
+    ['3:00',  '3 hours'],
+    ['4:00',  '4 hours'],
+    ['5:00',  '5 hours'],
+    ['6:00',  '6 hours'],
+    ['7:00',  '7 hours'],
+    ['8:00',  '8 hours']
+  ];
   var OV_CATS = {
     WFH:   {label:'WFH',   cls:'wfh',   needsDetail:false, countsAsWorked:true,  tag:function(){return 'WFH';}},
     VISIT: {label:'Visit', cls:'visit', needsDetail:true,  countsAsWorked:true,  placeholder:'e.g. Panipat, Ambala, Factory', tag:function(d){return 'Visit_'+(d||'NA');}},
@@ -9245,12 +9261,45 @@ function buildExcelBackup(){
     var f = rec.dur ? toMin(rec.dur) : 0;
     return isNaN(f) ? 0 : f;
   }
+  /* The hours a day was approved for, which is not the hours worked on it.
+
+     The modal has always had a box for what somebody did and never one for
+     what was asked of them, so a Wednesday agreed as four hours from home,
+     worked in full, still measured against nine and came out five short.
+     Six people doing that on 11 November is the "239m short" the office was
+     reading on a week where nobody had done anything wrong.
+
+     Nothing is approved unless somebody said so: an empty box means the day
+     asks for the usual shift, which is what every day did before this
+     existed. A figure that cannot be read is treated the same way, because
+     one NaN here would poison the week's total and every figure built on it,
+     and the shift is the answer that was right until this was typed. */
+  function approvedMinutes(emp, dateStr, full){
+    var ov = getOverride(emp, dateStr);
+    if(!ov || !ov.owed) return null;
+    var said = String(ov.owed).trim();
+    /* The shape is checked before the figure is read, because toMin answers 0
+       for anything it cannot parse - so "abc", "4" and a stray space would all
+       have come back as a day owing nothing at all, which is the most generous
+       reading of a typo there is. */
+    if(!/^\d{1,2}:[0-5]\d$/.test(said)) return null;
+    var m = toMin(said);
+    if(m === null || isNaN(m) || m < 0) return null;
+    return Math.min(m, full);                     // never more than the shift
+  }
   function owedMinutes(emp, dateStr){
     var dow = new Date(dateStr+'T00:00:00').getDay();
     if(dow === 0) return 0;                       // Sunday
     if(getOfficialLeave(dateStr)) return 0;       // company holiday, same for everyone
     var sh = parseShift(getShift(emp, dateStr));
     var full = sh.endMin - sh.startMin;
+    /* Leave takes the whole day, so there is nothing left to approve hours
+       against; every other mark may carry them. */
+    var ovA = getOverride(emp, dateStr);
+    if(!(ovA && ovA.cat === 'LEAVE')){
+      var agreed = approvedMinutes(emp, dateStr, full);
+      if(agreed !== null) return agreed;
+    }
     if(dow === 6){
       var sp = getSatPolicy(emp);
       if(sp.mode === 'OFF')  return 0;
@@ -11848,7 +11897,13 @@ function buildExcelBackup(){
         if(dateStr > todayISO_full){ open = true; return; }
         if(isToday) open = true;
         var sh = parseShift(getShift(empName, dateStr));
-        var required = sh.endMin - sh.startMin; // shift length in minutes (e.g. 9:00 = 540)
+        /* What the day asks for, asked of the one function that knows: the
+           shift, unless the day was approved for fewer hours. This used to
+           work the shift out for itself, so a day agreed as four hours was
+           still measured against nine here while the dashboard beside it had
+           been told otherwise - two answers to one question, which is how a
+           week where nobody did anything wrong read as four hours short. */
+        var required = owedMinutes(empName, dateStr);
         var delta = null;
         if(getOfficialLeave(dateStr)) return; // company holiday — not part of the weekly requirement
         var ov = getOverride(empName, dateStr);
@@ -20636,6 +20691,7 @@ function buildExcelBackup(){
     var detailVal = ov && ov.detail ? ov.detail : '';
     var reasonVal = ov && ov.reason ? ov.reason : '';
     var durationVal = ov && ov.duration ? ov.duration : '';
+    var owedVal = ov && ov.owed ? ov.owed : '';
     var showDetail = ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].needsDetail;
     var showDuration = ov && OV_CATS[ov.cat] && OV_CATS[ov.cat].countsAsWorked;
 
@@ -20790,6 +20846,21 @@ function buildExcelBackup(){
       '<div id="ovDurationWrap" style="display:'+(showDuration?'block':'none')+';margin-bottom:10px;">'+
         '<label style="font-size:10.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;">Hours worked (manual entry, e.g. for WFH — format H:MM)</label>'+
         '<input class="ov-detail" id="ovDuration" placeholder="e.g. 7:30" value="'+durationVal.replace(/"/g,'&quot;')+'" style="margin-bottom:0;"/>'+
+        /* And what the day was approved for, which is the other half of the
+           question and was never asked. The box above says what somebody did;
+           without this the week measured it against a full shift, so a day
+           agreed as four hours from home and worked in full came out five
+           hours short. "Full day" is the absence of an agreement, which is
+           what every day was before this existed. */
+        '<label style="font-size:10.5px;font-weight:600;color:var(--ink-soft);display:block;margin:10px 0 4px;">Approved hours for this day</label>'+
+        '<select class="ov-detail" id="ovOwed" style="margin-bottom:0;">'+
+          OWED_CHOICES.map(function(c){
+            return '<option value="'+c[0]+'"'+(owedVal === c[0] ? ' selected' : '')+'>'+c[1]+'</option>';
+          }).join('')+
+        '</select>'+
+        '<div class="save-note" style="text-align:left;margin-top:4px;">'
+          + 'What the week asks of this day. Leave it on Full day unless fewer '
+          + 'hours were agreed.</div>'+
       '</div>'+
       /* Escaped: approving a request copies the employee's own message into
          this note, and "</textarea>" in it ended the box and ran the rest. */
@@ -20818,7 +20889,11 @@ function buildExcelBackup(){
       var reason = document.getElementById('ovReason').value.trim();
       var durationEl = document.getElementById('ovDuration');
       var duration = durationEl ? durationEl.value.trim() : '';
-      overrides[emp+'|'+dateStr] = {cat:selectedCat, detail:detail, reason:reason, duration:duration, at:new Date().toISOString()};
+      /* What was agreed for the day, beside what was done on it. */
+      var owedEl = document.getElementById('ovOwed');
+      var owed = owedEl ? owedEl.value.trim() : '';
+      overrides[emp+'|'+dateStr] = {cat:selectedCat, detail:detail, reason:reason,
+        duration:duration, owed: owed, at:new Date().toISOString()};
       saveOverrides().then(function(){
         document.getElementById('ovSaveNote').textContent = 'Saved — visible to everyone viewing this dashboard.';
         refreshActivePage();

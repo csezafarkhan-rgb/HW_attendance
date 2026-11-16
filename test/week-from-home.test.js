@@ -43,6 +43,7 @@ const ctx = {
   weeklyLeverageMin: 30,
   deskTime: {}, overrides: {}, records: {},
   getShift: () => '9:30-6:30',                      // nine hours
+  getSatPolicy: () => ({ mode: 'OFF', hours: 4 }),
   getOfficialLeave: () => null,
   getOverride: (e, d) => ctx.overrides[e + '|' + d] || null,
   getRecord: (e, d) => ctx.records[e + '|' + d] || null,
@@ -51,7 +52,7 @@ const ctx = {
   Date, JSON, Object, Math, String, isNaN, parseInt, console,
 };
 vm.createContext(ctx);
-['pad2', 'parseShift', 'toMin', 'mondayOf', 'wfhSeenMinutes', 'computeWeeklyShortHours',
+['pad2', 'parseShift', 'toMin', 'mondayOf', 'wfhSeenMinutes', 'approvedMinutes', 'owedMinutes', 'computeWeeklyShortHours',
  'gridWeekVerdict'].forEach(n => vm.runInContext(grab(APP, n), ctx));
 
 /* mins: what DeskTime saw each day, or null for a day it saw nothing on. */

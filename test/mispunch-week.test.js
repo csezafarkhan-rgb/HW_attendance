@@ -20,12 +20,13 @@ const ctx = {
      goes through it now, because a night shift's clock needs reading. */
   shiftMin: (sh, t) => { const m = /^(\d+):(\d+)/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : 0; },
   toMin: t => { const m = /^(\d+):(\d+)/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : 0; },
+  getSatPolicy: () => ({ mode: 'OFF', hours: 4 }),
   getOfficialLeave: () => null, getOverride: () => null, getHalfDay: () => null, getEarlyExcuse: () => null,
   getRecord: (e, d) => recs[e + '|' + d] || null
 };
 vm.createContext(ctx);
 vm.runInContext('function getLateExcuse(e, d){ return lateExcuses[e+"|"+d] || null; }', ctx);
-['pad2', 'mondayOf', 'getMispunch', 'getLateEarly', 'isEarly', 'computeWeeklyShortHours'].forEach(n => vm.runInContext(lift(src, n), ctx));
+['pad2', 'mondayOf', 'getMispunch', 'getLateEarly', 'isEarly', 'approvedMinutes', 'owedMinutes', 'computeWeeklyShortHours'].forEach(n => vm.runInContext(lift(src, n), ctx));
 
 const dates = ['2026-09-14', '2026-09-15'];
 const before = ctx.computeWeeklyShortHours('Habib', dates).weekTotals['2026-09-14'];

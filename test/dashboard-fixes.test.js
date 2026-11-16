@@ -322,7 +322,12 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
     /* Nothing may recite the old fixed hour: it is the office's to change. */
     const saysHour = src.split('\n')
       .map((l, i) => ({ n: i + 1, l }))
-      .filter(x => /1:00/.test(x.l) && !/->\s*2\s+out twice/.test(x.l));
+      /* The approved-hours list offers an hour as one of the lengths a day
+         may be agreed at. That is a quantity of work, not the break
+         allowance this check is about, and it is the office's to pick from
+         rather than a figure baked into a label. */
+      .filter(x => /1:00/.test(x.l) && !/->\s*2\s+out twice/.test(x.l)
+                   && !/\['1:00', *'1 hour'\]/.test(x.l));
     check('nothing still says "1:00" where the figure is now the office\'s',
       saysHour.length === 0, saysHour.map(x => x.n + ': ' + x.l.trim().slice(0, 70)));
 
