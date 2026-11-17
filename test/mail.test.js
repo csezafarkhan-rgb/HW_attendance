@@ -84,11 +84,11 @@ const SECRET = 'test-secret-for-signing-links';
     sections: { table: false }
   });
   check('a late arrival has its hour picked out, and says by how much after it',
-    /Late One<span style="background:#FFF3C4[^>]*> \(10:13 AM\)<\/span><span[^>]*> - 43 min late<\/span>/
+    /Late One<\/span><span[^>]*><span style="background:#FFF3C4[^>]*> \(10:13 AM\)<\/span><span[^>]*> - 43 min late<\/span>/
       .test(marked.html),
     (/Late One<span[\s\S]{0,220}/.exec(marked.html) || [])[0]);
   check('and an on-time arrival is left plain',
-    /Early One<span style="color:#5B6675[^>]*> \(9:16 AM\)/.test(marked.html));
+    /Early One<\/span><span[^>]*><span style="color:#5B6675[^>]*> \(9:16 AM\)/.test(marked.html));
   check('the names on a card are numbered', /1_Asha Test/.test(cards.html) && /1_Ravi Test/.test(cards.html));
   check('dates read as the office writes them',
     mailer.fmtDay('2026-09-24') === '24 Sep’ 2026'
@@ -101,7 +101,8 @@ const SECRET = 'test-secret-for-signing-links';
            { name: 'Nopunch Test', kind: 'missing', 'in': '', inMin: null }]
   });
   check('a card shows when each of them came in',
-    /1_Early Test<span[^>]*> \(9:10 AM\)/.test(timed.html) && /1_Nopunch Test</.test(timed.html), timed.html.slice(0, 60));
+    /1_Early Test<\/span><span[^>]*><span[^>]*> \(9:10 AM\)/.test(timed.html)
+      && /1_Nopunch Test</.test(timed.html), timed.html.slice(0, 60));
   const arrived = mailer.dailyEmail({
     orgName: 'Test Co', dateLabel: 'Tue, 22 Sep', sections: { table: false },
     rows: [

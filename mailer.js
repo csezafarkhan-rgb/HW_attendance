@@ -805,15 +805,39 @@ function dailyEmail(o) {
          more than their longest line used and stood empty down the right.
          Purely equal is where this started. Between the two, every card is
          wide enough for its longest line and none of them is a sliver. */
-      const needs = kinds.map(needOf);
-      const asked = needs.reduce(function (a, b) { return a + b; }, 0) || 1;
-      const even = 100 / kinds.length;
-      const mixed = needs.map(function (n) { return (n / asked * 100 + even) / 2; });
-      /* And nothing below a floor, with the rest worked out again around it. */
-      const floored = mixed.map(function (s) { return Math.max(18, s); });
-      const given = floored.reduce(function (a, b) { return a + b; }, 0) || 1;
-      const share = floored.map(function (s) { return Math.floor(s / given * 100); });
-      const cells = kinds.map(function (k, idx) {
+      /* Over more than one row, where there are more kinds than a row can
+         hold.
+
+         The sharing out below is careful and was still hopeless: six cards
+         across a message six hundred pixels wide is a hundred pixels each,
+         and the longest line on the day is twice that. No division of a
+         hundred per cent fixes a row that is too narrow for any of its
+         cards - so the row stops being one row.
+
+         Evened out rather than filled three-then-the-rest, because a single
+         card alone on a second row reads as a card belonging to something
+         else rather than as the end of the set. */
+      const PER_ROW = 3;
+      const rowCount = Math.ceil(kinds.length / PER_ROW);
+      const perRow = Math.ceil(kinds.length / rowCount);
+      const rows = [];
+      for (let i = 0; i < kinds.length; i += perRow) rows.push(kinds.slice(i, i + perRow));
+      /* Each row shares out its own hundred per cent: a row of two cards
+         fills the width as a row of three does, rather than leaving the
+         message with a gap down one side. */
+      const sharesFor = function (group) {
+        const needs = group.map(needOf);
+        const asked = needs.reduce(function (a, b) { return a + b; }, 0) || 1;
+        const even = 100 / group.length;
+        const mixed = needs.map(function (n) { return (n / asked * 100 + even) / 2; });
+        /* And nothing below a floor, with the rest worked out again around it. */
+        const floored = mixed.map(function (s) { return Math.max(18, s); });
+        const given = floored.reduce(function (a, b) { return a + b; }, 0) || 1;
+        return floored.map(function (s) { return Math.floor(s / given * 100); });
+      };
+      const cellsFor = function (group) {
+        const share = sharesFor(group);
+        return group.map(function (k, idx) {
         /* Numbered, so a card can be counted down at a glance and read back
            over the phone without losing the place, with the time they came
            in beside the name. One person is one line: a card is a quarter of
@@ -870,8 +894,20 @@ function dailyEmail(o) {
                  + '</span>'
                  + '</div>';
           }
-          return '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name)
-               + (at ? time : '') + via
+          /* The name holds together and the hour holds together, and the line
+             may break between them if it must.
+
+             It used to be one nowrap line, which does not wrap - it overflows,
+             and in an email that means it runs straight across the card beside
+             it. "1_Shyam Lal ESS (9:12 AM)" lay over the card to its right.
+             Breaking between the two parts costs a second line on the rare
+             long name and never splits one person into two, which is what
+             nowrap was there to prevent in the first place. The night card has
+             read this way for a while; this is the same treatment. */
+          return '<div style="line-height:1.45;">'
+               + '<span style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name) + '</span>'
+               + (at ? ('<span style="white-space:nowrap;">' + time + via + '</span>')
+                     : via)
                + '</div>';
         };
         /* Grouped only where there is more than one slot in the card: with
@@ -916,9 +952,12 @@ function dailyEmail(o) {
                  + ' not the reader</div>')
               : '')
           + '</div></td>';
-      }).join('');
-      body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
-        + '<tr>' + cells + '</tr></table>');
+        }).join('');
+      };
+      rows.forEach(function (group) {
+        body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
+          + '<tr>' + cellsFor(group) + '</tr></table>');
+      });
     }
   }
 

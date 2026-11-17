@@ -168,10 +168,14 @@ const DAY = [
     html.indexOf('marked on the portal, not the reader') > -1, null);
   check('and says it once rather than once a person',
     html.split('marked on the portal').length - 1 === 1, null);
-  /* It cannot push a name onto a second line: it lives inside the same
-     nowrap line as the name and the time. */
-  check('the name, the time and the mark are one unbroken line',
-    /white-space:nowrap;">2_Aman Chandra[\s\S]{0,220}?<\/sup><\/div>/.test(html), null);
+  /* It cannot push the name onto a second line: it sits with the time, and
+     the time is held together. The line may now break between the name and
+     the hour - it has to, or a long one runs over the card beside it - but
+     neither part may break inside itself, which is what kept one person from
+     reading as two. */
+  check('the mark stays with the time, and the name stays whole',
+    /<span style="white-space:nowrap;">\d+_Aman Chandra<\/span>/.test(html)
+    && /<\/sup><\/span><\/div>/.test(html), null);
 }
 {
   const html = build(DAY);
