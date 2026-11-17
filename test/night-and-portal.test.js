@@ -60,7 +60,7 @@ const DAY = [
        second line with the span rather than stranding it after the name. */
     const p = build([onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00', 'portal')]);
     check('a portal mark travels with the span, not the name',
-      /9:00<sup[^>]*>P<\/sup><\/span>/.test(p), null);
+      /9:00<sup[^>]*>P<\/sup><\/div>/.test(p), null);
   }
   check('and he is on it', html.indexOf('1_Aman Gupta') > -1, null);
   /* The whole night, because a night is a span and not a moment: when it
@@ -71,12 +71,15 @@ const DAY = [
   /* The line is longer than a narrow card, so it is allowed to wrap - in one
      place only, the gap between the name and the span. Left to itself the
      card broke the name instead, and 1_Aman / Gupta reads as two people. */
-  check('the name is held together',
-    /<span style="white-space:nowrap;">1_Aman Gupta<\/span>/.test(html), null);
-  check('and so is the span',
-    /white-space:nowrap[^"]*"> \(7:04 PM → 4:04 AM\) · 9:00/.test(html), null);
-  check('so the only place the line can break is between the two',
-    /<\/span><span style="white-space:nowrap;color:/.test(html), null);
+  check('the name is held together, on a line of its own',
+    /<div style="white-space:nowrap;">1_Aman Gupta<\/div>/.test(html), null);
+  check('and so is the span, on the next',
+    /white-space:nowrap[^"]*">\(7:04 PM → 4:04 AM\) · 9:00/.test(html), null);
+  /* Put on two lines rather than left to wrap: it read differently at
+     every card width, and the card had to be wide enough for both parts
+     even though they were about to sit one above the other anyway. */
+  check('so the two sit one above the other, at every width',
+    /<\/div><div style="white-space:nowrap;color:/.test(html), null);
   check('the slot says which night it was',
     html.indexOf('19:00-4:00 · last night') > -1, null);
 
@@ -110,8 +113,20 @@ const DAY = [
     w['Not Reached Office'] < w['Present'] && w['Not Reached Office'] < w['On Night Shift'], w);
   check('the card holding the longest line is not squeezed for it',
     w['Present'] >= 33, w);
-  check('and the night card has the room for a whole night',
-    w['On Night Shift'] >= 33, w);
+  /* Stated as pixels its longest line needs rather than as a share, because
+     the share moved the day the night line went onto two lines - it stopped
+     needing room for the name and the span side by side - and a threshold
+     tuned to the old shape fails on the new one while the card is in fact
+     roomier than before. The message says how wide it is; the card's share
+     of it has to cover the span, which is the longest line it holds. */
+  {
+    const full = +(/width="(\d+)" cellpadding/.exec(
+      build(DAY.concat([LATE, onNights('Aman Gupta', '19:04', '4:04', '9:00', '19:00-4:00')]))) || [])[1];
+    const px = w['On Night Shift'] / 100 * full;
+    const span = '(7:04 PM → 4:04 AM) · 9:00'.length * 9.5 * 0.52;
+    check('and the night card has the room for a whole night',
+      px > span, { share: w['On Night Shift'], px: Math.round(px), span: Math.round(span) });
+  }
   check('the row still adds up to a row', sum(w) <= 100, w);
 
   /* A card that is all short names does not vanish, however little it asks. */

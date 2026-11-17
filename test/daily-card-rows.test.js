@@ -89,8 +89,12 @@ check('and it still gives way on a narrow screen',
 }
 
 /* ---- and a line that is still long wraps rather than overflowing ---- */
+/* An ordinary line is two held-together spans that may part if they must.
+   The night line is two deliberate lines and is checked above; this names an
+   ordinary person so the two cannot be confused. */
 check('an ordinary line may break between the name and the time',
-  !/<div style="white-space:nowrap;">\d+_/.test(html), null);
+  /<span style="white-space:nowrap;">\d+_Habib<\/span>/.test(html)
+  && !/<div style="white-space:nowrap;">\d+_Habib/.test(html), null);
 check('but the name itself is never broken, so one person stays one person',
   /<span style="white-space:nowrap;">1_/.test(html), null);
 
@@ -99,8 +103,22 @@ check('the late arrival still carries its hour and its measure',
   /20 min late/.test(html) && /10:20 AM/.test(html), null);
 check('the portal mark is still explained on the cards that have one',
   /marked on the portal/.test(html), null);
-check('and the night span is still one unbroken reading',
-  /6:56 PM/.test(html) && /5:17 AM/.test(html), null);
+/* The night line is the longest on the message. Put deliberately on two
+   lines - the name, then the span - it reads the same at every card width
+   instead of breaking wherever the card happens to end, and the card asks
+   only for the longer of the two rather than for both side by side. */
+check('the night span sits on its own line under the name',
+  /<div style="white-space:nowrap;">\d+_Aman Gupta<\/div><div style="white-space:nowrap;[^"]*">\(6:56 PM/
+    .test(html), (/1_Aman Gupta[\s\S]{0,140}/.exec(html) || [])[0]);
+check('and it is still one unbroken reading',
+  /\(6:56 PM → 5:17 AM\) · 10:21/.test(html), null);
+{
+  /* Asking for the sum of two lines that never share a row made the whole
+     message wider than it had to be. */
+  const widest = Math.max.apply(null, [html].map(widthOf));
+  check('so the message is no wider than the parts that actually share a row',
+    widest < 941, widest);
+}
 
 console.log(results.every(Boolean) ? '\nALL PASS (' + results.length + ')' : '\nSOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

@@ -796,8 +796,11 @@ function dailyEmail(o) {
         k[1].forEach(function (r, i) {
           let n = wide((i + 1) + '_' + r.name, 10.5);
           if (r.kind === 'night' && r.out) {
-            n += wide(' (' + clock(r['in']) + ' → ' + clock(r.out) + ')'
-                      + (r.worked ? (' · ' + r.worked) : ''), 9.5);
+            /* Two lines, so the card needs the longer of them rather than the
+               two added together - asking for the sum of lines that never
+               share a row made the whole message wider than it had to be. */
+            n = Math.max(n, wide('(' + clock(r['in']) + ' → ' + clock(r.out) + ')'
+                                 + (r.worked ? (' · ' + r.worked) : ''), 9.5));
           } else if (r.inMin != null) {
             n += wide(' (' + clock(r['in']) + ')', 9.5);
             if (r.late) n += wide(' - ' + minsSaid(r.late) + ' late'
@@ -891,13 +894,23 @@ function dailyEmail(o) {
              card broke the name instead, and 1_Aman / Gupta reads as two
              people until you look twice. */
           if (r.kind === 'night' && r.out) {
+            /* The name on its line and the span on the next, always, rather
+               than left to wrap wherever the card happens to end.
+
+               A night is the longest line on the message: a name, two clock
+               times, an arrow and the hours between. Allowed to wrap it broke
+               in a different place on every card width, and the card had to
+               be wide enough for name and span together even though they were
+               about to sit on two lines anyway. Put deliberately on two, the
+               card asks only for the longer of the two parts, and the span
+               reads as one thing because it is one thing. */
             return '<div style="line-height:1.45;">'
-                 + '<span style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name) + '</span>'
-                 + '<span style="white-space:nowrap;color:' + SOFT + ';font-size:9.5px;">'
-                 +   ' (' + esc(clock(r['in'])) + ' → ' + esc(clock(r.out)) + ')'
+                 + '<div style="white-space:nowrap;">' + (i + 1) + '_' + esc(r.name) + '</div>'
+                 + '<div style="white-space:nowrap;color:' + SOFT + ';font-size:9.5px;">'
+                 +   '(' + esc(clock(r['in'])) + ' → ' + esc(clock(r.out)) + ')'
                  +   (r.worked ? ' · ' + esc(r.worked) : '')
                  + via
-                 + '</span>'
+                 + '</div>'
                  + '</div>';
           }
           /* The name holds together and the hour holds together, and the line
