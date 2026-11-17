@@ -1,8 +1,8 @@
-// Six cards across one row of an email is a hundred pixels each, and the
-// lines inside them are nowrap - so they do not wrap, they overflow, and
-// "1_Shyam Lal ESS (9:12 AM)" ran straight over the card beside it. No width
-// estimator can fit that line into a hundred pixels; the row was the problem,
-// not the sharing out of it.
+// Six cards across a 720px message is 120 pixels each, and the longest line
+// on the day is twice that - so the lines lay across the cards beside them.
+// Breaking the cards onto two rows cured the overlap and read worse: the day
+// is one thing, and the office takes it in at a glance or not at all. So the
+// row asks for the width it needs and the message is built to it.
 'use strict';
 const path = require('path');
 const REPO = path.join(__dirname, '..');
@@ -15,10 +15,9 @@ const check = (name, ok, got) => {
 };
 
 const hhmm = t => { const p = String(t).split(':'); return (+p[0]) * 60 + (+p[1]); };
-const SHIFT = '9:30-6:30';
 const row = (name, kind, inT, extra) => Object.assign({
   name, 'in': inT || '', out: '', state: kind, kind,
-  label: kind, inMin: inT ? hhmm(inT) : null, shift: SHIFT
+  label: kind, inMin: inT ? hhmm(inT) : null, shift: '9:30-6:30'
 }, extra || {});
 
 const build = rows => mailer.dailyEmail({
@@ -28,8 +27,12 @@ const build = rows => mailer.dailyEmail({
               shifts: false, wfh: false, visits: false }
 }).html;
 
-/* The day from the message that prompted this: six kinds at once, with the
-   longest line on the one card whose name is longest. */
+const widthOf = html => +(/width="(\d+)" cellpadding/.exec(html) || [])[1];
+const cardsIn = html => (html.match(/<td width="\d+%" valign="top"/g) || []).length;
+const rowsIn = html => (html.match(/table-layout:fixed/g) || []).length;
+
+/* The day from the message that prompted this: six kinds at once, the longest
+   line on the night card and the second longest on Present. */
 const SIX = [
   row('Habib', 'present', '8:53'),
   row('Zafar Khan', 'present', '9:24'),
@@ -37,64 +40,67 @@ const SIX = [
   row('Himanshu', 'present', '10:20', { late: 20, via: 'portal' }),
   row('karan Ahuja', 'missing'),
   row('Munish Dhamija', 'missing'),
-  row('Aman Gupta', 'night', '18:56', { out: '10:21', worked: '8:00', shift: '19:00-4:00' }),
+  row('Aman Gupta', 'night', '18:56', { out: '5:17', worked: '10:21', shift: '19:00-4:00' }),
   row('Shyam Lal ESS', 'visit', '9:12', { via: 'portal' }),
   row('Aman Chandra', 'leave'),
   row('Rahul Mishra', 'wfh', '9:30')
 ];
-
 const html = build(SIX);
-const rowTables = html.match(/table-layout:fixed/g) || [];
 
-/* ---- the cards are laid out over more than one row ---- */
-check('six kinds are not crushed into a single row',
-  rowTables.length > 1, rowTables.length);
-/* Balanced rather than three-then-the-rest: a lone card on its own row reads
-   as a card that belongs to something else. */
-/* Counted by the card cell, which is the one that carries valign - a card
-   holds a slot-rule table of its own, and its two cells are not cards. */
+/* ---- one row, however many cards ---- */
+check('six kinds stay on a single row',
+  rowsIn(html) === 1, rowsIn(html));
+check('with every card on it',
+  cardsIn(html) === 6, cardsIn(html));
+check('and none of them squeezed to a sliver',
+  (html.match(/<td width="(\d+)%" valign="top"/g) || [])
+    .map(s => +(/(\d+)/.exec(s)[1])).every(w => w >= 10), null);
+
+/* ---- the message is built to what the row needs ---- */
+check('a day with six cards asks for more than the ordinary width',
+  widthOf(html) > 720, widthOf(html));
+check('and not more than a mail client will honour',
+  widthOf(html) <= 1040, widthOf(html));
+check('the width is declared on the attribute and the style alike, as clients read either',
+  new RegExp('width="' + widthOf(html) + '"').test(html)
+  && new RegExp('width:' + widthOf(html) + 'px').test(html), null);
+/* A phone cannot have 940 pixels, so the message folds rather than running
+   off the side of the screen. */
+check('and it still gives way on a narrow screen',
+  /max-width:100%/.test(html), null);
+
+/* ---- a quiet day is left exactly as it was ---- */
 {
-  const cellsPerRow = html.split('table-layout:fixed').slice(1)
-    .map(chunk => (chunk.match(/<td width="\d+%" valign="top"/g) || []).length);
-  check('and the rows are evened out, with no card left alone',
-    cellsPerRow.length > 1 && Math.max.apply(null, cellsPerRow)
-      - Math.min.apply(null, cellsPerRow) <= 1, cellsPerRow);
-  check('with no row holding more than four',
-    Math.max.apply(null, cellsPerRow) <= 4, cellsPerRow);
-  check('and every card accounted for, none dropped in the splitting',
-    cellsPerRow.reduce((a, b) => a + b, 0) === 6, cellsPerRow);
+  const small = build([row('Habib', 'present', '8:53'), row('karan Ahuja', 'missing')]);
+  check('two kinds keep the ordinary width',
+    widthOf(small) === 720, widthOf(small));
+  check('on one row, as they always did',
+    rowsIn(small) === 1 && cardsIn(small) === 2, [rowsIn(small), cardsIn(small)]);
 }
-/* Each row shares out its own hundred per cent, or a short row would leave a
-   gap down the side of the message. */
+/* Every other message is untouched: they carry no cards and no claim on the
+   width, so they are built at the ordinary one. */
 {
-  const widths = (html.match(/<td width="(\d+)%" valign="top"/g) || [])
-    .map(s => +(/(\d+)/.exec(s)[1]));
-  check('every card still asks for a real share of its own row',
-    widths.length === 6 && widths.every(w => w >= 20), widths);
+  const other = mailer.remindEmail({
+    orgName: 'A', name: 'Rahul Mishra', day: '2026-11-17', footer: 'x',
+    items: [{ job: 'late', day: '2026-11-17', mins: 18, came: '09:48' }]
+  }).html;
+  check('a message with no cards is still the ordinary width',
+    widthOf(other) === 720, widthOf(other));
 }
 
-/* ---- and a line that is still too long wraps instead of overflowing ---- */
+/* ---- and a line that is still long wraps rather than overflowing ---- */
 check('an ordinary line may break between the name and the time',
   !/<div style="white-space:nowrap;">\d+_/.test(html), null);
 check('but the name itself is never broken, so one person stays one person',
   /<span style="white-space:nowrap;">1_/.test(html), null);
-check('and the time beside it is kept whole too',
-  (html.match(/white-space:nowrap/g) || []).length >= 2, null);
 
 /* ---- what was already right stays right ---- */
 check('the late arrival still carries its hour and its measure',
   /20 min late/.test(html) && /10:20 AM/.test(html), null);
-check('the portal mark is still explained once per card that has one',
+check('the portal mark is still explained on the cards that have one',
   /marked on the portal/.test(html), null);
 check('and the night span is still one unbroken reading',
-  /6:56 PM/.test(html) && /10:21 AM/.test(html), null);
-
-/* Two or three kinds were never the problem and must not grow a second row. */
-{
-  const small = build([row('Habib', 'present', '8:53'), row('karan Ahuja', 'missing')]);
-  check('two kinds stay on one row, as they always did',
-    (small.match(/table-layout:fixed/g) || []).length === 1, null);
-}
+  /6:56 PM/.test(html) && /5:17 AM/.test(html), null);
 
 console.log(results.every(Boolean) ? '\nALL PASS (' + results.length + ')' : '\nSOME FAILED');
 process.exitCode = results.every(Boolean) ? 0 : 1;

@@ -180,7 +180,20 @@ function testBanner(wouldHaveGone) {
     + '</div>';
 }
 
-function layout(title, subtitle, blocks) {
+/* How wide a message may be built. 720 is the ordinary width; a day with six
+   summary cards on it asks for more, because the alternative is either lines
+   lying across their neighbours or the cards broken over two rows, and the
+   office reads the day at a glance or not at all. The ceiling is where a mail
+   client stops being reliable about it; max-width still keeps a phone
+   honest, so a wide message folds rather than scrolls sideways. */
+const MAIL_WIDTH = 720, MAIL_WIDTH_MAX = 1040;
+function mailWidth(want) {
+  const n = Math.round(Number(want) || 0);
+  if (!isFinite(n) || n <= MAIL_WIDTH) return MAIL_WIDTH;
+  return Math.min(n, MAIL_WIDTH_MAX);
+}
+function layout(title, subtitle, blocks, width) {
+  const W = mailWidth(width);
   /* The charset is declared in the message itself as well as in the headers
      the sender sets: a client that guesses instead of reading them turns every
      curly apostrophe into mojibake. */
@@ -194,10 +207,10 @@ function layout(title, subtitle, blocks) {
     + '<tr><td align="center">'
     /* 640 was the old safe width for a mail client, and the cards have
        outgrown it: three of them across that leaves each about two hundred
-       pixels, which is a name and a time and nothing more. 720 is still
-       inside what every client handles, and max-width keeps a phone honest. */
-    + '<table role="presentation" width="720" cellpadding="0" cellspacing="0" bgcolor="#ffffff" '
-    +   'style="width:720px;max-width:100%;background:#fff;'
+       pixels, which is a name and a time and nothing more. 720 is the
+       ordinary width now, and a message whose cards need more says so. */
+    + '<table role="presentation" width="' + W + '" cellpadding="0" cellspacing="0" bgcolor="#ffffff" '
+    +   'style="width:' + W + 'px;max-width:100%;background:#fff;'
     +   'border:1px solid ' + LINE + ';border-radius:14px;overflow:hidden;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
     + '<tr><td bgcolor="' + INK + '" style="padding:18px 22px;background:' + INK + ';color:#fff;">'
     +   '<div style="font-size:16px;font-weight:700;letter-spacing:.2px;">' + esc(title) + '</div>'
@@ -684,6 +697,9 @@ function dailyEmail(o) {
                             table: true, shot: true }, o.sections || {});
   const count = function (st) { return rows.filter(function (r) { return r.state === st; }).length; };
   const body = [];
+  /* How wide this message wants to be. The cards work it out from their own
+     longest lines further down; until they do, it is the ordinary width. */
+  let wantWidth = 0;
 
   const say = { date: o.dateLabel, org: o.orgName || 'Attendance',
                 present: count('present'), remote: count('remote'),
@@ -805,39 +821,29 @@ function dailyEmail(o) {
          more than their longest line used and stood empty down the right.
          Purely equal is where this started. Between the two, every card is
          wide enough for its longest line and none of them is a sliver. */
-      /* Over more than one row, where there are more kinds than a row can
-         hold.
+      /* One row, and the message widened to hold it.
 
-         The sharing out below is careful and was still hopeless: six cards
-         across a message six hundred pixels wide is a hundred pixels each,
-         and the longest line on the day is twice that. No division of a
-         hundred per cent fixes a row that is too narrow for any of its
-         cards - so the row stops being one row.
+         Six cards across seven hundred and twenty pixels is a hundred and
+         twenty each, and the longest line on the day is twice that - so the
+         lines ran over the cards beside them. Splitting the cards onto two
+         rows fixed the overlap and read worse: the day is one thing and the
+         office takes it in at a glance.
 
-         Evened out rather than filled three-then-the-rest, because a single
-         card alone on a second row reads as a card belonging to something
-         else rather than as the end of the set. */
-      const PER_ROW = 3;
-      const rowCount = Math.ceil(kinds.length / PER_ROW);
-      const perRow = Math.ceil(kinds.length / rowCount);
-      const rows = [];
-      for (let i = 0; i < kinds.length; i += perRow) rows.push(kinds.slice(i, i + perRow));
-      /* Each row shares out its own hundred per cent: a row of two cards
-         fills the width as a row of three does, rather than leaving the
-         message with a gap down one side. */
-      const sharesFor = function (group) {
-        const needs = group.map(needOf);
-        const asked = needs.reduce(function (a, b) { return a + b; }, 0) || 1;
-        const even = 100 / group.length;
-        const mixed = needs.map(function (n) { return (n / asked * 100 + even) / 2; });
-        /* And nothing below a floor, with the rest worked out again around it. */
-        const floored = mixed.map(function (s) { return Math.max(18, s); });
-        const given = floored.reduce(function (a, b) { return a + b; }, 0) || 1;
-        return floored.map(function (s) { return Math.floor(s / given * 100); });
-      };
-      const cellsFor = function (group) {
-        const share = sharesFor(group);
-        return group.map(function (k, idx) {
+         So the row asks for the width it needs and the message is built to
+         that, up to a limit no mail client will thank us for passing. The
+         cards still share what they are given in the proportions below;
+         what has changed is that there is enough to share. */
+      const needs = kinds.map(needOf);
+      wantWidth = Math.ceil(needs.reduce(function (a, b) { return a + b; }, 0)) + 44;
+      const asked = needs.reduce(function (a, b) { return a + b; }, 0) || 1;
+      const even = 100 / kinds.length;
+      const mixed = needs.map(function (n) { return (n / asked * 100 + even) / 2; });
+      /* And nothing below a floor, with the rest worked out again around it. */
+      const floored = mixed.map(function (s) { return Math.max(12, s); });
+      const given = floored.reduce(function (a, b) { return a + b; }, 0) || 1;
+      const share = floored.map(function (s) { return Math.floor(s / given * 100); });
+      const cells = (function () {
+        return kinds.map(function (k, idx) {
         /* Numbered, so a card can be counted down at a glance and read back
            over the phone without losing the place, with the time they came
            in beside the name. One person is one line: a card is a quarter of
@@ -953,11 +959,9 @@ function dailyEmail(o) {
               : '')
           + '</div></td>';
         }).join('');
-      };
-      rows.forEach(function (group) {
-        body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
-          + '<tr>' + cellsFor(group) + '</tr></table>');
-      });
+      })();
+      body.push('<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed;margin-bottom:6px;">'
+        + '<tr>' + cells + '</tr></table>');
     }
   }
 
@@ -1025,7 +1029,10 @@ function dailyEmail(o) {
      second message went out the same day. The time it was sent is on the
      header, so no two are ever quite the same. */
   const stamp = o.dateLabel + (o.sentAt ? (' \u00b7 as at ' + o.sentAt) : '');
-  return { subject: subject, html: layout(o.orgName || 'Attendance', stamp, body) };
+  /* Built to the width its own cards asked for, which on a quiet day is the
+     ordinary one. */
+  return { subject: subject,
+           html: layout(o.orgName || 'Attendance', stamp, body, wantWidth) };
 }
 
 /* What everybody did today, one card a person, in the order the office reads
