@@ -4694,18 +4694,28 @@ async function decidableBy(req, p) {
   /* Whose leave it is. An unrequested day carries the name; a request carries
      an id, and the name is on the request. */
   let empName = p.k === 'unreq' ? String(p.e || '') : '';
+  /* And what kind of thing it is, because a time correction is sent to a list
+     of its own. Asked here rather than assumed: the gate used to ask the leave
+     list about every request, so an office that filled in the corrections tab
+     sent its corrections to one set of people and then refused those same
+     people the buttons. A day taken without a request is never a correction,
+     so that path keeps the leave list. */
+  let kind = '';
   if (!empName) {
     const r = await pool.query(
       'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL', [p.org, 'leaveRequests']);
     const hit = (parseJson(r.rows[0] ? r.rows[0].value : null) || [])
       .filter(x => x && x.id === p.id)[0];
     empName = hit ? String(hit.empName || '') : '';
+    kind = hit ? String(hit.leaveType || '') : '';
   }
   if (!empName) return { how: 'no' };
   const settings = await mailSettings(p.org);
   const route = await approvalRouteOf(p.org);
   const mgmt = await mailRecipients(p.org, settings, 'leave');
-  const aud = await leaveAudience(p.org, settings, route, empName, mgmt);
+  const aud = kind === 'PUNCH'
+    ? await punchAudience(p.org, settings, route, empName, mgmt)
+    : await leaveAudience(p.org, settings, route, empName, mgmt);
   if (aud.to.indexOf(mine) > -1) return { how: 'yes', name: myName || mine };
   return { how: 'no', who: await approverNames(p.org, aud.to) };
 }
@@ -4777,6 +4787,105 @@ app.post('/e/:token', mailActionLimiter, formBody, async (req, res) => {
   const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim(),
                                        may.name);
   res.status(out.ok ? 200 : 409).send(mailer.resultPage(out.title, out.detail, out.ok));
+});
+
+/* ---- the same two buttons, on the approver's own page ----
+
+   An approver is usually not an admin. One of them answers for seven people
+   and has no Requests tab, because that tab is the office's: the only way he
+   could answer anything at all was to find the right email and press the
+   button in it. A decision that waits on somebody finding a message is a
+   decision that waits.
+
+   So what is waiting on him is put on his own page. Not a second way of
+   deciding - the same one. Who may answer is the gate the email buttons go
+   through, and the decision is the function those buttons call. A page that
+   worked out for itself whose leave is whose would be a second opinion on the
+   one question where two answers are worse than none.
+
+   What it shows of somebody else's request is the bare line - the name, the
+   kind, the days - with the reason behind a press. He is sent all of it by
+   email anyway; a colleague reading over his shoulder is not. */
+async function approvalsFor(orgId, mine) {
+  const kv = await sharedKeys(orgId, ['leaveRequests', 'empNames']);
+  const shown = parseJson(kv.empNames) || {};
+  /* Waiting, and waiting on an approver. A request sitting at 'query' is
+     waiting on the person who asked - it would read here as something to
+     decide, and there is nothing yet to decide. */
+  const open = (parseJson(kv.leaveRequests) || []).filter(
+    r => r && !r.archived && (r.status === 'pending' || r.status === 'recommended'));
+  if (!open.length) return [];
+  const settings = await mailSettings(orgId);
+  const route = await approvalRouteOf(orgId);
+  const mgmt = await mailRecipients(orgId, settings, 'leave');
+  /* One audience per person per kind, however many requests they have in. */
+  const asked = {};
+  const audOf = r => {
+    const k = (r.leaveType === 'PUNCH' ? 'punch|' : 'leave|') + r.empName;
+    if (!asked[k]) {
+      asked[k] = r.leaveType === 'PUNCH'
+        ? punchAudience(orgId, settings, route, r.empName, mgmt)
+        : leaveAudience(orgId, settings, route, r.empName, mgmt);
+    }
+    return asked[k];
+  };
+  const out = [];
+  for (const r of open) {
+    const aud = await audOf(r);
+    if (aud.to.indexOf(mine) === -1) continue;      // sent to them, not copied
+    const others = aud.to.filter(a => a !== mine);
+    out.push({
+      id: r.id, who: shown[r.empName] || r.empName,
+      type: r.leaveType, kind: mailer.kindName(r.leaveType),
+      from: r.dateFrom, to: r.dateTo || r.dateFrom,
+      days: daysBetween(r.dateFrom, r.dateTo || r.dateFrom).length,
+      half: r.half || '', status: r.status,
+      passedBy: r.status === 'recommended' ? String(r.recommendedBy || '') : '',
+      asked: r.createdAt || '', said: clip(String(r.message || ''), 600),
+      punchIn: r.punchIn || '', punchOut: r.punchOut || '',
+      /* Whether anybody else can settle it, so somebody can tell a queue of
+         one from a queue of three. */
+      alsoWith: others.length ? await approverNames(orgId, others) : ''
+    });
+  }
+  /* Oldest first: the one being forgotten is the one worth leading with. */
+  out.sort((a, b) => String(a.asked || a.from).localeCompare(String(b.asked || b.from)));
+  return out;
+}
+app.get('/api/my/approvals', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const mine = String((req.user && req.user.email) || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(mine)) return res.json({ waiting: [] });
+    res.json({ waiting: await approvalsFor(req.session.orgId, mine) });
+  } catch (e) {
+    console.error('what is waiting on an approver:', e && e.message);
+    res.json({ waiting: [] });
+  }
+});
+/* And the press itself, through the gate the email goes through and into the
+   function the email calls. The only difference is that the answer comes back
+   as JSON instead of a page, because this one is pressed on a page that is
+   already open. */
+app.post('/api/my/approvals', requireAuth, smallJson, async (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim();
+  const act = String((req.body && req.body.act) || '').trim();
+  if (!id || (act !== 'approve' && act !== 'reject')) {
+    return res.status(400).json({ error: 'Say which request, and which way.' });
+  }
+  const p = { k: 'req', org: req.session.orgId, id: id, act: act, s: 0 };
+  const may = await decidableBy(req, p);
+  if (may.how !== 'yes') {
+    return res.status(403).json({ error: 'This one is not yours to decide',
+      detail: (may.who ? ('It is with ' + may.who + '. ') : '')
+            + 'You were sent it so that you can see it, which is not the '
+            + 'same as answering it.' });
+  }
+  const done = await alreadySettled(p);
+  if (done) return res.status(409).json({ error: done.title, detail: done.detail });
+  const out = await applyEmailDecision(p, clip((req.body && req.body.note) || '', 500).trim(),
+                                       may.name);
+  res.status(out.ok ? 200 : 409).json(out.ok ? out : { error: out.title, detail: out.detail });
 });
 
 /* Admin controls: what is configured, a test email, and "send today's now". */

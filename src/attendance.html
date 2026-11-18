@@ -2332,6 +2332,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* A day with nothing on it at all. Red, not amber: it costs a whole day until
    somebody says what it was. */
 .ew-tag.gap{background:#FDE7E4;color:#C0392B;}
+.ew-tag.punch{background:#E0F2FE;color:#075E8C;}
 .ew-i.now{background:#FDE7E4;border-color:#F3C4BD;}
 .ew-age{flex:none;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;white-space:nowrap;}
 .ew-age.hot{background:#C0392B;color:#fff;} .ew-age.warm{background:#FFF3DF;color:#B26B00;}
@@ -2339,6 +2340,26 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 .ew-b.p{background:var(--brand,#3B7DF5);border-color:var(--brand,#3B7DF5);color:#fff;}
 .ew-b.r{background:#C0392B;border-color:#C0392B;color:#fff;}
 .ew-none{padding:9px 11px;font-size:11.5px;color:var(--ink-dim);}
+/* Somebody else's request, waiting on this person's word. Across the whole
+   card rather than in a column of its own: it is the only thing here that
+   holds another person up, and the lines it carries - a name, a kind and a
+   span of days - do not fit a half. */
+.ew-col.wide{margin-bottom:10px;}
+.ew-h.decide{background:#E3F6EC;color:#0A7A42;}
+.ew-b.g{background:#0A7A42;border-color:#0A7A42;color:#fff;}
+.ew-see{padding:2px 11px 11px;border-top:1px solid var(--line);background:var(--panel-2);font-size:12px;line-height:1.55;}
+.ew-see dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:9px 0 0;}
+.ew-see dt{color:var(--ink-dim);font-size:11px;font-weight:700;}
+.ew-see dd{margin:0;font-size:12px;}
+.ew-see .said{margin-top:9px;padding:8px 10px;background:var(--panel);border-left:3px solid var(--line-dk);border-radius:8px;font-size:12.5px;}
+/* The press is not the decision: the same two steps the emailed link takes,
+   and for the same reason - a mis-tap here marks somebody's days. */
+.ew-ask{padding:10px 11px;border-top:1px solid var(--line);background:#F2FBF5;}
+.ew-ask b{font-size:12.5px;display:block;margin-bottom:7px;}
+.ew-ask .lab{display:block;font-size:11px;color:var(--ink-soft);margin:0 0 5px;}
+.ew-ask textarea{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px;resize:vertical;}
+.ew-ask .row{display:flex;gap:7px;margin-top:9px;align-items:center;}
+.ew-ask .row .ew-none{padding:0;margin-left:auto;text-align:right;}
 /* Everything written about one day, under its times. Each note says what
    it is before it says what was written, because a reason on its own does
    not tell you whether it excused the day or merely explained it. */
@@ -22079,6 +22100,36 @@ function buildExcelBackup(){
   var EW_OVERDUE_DAYS = 3;
   var EW_OPEN_WHY = null;              // which late day has its box open
 
+  /* ---- and the fifth thing, which is not about their own record ----
+
+     An approver is usually not an admin: one of them answers for seven people
+     and has no Requests tab, because that tab is the office's. The link in the
+     email was the only way he could answer anything, so a decision waited on
+     him finding the right message.
+
+     What is waiting on him comes from the server, because this page is not
+     shown anybody else's requests and must not be: he is handed the ones he
+     is the named approver for, and nothing else. Who may decide what is the
+     server's answer in both places - the page asks, it does not work it out. */
+  var EW_DECIDE = null;                // what is waiting on them, once asked for
+  var EW_DECIDE_ASKED = false;         // whether the asking has started
+  var EW_SEE = null;                   // which request has its detail open
+  var EW_ASK = null;                   // {id, act} - the press waiting to be confirmed
+  function ewPullApprovals(){
+    if(EW_DECIDE_ASKED) return;
+    EW_DECIDE_ASKED = true;
+    fetch('/api/my/approvals', {credentials:'same-origin', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : {waiting:[]}; })
+      .then(function(d){
+        EW_DECIDE = (d && d.waiting) || [];
+        if(EW_DECIDE.length) renderEmpWaiting();
+      })
+      .catch(function(){ EW_DECIDE = []; });
+  }
+  /* Asked again after a decision, because the list is now one shorter and
+     because somebody else may have answered one while this page was open. */
+  function ewAgainApprovals(){ EW_DECIDE_ASKED = false; ewPullApprovals(); }
+
   function ewDaysSince(iso){
     if(!iso) return 0;
     var t = Date.parse(String(iso).length > 10 ? iso : (iso + 'T00:00:00'));
@@ -22331,6 +22382,82 @@ function buildExcelBackup(){
     try{ return dayInWords(iso).replace(/\u2019 \d{4}$/, ''); }catch(e){ return iso; }
   }
 
+  /* A colour for the kind, and the kind's own name for the words. The tag
+     beside their own items says what sort of day it is; this one says what
+     sort of request it is, which includes one that is not leave at all. */
+  function ewDecideTag(it){
+    if(it.type === 'PUNCH')  return { cls:'punch',  txt:it.kind || 'Punch correction' };
+    if(it.type === 'HALF')   return { cls:'half',   txt:it.kind || 'Half day' };
+    if(it.type === 'SHORT' || it.type === 'THREEQ')
+                             return { cls:'short',  txt:it.kind || 'Short leave' };
+    return { cls:'full', txt:it.kind || 'Leave' };
+  }
+  function ewDecideSub(it){
+    var bits = [];
+    var age = ewDaysSince(it.asked || it.from);
+    bits.push(age < 1 ? 'Asked today' : ('Asked ' + age + (age === 1 ? ' day' : ' days') + ' ago'));
+    if(it.type === 'PUNCH'){
+      /* The times as they were asked for, with "unchanged" where one end of
+         the day is not being touched - a blank there means leave it alone,
+         not midnight. */
+      bits.push('in ' + (it.punchIn ? fmtTime(it.punchIn) : 'unchanged')
+              + ', out ' + (it.punchOut ? fmtTime(it.punchOut) : 'unchanged'));
+    } else if(it.half){
+      bits.push(it.half === 'PM' ? 'second half' : 'first half');
+    } else if(it.days > 1){
+      bits.push(it.days + ' days');
+    }
+    if(it.passedBy) bits.push('passed on by ' + it.passedBy);
+    return bits.join(' · ');
+  }
+  /* Everything else the email carries about it, bar the leave year - that
+     table is the dashboard's arithmetic and this page is not the dashboard. */
+  function ewSeeBox(it){
+    return '<div class="ew-see"><dl>'
+      + '<dt>Asked</dt><dd>' + shotEsc(it.asked ? whenShort(it.asked) : 'not recorded') + '</dd>'
+      + '<dt>Days</dt><dd>' + shotEsc(ewSpan(it.from, it.to))
+      +   (it.days > 1 ? (', ' + it.days + ' days') : '')
+      +   (it.half ? (' · ' + shotEsc(it.half === 'PM' ? 'second half' : 'first half')) : '')
+      +   '</dd>'
+      + (it.type === 'PUNCH'
+          ? ('<dt>Times</dt><dd>in ' + shotEsc(it.punchIn ? fmtTime(it.punchIn) : 'unchanged')
+             + ', out ' + shotEsc(it.punchOut ? fmtTime(it.punchOut) : 'unchanged') + '</dd>')
+          : '')
+      + '<dt>Also with</dt><dd>' + (it.alsoWith ? shotEsc(it.alsoWith)
+          : 'nobody else — it is waiting on you alone') + '</dd>'
+      + '</dl>'
+      + (it.said ? ('<div class="said">“' + shotEsc(it.said) + '”</div>')
+                 : '<div class="ew-none" style="padding:9px 0 0">No reason was given with it.</div>')
+      + '</div>';
+  }
+  /* The confirm step, which is the emailed link's own confirm page put where
+     the button was pressed: what is about to happen, a word to go with it,
+     and one more press. */
+  function ewAskBox(it, act){
+    var yes = act === 'approve';
+    var what = it.type === 'PUNCH' ? 'the time'
+             : (it.days > 1 ? 'the days' : 'the day');
+    return '<div class="ew-ask">'
+      + '<b>' + (yes ? 'Approve ' : 'Reject ') + shotEsc(it.who) + '’s '
+      +   shotEsc(String(it.kind || 'request').toLowerCase()) + ', '
+      +   shotEsc(ewSpan(it.from, it.to)) + '?</b>'
+      + '<label class="lab">A word for ' + shotEsc(it.who)
+      +   (yes ? ' with your approval' : '') + ', if you want to give one (optional)</label>'
+      + '<textarea id="ewSay" rows="2" maxlength="500" placeholder="'
+      +   (yes ? 'e.g. Enjoy the break' : 'e.g. We are short-handed that week') + '"></textarea>'
+      + '<div class="row">'
+      +   '<button type="button" class="ew-b ' + (yes ? 'g' : 'r') + '" data-ew-go="'
+      +     shotEsc(it.id) + '" data-ew-goact="' + (yes ? 'approve' : 'reject') + '">Yes, '
+      +     (yes ? 'approve' : 'reject') + '</button>'
+      +   '<button type="button" class="ew-b" data-ew-drop="1">Cancel</button>'
+      +   '<span class="ew-none">' + (yes
+            ? ('Marks ' + what + ' and emails ' + shotEsc(it.who)
+               + '. The same as pressing it in the email.')
+            : ('Nothing is marked. ' + shotEsc(it.who) + ' is told, with your word if you give one.'))
+      +   '</span>'
+      + '</div></div>';
+  }
+
   function renderEmpWaiting(){
     var box = document.getElementById('empWaiting');
     if(!box) return;
@@ -22343,7 +22470,11 @@ function buildExcelBackup(){
     var got;
     try{ got = ewGather(name); }catch(e){ console.error('waiting list', e);
       box.style.display = 'none'; box.innerHTML = ''; return; }
-    if(!got.mine.length && !got.theirs.length){
+    /* Asked for on the first draw and kept: it is a question about other
+       people's requests, which this page has no copy of. */
+    ewPullApprovals();
+    var decide = EW_DECIDE || [];
+    if(!got.mine.length && !got.theirs.length && !decide.length){
       box.style.display = 'none'; box.innerHTML = ''; return;
     }
 
@@ -22425,9 +22556,45 @@ function buildExcelBackup(){
         + '<button type="button" class="ew-b" data-ew-see="' + shotEsc(it.id) + '">See it</button></div>';
     }).join('');
 
+    /* Somebody else's request, waiting on their word. The line is bare - a
+       name, a kind, a span of days - and the reason sits behind a press: they
+       are sent all of it by email, a colleague reading over their shoulder is
+       not. */
+    var decideRows = decide.map(function(it){
+      var t = ewDecideTag(it);
+      var open = (EW_SEE === it.id), asking = (EW_ASK && EW_ASK.id === it.id);
+      return '<div class="ew-i"><span class="ew-tag ' + t.cls + '">' + shotEsc(t.txt) + '</span>'
+        + '<div class="g"><b>' + shotEsc(it.who) + '</b> · '
+        +   shotEsc(ewSpan(it.from, it.to))
+        +   '<div class="sub">' + shotEsc(ewDecideSub(it)) + '</div></div>'
+        + ewAge(ewDaysSince(it.asked || it.from))
+        + '<button type="button" class="ew-b" data-ew-open="' + shotEsc(it.id) + '">'
+        +   (open ? 'Close' : 'See it') + '</button>'
+        /* While the question is on screen the two buttons come off it: the
+           answer is given in the box, and a second Approve beside it would be
+           a second way to do the one thing that cannot be undone from here. */
+        + (asking ? ''
+            : '<button type="button" class="ew-b g" data-ew-act="approve" data-ew-id="'
+              + shotEsc(it.id) + '">Approve</button>'
+              + '<button type="button" class="ew-b r" data-ew-act="reject" data-ew-id="'
+              + shotEsc(it.id) + '">Reject</button>')
+        + '</div>'
+        + (open ? ewSeeBox(it) : '')
+        + (asking ? ewAskBox(it, EW_ASK.act) : '');
+    }).join('');
+
     box.style.display = '';
     box.innerHTML = '<div class="wl-head"><div><b>Waiting on you</b>'
-      + '<span>' + (got.mine.length + got.theirs.length) + ' to settle</span></div></div>'
+      + '<span>' + (got.mine.length + got.theirs.length + decide.length)
+      + ' to settle</span></div></div>'
+      /* First, because it is the only thing on this card that holds another
+         person up: their own days wait on them, and this waits on them too
+         with somebody else standing still at the end of it. */
+      + (decide.length
+          ? ('<div class="ew-col wide"><div class="ew-h decide">Yours to decide '
+             + '— for other people<span class="n">' + decide.length + '</span></div>'
+             + decideRows + '</div>')
+          : '')
       + '<div class="ew-cols">'
       +   '<div class="ew-col"><div class="ew-h mine">Yours to do'
       +     '<span class="n">' + got.mine.length + '</span></div>'
@@ -22596,6 +22763,66 @@ function buildExcelBackup(){
         ewOpenForm(d, 'PUNCH', '',
           'Filled in for ' + fmtDayShortish(d)
           + '. Say the times you were in and out, and send it to be corrected.');
+      };
+    });
+
+    /* ---- and somebody else's request, waiting on their word ---- */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-open]'), function(b){
+      b.onclick = function(){
+        var id = b.getAttribute('data-ew-open');
+        EW_SEE = (EW_SEE === id) ? null : id;
+        renderEmpWaiting();
+      };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-act]'), function(b){
+      b.onclick = function(){
+        EW_ASK = { id: b.getAttribute('data-ew-id'), act: b.getAttribute('data-ew-act') };
+        renderEmpWaiting();
+      };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-drop]'), function(b){
+      b.onclick = function(){ EW_ASK = null; renderEmpWaiting(); };
+    });
+    /* The press itself. It goes to the server as the request's id and one
+       word, and the server asks the same question the emailed button asks -
+       whether this account is one the request was sent to - before it writes
+       anything. Nothing here decides; it asks to have it decided. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-go]'), function(b){
+      b.onclick = function(){
+        var id = b.getAttribute('data-ew-go'), act = b.getAttribute('data-ew-goact');
+        var ta = box.querySelector('#ewSay');
+        var note = ta ? ta.value.trim() : '';
+        b.disabled = true;
+        fetch('/api/my/approvals', {
+          method:'POST', credentials:'same-origin',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id:id, act:act, note:note })
+        }).then(function(r){
+          return r.json().catch(function(){ return {}; })
+            .then(function(d){ return { ok:r.ok, d:d || {} }; });
+        }).then(function(out){
+          if(!out.ok){
+            b.disabled = false;
+            showUploadStatus((out.d.error || 'That did not go through')
+              + (out.d.detail ? (' — ' + out.d.detail) : ''), true);
+            /* Settled by somebody else while this was open: the list is
+               stale, so it is asked for again rather than left showing a
+               request that no longer wants an answer. */
+            EW_ASK = null; ewAgainApprovals(); renderEmpWaiting();
+            return;
+          }
+          EW_ASK = null; EW_SEE = null;
+          EW_DECIDE = (EW_DECIDE || []).filter(function(x){ return x.id !== id; });
+          showUploadStatus(out.d.title
+            ? (out.d.title + (out.d.detail ? (' — ' + out.d.detail) : ''))
+            : (act === 'approve' ? 'Approved. The days are marked and they have been told.'
+                                 : 'Rejected. They have been told.'), false);
+          ewAgainApprovals();
+          renderEmpWaiting();
+        }).catch(function(e){
+          b.disabled = false;
+          showUploadStatus('That did not go through (' + ((e && e.message) || 'no answer') + ').', true);
+        });
       };
     });
   }

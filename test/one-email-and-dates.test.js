@@ -84,8 +84,15 @@ check('which is the list the person who asked is never on',
 check('the page that asks checks first, before it says anything about the request',
   /const may = await decidableBy\(req, p\);[\s\S]{0,220}const done = await alreadySettled\(p\);/.test(SRV),
   null);
-check('and the POST that acts checks again, because a POST need not have seen the page',
-  (SRV.match(/const may = await decidableBy\(req, p\);/g) || []).length === 2, null);
+/* There are more presses than there were - the approver's own page carries
+   the same two buttons now - so this counts the invariant rather than the
+   places: every press that acts asks the gate first, and the page that only
+   asks about the request asks it too. One check per decision, plus one. */
+check('and every press checks again, because a press need not have seen the page',
+  (SRV.match(/const may = await decidableBy\(req, p\);/g) || []).length
+    === (SRV.match(/await applyEmailDecision\(p,/g) || []).length + 1,
+  [(SRV.match(/const may = await decidableBy\(req, p\);/g) || []).length,
+   (SRV.match(/await applyEmailDecision\(p,/g) || []).length]);
 check('a refusal offers the way in rather than only saying no',
   /mailer\.resultPage\(no\.title, no\.detail, false, no\.link\)/.test(SRV), null);
 check('and tells a copied-in reader who it is actually with',

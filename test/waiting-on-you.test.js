@@ -385,8 +385,11 @@ check('the oldest is put first, because that is the one being forgotten',
 const render = grab(APP, 'renderEmpWaiting');
 check('it is drawn for the person it is about and nobody else',
   /viewRole\.role !== 'employee'/.test(render), null);
+/* Three lists now, not two: somebody else's request waiting on this person's
+   word is the one thing here that is not about their own record, and an
+   approver with a clean record of their own was shown nothing at all. */
 check('and not at all when there is nothing outstanding',
-  /if\(!got\.mine\.length && !got\.theirs\.length\)\{/.test(render), null);
+  /if\(!got\.mine\.length && !got\.theirs\.length && !decide\.length\)\{/.test(render), null);
 check('the column that is not theirs says so in words',
   /Nothing here is yours to finish/.test(render), null);
 
