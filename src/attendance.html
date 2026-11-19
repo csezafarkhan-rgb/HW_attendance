@@ -1062,6 +1062,9 @@ body{
 .search-box::placeholder{color:var(--ink-dim);}
 .month-btn{cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px;}
 .month-btn:hover{border-color:var(--ink);}
+/* Something came in while somebody was mid-form, so it is waiting to be
+   pressed rather than rearranging the page underneath them. */
+.month-btn.has-new{background:#E3F6EC;border-color:#0A7A42;color:#0A7A42;}
 .month-picker{position:relative;z-index:200;}
 /*  A row needs about 740px: name, shift time, the Saturday arrangement and a
     joining date. At 700 it did not fit, and the squeeze landed on the shift
@@ -4077,6 +4080,11 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
     </div>
   </div>
+  <!-- Read the newest from the server without rebuilding the page. It says
+       how long ago it last did, because "refreshed" means nothing without
+       when, and it lights up when the change feed has brought in something
+       while somebody was mid-form. -->
+  <button class="month-btn" id="officeSyncBtn" title="Read the newest marks, requests and settings from the server">⟳ <span id="officeSyncWhen">Refresh</span></button>
   <div class="month-picker">
     <button class="month-btn" id="emailBtn" title="Send or save the record">↗ Share</button>
     <div class="month-dropdown em-dropdown" id="emailDropdown"></div>
@@ -4706,6 +4714,127 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       renderEmpDropdown(); renderEmpBtnLabel(); renderShiftDropdown();
       refreshActivePage(); renderReqBadge();
     }catch(e){ console.error('redraw after dataset', e); }
+  }
+  /* ---- taking in what the office has now ----
+
+     Everything on this page is read once, as it starts. Somebody else marking
+     a day, answering a request or changing a shift happened in a different
+     browser, and this one went on showing what it read at eight in the
+     morning until the person thought to reload - which is a thing nobody
+     thinks to do until they have already been wrong about something.
+
+     So: a button that reads it all again without rebuilding the page, and
+     the same thing done quietly when the change feed says somebody has
+     changed something. The feed already runs; only the dataset was being
+     taken from it, and the settings - which is most of what the office edits
+     - were left as they were. */
+  var OFFICE_SYNC_BUSY = false;        // one at a time
+  /* Boot is itself a reading of everything, so the clock starts there rather
+     than at zero - otherwise the first glance at the button says the page has
+     never been read, on a page that has just read the lot. */
+  var OFFICE_SYNC_AT = Date.now();
+  var OFFICE_SYNC_WAITING = false;     // something came in while they were typing
+  /* One rejected loader must never fail the rest: a bad or missing key would
+     otherwise stop the whole page from drawing. */
+  function safeLoad(fn){
+    try{ var p = fn(); return (p && p.then) ? p.catch(function(e){ console.warn('load failed', e); })
+                                            : Promise.resolve(); }
+    catch(e){ console.warn('load threw', e); return Promise.resolve(); }
+  }
+  /* Every stored setting the page reads, in one list, so that reading them
+     again means reading the same things the first read did. */
+  function settingLoaders(again){
+    var list = [loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
+      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave,
+      loadSatPolicy, loadOffAttendance, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules,
+      loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark,
+      loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc,
+      /* How far back a request may reach. Read at boot because the waiting
+         list uses it too, and it used to be read only when the request form
+         opened - so an office that shortened the window had a page offering
+         days the server would refuse, which is the very fault this list
+         exists to stop somebody hitting. */
+      loadRequestWindow, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
+      loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
+      loadLeaveDeductions, loadLockedMonths, loadDailyTasks];
+    /* Who is signed in and what the accounts are is not a setting that
+       changes under somebody. The shell settles that once, at the start; a
+       refresh that read it again could put the page back into a view the
+       person has since left. */
+    if(again) list = list.filter(function(f){
+      return f !== loadViewRole && f !== loadAuthAccounts && f !== loadAccountNames;
+    });
+    return list;
+  }
+  /* Somebody in the middle of typing, or with a form open, is not somebody to
+     redraw underneath. */
+  function midSomething(){
+    try{
+      var a = document.activeElement;
+      if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return true;
+      if(document.querySelector('.modal-overlay.open')) return true;
+    }catch(e){}
+    return false;
+  }
+  function officeSyncLabel(){
+    var el = document.getElementById('officeSyncWhen');
+    if(!el) return;
+    if(OFFICE_SYNC_BUSY){ el.textContent = 'Reading…'; return; }
+    if(OFFICE_SYNC_WAITING){ el.textContent = 'New changes'; return; }
+    if(!OFFICE_SYNC_AT){ el.textContent = 'Refresh'; return; }
+    var mins = Math.floor((Date.now() - OFFICE_SYNC_AT) / 60000);
+    el.textContent = mins < 1 ? 'Just now' : (mins < 60 ? (mins + 'm ago')
+                                                        : (Math.floor(mins / 60) + 'h ago'));
+  }
+  /* The whole of what this page reads from the server, read again: the
+     settings, then the attendance, then the page redrawn from both. */
+  function refreshFromServer(quiet){
+    if(OFFICE_SYNC_BUSY) return Promise.resolve(false);
+    OFFICE_SYNC_BUSY = true; OFFICE_SYNC_WAITING = false;
+    var btn = document.getElementById('officeSyncBtn');
+    if(btn) btn.classList.remove('has-new');
+    officeSyncLabel();
+    /* refresh(), not hydrate(): the settings are served out of memory, so
+       asking for them any other way hands back the copy already held. */
+    var kv = (window.HWSync && window.HWSync.refresh)
+      ? window.HWSync.refresh() : Promise.resolve();
+    return kv.catch(function(){}).then(function(){
+      return (window.HWSync && window.HWSync.hydrateDataset)
+        ? window.HWSync.hydrateDataset() : null;
+    }).then(function(d){
+      /* A browser holding edits of its own keeps them; adopting the server's
+         copy over the top is a different path and not this one. */
+      if(d && DATASET_SOURCE === 'server' && (d.records || d.employees)) applyDataset(d);
+      return Promise.all(settingLoaders(true).map(safeLoad));
+    }).then(function(){
+      OFFICE_SYNC_AT = Date.now();
+      OFFICE_SYNC_BUSY = false;
+      try{ redrawAfterDataset(); }catch(e){}
+      try{ renderEmpWaiting(); }catch(e){}
+      try{ renderMyRequests(); }catch(e){}
+      officeSyncLabel();
+      if(!quiet) showUploadStatus('Up to date with what the office has now.', false);
+      return true;
+    }).catch(function(e){
+      OFFICE_SYNC_BUSY = false;
+      officeSyncLabel();
+      if(!quiet) showUploadStatus('Could not reach the server just now.', true);
+      return false;
+    });
+  }
+  /* The feed says somebody changed something. Quietly if the person is doing
+     nothing in particular; otherwise the button says so and waits to be
+     pressed, because a page that rearranges itself under a half-typed form
+     is worse than one that is a minute out of date. */
+  function officeChanged(){
+    if(midSomething()){
+      OFFICE_SYNC_WAITING = true;
+      var btn = document.getElementById('officeSyncBtn');
+      if(btn) btn.classList.add('has-new');
+      officeSyncLabel();
+      return;
+    }
+    refreshFromServer(true);
   }
   function adoptServerDataset(remote){
     if(DATASET_SOURCE !== 'local') return;
@@ -12682,12 +12811,12 @@ function buildExcelBackup(){
         refreshActivePage();
       }
     };
-    if(e.data.dataset) {
-      applyRemote(e.data.dataset);
-    } else if(window.HWSync && window.HWSync.hydrateDataset){
-      window.HWSync.hydrateDataset().then(applyRemote)
-        .catch(function(err){ console.warn('remote dataset refresh failed', err); });
-    }
+    if(e.data.dataset) applyRemote(e.data.dataset);
+    /* And the settings with it. Only the attendance used to come back from a
+       change somebody else made, so a mark, an answered request or a changed
+       shift sat unseen on this screen until it was reloaded by hand - which
+       is most of what the office actually edits. */
+    officeChanged();
   });
 
   window.addEventListener('message', function(e){
@@ -14225,6 +14354,28 @@ function buildExcelBackup(){
     document.addEventListener('click', function(){ dd.classList.remove('open'); });
     setTimeout(function(){ loadStatus(true); }, 2500);
     setInterval(function(){ if(!document.hidden) loadStatus(false); }, 120000);
+  })();
+
+  /* The refresh button, and the clock on its face. */
+  (function(){
+    var btn = document.getElementById('officeSyncBtn');
+    if(!btn) return;
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      refreshFromServer(false);
+    });
+    /* A minute's worth of difference at a time: the label is only ever read
+       to answer "is what I am looking at recent", and that answer changes by
+       the minute. */
+    setInterval(function(){ if(!document.hidden) officeSyncLabel(); }, 30000);
+    /* Coming back to a tab left open all afternoon is the one moment the
+       screen is most likely to be out of date and least likely to be noticed.
+       Nothing is read if something was read in the last minute. */
+    document.addEventListener('visibilitychange', function(){
+      if(document.hidden) return;
+      if(OFFICE_SYNC_WAITING || Date.now() - OFFICE_SYNC_AT > 60000) officeChanged();
+    });
+    officeSyncLabel();
   })();
 
   (function(){
@@ -21850,6 +22001,12 @@ function buildExcelBackup(){
       /* A browser holding edits of its own keeps them: adopting the server's
          copy over the top is what that path is for, and it is not this one. */
       if(d && DATASET_SOURCE === 'server' && (d.records || d.employees)) applyDataset(d);
+      /* The settings are served from memory, so they are asked for again
+         before the loaders read them - otherwise this reads back the copy it
+         already had and reports itself up to date. */
+      return ((window.HWSync && window.HWSync.refresh)
+        ? window.HWSync.refresh().catch(function(){}) : Promise.resolve());
+    }).then(function(){
       return Promise.all([loadOverrides, loadManualRecords, loadHalfDays, loadLateExcuses,
         loadEarlyExcuses, loadLeaveRequests, loadOfficialLeaves, loadDayShifts,
         loadShiftAssignments, loadManualLeave, loadEmpNames, loadSelfMark,
@@ -24389,21 +24546,9 @@ function buildExcelBackup(){
     state.selectedMonths = defaultMonth ? [defaultMonth] : [];
     // One rejected loader used to fail the whole Promise.all, leaving the page
     // blank. Swallow individual failures so a bad or missing key can never stop
-    // the grid from rendering.
-    var safe = function(fn){
-      try{ var p = fn(); return (p && p.then) ? p.catch(function(e){ console.warn('load failed', e); }) : Promise.resolve(); }
-      catch(e){ console.warn('load threw', e); return Promise.resolve(); }
-    };
-    return Promise.all([loadOverrides, loadShiftAssignments, loadVisibleEmployees, loadEmployeeOrder,
-      loadEarlyExcuses, loadDayShifts, loadCustomShifts, loadHalfDays, loadManualLeave, loadSatPolicy, loadOffAttendance, loadSalaries, loadJoinDates, loadEmpNames, loadPayRules, loadSigns, loadMispunchFlags, loadManualRecords, loadLateExcuses, loadSelfMark, loadLeavePolicy, loadAccountNames, loadApprovalRoute, loadApproverIntro, loadApproverCc,
-      /* How far back a request may reach. Read at boot because the waiting
-         list uses it too, and it used to be read only when the request form
-         opened - so an office that shortened the window had a page offering
-         days the server would refuse, which is the very fault this list
-         exists to stop somebody hitting. */
-      loadRequestWindow, loadDeskTime, loadDeskTimeNames, loadDeskTimeIds,
-      loadViewRole, loadAuthAccounts, loadCompanyInfo, loadLeaveRequests, loadOfficialLeaves,
-      loadLeaveDeductions, loadLockedMonths, loadDailyTasks].map(safe));
+    // the grid from rendering. The list itself lives beside the refresh that
+    // reads them again, so the two cannot drift into reading different things.
+    return Promise.all(settingLoaders(false).map(safeLoad));
   }).then(function(){
     // Settings arrive after the first paint, and the leave figures depend on
     // them - joining dates in particular. Redraw once they are in.

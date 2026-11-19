@@ -1,0 +1,135 @@
+/* Sixty questions where one answer would do.
+ *
+ * The dashboard reads about sixty stored settings as it starts. The adapter
+ * holds them all in memory and fetches them in one request - but only once
+ * hydrate() has run, and hydrate() was called in the shell alone. Inside the
+ * frame nothing called it, so every one of those reads became its own round
+ * trip: fifty-eight requests, a second and a half, on every single load.
+ *
+ * So a read that arrives before hydration asks for everything once and waits
+ * for it, instead of asking for its own key; and a frame whose parent has
+ * already loaded the lot takes the copy instead of fetching it again.
+ */
+'use strict';
+const fs = require('fs'), path = require('path'), vm = require('vm');
+const REPO = path.join(__dirname, '..');
+const SYNC = fs.readFileSync(path.join(REPO, 'public', 'hw-sync.js'), 'utf8');
+
+const results = [];
+const check = (name, ok, got) => {
+  results.push(ok);
+  console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '  ' + JSON.stringify(got)));
+};
+
+/* A window with just enough in it to run the adapter: somewhere to fetch
+   from, somewhere to put a notice, and a parent (or not). */
+function makeWindow(opts) {
+  opts = opts || {};
+  const asked = [];
+  const el = { style: {}, setAttribute() {}, addEventListener() {}, appendChild() {} };
+  const win = {
+    asked,
+    parent: null,
+    self: null, top: null,
+    addEventListener() {}, removeEventListener() {},
+    setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {},
+    Promise, Object, Array, String, Number, Date, Error, JSON, Math, console,
+    AbortController: function () { this.abort = function () {}; this.signal = null; },
+    document: {
+      hidden: false, addEventListener() {}, getElementById: () => el,
+      createElement: () => el, body: { appendChild() {} }
+    },
+    fetch: (url, init) => {
+      asked.push(String(url).split('?')[0]);
+      if (init && init.body) { try { win.lastPut = JSON.parse(init.body); } catch (e) {} }
+      const answer = opts.answer ? opts.answer(url, init) : null;
+      if (answer && answer.fail) {
+        return Promise.resolve({ ok: false, status: answer.status || 500,
+                                 json: () => Promise.resolve({ error: 'no' }) });
+      }
+      return Promise.resolve({ ok: true, status: 200,
+                               json: () => Promise.resolve(answer || {}) });
+    }
+  };
+  win.self = win; win.top = opts.framed ? {} : win;
+  win.parent = opts.parent || win;
+  win.window = win;
+  return win;
+}
+function run(win) {
+  const ctx = vm.createContext(win);
+  vm.runInContext(SYNC, ctx);
+  return win;
+}
+
+const VALUES = { overrides: '{"a":1}', halfDays: '{}', empNames: '{"x":"y"}',
+                 satPolicy: '{}', joinDates: '{}' };
+const VERSIONS = { overrides: 7, halfDays: 2 };
+
+(async () => {
+  /* ---- the shell, which has nobody to borrow from ---- */
+  {
+    const win = run(makeWindow({ answer: url => /kv-all/.test(url)
+      ? { values: VALUES, versions: VERSIONS } : {} }));
+    const keys = Object.keys(VALUES);
+    const got = await Promise.all(keys.map(k => win.storage.get(k)));
+    check('five reads before hydration ask once, not five times',
+      win.asked.length === 1, win.asked);
+    check('and the one they ask is the one that answers everything',
+      win.asked[0] === '/api/kv-all', win.asked);
+    check('every one of them gets its own value back',
+      got.every((r, i) => r && r.value === VALUES[keys[i]]), got.map(x => x && x.value));
+    /* Hydrated means the cache is the whole truth: a key that is not in it was
+       never stored, and asking the server again would only say so again. */
+    const miss = await win.storage.get('neverStored');
+    check('a key nobody ever stored answers without another request',
+      miss === null && win.asked.length === 1, win.asked);
+  }
+
+  /* ---- the frame, which has ---- */
+  {
+    const parent = run(makeWindow({ answer: url => /kv-all/.test(url)
+      ? { values: VALUES, versions: VERSIONS } : {} }));
+    await parent.HWSync.hydrate();
+    const kid = run(makeWindow({ framed: true, parent: parent,
+      answer: () => ({ values: {}, versions: {} }) }));
+    const r = await kid.storage.get('overrides');
+    check('a frame beside a page that has it all asks for nothing',
+      kid.asked.length === 0, kid.asked);
+    check('and reads the same value its parent holds',
+      r && r.value === VALUES.overrides, r);
+    /* The version travels with the value, or the first save from the frame
+       would be refused as a conflict with a change nobody made. */
+    await kid.storage.set('overrides', '{"a":2}');
+    const put = (kid.lastPut || {});
+    check('the version comes with it, so a save from the frame is not a conflict',
+      put.baseVersion === VERSIONS.overrides, put);
+  }
+
+  /* ---- and when the one request fails ---- */
+  {
+    /* The sign-in page reads a setting before anybody has signed in. kv-all
+       answers 401 there, and the read must still behave as it always did
+       rather than resolving to nothing for the rest of the session. */
+    const win = run(makeWindow({ answer: url => /kv-all/.test(url)
+      ? { fail: true, status: 500 } : { key: 'empNames', value: '{"x":"y"}', version: 3 } }));
+    const r = await win.storage.get('empNames');
+    check('a failed hydration falls back to asking for the one key',
+      win.asked.length === 2 && /\/api\/kv\//.test(win.asked[1]), win.asked);
+    check('and the read still answers', r && r.value === '{"x":"y"}', r);
+  }
+
+  /* ---- what the shell does is unchanged ---- */
+  {
+    const win = run(makeWindow({ answer: url => /kv-all/.test(url)
+      ? { values: VALUES, versions: VERSIONS } : {} }));
+    await win.HWSync.hydrate();
+    await win.HWSync.hydrate();
+    check('hydrating twice is one request, not two', win.asked.length === 1, win.asked);
+    check('and the cache it hands out is what it loaded',
+      Object.keys(win.HWSync.cached()).length === Object.keys(VALUES).length, null);
+  }
+
+  console.log(results.every(Boolean) ? '\nALL PASS (' + results.length + ')' : '\nSOME FAILED');
+  process.exitCode = results.every(Boolean) ? 0 : 1;
+})();

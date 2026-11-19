@@ -109,9 +109,60 @@
   var serverVersions = Object.create(null);
   var seen = Object.create(null);
   var queues = Object.create(null);         // saves of one key, one after another
+  var hydrating = null;                     // the one request in flight, shared by every reader
+
+  /* The dashboard runs in a frame of a page that has already loaded all of
+     this: same origin, same session, same answer. So it takes the copy rather
+     than asking the server again for what it is sitting next to - and the
+     versions come with it, or the frame's first save would be refused as a
+     conflict with a change nobody made.
+
+     Anything unexpected here - no parent, a parent from another origin, an
+     older copy with no ready() on it - simply means there is nothing to
+     borrow, and the request is made as before. */
+  function borrowFromParent() {
+    try {
+      var up = window.parent;
+      if (!up || up === window) return false;
+      var theirs = up.HWSync;
+      if (!theirs || typeof theirs.cached !== 'function'
+          || typeof theirs.ready !== 'function' || !theirs.ready()) return false;
+      var vals = theirs.cached() || {};
+      var keys = Object.keys(vals);
+      if (!keys.length) return false;
+      var vers = (typeof theirs.versions === 'function' && theirs.versions()) || {};
+      var copy = Object.create(null), copyV = Object.create(null);
+      keys.forEach(function (k) { copy[k] = vals[k]; });
+      Object.keys(vers).forEach(function (k) { copyV[k] = vers[k]; });
+      cache = copy; serverVersions = copyV; hydrated = true;
+      return true;
+    } catch (_) { return false; }           // another origin, or no copy there
+  }
 
   window.HWSync = {
     hydrate: function () {
+      if (hydrated) return Promise.resolve(cache);
+      if (hydrating) return hydrating;                 // everybody waits on the one request
+      if (borrowFromParent()) return Promise.resolve(cache);
+      hydrating = api('GET', '/api/kv-all').then(function (r) {
+        cache = (r && r.values) || Object.create(null);
+        serverVersions = (r && r.versions) || Object.create(null);
+        hydrated = true;
+        hydrating = null;
+        return cache;
+      }, function (e) { hydrating = null; throw e; });
+      return hydrating;
+    },
+    /* Whether this copy holds the lot, and what versions it holds them at -
+       asked by a frame deciding whether there is anything worth borrowing. */
+    ready: function () { return hydrated; },
+    versions: function () { return serverVersions; },
+    /* The same request again, when what is held is known to be out of date:
+       somebody else has changed something, or the person has asked for the
+       newest. Reads are served from memory now, so without this a page that
+       re-ran its loaders would quietly re-read the copy it already had. */
+    refresh: function () {
+      hydrated = false; hydrating = null;
       return api('GET', '/api/kv-all').then(function (r) {
         cache = (r && r.values) || Object.create(null);
         serverVersions = (r && r.versions) || Object.create(null);
@@ -155,11 +206,26 @@
         return Promise.resolve({ key: key, value: cache[key], shared: !!shared });
       }
       if (hydrated) return Promise.resolve(null);
-      return api('GET', '/api/kv/' + encodeURIComponent(key) + '?shared=' + (shared !== false))
-        .then(function (r) {
-          if (r && r.version != null && shared !== false) { seen[key] = r.version; serverVersions[key] = r.version; }
-          return r;
-        });
+      /* Not hydrated yet - which, inside the dashboard's frame, was every
+         read it made. The app asks for about sixty settings as it starts and
+         each one was its own round trip: fifty-eight requests and a second
+         and a half of the boot, spent asking sixty times for what one answer
+         holds. So the first read loads the lot and the rest wait on it. */
+      var one = function () {
+        return api('GET', '/api/kv/' + encodeURIComponent(key) + '?shared=' + (shared !== false))
+          .then(function (r) {
+            if (r && r.version != null && shared !== false) { seen[key] = r.version; serverVersions[key] = r.version; }
+            return r;
+          });
+      };
+      return window.HWSync.hydrate().then(function () {
+        if (!Object.prototype.hasOwnProperty.call(cache, key)) return null;
+        if (serverVersions[key] != null) seen[key] = serverVersions[key];
+        return { key: key, value: cache[key], shared: !!shared };
+      /* The sign-in page reads a setting before anybody has signed in, and
+         there the one request is refused. The read then behaves as it always
+         did rather than answering nothing for the rest of the session. */
+      }, one);
     },
 
     set: function (key, value, shared) {
@@ -275,9 +341,12 @@
           cursor = r.cursor;
           if (fromOthers.length) {
             var needsDataset = fromOthers.some(function(c){ return c.entity === 'records' || c.entity === 'employees'; });
+            /* refresh(), not hydrate(): hydrate answers from memory now, so
+               asking it here would hand back the very copy the change feed
+               has just said is out of date. */
             var refresh = needsDataset
               ? window.HWSync.hydrateDataset()
-              : window.HWSync.hydrate();
+              : window.HWSync.refresh();
             refresh.then(function (dataset) {
               if (typeof onRemoteChange === 'function') onRemoteChange(fromOthers, dataset);
             }).catch(function () { /* picked up on a later change */ });
