@@ -110,6 +110,10 @@
   var seen = Object.create(null);
   var queues = Object.create(null);         // saves of one key, one after another
   var hydrating = null;                     // the one request in flight, shared by every reader
+  /* The attendance asked for at boot, kept only long enough for the frame
+     built a moment later to take it. A workspace opened an hour after signing
+     in must not be handed an hour-old copy. */
+  var dsBoot = null, dsBootAt = 0, DS_BOOT_GOOD_MS = 60000;
 
   /* The dashboard runs in a frame of a page that has already loaded all of
      this: same origin, same session, same answer. So it takes the copy rather
@@ -181,6 +185,53 @@
        asked by a frame deciding whether there is anything worth borrowing. */
     ready: function () { return hydrated; },
     versions: function () { return serverVersions; },
+    /* The same request, started before anybody knows whether there is a
+       session at all.
+
+       Signing in asked /api/me, waited for the answer, and only then asked
+       for the settings: two round trips one after the other, and to a server
+       on the other side of the world that is six hundred milliseconds. They
+       are asked for at the same time now. A refusal here means nothing and
+       must not throw anybody out - who is signed in is /api/me's answer, not
+       this one's - so this one is quiet, and leaves no copy behind when it
+       fails. */
+    prefetch: function () {
+      if (hydrated || hydrating) return;
+      hydrating = fetch('/api/kv-all', { credentials: 'same-origin',
+                                         headers: { 'content-type': 'application/json' } })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (r) {
+          hydrating = null;
+          if (!r || !r.values) return null;            // no session yet, or refused
+          cache = r.values; serverVersions = r.versions || Object.create(null);
+          hydrated = true;
+          return cache;
+        }, function () { hydrating = null; return null; });
+    },
+    /* The attendance itself, asked for the same way and at the same time, and
+       handed to the frame when it is built - which is a third of a second
+       after this, and used to spend it asking again. */
+    prefetchDataset: function () {
+      if (dsBoot && Date.now() - dsBootAt < DS_BOOT_GOOD_MS) return dsBoot;
+      dsBootAt = Date.now();
+      dsBoot = window.HWSync.hydrateDataset().catch(function (e) { dsBoot = null; throw e; });
+      return dsBoot;
+    },
+    /* What a page asks at boot: the copy already on its way if there is one,
+       its own request if not. Never the one from an hour ago. */
+    bootDataset: function () {
+      if (dsBoot && Date.now() - dsBootAt < DS_BOOT_GOOD_MS) return dsBoot;
+      var theirs = parentSync();
+      if (theirs && typeof theirs.prefetchDataset === 'function') {
+        try {
+          dsBootAt = Date.now();
+          dsBoot = Promise.resolve(theirs.prefetchDataset())
+            .catch(function () { return window.HWSync.hydrateDataset(); });
+          return dsBoot;
+        } catch (_) { /* another origin: ask for it here */ }
+      }
+      return window.HWSync.prefetchDataset();
+    },
     /* The same request again, when what is held is known to be out of date:
        somebody else has changed something, or the person has asked for the
        newest. Reads are served from memory now, so without this a page that
@@ -243,6 +294,10 @@
           });
       };
       return window.HWSync.hydrate().then(function () {
+        /* A quiet prefetch that was refused leaves nothing behind, so the
+           wait can end with no copy at all. Then this is a read like any
+           other and asks for its own key. */
+        if (!hydrated) return one();
         if (!Object.prototype.hasOwnProperty.call(cache, key)) return null;
         if (serverVersions[key] != null) seen[key] = serverVersions[key];
         return { key: key, value: cache[key], shared: !!shared };

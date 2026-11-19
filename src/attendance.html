@@ -4080,15 +4080,16 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       <button class="month-option" id="gridXlBtn" title="Export the grid for the selected month(s) to Excel, with the same colours">📗 Excel (grid)</button>
     </div>
   </div>
-  <!-- Read the newest from the server without rebuilding the page. It says
-       how long ago it last did, because "refreshed" means nothing without
-       when, and it lights up when the change feed has brought in something
-       while somebody was mid-form. -->
-  <button class="month-btn" id="officeSyncBtn" title="Read the newest marks, requests and settings from the server">⟳ <span id="officeSyncWhen">Refresh</span></button>
   <div class="month-picker">
     <button class="month-btn" id="emailBtn" title="Send or save the record">↗ Share</button>
     <div class="month-dropdown em-dropdown" id="emailDropdown"></div>
   </div>
+  <!-- Read the newest from the server without rebuilding the page. It says
+       how long ago it last did, because "refreshed" means nothing without
+       when, and it lights up when the change feed has brought in something
+       while somebody was mid-form. Next to the database light, which is the
+       other thing on this bar about what the server is saying. -->
+  <button class="month-btn" id="officeSyncBtn" title="Read the newest marks, requests and settings from the server">⟳ <span id="officeSyncWhen">Refresh</span></button>
   <div class="month-picker st-picker">
     <button class="month-btn st-btn" id="statusBtn" title="Is the database answering, and how much of the plan is left">
       <span class="db-ico" aria-hidden="true"><svg viewBox="0 0 22 26" class="db-svg">
@@ -4928,7 +4929,11 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
          "Loading…" forever because this promise had no deadline. The UI can
          render from the local/imported copy first; when the server responds,
          its dataset remains authoritative and replaces that copy. */
-      var remoteLoad = window.HWSync.hydrateDataset();
+      /* The copy the page above started fetching while this frame was being
+         built, where there is one: both were asking the same server for the
+         same attendance, a third of a second apart. */
+      var remoteLoad = window.HWSync.bootDataset
+        ? window.HWSync.bootDataset() : window.HWSync.hydrateDataset();
       var remoteTimed = new Promise(function(resolve){
         var done = false;
         var finish = function(v){ if(done) return; done = true; resolve(v); };
@@ -9867,10 +9872,21 @@ function buildExcelBackup(){
      Asked for once at boot, because the form that needs it is printed on
      demand and cannot wait for an answer. */
   var accountNames = {};
+  /* Asked for as the page starts rather than after the attendance has
+     arrived. It is a request of its own to a server a quarter of a second
+     away, and it was queued behind the dataset for no reason beyond the order
+     the loaders happen to run in. */
+  var NAMES_EARLY = null;
+  function accountNamesSoon(){
+    if(!NAMES_EARLY){
+      NAMES_EARLY = fetch('/api/account-names', { credentials:'same-origin' })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .catch(function(){ return null; });
+    }
+    return NAMES_EARLY;
+  }
   function loadAccountNames(){
-    return fetch('/api/account-names', { credentials:'same-origin' })
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(j){ accountNames = (j && j.names) || {}; })
+    return accountNamesSoon().then(function(j){ accountNames = (j && j.names) || {}; })
       .catch(function(){ accountNames = {}; });
   }
   function approverLabel(email){
@@ -24530,6 +24546,9 @@ function buildExcelBackup(){
   }
 
   // ---------- top-level init ----------
+  /* Every request this page makes that is not the attendance itself, started
+     here: they do not depend on it and were only ever waiting for it. */
+  accountNamesSoon();
   loadCustomDataset().then(function(){
     var latestNow = ALL_MONTHS[ALL_MONTHS.length-1];
     // The month list is rebuilt once the saved dataset arrives. defaultMonth was

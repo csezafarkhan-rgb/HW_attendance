@@ -144,6 +144,66 @@ const VERSIONS = { overrides: 7, halfDays: 2 };
     check('and the read still answers', r && r.value === '{"x":"y"}', r);
   }
 
+  /* ---- asked for before anybody knows there is a session ----
+
+     Signing in asked /api/me, waited, and only then asked for the settings:
+     two round trips one after the other, and to Oregon that is six hundred
+     milliseconds before anything can be drawn. They go at the same time now,
+     which means the second one is sent without knowing whether it will be
+     allowed - so being refused has to cost nothing. */
+  {
+    const win = run(makeWindow({ answer: url => /kv-all/.test(url)
+      ? { values: VALUES, versions: VERSIONS } : {} }));
+    win.HWSync.prefetch();
+    const r = await win.storage.get('overrides');
+    check('the early request is the one the first read waits on',
+      win.asked.length === 1 && win.asked[0] === '/api/kv-all', win.asked);
+    check('and it answers the read', r && r.value === VALUES.overrides, r);
+  }
+  {
+    /* Refused, because nobody had signed in yet. It must leave no copy
+       behind: a cache of nothing, treated as the whole truth, would answer
+       "not stored" to every read for the rest of the session. */
+    const win = run(makeWindow({ answer: url => /kv-all/.test(url)
+      ? { fail: true, status: 401 }
+      : { key: 'empNames', value: '{"x":"y"}', version: 3 } }));
+    win.HWSync.prefetch();
+    const r = await win.storage.get('empNames');
+    check('a refused early request leaves no copy behind',
+      win.HWSync.ready() === false, null);
+    check('and the read that follows it still gets its answer',
+      r && r.value === '{"x":"y"}', r);
+  }
+
+  /* ---- and the attendance, which the frame used to ask for again ---- */
+  {
+    const parent = run(makeWindow({ answer: url => /dataset/.test(url)
+      ? { employees: [{ name: 'A' }], records: [{ e: 'A', d: '2026-11-19' }] }
+      : { values: {}, versions: {} } }));
+    parent.HWSync.prefetchDataset();
+    const kid = run(makeWindow({ framed: true, parent: parent,
+      answer: () => ({ employees: [], records: [] }) }));
+    const d = await kid.HWSync.bootDataset();
+    check('a frame takes the attendance the page above already asked for',
+      kid.asked.length === 0, kid.asked);
+    check('and it is the attendance, not an empty stand-in',
+      d && d.employees.length === 1 && d.records.length === 1, d);
+    check('one request for it, not one per asking',
+      parent.asked.filter(u => /dataset/.test(u)).length === 1, parent.asked);
+  }
+  {
+    /* No page above, or one that never asked: this one asks, once. */
+    const lone = run(makeWindow({ answer: () => ({ employees: [], records: [] }) }));
+    await lone.HWSync.bootDataset();
+    await lone.HWSync.bootDataset();
+    check('a page on its own asks for it itself, and only once',
+      lone.asked.filter(u => /dataset/.test(u)).length === 1, lone.asked);
+    /* A workspace opened an hour after signing in must not be handed an
+       hour-old copy of the attendance. */
+    check('and a copy from an hour ago is not handed to anybody',
+      /DS_BOOT_GOOD_MS/.test(SYNC) && /Date\.now\(\) - dsBootAt < DS_BOOT_GOOD_MS/.test(SYNC), null);
+  }
+
   /* ---- what the shell does is unchanged ---- */
   {
     const win = run(makeWindow({ answer: url => /kv-all/.test(url)
@@ -154,6 +214,27 @@ const VERSIONS = { overrides: 7, halfDays: 2 };
     check('and the cache it hands out is what it loaded',
       Object.keys(win.HWSync.cached()).length === Object.keys(VALUES).length, null);
   }
+
+  /* ---- and the order the three pages actually start things in ---- */
+  const AUTH = fs.readFileSync(path.join(REPO, 'public', 'hw-auth.js'), 'utf8');
+  const APP = fs.readFileSync(path.join(REPO, 'src', 'attendance.html'), 'utf8');
+  check('the settings are asked for beside the session check, not after it',
+    /HWSync\.prefetch\(\);[\s\S]{0,400}fetch\('\/api\/me'/.test(AUTH), null);
+  /* Only where somebody has signed in on this browser before: an anonymous
+     visitor should not have a refused request made on their behalf. */
+  check('but only where there has been a session on this browser',
+    /if \(last && window\.HWSync && typeof window\.HWSync\.prefetch/.test(AUTH), null);
+  check('the attendance is asked for as the dashboard is built, not by it',
+    /prefetchDataset\(\)\.catch/.test(AUTH), null);
+  check('and the dashboard waits on that one rather than making its own',
+    /window\.HWSync\.bootDataset\s*\?\s*window\.HWSync\.bootDataset\(\)/.test(APP), null);
+  /* The names were queued behind the attendance for no reason beyond the
+     order the loaders happen to run in. */
+  check('the account names go at the same time as the attendance',
+    APP.indexOf('accountNamesSoon();\n  loadCustomDataset()') > -1
+    || /accountNamesSoon\(\);[\s\S]{0,40}loadCustomDataset\(\)/.test(APP), null);
+  check('and the loader that wanted them takes that same answer',
+    /function loadAccountNames\(\)\{[\s\S]{0,120}accountNamesSoon\(\)/.test(APP), null);
 
   console.log(results.every(Boolean) ? '\nALL PASS (' + results.length + ')' : '\nSOME FAILED');
   process.exitCode = results.every(Boolean) ? 0 : 1;

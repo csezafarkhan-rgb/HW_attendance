@@ -211,6 +211,14 @@
         ? window.HWSync.hydrate()
         : Promise.resolve();
       try { ready.catch(function () {}); } catch (_) {}
+      /* And the attendance, which the frame would otherwise ask for a third
+         of a second later - the time it takes to build. It waits on this one
+         instead. */
+      try {
+        if (window.HWSync && typeof window.HWSync.prefetchDataset === 'function') {
+          window.HWSync.prefetchDataset().catch(function () {});
+        }
+      } catch (_) {}
       /* Someone else signed in on this browser last: their copies go before
          the dashboard is built, so nothing of theirs is seeded into this one. */
       var prev = null;
@@ -305,7 +313,19 @@
     if (uEl) uEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (pEl) pEl.focus(); } });
     if (outBtn) outBtn.addEventListener('click', function () { window.HWAuth.signOut(); });
 
-    // Ask the server whether a valid session already exists.
+    /* Ask the server whether a valid session already exists - and, at the
+       same moment and not after it, for the settings that session would need.
+       Asking in turn cost two round trips to a server on the other side of
+       the world before anything could be drawn. The second one is quiet: if
+       there is no session it is refused, nothing is kept, and the gate below
+       decides what happens next exactly as it did. */
+    try {
+      var last = null;
+      try { last = localStorage.getItem(LAST_USER_KEY); } catch (e) {}
+      if (last && window.HWSync && typeof window.HWSync.prefetch === 'function') {
+        window.HWSync.prefetch();
+      }
+    } catch (e) {}
     fetch('/api/me', { credentials: 'same-origin' })
       .then(function (r) { return r.status === 200 ? r.json() : null; })
       .then(function (j) {
