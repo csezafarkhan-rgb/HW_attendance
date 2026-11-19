@@ -921,7 +921,12 @@ body{
 .em-row.em-btns .btn{ width:auto !important; flex:none !important; padding:5px 12px; font-size:12px; }
 /* The database / plan indicator and its panel. It sits at the right-hand end
    of the toolbar row, away from the controls that change what is on screen. */
-.st-picker{ margin-left:auto; }
+/* The refresh button and the database light are the two things on this bar
+   about what the server is saying, so they sit together at the end of it -
+   and the gap that used to push the light out on its own now starts one
+   button earlier. */
+.sync-btn{ margin-left:auto; }
+.st-picker{ margin-left:0; }
 .st-btn{ display:inline-flex; align-items:center; gap:7px; font-variant-numeric:tabular-nums; }
 /* A database drawn as a cylinder that fills from the bottom, the way a battery
    does, so how full the plan is can be read without opening anything. */
@@ -4089,7 +4094,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
        when, and it lights up when the change feed has brought in something
        while somebody was mid-form. Next to the database light, which is the
        other thing on this bar about what the server is saying. -->
-  <button class="month-btn" id="officeSyncBtn" title="Read the newest marks, requests and settings from the server">⟳ <span id="officeSyncWhen">Refresh</span></button>
+  <button class="month-btn sync-btn" id="officeSyncBtn" title="Read the newest marks, requests and settings from the server">⟳ <span id="officeSyncWhen">Refresh</span></button>
   <div class="month-picker st-picker">
     <button class="month-btn st-btn" id="statusBtn" title="Is the database answering, and how much of the plan is left">
       <span class="db-ico" aria-hidden="true"><svg viewBox="0 0 22 26" class="db-svg">
