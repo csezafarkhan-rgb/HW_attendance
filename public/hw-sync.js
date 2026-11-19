@@ -120,13 +120,22 @@
      Anything unexpected here - no parent, a parent from another origin, an
      older copy with no ready() on it - simply means there is nothing to
      borrow, and the request is made as before. */
-  function borrowFromParent() {
+  /* The adapter on the page this one is framed in, if there is one and it can
+     be reached at all. */
+  function parentSync() {
     try {
       var up = window.parent;
-      if (!up || up === window) return false;
+      if (!up || up === window) return null;
       var theirs = up.HWSync;
       if (!theirs || typeof theirs.cached !== 'function'
-          || typeof theirs.ready !== 'function' || !theirs.ready()) return false;
+          || typeof theirs.hydrate !== 'function' || typeof theirs.ready !== 'function') return null;
+      return theirs;
+    } catch (_) { return null; }           // another origin
+  }
+  function borrowFromParent() {
+    try {
+      var theirs = parentSync();
+      if (!theirs || !theirs.ready()) return false;
       var vals = theirs.cached() || {};
       var keys = Object.keys(vals);
       if (!keys.length) return false;
@@ -144,13 +153,28 @@
       if (hydrated) return Promise.resolve(cache);
       if (hydrating) return hydrating;                 // everybody waits on the one request
       if (borrowFromParent()) return Promise.resolve(cache);
-      hydrating = api('GET', '/api/kv-all').then(function (r) {
-        cache = (r && r.values) || Object.create(null);
-        serverVersions = (r && r.versions) || Object.create(null);
-        hydrated = true;
-        hydrating = null;
-        return cache;
-      }, function (e) { hydrating = null; throw e; });
+      var ownFetch = function () {
+        return api('GET', '/api/kv-all').then(function (r) {
+          cache = (r && r.values) || Object.create(null);
+          serverVersions = (r && r.versions) || Object.create(null);
+          hydrated = true;
+          hydrating = null;
+          return cache;
+        }, function (e) { hydrating = null; throw e; });
+      };
+      /* The page above is still loading its copy. Waiting for that one is the
+         difference between the frame starting when the shell has finished and
+         the frame starting now: both were waiting on the same request, and
+         only one of them needed to make it. */
+      var theirs = parentSync();
+      if (theirs) {
+        hydrating = Promise.resolve(theirs.hydrate()).then(function () {
+          if (borrowFromParent()) { hydrating = null; return cache; }
+          return ownFetch();
+        }, ownFetch);
+        return hydrating;
+      }
+      hydrating = ownFetch();
       return hydrating;
     },
     /* Whether this copy holds the lot, and what versions it holds them at -

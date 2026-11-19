@@ -47,8 +47,8 @@ function makeWindow(opts) {
         return Promise.resolve({ ok: false, status: answer.status || 500,
                                  json: () => Promise.resolve({ error: 'no' }) });
       }
-      return Promise.resolve({ ok: true, status: 200,
-                               json: () => Promise.resolve(answer || {}) });
+      const reply = { ok: true, status: 200, json: () => Promise.resolve(answer || {}) };
+      return opts.gate ? opts.gate.then(() => reply) : Promise.resolve(reply);
     }
   };
   win.self = win; win.top = opts.framed ? {} : win;
@@ -104,6 +104,31 @@ const VERSIONS = { overrides: 7, halfDays: 2 };
     const put = (kid.lastPut || {});
     check('the version comes with it, so a save from the frame is not a conflict',
       put.baseVersion === VERSIONS.overrides, put);
+  }
+
+  /* ---- the frame built while the page above is still loading ----
+
+     The frame used to be created only once the shell's own request came back,
+     which is most of a second of a login spent looking at nothing. It is
+     built while that request is still in the air now, so its first read has
+     to wait for the request already being made rather than making a second
+     one. */
+  {
+    let open;
+    const gate = new Promise(r => { open = r; });
+    const parent = run(makeWindow({ gate: gate,
+      answer: url => /kv-all/.test(url) ? { values: VALUES, versions: VERSIONS } : {} }));
+    const waiting = parent.HWSync.hydrate();          // in flight, not yet answered
+    const kid = run(makeWindow({ framed: true, parent: parent,
+      answer: () => ({ values: {}, versions: {} }) }));
+    const read = kid.storage.get('empNames');
+    check('a frame built mid-request makes no request of its own',
+      kid.asked.length === 0, kid.asked);
+    open();                                            // the shell's answer arrives
+    await waiting;
+    const r = await read;
+    check('and its read is answered by the one that was already in the air',
+      r && r.value === VALUES.empNames && kid.asked.length === 0, [r, kid.asked]);
   }
 
   /* ---- and when the one request fails ---- */

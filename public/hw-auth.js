@@ -201,16 +201,27 @@
       }
       if (pbBtn) pbBtn.style.display = user.role === 'admin' ? '' : 'none';
 
+      /* Started here, waited for in there. The settings used to be loaded
+         before the dashboard was built at all, so the frame was created when
+         this request came back - about eight hundred milliseconds of a login
+         spent looking at nothing. The frame asks this same copy for them and
+         waits on this same request, so it can be built while the request is
+         still in the air and nobody waits twice. */
       var ready = (window.HWSync && typeof window.HWSync.hydrate === 'function')
         ? window.HWSync.hydrate()
         : Promise.resolve();
+      try { ready.catch(function () {}); } catch (_) {}
       /* Someone else signed in on this browser last: their copies go before
          the dashboard is built, so nothing of theirs is seeded into this one. */
       var prev = null;
       try { prev = localStorage.getItem(LAST_USER_KEY); } catch (e) {}
       var clean = (prev && prev !== String(user.id)) ? clearLocalData() : Promise.resolve();
       try { localStorage.setItem(LAST_USER_KEY, String(user.id)); } catch (e) {}
-      Promise.all([Promise.resolve(ready).catch(function () {}), clean]).then(function () {
+      /* Only the clearing is waited for, and only because it is about to
+         delete the last person's copies: a dashboard built before that
+         finished would read them. The settings are not waited for here - the
+         frame waits for them itself, and can be built meanwhile. */
+      Promise.all([clean]).then(function () {
         gate.classList.add('lg-out');
         setTimeout(function () { gate.style.display = 'none'; }, 380);
         if (typeof startWorkspace === 'function') startWorkspace('attendance');
