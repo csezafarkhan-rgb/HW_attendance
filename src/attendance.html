@@ -4830,6 +4830,33 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     el.textContent = mins < 1 ? 'Just now' : (mins < 60 ? (mins + 'm ago')
                                                         : (Math.floor(mins / 60) + 'h ago'));
   }
+  /* And DeskTime itself, which nothing on this page has asked since the last
+     nightly round.
+
+     Re-reading what the server holds is not the same as asking DeskTime what
+     has happened since: somebody presses this button to see now. The two days
+     that can still change are the one running and the one before it, which is
+     exactly what the nightly round asks for - this is that round, brought
+     forward by somebody pressing the button.
+
+     DeskTime being slow, refusing the key or being unreachable must not hold
+     up the rest of the reading: it is asked, and the record is read either
+     way. Whatever arrives late is picked up by the next press or by the
+     night. */
+  function askDeskTimeNow(){
+    var to = todayISO_full;
+    var from = new Date(to + 'T00:00:00');
+    from.setDate(from.getDate() - 1);
+    var ask;
+    try{
+      ask = fetch('/api/desktime/pull', { method:'POST', credentials:'same-origin',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ from: isoOf(from), to: to }) })
+        .then(function(r){ return r.ok ? r.json().catch(function(){ return null; }) : null; })
+        .catch(function(){ return null; });
+    }catch(e){ return Promise.resolve(null); }
+    return Promise.race([ask, new Promise(function(res){ setTimeout(function(){ res(null); }, 8000); })]);
+  }
   /* The whole of what this page reads from the server, read again: the
      settings, then the attendance, then the page redrawn from both. */
   function refreshFromServer(quiet){
@@ -4842,7 +4869,14 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
        asking for them any other way hands back the copy already held. */
     var kv = (window.HWSync && window.HWSync.refresh)
       ? window.HWSync.refresh() : Promise.resolve();
-    return kv.catch(function(){}).then(function(){
+    /* DeskTime is asked at the same time rather than after: the two have
+       nothing to do with each other, and asking in turn would add whatever
+       DeskTime takes to every press. What it says is kept, so the message at
+       the end can mention it. */
+    var desk = askDeskTimeNow();
+    var brought = null;
+    return Promise.all([kv.catch(function(){}), desk.then(function(j){ brought = j; })])
+      .then(function(){
       return (window.HWSync && window.HWSync.hydrateDataset)
         ? window.HWSync.hydrateDataset() : null;
     }).then(function(d){
@@ -4857,7 +4891,14 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       try{ renderEmpWaiting(); }catch(e){}
       try{ renderMyRequests(); }catch(e){}
       officeSyncLabel();
-      if(!quiet) showUploadStatus('Up to date with what the office has now.', false);
+      /* What DeskTime gave up, where it gave up anything: a press that
+         brought in two days and one that brought in nothing should not read
+         the same. */
+      var dtSaid = (brought && brought.ok && brought.wrote)
+        ? (' DeskTime added ' + brought.wrote + ' day'
+           + (brought.wrote === 1 ? '' : 's') + '.')
+        : '';
+      if(!quiet) showUploadStatus('Up to date with what the office has now.' + dtSaid, false);
       return true;
     }).catch(function(e){
       OFFICE_SYNC_BUSY = false;

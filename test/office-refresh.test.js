@@ -74,6 +74,25 @@ check('the employee’s own sync refills the memory before its loaders too',
   emp.indexOf('HWSync.refresh') > -1
   && emp.indexOf('HWSync.refresh') < emp.indexOf('loadOverrides'), null);
 
+/* ---- and DeskTime, which the server holds a copy of ----
+   Re-reading what the server holds is not the same as asking DeskTime what
+   has happened since. Somebody presses this to see now. */
+const ask = grab(APP, 'askDeskTimeNow');
+check('the press asks DeskTime itself, not only the copy of it',
+  /\/api\/desktime\/pull/.test(ask), null);
+check('for the two days that can still change',
+  /from\.setDate\(from\.getDate\(\) - 1\)/.test(ask), null);
+/* DeskTime being slow, refusing the key or being unreachable must not hold
+   up the reading of the record. */
+check('and does not wait on it for ever',
+  /Promise\.race\(\[ask,[\s\S]{0,90}8000\)/.test(ask), null);
+check('a refusal from DeskTime is not a failed refresh',
+  /r\.ok \? r\.json\(\)[\s\S]{0,80}: null/.test(ask), null);
+check('the two are asked at the same time, not one after the other',
+  /Promise\.all\(\[kv\.catch\(function\(\)\{\}\), desk\.then/.test(refresh), null);
+check('and a press that brought days in says so',
+  /DeskTime added ' \+ brought\.wrote/.test(refresh), null);
+
 /* ---- what a change from somebody else does ---- */
 check('a change from the feed brings the settings back, not just the attendance',
   /if\(e\.data\.dataset\) applyRemote\(e\.data\.dataset\);[\s\S]{0,400}officeChanged\(\);/.test(APP), null);
