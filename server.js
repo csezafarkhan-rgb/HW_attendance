@@ -5899,6 +5899,47 @@ app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
   res.json(out);
 });
 
+/* ---- the company's mark, for the tab ----
+
+   The office uploads its logo on the dashboard, so the tab icon cannot be a
+   file in the repo: it would be somebody else's logo the day they change
+   theirs. The page cuts the mark out of that logo and stores the result;
+   this hands it back as an image.
+
+   Served without a session, because the login page is where the tab is first
+   seen and nobody is signed in there yet. Which office's mark that is, is
+   the session's answer where there is one, and otherwise the only office on
+   the server - and where there is more than one and nobody signed in, there
+   is no honest answer, so none is given. A company logo is in any case the
+   one thing on that page already printed across the top of it. */
+let faviconOrg = null;                 // the only org there is, once it is known
+app.get(['/favicon.png', '/favicon.ico'], async (req, res) => {
+  try {
+    let orgId = (req.session && req.session.orgId) || null;
+    if (!orgId) {
+      if (faviconOrg === null) {
+        const r = await pool.query('SELECT id FROM orgs LIMIT 2');
+        faviconOrg = (r.rows.length === 1) ? r.rows[0].id : 0;
+      }
+      orgId = faviconOrg || null;
+    }
+    if (!orgId) return res.status(404).end();
+    const r = await pool.query(
+      "SELECT value FROM kv WHERE org_id = $1 AND key = 'companyIcon' AND user_id IS NULL", [orgId]);
+    const src = String(r.rows[0] ? r.rows[0].value : '');
+    const m = /^data:image\/(png|jpeg|gif|webp|x-icon);base64,([A-Za-z0-9+/=\s]+)$/.exec(src);
+    if (!m) return res.status(404).end();
+    const body = Buffer.from(m[2], 'base64');
+    if (!body.length || body.length > 512 * 1024) return res.status(404).end();
+    res.set('Content-Type', 'image/' + m[1]);
+    /* An hour, and revalidated after that: a logo changes about once in the
+       life of a company, and a tab icon that will not let go of the old one
+       is its own small annoyance. */
+    res.set('Cache-Control', 'public, max-age=3600, must-revalidate');
+    res.send(body);
+  } catch (e) { res.status(404).end(); }
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html'],
   etag: true,

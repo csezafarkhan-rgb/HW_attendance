@@ -200,6 +200,10 @@
         if (user.role === 'admin_view') { usersBtn.textContent = '🔐 Sign-in'; usersBtn.title = 'Two-step sign-in for your account'; }
       }
       if (pbBtn) pbBtn.style.display = user.role === 'admin' ? '' : 'none';
+      /* What this account may do, where the page needs to know without asking
+         again - the tab icon is cut from the company logo by whoever is
+         looking at it, and only the office may store the result. */
+      window.HW_ROLE = user.role;
 
       /* Started here, waited for in there. The settings used to be loaded
          before the dashboard was built at all, so the frame was created when
