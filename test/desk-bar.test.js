@@ -220,9 +220,13 @@ check('the week line carries it',
    disappears into the block; a white one does not. */
 check('days that are a block of colour are divided by a white line',
   /#attTable td\.ov-cell[\s\S]{0,160}border-bottom-color:#FFFFFF/.test(flat), null);
-check('and so are leave, a holiday, an absence and a day with no record',
-  /td\.absent-cell/.test(flat) && /td\.nodata-cell/.test(flat)
-  && /td\.holiday-cell/.test(flat) && /td\.prejoin\{ border-bottom-color/.test(flat), null);
+check('and a holiday is divided the same way',
+  /#attTable td\.ov-cell, #attTable td\.holiday-cell\{ border-bottom-color:#FFFFFF; \}/.test(flat), null);
+/* The pale ones want the opposite: the cell is already the colour of the
+   paper, so a white line between two of them is no line at all and a week of
+   empty days ran together as one tall box. */
+check('a day with nothing on it is divided by a light grey instead',
+  /#attTable td\.nodata-cell, #attTable td\.absent-cell, #attTable td\.prejoin\{[\s\S]{0,60}border-bottom-color:#D8DEE7/.test(flat), null);
 
 /* ---- the day and its bar are one cell ----
    The line between the times and the bar made the bar look like a row of

@@ -2095,8 +2095,15 @@ td.ov-cell.mispunch{background:#D9622E;color:#fff;}
    rule that divides every other cell disappears into both. A white line
    divides them instead - the colour of the paper, so the days are told apart
    by a gap rather than by another colour arguing with the block. */
-#attTable td.ov-cell, #attTable td.absent-cell, #attTable td.nodata-cell,
-#attTable td.holiday-cell, #attTable td.prejoin{ border-bottom-color:#FFFFFF; }
+#attTable td.ov-cell, #attTable td.holiday-cell{ border-bottom-color:#FFFFFF; }
+/* The pale ones want the opposite. A day with nothing on it, a weekly off, a
+   day before somebody joined: the cell is already the colour of the paper, so
+   a white line between two of them is no line at all and a week of empty days
+   ran together as one tall box. A light grey keeps them apart without
+   drawing more attention than an empty day deserves. */
+#attTable td.nodata-cell, #attTable td.absent-cell, #attTable td.prejoin{
+  border-bottom-color:#D8DEE7;
+}
 /* Only the date cell carries the holiday colour - the row itself stays normal
    so the attendance in it still reads as attendance. */
 tr.holiday-row .date-col{background:#6E4BB8 !important;color:#FFFFFF;box-shadow:inset 3px 0 0 #4A2E86;font-weight:800;}
