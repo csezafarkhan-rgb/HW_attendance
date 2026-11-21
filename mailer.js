@@ -192,8 +192,31 @@ function mailWidth(want) {
   if (!isFinite(n) || n <= MAIL_WIDTH) return MAIL_WIDTH;
   return Math.min(n, MAIL_WIDTH_MAX);
 }
-function layout(title, subtitle, blocks, width) {
+/* The company's mark at the top of the bar, where there is one.
+
+   Fetched from the site rather than carried in the message: a picture built
+   into the HTML is not drawn at all by most mail clients, which is why the
+   attendance screenshot already works this way.
+
+   On a white chip, because the logo offices upload is a mark on white paper -
+   dropped straight onto the dark bar it reads as a sticker, and a chip says
+   the white is meant. A client with pictures turned off, which is Outlook out
+   of the box, shows the chip empty: the name and the date beside it are text
+   and say everything the message needs to say. */
+function markChip(url) {
+  if (!url) return '';
+  return '<td width="56" valign="middle" style="padding-right:14px;">'
+    + '<table role="presentation" cellpadding="0" cellspacing="0" bgcolor="#ffffff" '
+    +   'style="background:#fff;border-radius:10px;">'
+    + '<tr><td style="padding:6px;line-height:0;">'
+    + '<img src="' + esc(url) + '" width="30" height="30" alt="" '
+    +   'style="display:block;width:30px;height:30px;border:0;">'
+    + '</td></tr></table></td>';
+}
+function layout(title, subtitle, blocks, width, mark) {
   const W = mailWidth(width);
+  const head = '<div style="font-size:16px;font-weight:700;letter-spacing:.2px;">' + esc(title) + '</div>'
+    + (subtitle ? ('<div style="font-size:12.5px;opacity:.75;margin-top:3px;">' + esc(subtitle) + '</div>') : '');
   /* The charset is declared in the message itself as well as in the headers
      the sender sets: a client that guesses instead of reading them turns every
      curly apostrophe into mojibake. */
@@ -213,8 +236,10 @@ function layout(title, subtitle, blocks, width) {
     +   'style="width:' + W + 'px;max-width:100%;background:#fff;'
     +   'border:1px solid ' + LINE + ';border-radius:14px;overflow:hidden;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
     + '<tr><td bgcolor="' + INK + '" style="padding:18px 22px;background:' + INK + ';color:#fff;">'
-    +   '<div style="font-size:16px;font-weight:700;letter-spacing:.2px;">' + esc(title) + '</div>'
-    +   (subtitle ? ('<div style="font-size:12.5px;opacity:.75;margin-top:3px;">' + esc(subtitle) + '</div>') : '')
+    +   (mark
+          ? ('<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+             + markChip(mark) + '<td valign="middle">' + head + '</td></tr></table>')
+          : head)
     + '</td></tr>'
     + '<tr><td style="padding:18px 22px;color:' + INK + ';font-size:14px;line-height:1.5;">' + blocks.join('') + '</td></tr>'
     + '<tr><td style="padding:14px 22px;border-top:1px solid ' + LINE + ';color:' + SOFT + ';font-size:11.5px;">'
@@ -1045,7 +1070,7 @@ function dailyEmail(o) {
   /* Built to the width its own cards asked for, which on a quiet day is the
      ordinary one. */
   return { subject: subject,
-           html: layout(o.orgName || 'Attendance', stamp, body, wantWidth) };
+           html: layout(o.orgName || 'Attendance', stamp, body, wantWidth, o.mark) };
 }
 
 /* What everybody did today, one card a person, in the order the office reads
@@ -1126,7 +1151,7 @@ function tasksEmail(o) {
   }
   return {
     subject: fillText(o.subject || words.subject, say),
-    html: layout(o.orgName || 'Attendance', o.dateLabel || 'Work done', body)
+    html: layout(o.orgName || 'Attendance', o.dateLabel || 'Work done', body, undefined, o.mark)
   };
 }
 function leaveEmail(o) {
@@ -1173,7 +1198,7 @@ function leaveEmail(o) {
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
   return {
     subject: subject,
-    html: layout(o.orgName || 'Attendance', o.dateLabel || 'Leave waiting for a decision', body)
+    html: layout(o.orgName || 'Attendance', o.dateLabel || 'Leave waiting for a decision', body, undefined, o.mark)
   };
 }
 
@@ -1274,7 +1299,7 @@ function remindEmail(o) {
     subject: subject || (items.length + ' waiting on you'),
     html: layout(o.orgName || 'Attendance',
       items.length === 1 ? 'One thing is waiting on you'
-                         : (items.length + ' things are waiting on you'), body)
+                         : (items.length + ' things are waiting on you'), body, undefined, o.mark)
   };
 }
 function excusedEmail(o) {
@@ -1323,7 +1348,7 @@ function excusedEmail(o) {
     subject: subject || (one
       ? ('Late excused · ' + items[0].name + ' · ' + fmtDay(items[0].day))
       : ('Late excused · ' + items.length + ' marked')),
-    html: layout(o.orgName || 'Attendance', one ? 'A late arrival answered for' : 'Late arrivals answered for', body)
+    html: layout(o.orgName || 'Attendance', one ? 'A late arrival answered for' : 'Late arrivals answered for', body, undefined, o.mark)
   };
 }
 
@@ -1371,7 +1396,7 @@ function decisionEmail(o) {
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
   return { subject: subject, html: layout(o.orgName || 'Attendance',
     punch ? (yes ? 'Your time has been corrected' : 'Your correction was not approved')
-          : (yes ? 'Your leave is approved' : 'Your leave was not approved'), body) };
+          : (yes ? 'Your leave is approved' : 'Your leave was not approved'), body, undefined, o.mark) };
 }
 
 /* The whole month, rather than the day: the record as a picture and the same
@@ -1450,7 +1475,7 @@ function monthEmail(o) {
      own. */
   const stamp = (o.monthLabel || 'The month') + (o.sentAt ? (' \u00b7 sent ' + o.sentAt) : '');
   return { subject: subject,
-           html: layout(o.orgName || 'Attendance', stamp, body) };
+           html: layout(o.orgName || 'Attendance', stamp, body, undefined, o.mark) };
 }
 
 /* The holiday reminder: what is closed, when, and how far off it is. */
@@ -1487,7 +1512,7 @@ function holidayEmail(o) {
   }
   if (o.siteUrl) body.push('<div style="margin-top:16px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>');
   const subject = fillText((o.subject && o.subject.trim()) ? o.subject : words.subject, say);
-  return { subject: subject, html: layout(o.orgName || 'Attendance', 'A holiday is coming up', body) };
+  return { subject: subject, html: layout(o.orgName || 'Attendance', 'A holiday is coming up', body, undefined, o.mark) };
 }
 
 /* One new request, sent as it is raised. */
@@ -1519,7 +1544,7 @@ function requestEmail(o) {
       footer ? ('<div style="margin-top:16px;padding-top:12px;border-top:1px solid ' + LINE + ';'
                   + 'font-size:12px;color:' + SOFT + ';">' + lines(footer) + '</div>') : '',
       o.siteUrl ? ('<div style="margin-top:8px;">' + button(o.siteUrl, 'Open the dashboard', 'plain') + '</div>') : ''
-    ])
+    ], undefined, o.mark)
   };
 }
 
@@ -1587,7 +1612,7 @@ function passwordEmail(o) {
     + '</div>');
   return { subject: invite ? ('Set your password · ' + (o.orgName || 'Attendance'))
                            : ('Reset your password · ' + (o.orgName || 'Attendance')),
-           html: layout(o.orgName || 'Attendance', invite ? 'Welcome' : 'Password reset', body) };
+           html: layout(o.orgName || 'Attendance', invite ? 'Welcome' : 'Password reset', body, undefined, o.mark) };
 }
 
 /* The page that link opens: two boxes and nothing else. Posted back to the
@@ -1669,7 +1694,7 @@ function shiftEmail(o) {
     subject: subject || (one
       ? ('Shift changed \u00b7 ' + items[0].name + ' \u00b7 ' + fmtDay(items[0].day))
       : ('Shift changed \u00b7 ' + items.length + ' days')),
-    html: layout(o.orgName || 'Attendance', one ? 'Hours set for a day' : 'Hours set for a day', body)
+    html: layout(o.orgName || 'Attendance', one ? 'Hours set for a day' : 'Hours set for a day', body, undefined, o.mark)
   };
 }
 
@@ -1741,7 +1766,7 @@ function partDayEmail(o) {
       ? ((allBack ? 'Part day put back \u00b7 ' : (items[0].kindName + ' taken \u00b7 '))
          + items[0].name + ' \u00b7 ' + fmtDay(items[0].day))
       : ((allBack ? 'Part days put back \u00b7 ' : 'Part days taken \u00b7 ') + items.length)),
-    html: layout(o.orgName || 'Attendance', head, body)
+    html: layout(o.orgName || 'Attendance', head, body, undefined, o.mark)
   };
 }
 

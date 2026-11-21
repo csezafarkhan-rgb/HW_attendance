@@ -165,7 +165,7 @@
            the same logo. Where no logo has been uploaded there is nothing to
            serve, and the heading is then the words alone rather than a broken
            picture. -->
-      <h1><img id="lgMark" class="lg-mark" src="/favicon.png" alt="" onerror="this.style.display='none'"> Homeweavers Attendance</h1>
+      <h1><img id="lgMark" class="lg-mark" src="/mark.png" alt="" onerror="this.style.display='none'"> Homeweavers Attendance</h1>
       <p class="lg-sub" id="lgTitleSub">Sign in to open your dashboards</p>
       <div id="lgErr"></div>
       <div id="lgOk"></div>
@@ -1774,6 +1774,59 @@
   }
   window.hwMarkBox = hwMarkBox;
 
+  /* The mark alone, square, with the paper taken out from behind it.
+
+     An uploaded logo is a picture of a printed thing: the mark sits on white,
+     and that white is only white because paper is. Dropped on anything else
+     it becomes a white tile around the mark. So near-white is turned to
+     nothing, and the edge is faded rather than cut, or the mark arrives with
+     a white rind around it at the sizes that matter. */
+  function hwMarkCut(img, box, size, pad){
+    var mw = box.x1-box.x0+1, mh = box.y1-box.y0+1, side = Math.max(mw, mh);
+    var c = document.createElement('canvas'); c.width = size; c.height = size;
+    var g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    var scale = (size * (1 - 2*pad)) / side, dw = mw*scale, dh = mh*scale;
+    g.drawImage(img, box.x0, box.y0, mw, mh, (size-dw)/2, (size-dh)/2, dw, dh);
+    try{
+      var im = g.getImageData(0, 0, size, size), p = im.data;
+      for(var i = 0; i < p.length; i += 4){
+        if(!p[i+3]) continue;
+        var low = Math.min(p[i], p[i+1], p[i+2]);      // how white this pixel is
+        if(low >= 250){ p[i+3] = 0; continue; }
+        if(low > 215) p[i+3] = Math.round(p[i+3] * (250 - low) / 35);
+      }
+      g.putImageData(im, 0, 0);
+    }catch(_){ }
+    return c;                      // a canvas, so the tile can draw it at once
+  }
+  /* And the same mark on a rounded tile, which is what a browser tab, a
+     phone's home screen and a bookmark bar all expect: the shape is what is
+     recognised at sixteen pixels, not the detail inside it. Dark, because a
+     tab bar is usually light and a white tile on it is a hole. */
+  var HW_TILE_INK = '#1B2330';
+  function hwMarkTile(markCanvas, size){
+    var c = document.createElement('canvas'); c.width = size; c.height = size;
+    var g = c.getContext('2d');
+    var r = Math.round(size * 0.22);
+    g.beginPath();
+    g.moveTo(r, 0); g.lineTo(size-r, 0); g.quadraticCurveTo(size, 0, size, r);
+    g.lineTo(size, size-r); g.quadraticCurveTo(size, size, size-r, size);
+    g.lineTo(r, size); g.quadraticCurveTo(0, size, 0, size-r);
+    g.lineTo(0, r); g.quadraticCurveTo(0, 0, r, 0);
+    g.closePath();
+    g.fillStyle = HW_TILE_INK;
+    g.fill();
+    /* Drawn from the canvas the cut was made on rather than from a picture
+       built out of it: a picture has to load before it can be drawn, and
+       there is nothing here to wait on it. */
+    var inset = Math.round(size * 0.17);
+    try{ g.drawImage(markCanvas, inset, inset, size - 2*inset, size - 2*inset); }catch(_){ }
+    return c;
+  }
+  window.hwMarkCut = hwMarkCut;
+  window.hwMarkTile = hwMarkTile;
+
   function hwMarkFromLogo(src){
     try{
       if(!src || String(src).indexOf('data:image') !== 0) return;
@@ -1795,25 +1848,31 @@
           };
           var box = hwMarkBox(inked, W, H);
           if(!box) return;
-          var x0 = box.x0, y0 = box.y0;
-          var mw = box.x1-box.x0+1, mh = box.y1-box.y0+1;
-          var side = Math.max(mw, mh), size = 64, pad = 0.05;
-          var out = document.createElement('canvas'); out.width = size; out.height = size;
-          var og = out.getContext('2d');
-          og.imageSmoothingQuality = 'high';
-          var scale = (size * (1 - 2*pad)) / side, dw = mw*scale, dh = mh*scale;
-          og.drawImage(img, x0, y0, mw, mh, (size-dw)/2, (size-dh)/2, dw, dh);
-          var png = out.toDataURL('image/png');
+          var bareC = hwMarkCut(img, box, 64, 0.05);
+          var bare = bareC.toDataURL('image/png');
+          var tile = hwMarkTile(bareC, 64).toDataURL('image/png');
+          /* The tab carries the tile. A bare mark on a bare tab bar is a few
+             coloured strokes floating in nothing; every other application's
+             icon is a shape, and a shape is what the eye finds in a row of
+             twenty tabs. */
           var link = document.getElementById('hwTabIcon');
-          if(link) link.href = png;
-          /* Kept for the next person's login page. Only the office writes it -
-             an employee's save would be refused, and a refusal notice about
-             a tab icon is noise about something nobody asked for. */
+          if(link) link.href = tile;
+          /* Kept for the next person's login page, and for the messages, which
+             cannot work any of this out for themselves. Two pictures, because
+             two different things are wanted: the tile where it stands alone,
+             the mark where something else is already around it. Only the
+             office writes them - an employee's save would be refused, and a
+             refusal notice about a tab icon is noise about something nobody
+             asked for. */
           if(window.HW_ROLE === 'admin' && window.storage && window.storage.set){
-            window.storage.get('companyIcon', true).then(function(res){
-              if(res && res.value === png) return;
-              return window.storage.set('companyIcon', png, true);
-            }).catch(function(){});
+            var keep = function(key, png){
+              window.storage.get(key, true).then(function(res){
+                if(res && res.value === png) return;
+                return window.storage.set(key, png, true);
+              }).catch(function(){});
+            };
+            keep('companyIcon', tile);
+            keep('companyMark', bare);
           }
         }catch(_){ }
       };

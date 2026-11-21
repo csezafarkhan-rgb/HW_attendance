@@ -1211,6 +1211,7 @@ async function sendPasswordLink(u, kind) {
   if (!EMAIL_RE.test(String(u.email || ''))) return { ok: false, error: 'no_address' };
   const kv = await sharedKeys(u.org_id, ['companyInfo']);
   const mail = mailer.passwordEmail({
+    mark: await markUrlFor(u.org_id),
     kind, email: u.email, name: u.name, orgName: orgNameOf(kv.companyInfo),
     goodFor: pwGoodFor(kind),
     link: mailer.baseUrl().replace(/\/+$/, '') + '/set-password/' + pwToken(u, kind)
@@ -2908,6 +2909,7 @@ async function buildDailyEmail(orgId, day, opts) {
 
   const settings = opts.settings || await mailSettings(orgId);
   return mailer.dailyEmail({
+    mark: await markUrlFor(orgId),
     orgName: orgNameOf(kv.companyInfo),
     dateLabel: mailer.fmtDay(day, true),
     rows, hidden: hidden > 0 ? hidden : 0, attached: !!opts.attached, siteUrl: mailer.baseUrl(),
@@ -2978,6 +2980,7 @@ async function leaveDigests(orgId) {
       if (rec) only.req = Object.assign({}, only.req, { leaveRecord: rec });
     }
     const mail = mailer.leaveEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), pending, unrequested: unreq,
       siteUrl: mailer.baseUrl(), subject: settings.leave.subject,
       intro: settings.leave.intro, footer: settings.leave.footer, approver: byName
@@ -3132,6 +3135,7 @@ async function sendMonthEmail(orgId, opts) {
 
   const kv = await sharedKeys(orgId, ['companyInfo']);
   const mail = mailer.monthEmail({
+    mark: await markUrlFor(orgId),
     orgName: orgNameOf(kv.companyInfo),
     monthLabel: clip(opts.monthLabel || '', 120),
     shown: Number.isFinite(opts.shown) ? opts.shown : null,
@@ -3205,6 +3209,7 @@ async function sendHolidayEmail(orgId, opts) {
   if (!holidays.length) return { ok: true, nothing: true };
   const kv = await sharedKeys(orgId, ['companyInfo']);
   const mail = mailer.holidayEmail({
+    mark: await markUrlFor(orgId),
     orgName: orgNameOf(kv.companyInfo),
     holidays: holidays.map(h => ({
       name: h.name, note: h.note, away: daysApart(today, h.day),
@@ -3278,6 +3283,7 @@ async function sendTasksEmail(orgId, day, opts) {
     silent.push(label);
   });
   const mail = mailer.tasksEmail({
+    mark: await markUrlFor(orgId),
     orgName: orgNameOf(kv.companyInfo), dateLabel: mailer.fmtDay(day, true),
     people: wrote, silent, subject: settings.tasks.subject,
     intro: settings.tasks.intro, footer: settings.tasks.footer, siteUrl: mailer.baseUrl()
@@ -3788,6 +3794,7 @@ async function notifyDecision(orgId, req) {
        point of one sign-off is that there is no message it does not reach,
        and this was the message the person who asked actually waits for. */
     const mail = mailer.decisionEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), req, decision: req.status, siteUrl: mailer.baseUrl(),
       footer: req.leaveType === 'PUNCH' ? settings.punch.footer : settings.leave.footer
     });
@@ -3817,6 +3824,7 @@ async function notifyRecommended(orgId, req) {
     if (!claimed.rows.length) return;
     const kv = await sharedKeys(orgId, ['companyInfo']);
     const mail = mailer.requestEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo),
       req: Object.assign({}, req, { leaveRecord: await leaveRecordFor(orgId, req.empName, req) }),
       links: linksFor({ k: 'req', org: orgId, id: req.id, s: 2 }),
@@ -3984,6 +3992,7 @@ async function sendRemindersOnce(orgId, day, settings) {
       continue;
     }
     const mail = mailer.remindEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), name: items.shownName || name, day: day,
       items: items, siteUrl: mailer.baseUrl(),
       subject: settings.remind.subject, intro: settings.remind.intro,
@@ -4212,6 +4221,7 @@ async function notifySelfExcused(orgId, marks) {
     /* And the people whose days these are. */
     cc.push.apply(cc, await ownersOf(orgId, marks.map(m => m.empName), to, cc));
     const mail = mailer.excusedEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl(),
       /* The office's own words, the same ones the test shows it. */
       subject: settings.excused.subject, intro: settings.excused.intro,
@@ -4251,6 +4261,7 @@ async function notifyShiftChange(orgId, moves) {
     }));
     cc.push.apply(cc, await ownersOf(orgId, moves.map(m => m.empName), to, cc));
     const mail = mailer.shiftEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), items, siteUrl: mailer.baseUrl(),
       subject: words.subject, intro: words.intro, footer: words.footer
     });
@@ -4318,6 +4329,7 @@ async function notifyPartDayTaken(orgId, items) {
     }));
     cc.push.apply(cc, await ownersOf(orgId, items.map(m => m.empName), to, cc));
     const mail = mailer.partDayEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), items: list, siteUrl: mailer.baseUrl(),
       subject: words.subject, intro: words.intro, footer: words.footer
     });
@@ -4410,6 +4422,7 @@ async function notifyUnrequestedMarks(orgId, key, changes) {
       if (!items.length) continue;
       const byName = await approverName(orgId, addr);
       const mail = mailer.leaveEmail({
+        mark: await markUrlFor(orgId),
         orgName: orgNameOf(kv.companyInfo), pending: [],
         unrequested: items.slice(0, 15).map(m => ({
           req: m, heading: 'Marked on the record, no request',
@@ -4955,6 +4968,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
                  message: 'Sample only - nobody has asked for this correction.',
                  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const mail = mailer.requestEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), req: r0, siteUrl: mailer.baseUrl(),
       intro: settings.punch.intro, footer: settings.punch.footer,
       subjectText: settings.punch.subject,
@@ -4967,6 +4981,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
   if (String((req.body && req.body.kind) || '') === 'remind') {
     const owed = (await pendingByEmployee(orgId, settings))[name] || [];
     const mail = owed.length ? mailer.remindEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), name: name, day: day, items: owed,
       siteUrl: mailer.baseUrl(), subject: settings.remind.subject,
       intro: settings.remind.intro, footer: settings.remind.footer }) : null;
@@ -5015,6 +5030,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
       built.push({ subject: mail.subject, to: a.to, cc: a.cc, html: mail.html });
     };
     add(selfAud, mailer.excusedEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
       subject: words.subject, intro: words.intro, footer: words.footer,
       items: [{ name: name, day: day, late: 48, came: '10:18', shift: '9:30-6:30',
@@ -5022,6 +5038,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     }));
     const sh = words.shift || {};
     add(selfAud, mailer.shiftEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
       subject: sh.subject, intro: sh.intro, footer: sh.footer,
       items: [{ name: name, day: day, from: '9:30-6:30', to: '11:00-8:00',
@@ -5029,6 +5046,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     }));
     const pt = words.part || {};
     add(await partTakenAudience(orgId, settings, [name]), mailer.partDayEmail({
+      mark: await markUrlFor(orgId),
       orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
       subject: pt.subject, intro: pt.intro, footer: pt.footer,
       items: [{ name: name, day: day, kindName: 'Half day',
@@ -5060,6 +5078,7 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
                  message: 'Sample only - nobody has asked for this day.',
                  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const mail = mailer.requestEmail({
+    mark: await markUrlFor(orgId),
     orgName: orgNameOf(kv.companyInfo), req: req0, siteUrl: mailer.baseUrl(),
     intro: settings.leave.intro, footer: settings.leave.footer,
     approver: await approverNames(orgId, greetedOf(aud.to, mgmt)),
@@ -5135,6 +5154,7 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
            note: 'the client call ran over from yesterday',
            came: '09:52', shift: '9:30-6:30', late: 22 }];
     demo = mailer.excusedEmail({
+      mark: await markUrlFor(req.session.orgId),
       orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(), items,
       subject: settings.excused.subject, intro: settings.excused.intro,
       footer: settings.excused.footer
@@ -5150,6 +5170,7 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
     const me = (req.user && req.user.name) || 'A name from the record';
     const words = settings.excused.shift || {};
     demo2 = mailer.shiftEmail({
+      mark: await markUrlFor(req.session.orgId),
       orgName: orgNameOf(kv.companyInfo), siteUrl: mailer.baseUrl(),
       items: [{ name: shownNames[me] || me, day: istParts().day,
                 from: shiftFor(parseJson(kv.shiftAssignments) || {}, me) || '9:30-6:30',
@@ -5913,19 +5934,28 @@ app.get('/api/status', requireRole('admin', 'admin_view'), async (req, res) => {
    is no honest answer, so none is given. A company logo is in any case the
    one thing on that page already printed across the top of it. */
 let faviconOrg = null;                 // the only org there is, once it is known
-app.get(['/favicon.png', '/favicon.ico'], async (req, res) => {
+/* Whose mark to serve. The session's answer where there is one; the only
+   office on the server where there is not; and where a message asks for a
+   particular one by name - which is how an email asks, having no session -
+   that one, because a logo is not a secret and the message was sent on that
+   office's behalf. */
+async function orgForMark(req) {
+  const asked = parseInt((req.query && req.query.org) || '', 10);
+  if (asked > 0) return asked;
+  const mine = (req.session && req.session.orgId) || null;
+  if (mine) return mine;
+  if (faviconOrg === null) {
+    const r = await pool.query('SELECT id FROM orgs LIMIT 2');
+    faviconOrg = (r.rows.length === 1) ? r.rows[0].id : 0;
+  }
+  return faviconOrg || null;
+}
+async function serveStoredImage(req, res, key) {
   try {
-    let orgId = (req.session && req.session.orgId) || null;
-    if (!orgId) {
-      if (faviconOrg === null) {
-        const r = await pool.query('SELECT id FROM orgs LIMIT 2');
-        faviconOrg = (r.rows.length === 1) ? r.rows[0].id : 0;
-      }
-      orgId = faviconOrg || null;
-    }
+    const orgId = await orgForMark(req);
     if (!orgId) return res.status(404).end();
     const r = await pool.query(
-      "SELECT value FROM kv WHERE org_id = $1 AND key = 'companyIcon' AND user_id IS NULL", [orgId]);
+      'SELECT value FROM kv WHERE org_id = $1 AND key = $2 AND user_id IS NULL', [orgId, key]);
     const src = String(r.rows[0] ? r.rows[0].value : '');
     const m = /^data:image\/(png|jpeg|gif|webp|x-icon);base64,([A-Za-z0-9+/=\s]+)$/.exec(src);
     if (!m) return res.status(404).end();
@@ -5934,11 +5964,28 @@ app.get(['/favicon.png', '/favicon.ico'], async (req, res) => {
     res.set('Content-Type', 'image/' + m[1]);
     /* An hour, and revalidated after that: a logo changes about once in the
        life of a company, and a tab icon that will not let go of the old one
-       is its own small annoyance. */
+       is its own small annoyance. A message carries the version in the link,
+       so a mail client's picture cache is no part of this. */
     res.set('Cache-Control', 'public, max-age=3600, must-revalidate');
     res.send(body);
   } catch (e) { res.status(404).end(); }
-});
+}
+/* The tile, which is what a tab, a bookmark and a phone's home screen want. */
+app.get(['/favicon.png', '/favicon.ico'], (req, res) => serveStoredImage(req, res, 'companyIcon'));
+/* And the mark alone, for the places that have a shape around them already:
+   the heading on the sign-in page, and the chip at the top of a message. */
+app.get('/mark.png', (req, res) => serveStoredImage(req, res, 'companyMark'));
+/* The address of that mark for a message, which has no session to ask with -
+   so the office is named in the link, and the version with it, because a
+   mail client that has drawn a picture once will go on drawing that one. */
+async function markUrlFor(orgId) {
+  try {
+    const r = await pool.query(
+      "SELECT version FROM kv WHERE org_id = $1 AND key = 'companyMark' AND user_id IS NULL", [orgId]);
+    if (!r.rows.length) return '';
+    return mailer.baseUrl() + '/mark.png?org=' + orgId + '&v=' + Number(r.rows[0].version || 0);
+  } catch (e) { return ''; }
+}
 
 app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html'],
