@@ -113,23 +113,40 @@ check('the tile has rounded corners, like every other icon in the row',
 check('and is dark, because a tab bar is usually light',
   /fillStyle = HW_TILE_INK/.test(tile) && /HW_TILE_INK = '#1B2330'/.test(SHELL), null);
 check('with the mark inside it rather than filling it',
-  /size \* 0\.17/.test(tile), null);
+  /size \* 0\.16/.test(tile), null);
+check('and keeping its own shape in there, not stretched to the square',
+  /room \* markCanvas\.width \/ mk/.test(tile), null);
 check('drawn from the canvas, so nothing has to be waited for',
   /drawImage\(markCanvas/.test(tile), null);
 
 /* ---- what the page does with it ---- */
 const maker = grab(SHELL, 'hwMarkFromLogo');
-check('the tab gets the tile', /link\.href = tile/.test(maker), null);
+/* The office asked for the logo as it is. A tab sits on whatever colour the
+   person's theme is, and a mark with nothing behind it belongs on all of
+   them, where a tile of our choosing belongs on one. */
+check('the tab gets the mark itself, on nothing',
+  /link\.href = bare/.test(maker), null);
 /* Two pictures, because two things are wanted: the tile where it stands
    alone, the mark where there is already a shape around it. */
-check('and both are kept - the tile and the mark on its own',
-  /keep\('companyIcon', tile\);/.test(maker) && /keep\('companyMark', bare\);/.test(maker), null);
+check('and both are kept - the mark, and a tile for a home screen',
+  /keep\('companyMark', bare\);/.test(maker) && /keep\('companyTile', tile\);/.test(maker), null);
+/* A home screen fills the square itself, and fills it black behind anything
+   transparent, which is the one place the tile earns its keep. */
+check('the home-screen icon is the tile, and only that one',
+  /<link rel="apple-touch-icon" href="\/tile\.png">/.test(SHELL)
+  && /app\.get\('\/tile\.png'/.test(SRV), null);
 check('the sign-in heading takes the mark, which sits on white already',
   /id="lgMark"[^>]*src="\/mark\.png"/.test(SHELL), null);
-check('the mark is squared off, so the tab does not stretch it',
+/* The picture is the mark and nothing else. A square meant a margin down
+   both sides of a mark taller than it is wide, and a tab draws what it is
+   given - so the margins were drawn too and the mark came out smaller than
+   the room it had. */
+check('the picture is the mark’s own shape, with nothing beside it',
+  /c\.width = w; c\.height = h;/.test(cut) && /drawImage\(img, box\.x0, box\.y0, mw, mh, 0, 0, w, h\)/.test(cut), null);
+check('scaled by its longer side, so it is never stretched',
   /Math\.max\(mw, mh\)/.test(cut), null);
-check('and given a little room, so it is not jammed against the edges',
-  /hwMarkCut\(img, box, 64, 0\.05\)/.test(maker), null);
+check('and cut larger than a tab needs, for a retina screen and a message',
+  /hwMarkCut\(img, box, 128\)/.test(maker), null);
 check('the same logo is not cut twice', /__hwMarkFrom === src/.test(maker), null);
 /* A logo loaded from another origin taints the canvas and reading it throws.
    That is not a fault worth a broken page over - the tab simply keeps the
@@ -137,7 +154,7 @@ check('the same logo is not cut twice', /__hwMarkFrom === src/.test(maker), null
 check('a picture that cannot be read leaves the tab as it was',
   /catch\(_\)\{ return; \}/.test(maker) && /tainted/.test(maker), null);
 check('it is put on the tab',
-  /getElementById\('hwTabIcon'\)[\s\S]{0,80}link\.href = tile/.test(maker), null);
+  /getElementById\('hwTabIcon'\)[\s\S]{0,120}link\.href = bare/.test(maker), null);
 /* Only the office stores it: an employee's save would be refused, and a
    refusal notice about a tab icon is noise about something nobody asked
    for. */
@@ -147,8 +164,8 @@ check('which the sign-in says once, rather than being asked again',
   /window\.HW_ROLE = user\.role;/.test(AUTH), null);
 check('and it is not written again when it has not changed',
   /res\.value === png/.test(maker), null);
-check('the mark alone is served too, for what already has a shape around it',
-  /app\.get\('\/mark\.png'/.test(SRV), null);
+check('the tab, the sign-in page and the messages all ask for the one picture',
+  /app\.get\(\['\/favicon\.png', '\/favicon\.ico', '\/mark\.png'\]/.test(SRV), null);
 check('the tab asks for it before anybody signs in',
   /<link id="hwTabIcon" rel="icon" type="image\/png" href="\/favicon\.png">/.test(SHELL), null);
 check('and the logo arriving is what sets it off',

@@ -5970,11 +5970,14 @@ async function serveStoredImage(req, res, key) {
     res.send(body);
   } catch (e) { res.status(404).end(); }
 }
-/* The tile, which is what a tab, a bookmark and a phone's home screen want. */
-app.get(['/favicon.png', '/favicon.ico'], (req, res) => serveStoredImage(req, res, 'companyIcon'));
-/* And the mark alone, for the places that have a shape around them already:
-   the heading on the sign-in page, and the chip at the top of a message. */
-app.get('/mark.png', (req, res) => serveStoredImage(req, res, 'companyMark'));
+/* The mark, on nothing: the tab, the heading on the sign-in page, and the
+   chip at the top of a message all sit on a colour of their own, and a mark
+   with nothing behind it belongs on all three. */
+app.get(['/favicon.png', '/favicon.ico', '/mark.png'],
+  (req, res) => serveStoredImage(req, res, 'companyMark'));
+/* The one place a transparent picture is no use: a phone's home screen fills
+   the square itself, and fills it black. */
+app.get('/tile.png', (req, res) => serveStoredImage(req, res, 'companyTile'));
 /* The address of that mark for a message, which has no session to ask with -
    so the office is named in the link, and the version with it, because a
    mail client that has drawn a picture once will go on drawing that one. */
