@@ -97,7 +97,7 @@ check('a day exactly matched is not "past" it', ctx.deskBand(100) === 'hi', null
     (APP.match(new RegExp(c.replace('#', '#'), 'g')) || []).length >= 2, null);
 });
 check('and the bar is the same height as that page’s',
-  /\.desk-bar\{[^}]*height:\s*7px/.test(APP) && /\.dt-use-bar\{[^}]*height:\s*7px/.test(APP), null);
+  /\.desk-bar\{[^}]*height:\s*5px/.test(APP) && /\.dt-use-bar\{[^}]*height:\s*5px/.test(APP), null);
 
 /* ---- the cell ---- */
 const cell = ctx.deskBarCell(share, true);
