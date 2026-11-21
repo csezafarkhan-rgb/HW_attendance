@@ -91,7 +91,7 @@ check('a refusal from DeskTime is not a failed refresh',
 check('the two are asked at the same time, not one after the other',
   /Promise\.all\(\[kv\.catch\(function\(\)\{\}\), desk\.then/.test(refresh), null);
 check('and a press that brought days in says so',
-  /DeskTime added ' \+ brought\.wrote/.test(refresh), null);
+  /DeskTime sent ' \+ brought\.wrote \+ ' reading'/.test(refresh), null);
 
 /* ---- what a change from somebody else does ---- */
 check('a change from the feed brings the settings back, not just the attendance',

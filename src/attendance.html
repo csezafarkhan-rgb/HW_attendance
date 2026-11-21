@@ -4894,8 +4894,10 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
       /* What DeskTime gave up, where it gave up anything: a press that
          brought in two days and one that brought in nothing should not read
          the same. */
+      /* One reading is one person's day, which is why it is not called a
+         day: asking for two days of eight people can bring in sixteen. */
       var dtSaid = (brought && brought.ok && brought.wrote)
-        ? (' DeskTime added ' + brought.wrote + ' day'
+        ? (' DeskTime sent ' + brought.wrote + ' reading'
            + (brought.wrote === 1 ? '' : 's') + '.')
         : '';
       if(!quiet) showUploadStatus('Up to date with what the office has now.' + dtSaid, false);
@@ -17531,8 +17533,10 @@ function buildExcelBackup(){
             return;
           }
           if(j && j.ok){
+            /* Readings, not days: one reading is one person's day, so a week
+               asked for eight people can come back as fifty-six. */
             showUploadStatus(j.wrote
-              ? (j.wrote + ' day' + (j.wrote === 1 ? '' : 's') + ' brought in from DeskTime.')
+              ? (j.wrote + ' reading' + (j.wrote === 1 ? '' : 's') + ' brought in from DeskTime.')
               : 'DeskTime had nothing new.', false);
             loadDeskTime().then(function(){ DT_MONTH = null; renderDeskTimePage(); });
             return;
