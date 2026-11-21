@@ -213,6 +213,17 @@ check('nor is anything drawn before there is a table to draw into',
 check('the week line carries it',
   /weekDeskSaid\(weekDeskShare\(emp\.name, dates, wk\)\)/.test(flat), null);
 
+/* ---- and one day told from the next ----
+   A day the office marked is one block of colour, and stacked they run
+   together: a week from home read as a single green field with the hours
+   printed in it five times. The grey rule that divides every other cell
+   disappears into the block; a white one does not. */
+check('days that are a block of colour are divided by a white line',
+  /#attTable td\.ov-cell[\s\S]{0,160}border-bottom-color:#FFFFFF/.test(flat), null);
+check('and so are leave, a holiday, an absence and a day with no record',
+  /td\.absent-cell/.test(flat) && /td\.nodata-cell/.test(flat)
+  && /td\.holiday-cell/.test(flat) && /td\.prejoin\{ border-bottom-color/.test(flat), null);
+
 /* ---- the switch ---- */
 check('there is a switch for it, under Hide Sunday',
   /id="hideSundayToggle"[\s\S]{0,400}id="deskBarToggle"/.test(flat), null);

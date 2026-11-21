@@ -2088,6 +2088,15 @@ td.ov-cell.leave{background:var(--leave-dk);color:#fff;}
 td.ov-cell.visit{background:var(--visit);color:#fff;}
 td.ov-cell.other{background:#5B6472;color:#fff;}
 td.ov-cell.mispunch{background:#D9622E;color:#fff;}
+/* ---- one day, then the next ----
+   A day marked by the office is one block of colour, and stacked they run
+   together: a week from home read as a single green field with the hours
+   printed in it five times, and a week of leave as one grey slab. The grey
+   rule that divides every other cell disappears into both. A white line
+   divides them instead - the colour of the paper, so the days are told apart
+   by a gap rather than by another colour arguing with the block. */
+#attTable td.ov-cell, #attTable td.absent-cell, #attTable td.nodata-cell,
+#attTable td.holiday-cell, #attTable td.prejoin{ border-bottom-color:#FFFFFF; }
 /* Only the date cell carries the holiday colour - the row itself stays normal
    so the attendance in it still reads as attendance. */
 tr.holiday-row .date-col{background:#6E4BB8 !important;color:#FFFFFF;box-shadow:inset 3px 0 0 #4A2E86;font-weight:800;}
@@ -12481,6 +12490,32 @@ function buildExcelBackup(){
      elsewhere shut, with the person mid-edit in one of them. A click on a
      choice belongs to whatever opened the list; the list closes itself. */
   function inChoiceList(t){ return !!(t && t.closest && t.closest('.selx-pop')); }
+  /* ---- and a click outside this page altogether ----
+
+     Every menu on the toolbar closes when you click elsewhere - elsewhere
+     meaning anywhere in this document. But this document is a frame inside
+     another page, and that page has a bar of its own above it and space
+     beside it. A click there never reaches here, so the menu stayed open
+     over the grid until something inside was clicked.
+
+     The frame losing focus is that click, as far as this page can see it;
+     the page around it says so too, for the case where the frame never had
+     the focus to lose. Menus only - a form somebody is halfway through
+     typing into is not a thing to shut because they reached for the window
+     behind it. */
+  function closeFloatingMenus(){
+    try{
+      Array.prototype.forEach.call(document.querySelectorAll('.month-dropdown.open'),
+        function(x){ x.classList.remove('open'); });
+    }catch(e){}
+    /* The list a custom select opens is torn down by its own closer, which
+       takes its listeners with it. */
+    try{ if(typeof window.__selxClose === 'function') window.__selxClose(); }catch(e){}
+  }
+  window.addEventListener('blur', closeFloatingMenus);
+  window.addEventListener('message', function(e){
+    if(e && e.data && e.data.type === 'hw-outside-click') closeFloatingMenus();
+  });
   document.addEventListener('click', function(e){
     var t = e.target;
     if(!t || !t.closest) return;
@@ -24828,6 +24863,9 @@ function buildExcelBackup(){
       window.removeEventListener('resize',closePop); window.removeEventListener('scroll',onScroll,true); cleanup=null; }
   }
   function onKey(e){ if(e.key==='Escape') closePop(); }
+  /* So that a click outside this frame can shut the list the same way the
+     list shuts itself, listeners and all. */
+  window.__selxClose = closePop;
   function onScroll(ev){ if(openPop && !openPop.contains(ev.target)) closePop(); }
   function skip(sel){
     if(!sel || sel.tagName!=='SELECT') return true;

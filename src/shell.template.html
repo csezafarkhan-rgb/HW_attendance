@@ -1900,6 +1900,21 @@
   }
   window.hwMarkFromLogo = hwMarkFromLogo;
 
+  /* ---- a click out here is a click outside the dashboard ----
+
+     The menus on the dashboard's toolbar close when something else in that
+     page is clicked, and this bar is not in that page: it is the page the
+     frame sits in. So a menu left open over the grid stayed open while
+     somebody clicked the logo, the month badge or the empty space beside
+     them. The frames are told, and close their menus; nothing else of
+     theirs is touched. */
+  document.addEventListener('click', function(){
+    var frames = document.querySelectorAll('#frames iframe');
+    for(var i = 0; i < frames.length; i++){
+      try{ frames[i].contentWindow.postMessage({ type:'hw-outside-click' }, '*'); }catch(e){}
+    }
+  }, true);
+
   window.addEventListener('message', function(e){
     if(!window.__hwFromOurFrame || !window.__hwFromOurFrame(e.source)) return;
     if(e && e.data === 'hw-back-to-console'){ /* no-op */ }
