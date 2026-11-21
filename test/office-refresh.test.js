@@ -88,6 +88,12 @@ check('and does not wait on it for ever',
   /Promise\.race\(\[ask,[\s\S]{0,90}8000\)/.test(ask), null);
 check('a refusal from DeskTime is not a failed refresh',
   /r\.ok \? r\.json\(\)[\s\S]{0,80}: null/.test(ask), null);
+/* Each ask is two calls to DeskTime, and the quiet refreshes are not rare:
+   the change feed sets one off whenever anybody edits anything. */
+check('only a press asks DeskTime - a quiet refresh does not',
+  /var desk = quiet \? Promise\.resolve\(null\) : askDeskTimeNow\(\);/.test(refresh), null);
+check('and not twice inside two minutes, however often it is pressed',
+  /Date\.now\(\) - DESK_ASKED_AT < 120000/.test(ask), null);
 check('the two are asked at the same time, not one after the other',
   /Promise\.all\(\[kv\.catch\(function\(\)\{\}\), desk\.then/.test(refresh), null);
 check('and a press that brought days in says so',

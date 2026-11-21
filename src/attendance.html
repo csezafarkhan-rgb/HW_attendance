@@ -4848,7 +4848,16 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
      up the rest of the reading: it is asked, and the record is read either
      way. Whatever arrives late is picked up by the next press or by the
      night. */
+  var DESK_ASKED_AT = 0;
   function askDeskTimeNow(){
+    /* Each ask is two calls to DeskTime, and the quiet refreshes are not
+       rare: the change feed sets one off whenever anybody edits anything,
+       and coming back to a tab sets off another. DeskTime would be asked
+       dozens of times an hour for figures that change by the minute at
+       most. So only a deliberate press asks, and not twice inside two
+       minutes however often the button is pressed. */
+    if(Date.now() - DESK_ASKED_AT < 120000) return Promise.resolve(null);
+    DESK_ASKED_AT = Date.now();
     var to = todayISO_full;
     var from = new Date(to + 'T00:00:00');
     from.setDate(from.getDate() - 1);
@@ -4877,8 +4886,12 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     /* DeskTime is asked at the same time rather than after: the two have
        nothing to do with each other, and asking in turn would add whatever
        DeskTime takes to every press. What it says is kept, so the message at
-       the end can mention it. */
-    var desk = askDeskTimeNow();
+       the end can mention it.
+
+       Only on a press. A quiet refresh is the page keeping up with the
+       office, and the office editing a shift is no reason to go asking
+       another company's server what somebody's computer was doing. */
+    var desk = quiet ? Promise.resolve(null) : askDeskTimeNow();
     var brought = null;
     return Promise.all([kv.catch(function(){}), desk.then(function(j){ brought = j; })])
       .then(function(){
