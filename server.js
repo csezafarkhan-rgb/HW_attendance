@@ -4924,6 +4924,31 @@ app.get('/api/mail', requireRole('admin', 'admin_view'), async (req, res) => {
 
    Nothing is sent unless the test is asked for, and a test goes to the one
    address a test has ever gone to: the account asking for it. */
+/* Where a sample goes.
+
+   The account that asked for it, by default: a sample is for whoever pressed
+   the button. Where the office names somebody else - to see how a message
+   looks in the inbox it will really land in - that person, so long as they
+   hold an account in this office. A test that could be addressed anywhere is
+   a way to send mail from the company's own address to a stranger, and
+   nothing here wants that. */
+async function sampleBox(req, fallback) {
+  const asked = String((req.body && req.body.to) || '').trim().toLowerCase();
+  if (asked) {
+    const r = await pool.query(
+      `SELECT email FROM users WHERE org_id = $1 AND is_active
+         AND lower(COALESCE(email, '')) = $2 LIMIT 1`, [req.session.orgId, asked]);
+    if (!r.rows.length) {
+      return { error: 'No active account in this office has the address ' + asked
+                    + '. A sample only goes to somebody who already gets the real thing.' };
+    }
+    return { box: String(r.rows[0].email) };
+  }
+  let box = String((req.user && req.user.email) || '').trim();
+  if (!EMAIL_RE.test(box)) box = String(fallback || '').trim();
+  if (!EMAIL_RE.test(box)) return { error: 'Your account has no email address on it.' };
+  return { box: box };
+}
 app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
   if (!mailer.ready()) return res.status(400).json({ error: 'not_configured' });
   const name = String((req.body && req.body.emp) || '').trim();
@@ -4991,9 +5016,9 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     }
     const to = String(await employeeAddress(orgId, name) || '').trim();
     if ((req.body && req.body.send) === 'test') {
-      let box = String((req.user && req.user.email) || '').trim();
-      if (!EMAIL_RE.test(box)) box = to;
-      if (!box) return res.status(400).json({ error: 'Your account has no email address on it.' });
+      const pick = await sampleBox(req, to);
+      if (pick.error) return res.status(400).json({ error: pick.error });
+      const box = pick.box;
       const m2 = { to: [box], cc: [], subject: '[Sample] ' + mail.subject, html: mail.html };
       const r2 = await mailer.send(m2);
       await logMail(orgId, 'remind', m2, r2);
@@ -5054,9 +5079,9 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     }));
     if (!built.length) return res.status(400).json({ error: 'nothing to build' });
     if ((req.body && req.body.send) === 'test') {
-      let box = String((req.user && req.user.email) || '').trim();
-      if (!EMAIL_RE.test(box)) box = (built[0].to || [])[0] || '';
-      if (!box) return res.status(400).json({ error: 'Your account has no email address on it.' });
+      const pick = await sampleBox(req, (built[0].to || [])[0] || '');
+      if (pick.error) return res.status(400).json({ error: pick.error });
+      const box = pick.box;
       let bad = null;
       for (const b of built) {
         const m2 = { to: [box], cc: [], subject: '[Sample] ' + b.subject, html: b.html };
@@ -5093,11 +5118,9 @@ app.post('/api/mail/leave-sample', requireRole('admin'), async (req, res) => {
     heading: 'Sample \u2014 how this person\u2019s leave will arrive' });
 
   if ((req.body && req.body.send) === 'test') {
-    let to = String((req.user && req.user.email) || '').trim();
-    if (!EMAIL_RE.test(to)) {
-      if (!mgmt.length) return res.status(400).json({ error: 'Your account has no email address on it.' });
-      to = mgmt[0];
-    }
+    const pick = await sampleBox(req, mgmt[0] || '');
+    if (pick.error) return res.status(400).json({ error: pick.error });
+    const to = pick.box;
     const msg = { to: [to], cc: [], subject: '[Sample] ' + mail.subject, html: mail.html };
     const r = await mailer.send(msg);
     await logMail(orgId, 'leave', msg, r);
@@ -5116,15 +5139,14 @@ app.post('/api/mail/test', requireRole('admin'), async (req, res) => {
      stored as its email is not always an address. Resend answers such a send
      with "Invalid `to` field", which says nothing about whose address is
      wrong; the address is checked here and the answer names it. */
-  let to = String((req.user && req.user.email) || '').trim();
-  if (!EMAIL_RE.test(to)) {
-    const fallback = await mailRecipients(req.session.orgId, await mailSettings(req.session.orgId));
-    if (!fallback.length) {
-      return res.status(400).json({ error: 'Your account has no email address on it ('
-        + (to || 'blank') + '), and no other admin has one either. Put an address on the account in Users.' });
-    }
-    to = fallback[0];
+  const fallback = await mailRecipients(req.session.orgId, await mailSettings(req.session.orgId));
+  const pick = await sampleBox(req, fallback[0] || '');
+  if (pick.error) {
+    return res.status(400).json({ error: pick.error
+      + (String((req.body && req.body.to) || '').trim() ? ''
+         : ' Put an address on the account in Users, or name one to send to.') });
   }
+  const to = pick.box;
   /* The tab the office is looking at, so what comes back is that message
      rather than a note saying the wiring works. Built exactly as the real one
      is, with the office's own wording, and addressed to the one person asking
