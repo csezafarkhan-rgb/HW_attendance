@@ -14,6 +14,9 @@
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const REPO = path.join(__dirname, '..');
 const APP = fs.readFileSync(path.join(REPO, 'src', 'attendance.html'), 'utf8');
+/* The same source with the carriage returns taken out, for the patterns that
+   run across more than one line. */
+const flat = APP.replace(/\r/g, '');
 
 const results = [];
 const check = (name, ok, got) => {
@@ -74,9 +77,13 @@ check('a day with no marked hours has nothing to be a share of',
   ctx.deskShare('Zafar Khan', '2026-11-02', 0) === null, null);
 check('and a day DeskTime missed has nothing to share',
   ctx.deskShare('Habib', '2026-11-02', 540) === null, null);
-/* The bar is a share of the figure in the row above it. */
-check('it is taken against the total that row has just shown',
-  /deskByEmp\[emp\.name\] = deskShare\(emp\.name, dateStr, durs\.totalMin\);/.test(APP), null);
+/* The bar is a share of the figure in the row above it - and it is taken
+   before those cells are drawn, because whether they cover one line or two
+   depends on the answer. */
+check('it is taken against the total that row shows',
+  /var share = deskShare\(emp\.name, dateStr, durs\.totalMin\);/.test(APP), null);
+check('and before the day it belongs to is drawn',
+  APP.indexOf('var share = deskShare(') < APP.indexOf("cells += '<td class=\"att-cell '+inCls"), null);
 
 /* ---- the four colours, which are the DeskTime page's own ---- */
 check('past a full day has a colour of its own', ctx.deskBand(101) === 'over', null);
@@ -98,9 +105,13 @@ check('the bar sits in a cell six columns wide, like the day above it',
   /colspan="6"/.test(cell), cell.slice(0, 80));
 check('and carries the rule between people, so the column is not broken',
   /class="desk-cell emp-block-start"/.test(cell), null);
-check('the fill is the share, on a track a quarter longer than the day',
-  /width="?68\.0%/.test(cell) || /width:68\.0%/.test(cell), cell);
-check('with the mark where a full day reaches', /<u><\/u>/.test(cell), null);
+/* The track is the day. It ran a quarter past it once, with a mark where a
+   full day reached - and every bar then read as less than it was, since a
+   full day filled four fifths of the bar. */
+check('the fill is the share of the day, on a track that is the day',
+  /width:85\.0%/.test(cell), cell);
+check('and there is no mark on it to read it short against',
+  !/<u>/.test(cell) && !/\.desk-bar u\{/.test(APP), null);
 check('and the figures in words for anybody who hovers',
   /title="At the computer 7:50 of 9:16 marked/.test(cell), cell.slice(0, 140));
 const over = ctx.deskBarCell(ctx.deskShare('Himanshu', '2026-11-02', 540), false);
@@ -109,8 +120,8 @@ check('a day past the mark says so in words as well as colour',
 /* 104% of the day is 83% of a track that runs to 125, which is past the
    mark and short of the end - the bar says 'over' by crossing the mark, not
    by filling. */
-check('and its fill crosses the mark without filling the track',
-  /width:83\.2%/.test(over), over.slice(0, 140));
+check('and it fills the bar, which is what the colour is for',
+  /width:100\.0%/.test(over), over.slice(0, 140));
 check('a person with no figure gets an empty cell, not a bar of nothing',
   ctx.deskBarCell(null, true) === '<td class="desk-cell emp-block-start" colspan="6"></td>',
   ctx.deskBarCell(null, true));
@@ -119,8 +130,21 @@ check('a person with no figure gets an empty cell, not a bar of nothing',
 const emps = [{ name: 'Zafar Khan' }, { name: 'Rahul Mishra' }, { name: 'Habib' }];
 const by = { 'Zafar Khan': share, 'Rahul Mishra': ctx.deskShare('Rahul Mishra', '2026-11-02', 357) };
 const row = ctx.deskBarRow(emps, by);
-check('one cell per person on the line, whether or not they have a bar',
-  (row.match(/<td /g) || []).length === 3, row.length);
+/* Only the people with a figure are on the line. Everybody else's day covers
+   both lines instead, so a day from home or a day on leave is one block of
+   colour and not a block with an empty strip under it. */
+check('only the people with a figure get a cell on the line',
+  (row.match(/<td /g) || []).length === 2, row);
+check('and the day of anybody without one covers both lines',
+  /cells = cells\.split\(RS\)\.join\(deskBars \? ' rowspan="2"' : ''\);/.test(flat), null);
+check('which is written as a marker, since a day with no line may span nothing',
+  /var RS = '\{\{RS\}\}';/.test(flat), null);
+check('a day from home spans both lines the same way',
+  /class="ov-cell '\+cat\.cls\+' emp-block-start" colspan="6"'\+RS\+'/.test(flat), null);
+check('and so does a day with no record at all',
+  /nodata-cell emp-block-start" colspan="6"'\+RS\+'/.test(flat), null);
+check('while a punched day spans only where that person has no bar',
+  /var mine = share \? '' : RS;/.test(flat), null);
 /* An empty line under every day would double the height of a month to say
    nothing at all. */
 check('a day nobody has a figure for draws no line',
@@ -131,7 +155,6 @@ check('and the switch turned off draws none either',
 ctx.state.deskBar = true;
 
 /* ---- the row it goes under ---- */
-const flat = APP.replace(/\r/g, '');
 check('the date cell covers both lines, so nothing sits beside the bar empty',
   /'<td class="date-col"'\+\(deskBars \? ' rowspan="2"' : ''\)\+'>'\+label\+'<\/td>'/.test(flat), null);
 check('the line is coloured as the day above it - a Saturday, a holiday, today',

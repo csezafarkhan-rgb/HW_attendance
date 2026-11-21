@@ -2206,15 +2206,14 @@ td.dur-cell.full{color:#000;font-weight:700;}
    colours. Two drawings of one measure that look different are two
    measures to anybody reading them.
 
-   The track runs a quarter past a full day, with a mark where a full day
-   reaches, so a computer in use longer than the day the record credits -
-   which is what a day from home usually looks like - crosses the mark
-   instead of filling the bar and reading like any other full day. */
+   The track is the day itself. It ran a quarter past it once, with a mark
+   where a full day reached - and every bar then read as less than it was,
+   because a full day filled four fifths of the bar. A day past the whole of
+   it fills the bar and says so by its colour, which is what the colour is
+   for. */
 tr.desk-row td{padding:1px 3px 3px;border-top:0;}
 .desk-bar{position:relative;display:block;height:7px;border-radius:2px;background:#C3CEDE;overflow:hidden;}
 .desk-bar i{display:block;height:100%;min-width:2px;}
-/* Where a full day reaches. Over the fill, so a bar past it still shows the mark it passed. */
-.desk-bar u{position:absolute;top:0;bottom:0;left:80%;width:1px;background:rgba(27,35,48,.45);}
 .desk-bar.hi i{background:#2F6FD0;}
 /* Past the whole of it, and not a thing to answer for. */
 .desk-bar.over i{background:#2E7D5B;}
@@ -9544,10 +9543,9 @@ function buildExcelBackup(){
     if(desk === null || !markedMin || markedMin <= 0) return null;
     return { desk: desk, marked: markedMin, pct: Math.round(desk / markedMin * 100) };
   }
-  /* The bar itself. The track is a quarter longer than the day, so the mark at
-     four fifths of it is where a full day reaches; a reading past it has its
-     own colour, since it is a different thing to see and not merely more. */
-  var DESK_TRACK = 125;
+  /* The bar itself. The track is the day, so a full day is a full bar; a
+     reading past it has a colour of its own, since it is a different thing to
+     see and not merely more of the same one. */
   function deskBand(pct){
     if(pct > 100) return 'over';
     return pct >= 75 ? 'hi' : (pct >= 50 ? 'mid' : 'lo');
@@ -9555,23 +9553,26 @@ function buildExcelBackup(){
   function deskBarCell(share, startsBlock){
     var cls = 'desk-cell' + (startsBlock ? ' emp-block-start' : '');
     if(!share) return '<td class="' + cls + '" colspan="6"></td>';
-    var fill = Math.min(DESK_TRACK, share.pct) / DESK_TRACK * 100;
+    var fill = Math.min(100, share.pct);
     var said = 'At the computer ' + fmtMin(share.desk) + ' of ' + fmtMin(share.marked)
              + ' marked \u00b7 ' + share.pct + '%'
              + (share.pct > 100 ? ' \u2014 longer than the day this record credits' : '');
     return '<td class="' + cls + '" colspan="6" title="' + said + '">'
       + '<span class="desk-bar ' + deskBand(share.pct) + '">'
-      + '<i style="width:' + fill.toFixed(1) + '%;"></i><u></u></span></td>';
+      + '<i style="width:' + fill.toFixed(1) + '%;"></i></span></td>';
   }
   /* The line under one day, or nothing at all where nobody on it has a figure:
      an empty line under every day would double the height of a month to say
-     nothing. Nothing either where the office has turned the bar off. */
+     nothing. Nothing either where the office has turned the bar off.
+
+     Only the people who have a bar get a cell on it. Everybody else's day
+     covers both lines instead, so a day from home or a day on leave is one
+     block of colour rather than a block with an empty strip under it. */
   function deskBarRow(emps, byEmp){
     if(!state.deskBar) return '';
-    var any = false;
-    emps.forEach(function(e){ if(byEmp[e.name]) any = true; });
-    if(!any) return '';
-    return emps.map(function(e){ return deskBarCell(byEmp[e.name] || null, true); }).join('');
+    var have = emps.filter(function(e){ return !!byEmp[e.name]; });
+    if(!have.length) return '';
+    return have.map(function(e){ return deskBarCell(byEmp[e.name], true); }).join('');
   }
   function wfhCellDuration(emp, dateStr, ov){
     if(!ov) return '';
@@ -19855,29 +19856,34 @@ function buildExcelBackup(){
          covers one line or two depends on whether anybody on this day has a
          desk bar under them, and that is not known until they are drawn. */
       var cells = '', deskByEmp = {};
+      /* A day where nobody has a bar has no line under it, and then nothing
+         may cover two lines - so the cells are written with a marker where a
+         rowspan would go, and the marker is answered once the day is drawn
+         and it is known whether there is a line at all. */
+      var RS = '{{RS}}';
       emps.forEach(function(emp){
         var rec = getRecord(emp.name, dateStr);
         var ov = getOverride(emp.name, dateStr);
         if(beforeJoining(emp.name, dateStr)){
           // No data-emp on this cell, so the click binding skips it - the day is
           // not theirs to record anything against.
-          cells += '<td class="prejoin emp-block-start" colspan="6" title="'
+          cells += '<td class="prejoin emp-block-start" colspan="6"'+RS+' title="'
                +  shotEsc(emp.name)+' joined on '+normJoin(getJoinDate(emp.name))
                +  ' \u2014 nothing can be recorded before that">\u00b7</td>';
           return;
         }
         if(holiday && !ov){
-          cells += '<td class="att-cell holiday-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+escapeHtml(holiday.name+(holiday.note?' — '+holiday.note:''))+'">'+escapeHtml(holiday.name+(holiday.note?(' · '+holiday.note):''))+'</td>';
+          cells += '<td class="att-cell holiday-cell emp-block-start" colspan="6"'+RS+' data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+escapeHtml(holiday.name+(holiday.note?' — '+holiday.note:''))+'">'+escapeHtml(holiday.name+(holiday.note?(' · '+holiday.note):''))+'</td>';
         } else if(ov){
           var cat = OV_CATS[ov.cat] || OV_CATS.OTHER;
           var ovDur = wfhCellDuration(emp.name, dateStr, ov);
           var tag = escapeHtml(cat.tag(ov.detail) + (ovDur ? ' · '+ovDur : ''));   // the detail comes from an approved request's type
           var fdBadge = (ov.cat === 'LEAVE') ? ' <span class="hd-pill full" title="Full day">'+hdMark('FULL')+'</span>' : '';
-          cells += '<td class="ov-cell '+cat.cls+' emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(ov.reason?ov.reason.replace(/"/g,'&quot;'):'')+'">'+tag+fdBadge+'</td>';
+          cells += '<td class="ov-cell '+cat.cls+' emp-block-start" colspan="6"'+RS+' data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(ov.reason?ov.reason.replace(/"/g,'&quot;'):'')+'">'+tag+fdBadge+'</td>';
         } else if(rec && rec.st === 'WO'){
-          cells += '<td class="att-cell absent-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">Weekly Off</td>';
+          cells += '<td class="att-cell absent-cell emp-block-start" colspan="6"'+RS+' data-emp="'+emp.name+'" data-date="'+dateStr+'">Weekly Off</td>';
         } else if(rec && rec.st === 'AB'){
-          cells += '<td class="att-cell absent-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">Absent</td>';
+          cells += '<td class="att-cell absent-cell emp-block-start" colspan="6"'+RS+' data-emp="'+emp.name+'" data-date="'+dateStr+'">Absent</td>';
         } else if(rec){
           var mp = getMispunch(emp.name, dateStr);
           var lx = getLateExcuse(emp.name, dateStr);
@@ -19899,6 +19905,13 @@ function buildExcelBackup(){
               : ((actuallyEarly?' early':'')+((wasEarly&&ex)?' early-excused':'')))
             +(isAlert(rec,dateStr)&&!mp?' alert':'')+(mp?' mispunch':'')+(rec.manual?' manual-entry':'');
           var durs = computeDurations(rec);
+          /* Taken here rather than after the cells are drawn, because whether
+             these six cover one line or two depends on the answer. Against the
+             total the row itself shows, so the bar underneath is a share of
+             the figure above it and not of some other reckoning of the day. */
+          var share = deskShare(emp.name, dateStr, durs.totalMin);
+          deskByEmp[emp.name] = share;
+          var mine = share ? '' : RS;
           var hdFlag = getHalfDay(emp.name, dateStr);
           var durCls = 'dur-cell' + (hdFlag ? ' ' + hdCls(hdFlag.kind) : (rec.st==='HD' ? ' half' : '')) + (isShortLeave(emp.name, rec) ? ' short' : '');
           var selfGap = selfEntryFlagged(emp.name, dateStr);
@@ -19910,36 +19923,33 @@ function buildExcelBackup(){
           var dsOv = getDayShift(emp.name, dateStr);
           if(dsOv) inTitle = (inTitle?inTitle+' · ':'')+'Shift changed for this day: '+dsOv;
           if(hdFlag) inTitle = (inTitle?inTitle+' · ':'')+hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note):'');
-          cells += '<td class="att-cell '+inCls+' emp-block-start" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')
+          cells += '<td class="att-cell '+inCls+' emp-block-start"'+mine+' data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')
             +(selfGap?' <span class="self-late-flag">⚠</span>':'')+'</td>';
           var outTitle = mp&&mp.note ? ('Mispunch: '+mp.note)
             : (dayStillOpen ? 'Last punch so far today — not necessarily the time they left'
               : (wasEarly ? (ex ? ('Left early — excused: '+(ex.note||'')) : ('Left early by '+minsSaid(getLateEarly(emp.name,rec).early))) : ''));
-          cells += '<td class="att-cell '+outCls+'" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+outTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec.out)+(mp?' ⚑':'')+((wasEarly&&ex)?' ✓':'')+'</td>';
-          cells += '<td class="att-cell '+durCls+' dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(durs.totalMin!==null?fmtMin(durs.totalMin):'—')+(rec.st==='HD'?' ½':'')
+          cells += '<td class="att-cell '+outCls+'"'+mine+' data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+outTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec.out)+(mp?' ⚑':'')+((wasEarly&&ex)?' ✓':'')+'</td>';
+          cells += '<td class="att-cell '+durCls+' dur-col"'+mine+' data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(durs.totalMin!==null?fmtMin(durs.totalMin):'—')+(rec.st==='HD'?' ½':'')
             +(hdFlag?('<span class="hd-pill '+hdCls(hdFlag.kind)+'" title="'
               +hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note.replace(/"/g,'&quot;')):'')+'">'
               +hdMark(hdFlag.kind)+'</span>'):'')+'</td>';
-          cells += '<td class="att-cell dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.dur||(durs.inMin?fmtMin(durs.inMin):'—'))+'</td>';
+          cells += '<td class="att-cell dur-col"'+mine+' data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.dur||(durs.inMin?fmtMin(durs.inMin):'—'))+'</td>';
           // Time out past the allowance set on the Options panel, on a finished
           // day with real punches.
           var outOver = durs.outMin !== null && durs.outMin > BREAK_ALLOW_MIN && !rec.manual && !mp && !dayStillOpen;
-          cells += '<td class="att-cell dur-col'+(outOver?' out-over':'')+'" data-emp="'+emp.name+'" data-date="'+dateStr+'"'
+          cells += '<td class="att-cell dur-col'+(outOver?' out-over':'')+'"'+mine+' data-emp="'+emp.name+'" data-date="'+dateStr+'"'
             + (outOver ? ' title="Out '+fmtMin(durs.outMin)+': '+fmtMin(durs.outMin - BREAK_ALLOW_MIN)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' allowed ('+breakAllowWords()+')"' : '')
             + '>'+(durs.outMin!==null?fmtMin(durs.outMin):'—')+'</td>';
-          cells += '<td class="att-cell punches-cell" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.manual?'—':(rec.c||0))+'</td>';
-          /* Against the total this row has just shown, so the bar underneath is
-             a share of the figure above it and not of some other reckoning of
-             the same day. */
-          deskByEmp[emp.name] = deskShare(emp.name, dateStr, durs.totalMin);
+          cells += '<td class="att-cell punches-cell"'+mine+' data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.manual?'—':(rec.c||0))+'</td>';
         } else {
           /* A dash, like every other empty cell in the row. Whole months ahead
              are days with nothing in them yet, and "No record" repeated down
              the sheet read as a finding rather than an empty space. */
-          cells += '<td class="att-cell nodata-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">—</td>';
+          cells += '<td class="att-cell nodata-cell emp-block-start" colspan="6"'+RS+' data-emp="'+emp.name+'" data-date="'+dateStr+'">—</td>';
         }
       });
       var deskBars = deskBarRow(emps, deskByEmp);
+      cells = cells.split(RS).join(deskBars ? ' rowspan="2"' : '');
       html += '<tr class="'+rowCls+(isWeekStart?' week-start':'')+' "'+(dateStr===todayISO_full?' id="todayRow"':'')+'>'
            +  '<td class="date-col"'+(deskBars ? ' rowspan="2"' : '')+'>'+label+'</td>'
            +  cells
