@@ -2220,6 +2220,8 @@ tr.desk-row td{padding:1px 3px 3px;border-top:0;}
 .desk-bar.mid i{background:#E0A93B;}
 /* Under half: the one worth asking about. */
 .desk-bar.lo i{background:#C9594F;}
+/* And the week's own reckoning, on the line that closes the week. Said rather than drawn: that line is words already, and a bar on a red cell competes with the thing the red is saying. */
+.wk-desk{opacity:.72;font-weight:600;white-space:nowrap;}
 /* Before someone joined: not a blank day, a day that is not theirs. Hatched
    so it reads as unavailable rather than merely empty, and not clickable. */
 #leaveTable td.prejoin{ background:repeating-linear-gradient(135deg,#F2F4F7 0 6px,#EAEDF2 6px 12px) !important;
@@ -9560,6 +9562,39 @@ function buildExcelBackup(){
     return '<td class="' + cls + '" colspan="6" title="' + said + '">'
       + '<span class="desk-bar ' + deskBand(share.pct) + '">'
       + '<i style="width:' + fill.toFixed(1) + '%;"></i></span></td>';
+  }
+  /* What a week came to at the computer, against what the record credits for
+     the same days.
+
+     The same days the bars are on, and for the same reason: a day worked from
+     home is counted in desk minutes on both sides of the sum, so it would read
+     as a flat hundred per cent and say nothing. A day DeskTime never saw is
+     left out of both sides too - counted as nothing at the computer it would
+     read as time not worked, which is a different claim altogether and not one
+     this record can make. */
+  function weekDeskShare(emp, dates, monday){
+    var desk = 0, marked = 0, days = 0;
+    dates.forEach(function(d){
+      if(mondayOf(d) !== monday) return;
+      var seen = deskSeenMinutes(emp, d);
+      if(seen === null) return;
+      var rec = getRecord(emp, d);
+      if(!rec) return;
+      var tot = computeDurations(rec).totalMin;
+      if(!tot) return;
+      desk += seen; marked += tot; days++;
+    });
+    if(!days || !marked) return null;
+    return { desk: desk, marked: marked, days: days, pct: Math.round(desk / marked * 100) };
+  }
+  /* The words for it. Not on a week the office has turned the bars off for:
+     it is the same thing being said, a week at a time. */
+  function weekDeskSaid(share){
+    if(!share || !state.deskBar) return '';
+    return ' <span class="wk-desk" title="Across the ' + share.days
+      + (share.days === 1 ? ' day' : ' days') + ' of this week the clock and DeskTime'
+      + ' both saw">\u00b7 desk ' + fmtMin(share.desk) + ' of ' + fmtMin(share.marked)
+      + ' \u00b7 ' + share.pct + '%</span>';
   }
   /* The line under one day, or nothing at all where nobody on it has a figure:
      an empty line under every day would double the height of a month to say
@@ -20004,7 +20039,8 @@ function buildExcelBackup(){
               cls = 'over'; text = 'Not completed · ' + (shortMin - leverage) + 'm over leverage of ' + leverage + 'm, total ' + shortMin + 'm short';
             }
           }
-          html += '<td colspan="6" class="week-summary-cell '+cls+' emp-block-start">'+text+'</td>';
+          html += '<td colspan="6" class="week-summary-cell '+cls+' emp-block-start">'+text
+               +  weekDeskSaid(weekDeskShare(emp.name, dates, wk))+'</td>';
         });
         html += '</tr>';
       }

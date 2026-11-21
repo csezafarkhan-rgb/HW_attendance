@@ -177,6 +177,42 @@ check('and a reading that changes nothing redraws nothing',
 check('nor is anything drawn before there is a table to draw into',
   /if\(t && t\.rows\.length\)/.test(flat), null);
 
+/* ---- and what the week came to ----
+   The bars say it a day at a time; the week line is the row the office
+   actually decides anything on, and it said nothing about the computer. */
+{
+  const wk = {
+    console, Math, String, Object, Array,
+    deskTime: DESK,
+    state: { deskBar: true },
+    fmtMin: ctx.fmtMin,
+    mondayOf: d => '2026-11-02',
+    getRecord: (e, d) => ({ 'in': '09:00', out: '18:00' }),
+    computeDurations: () => ({ totalMin: 540 })
+  };
+  vm.createContext(wk);
+  ['deskSeenMinutes', 'weekDeskShare', 'weekDeskSaid'].forEach(n => vm.runInContext(grab(APP, n), wk));
+  const dates = ['2026-11-02', '2026-11-03'];
+  /* Only Zafar has a figure on the 2nd in this fixture, so the week is one day. */
+  const share = wk.weekDeskShare('Zafar Khan', dates, '2026-11-02');
+  check('the week counts the days the clock and DeskTime both saw',
+    share && share.days === 1 && share.desk === 470 && share.marked === 540, share);
+  check('and says what share that is', share && share.pct === 87, share);
+  check('a person DeskTime never saw has no week figure',
+    wk.weekDeskShare('Nobody', dates, '2026-11-02') === null, null);
+  const said = wk.weekDeskSaid(share);
+  check('the week line says it in words, not as a bar',
+    /desk 7:50 of 9:00/.test(said) && !/desk-bar/.test(said), said);
+  check('with the share beside it', /87%/.test(said), said);
+  check('and quietly, since that line already says something else',
+    /class="wk-desk"/.test(said), said);
+  wk.state.deskBar = false;
+  check('the switch turns this off too - it is the same thing, a week at a time',
+    wk.weekDeskSaid(share) === '', null);
+}
+check('the week line carries it',
+  /weekDeskSaid\(weekDeskShare\(emp\.name, dates, wk\)\)/.test(flat), null);
+
 /* ---- the switch ---- */
 check('there is a switch for it, under Hide Sunday',
   /id="hideSundayToggle"[\s\S]{0,400}id="deskBarToggle"/.test(flat), null);
