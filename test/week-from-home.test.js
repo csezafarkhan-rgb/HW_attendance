@@ -52,7 +52,7 @@ const ctx = {
   Date, JSON, Object, Math, String, isNaN, parseInt, console,
 };
 vm.createContext(ctx);
-['pad2', 'parseShift', 'toMin', 'mondayOf', 'wfhSeenMinutes', 'approvedMinutes', 'owedMinutes', 'computeWeeklyShortHours',
+['pad2', 'parseShift', 'toMin', 'mondayOf', 'deskSeenMinutes', 'wfhSeenMinutes', 'approvedMinutes', 'owedMinutes', 'computeWeeklyShortHours',
  'gridWeekVerdict'].forEach(n => vm.runInContext(grab(APP, n), ctx));
 
 /* mins: what DeskTime saw each day, or null for a day it saw nothing on. */

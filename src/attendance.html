@@ -2194,6 +2194,33 @@ td.dur-cell.short::after{
   content:'';position:absolute;top:2px;right:2px;width:5px;height:5px;border-radius:50%;background:#7C5CBF;
 }
 td.dur-cell.full{color:#000;font-weight:700;}
+/* ---- the time the computer was in use, under the day it belongs to ----
+   A line of its own rather than a column: the grid is twelve people wide
+   already, and a seventh column each buys nothing the bar does not say.
+   The date beside it covers both lines, so nothing sits next to it empty,
+   and the rule between people runs through it, or the column it divides
+   looks broken at every other line.
+
+   Seven pixels, the track at #C3CEDE, square ends and barely turned
+   corners: the same bar the DeskTime page draws, down to the four
+   colours. Two drawings of one measure that look different are two
+   measures to anybody reading them.
+
+   The track runs a quarter past a full day, with a mark where a full day
+   reaches, so a computer in use longer than the day the record credits -
+   which is what a day from home usually looks like - crosses the mark
+   instead of filling the bar and reading like any other full day. */
+tr.desk-row td{padding:1px 3px 3px;border-top:0;}
+.desk-bar{position:relative;display:block;height:7px;border-radius:2px;background:#C3CEDE;overflow:hidden;}
+.desk-bar i{display:block;height:100%;min-width:2px;}
+/* Where a full day reaches. Over the fill, so a bar past it still shows the mark it passed. */
+.desk-bar u{position:absolute;top:0;bottom:0;left:80%;width:1px;background:rgba(27,35,48,.45);}
+.desk-bar.hi i{background:#2F6FD0;}
+/* Past the whole of it, and not a thing to answer for. */
+.desk-bar.over i{background:#2E7D5B;}
+.desk-bar.mid i{background:#E0A93B;}
+/* Under half: the one worth asking about. */
+.desk-bar.lo i{background:#C9594F;}
 /* Before someone joined: not a blank day, a day that is not theirs. Hatched
    so it reads as unavailable rather than merely empty, and not clickable. */
 #leaveTable td.prejoin{ background:repeating-linear-gradient(135deg,#F2F4F7 0 6px,#EAEDF2 6px 12px) !important;
@@ -4062,6 +4089,7 @@ body.is-view-only table.att td.att-cell{ cursor:default !important; }
     <div class="month-dropdown" id="viewOptsDropdown" style="min-width:240px;">
       <label class="mrow" id="weekStatusToggleLabel"><input type="checkbox" id="weekStatusToggle" checked/>Week status row</label>
       <label class="mrow" id="hideSundayToggleLabel"><input type="checkbox" id="hideSundayToggle"/>Hide Sunday</label>
+      <label class="mrow" id="deskBarToggleLabel" title="A bar under each day for the time DeskTime saw the computer in use, as a share of the hours marked"><input type="checkbox" id="deskBarToggle" checked/>DeskTime bar</label>
       <div class="opt-sep"></div>
       <label class="mrow num"><span>Late ≥</span><span><input type="number" id="lateThreshInput" min="0" max="180" value="10"/><i class="u">min</i></span></label>
       <label class="mrow num" title="Grace before an early departure is marked"><span>Early ≥</span><span><input type="number" id="earlyThreshInput" min="0" max="180" value="10"/><i class="u">min</i></span></label>
@@ -5398,7 +5426,7 @@ function attachDismiss(el){
     'employeeOrder','companyInfo','authAccounts','lateThresholdMin','weeklyLeverageMin',
     'lunchBreakMin','break1Min','break2Min','mailSettings','selfMark','offAttendance','leavePolicy','approvalRoute','approverIntro','approverCc','deskTime','deskTimeNames','deskTimeIds',
     'leaveRecord',
-    'showWeekStatus','hideSunday','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
+    'showWeekStatus','hideSunday','deskBar','viewRole','earlyThresholdMin','salaries','joinDates','empNames','payRules','signatures',
     'lockedMonths'];
   /* Kept per person rather than for the office: what this account has already
      seen. They go into the backup like everything else, but have to be written
@@ -7702,6 +7730,7 @@ function ensureDirPerm(dir, byClick, mode){
       ['Time away allowed', fmtMin(BREAK_ALLOW_MIN)],
       ['Week status row', state.showWeekStatus ? 'on' : 'off'],
       ['Hide Sunday', state.hideSunday ? 'on' : 'off'],
+      ['DeskTime bar', state.deskBar ? 'on' : 'off'],
       ['All leave unpaid', payRules.allLeaveUnpaid ? 'yes' : 'no'],
       ['Provident fund', payRules.pf ? (payRules.pfPct+'%') : 'off'],
       ['ESI', payRules.esi ? (payRules.esiPct+'% up to '+payRules.esiCap) : 'off'],
@@ -7869,7 +7898,7 @@ function backupSettingsSheet(){
         lockedMonths: (typeof lockedMonths !== 'undefined' ? lockedMonths : null),
         lateThresholdMin: lateThresholdMin, earlyThresholdMin: earlyThresholdMin, weeklyLeverageMin: weeklyLeverageMin,
         lunchBreakMin: LUNCH_BREAK_MIN, break1Min: BREAK1_MIN, break2Min: BREAK2_MIN,
-        showWeekStatus: state.showWeekStatus, hideSunday: state.hideSunday,
+        showWeekStatus: state.showWeekStatus, hideSunday: state.hideSunday, deskBar: state.deskBar,
         visibleEmployees: (typeof visibleEmpSet !== 'undefined' ? visibleEmpSet : null),
         authAccounts: (typeof authAccounts !== 'undefined' ? authAccounts : null)
       }[k];
@@ -8911,7 +8940,10 @@ function buildExcelBackup(){
   // "incomplete" latest months, which hid today's rows — fixed.)
   var defaultMonth = ALL_MONTHS.indexOf(todayISO) > -1 ? todayISO : latest;
 
-  var state = { selectedMonths:[defaultMonth], search:'', showWeekStatus:true, hideSunday:false };
+  var state = { selectedMonths:[defaultMonth], search:'', showWeekStatus:true, hideSunday:false,
+                /* On unless somebody turns it off: a figure nobody can see is a
+                   figure nobody acts on. */
+                deskBar:true };
 
   var overrides = {};
   /* The hours a day may be approved for, as a short list rather than a box to
@@ -9494,8 +9526,52 @@ function buildExcelBackup(){
      what the week counts it as have to be the same figure or the screen
      argues with itself. */
   function wfhSeenMinutes(emp, dateStr){
+    return deskSeenMinutes(emp, dateStr);
+  }
+  /* What DeskTime says the computer was in use for, in minutes, or null where
+     it saw nothing. One definition: the hours a day from home is worth, the
+     bar under the day, and the week's total all ask this. */
+  function deskSeenMinutes(emp, dateStr){
     var seen = deskTime[emp + '|' + dateStr];
     return (seen && seen.d > 0) ? Math.round(seen.d) : null;
+  }
+  /* And what share that is of the day the record credits. Against the marked
+     day rather than the shift, because the marked day is the figure in the row
+     above the bar and the two must not disagree. Null where there is nothing
+     to compare - no desk figure, or no day to compare it against. */
+  function deskShare(emp, dateStr, markedMin){
+    var desk = deskSeenMinutes(emp, dateStr);
+    if(desk === null || !markedMin || markedMin <= 0) return null;
+    return { desk: desk, marked: markedMin, pct: Math.round(desk / markedMin * 100) };
+  }
+  /* The bar itself. The track is a quarter longer than the day, so the mark at
+     four fifths of it is where a full day reaches; a reading past it has its
+     own colour, since it is a different thing to see and not merely more. */
+  var DESK_TRACK = 125;
+  function deskBand(pct){
+    if(pct > 100) return 'over';
+    return pct >= 75 ? 'hi' : (pct >= 50 ? 'mid' : 'lo');
+  }
+  function deskBarCell(share, startsBlock){
+    var cls = 'desk-cell' + (startsBlock ? ' emp-block-start' : '');
+    if(!share) return '<td class="' + cls + '" colspan="6"></td>';
+    var fill = Math.min(DESK_TRACK, share.pct) / DESK_TRACK * 100;
+    var said = 'At the computer ' + fmtMin(share.desk) + ' of ' + fmtMin(share.marked)
+             + ' marked \u00b7 ' + share.pct + '%'
+             + (share.pct > 100 ? ' \u2014 longer than the day this record credits' : '');
+    return '<td class="' + cls + '" colspan="6" title="' + said + '">'
+      + '<span class="desk-bar ' + deskBand(share.pct) + '">'
+      + '<i style="width:' + fill.toFixed(1) + '%;"></i><u></u></span></td>';
+  }
+  /* The line under one day, or nothing at all where nobody on it has a figure:
+     an empty line under every day would double the height of a month to say
+     nothing. Nothing either where the office has turned the bar off. */
+  function deskBarRow(emps, byEmp){
+    if(!state.deskBar) return '';
+    var any = false;
+    emps.forEach(function(e){ if(byEmp[e.name]) any = true; });
+    if(!any) return '';
+    return emps.map(function(e){ return deskBarCell(byEmp[e.name] || null, true); }).join('');
   }
   function wfhCellDuration(emp, dateStr, ov){
     if(!ov) return '';
@@ -12621,6 +12697,24 @@ function buildExcelBackup(){
       if(adminInitDone) renderTable();
     }
   }).catch(function(){});
+  /* The DeskTime bar. Kept per person, like the two above it: one admin
+     reading the hours wants it and another reading the punches does not. */
+  (function(){
+    var cb = document.getElementById('deskBarToggle');
+    if(cb) cb.addEventListener('change', function(e){
+      state.deskBar = e.target.checked;
+      storage.set('deskBar', String(e.target.checked), false).catch(function(){});
+      renderTable();
+    });
+    storage.get('deskBar', false).then(function(res){
+      if(res && res.value === 'false'){
+        state.deskBar = false;
+        var c = document.getElementById('deskBarToggle');
+        if(c) c.checked = false;
+        if(adminInitDone) renderTable();
+      }
+    }).catch(function(){});
+  })();
   /* Hide Sunday toggle */
   document.getElementById('hideSundayToggle').addEventListener('change', function(e){
     state.hideSunday = e.target.checked;
@@ -19743,31 +19837,33 @@ function buildExcelBackup(){
           + '">' + (shut ? '\uD83D\uDD12' : '\u2691') + '</span>';
       }
       var label = monthLabelShort(dateStr.slice(0,7)).split(' ')[0]+' '+pad2(dayNum)+', '+weekdayName(dateStr) + holMark;
-      html += '<tr class="'+rowCls+(isWeekStart?' week-start':'')+' "'+(dateStr===todayISO_full?' id="todayRow"':'')+'>';
-      html += '<td class="date-col">'+label+'</td>';
+      /* The people are drawn before the row is opened: whether the date cell
+         covers one line or two depends on whether anybody on this day has a
+         desk bar under them, and that is not known until they are drawn. */
+      var cells = '', deskByEmp = {};
       emps.forEach(function(emp){
         var rec = getRecord(emp.name, dateStr);
         var ov = getOverride(emp.name, dateStr);
         if(beforeJoining(emp.name, dateStr)){
           // No data-emp on this cell, so the click binding skips it - the day is
           // not theirs to record anything against.
-          html += '<td class="prejoin emp-block-start" colspan="6" title="'
+          cells += '<td class="prejoin emp-block-start" colspan="6" title="'
                +  shotEsc(emp.name)+' joined on '+normJoin(getJoinDate(emp.name))
                +  ' \u2014 nothing can be recorded before that">\u00b7</td>';
           return;
         }
         if(holiday && !ov){
-          html += '<td class="att-cell holiday-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+escapeHtml(holiday.name+(holiday.note?' — '+holiday.note:''))+'">'+escapeHtml(holiday.name+(holiday.note?(' · '+holiday.note):''))+'</td>';
+          cells += '<td class="att-cell holiday-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+escapeHtml(holiday.name+(holiday.note?' — '+holiday.note:''))+'">'+escapeHtml(holiday.name+(holiday.note?(' · '+holiday.note):''))+'</td>';
         } else if(ov){
           var cat = OV_CATS[ov.cat] || OV_CATS.OTHER;
           var ovDur = wfhCellDuration(emp.name, dateStr, ov);
           var tag = escapeHtml(cat.tag(ov.detail) + (ovDur ? ' · '+ovDur : ''));   // the detail comes from an approved request's type
           var fdBadge = (ov.cat === 'LEAVE') ? ' <span class="hd-pill full" title="Full day">'+hdMark('FULL')+'</span>' : '';
-          html += '<td class="ov-cell '+cat.cls+' emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(ov.reason?ov.reason.replace(/"/g,'&quot;'):'')+'">'+tag+fdBadge+'</td>';
+          cells += '<td class="ov-cell '+cat.cls+' emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+(ov.reason?ov.reason.replace(/"/g,'&quot;'):'')+'">'+tag+fdBadge+'</td>';
         } else if(rec && rec.st === 'WO'){
-          html += '<td class="att-cell absent-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">Weekly Off</td>';
+          cells += '<td class="att-cell absent-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">Weekly Off</td>';
         } else if(rec && rec.st === 'AB'){
-          html += '<td class="att-cell absent-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">Absent</td>';
+          cells += '<td class="att-cell absent-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">Absent</td>';
         } else if(rec){
           var mp = getMispunch(emp.name, dateStr);
           var lx = getLateExcuse(emp.name, dateStr);
@@ -19800,32 +19896,43 @@ function buildExcelBackup(){
           var dsOv = getDayShift(emp.name, dateStr);
           if(dsOv) inTitle = (inTitle?inTitle+' · ':'')+'Shift changed for this day: '+dsOv;
           if(hdFlag) inTitle = (inTitle?inTitle+' · ':'')+hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note):'');
-          html += '<td class="att-cell '+inCls+' emp-block-start" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')
+          cells += '<td class="att-cell '+inCls+' emp-block-start" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+inTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec['in'])+(rec.manual?' ✎':'')+(lx?' ✓':'')
             +(selfGap?' <span class="self-late-flag">⚠</span>':'')+'</td>';
           var outTitle = mp&&mp.note ? ('Mispunch: '+mp.note)
             : (dayStillOpen ? 'Last punch so far today — not necessarily the time they left'
               : (wasEarly ? (ex ? ('Left early — excused: '+(ex.note||'')) : ('Left early by '+minsSaid(getLateEarly(emp.name,rec).early))) : ''));
-          html += '<td class="att-cell '+outCls+'" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+outTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec.out)+(mp?' ⚑':'')+((wasEarly&&ex)?' ✓':'')+'</td>';
-          html += '<td class="att-cell '+durCls+' dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(durs.totalMin!==null?fmtMin(durs.totalMin):'—')+(rec.st==='HD'?' ½':'')
+          cells += '<td class="att-cell '+outCls+'" data-emp="'+emp.name+'" data-date="'+dateStr+'" title="'+outTitle.replace(/"/g,'&quot;')+'">'+fmtTime(rec.out)+(mp?' ⚑':'')+((wasEarly&&ex)?' ✓':'')+'</td>';
+          cells += '<td class="att-cell '+durCls+' dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(durs.totalMin!==null?fmtMin(durs.totalMin):'—')+(rec.st==='HD'?' ½':'')
             +(hdFlag?('<span class="hd-pill '+hdCls(hdFlag.kind)+'" title="'
               +hdLabel(hdFlag.kind)+(hdFlag.note?(': '+hdFlag.note.replace(/"/g,'&quot;')):'')+'">'
               +hdMark(hdFlag.kind)+'</span>'):'')+'</td>';
-          html += '<td class="att-cell dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.dur||(durs.inMin?fmtMin(durs.inMin):'—'))+'</td>';
+          cells += '<td class="att-cell dur-col" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.dur||(durs.inMin?fmtMin(durs.inMin):'—'))+'</td>';
           // Time out past the allowance set on the Options panel, on a finished
           // day with real punches.
           var outOver = durs.outMin !== null && durs.outMin > BREAK_ALLOW_MIN && !rec.manual && !mp && !dayStillOpen;
-          html += '<td class="att-cell dur-col'+(outOver?' out-over':'')+'" data-emp="'+emp.name+'" data-date="'+dateStr+'"'
+          cells += '<td class="att-cell dur-col'+(outOver?' out-over':'')+'" data-emp="'+emp.name+'" data-date="'+dateStr+'"'
             + (outOver ? ' title="Out '+fmtMin(durs.outMin)+': '+fmtMin(durs.outMin - BREAK_ALLOW_MIN)+' over the '+fmtMin(BREAK_ALLOW_MIN)+' allowed ('+breakAllowWords()+')"' : '')
             + '>'+(durs.outMin!==null?fmtMin(durs.outMin):'—')+'</td>';
-          html += '<td class="att-cell punches-cell" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.manual?'—':(rec.c||0))+'</td>';
+          cells += '<td class="att-cell punches-cell" data-emp="'+emp.name+'" data-date="'+dateStr+'">'+(rec.manual?'—':(rec.c||0))+'</td>';
+          /* Against the total this row has just shown, so the bar underneath is
+             a share of the figure above it and not of some other reckoning of
+             the same day. */
+          deskByEmp[emp.name] = deskShare(emp.name, dateStr, durs.totalMin);
         } else {
           /* A dash, like every other empty cell in the row. Whole months ahead
              are days with nothing in them yet, and "No record" repeated down
              the sheet read as a finding rather than an empty space. */
-          html += '<td class="att-cell nodata-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">—</td>';
+          cells += '<td class="att-cell nodata-cell emp-block-start" colspan="6" data-emp="'+emp.name+'" data-date="'+dateStr+'">—</td>';
         }
       });
-      html += '</tr>';
+      var deskBars = deskBarRow(emps, deskByEmp);
+      html += '<tr class="'+rowCls+(isWeekStart?' week-start':'')+' "'+(dateStr===todayISO_full?' id="todayRow"':'')+'>'
+           +  '<td class="date-col"'+(deskBars ? ' rowspan="2"' : '')+'>'+label+'</td>'
+           +  cells
+           +  '</tr>';
+      /* The same row classes, so a Saturday, a holiday or today is the colour
+         underneath that it is above. */
+      if(deskBars) html += '<tr class="desk-row '+rowCls+'">'+deskBars+'</tr>';
 
       prevWeekMonday = thisWeekMonday;
       var rowDow = new Date(dateStr+'T00:00:00').getDay();

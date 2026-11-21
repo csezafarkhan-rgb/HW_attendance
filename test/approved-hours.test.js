@@ -50,7 +50,7 @@ const ctx = {
   Date, JSON, Object, Math, String, isNaN, parseInt, parseFloat, console,
 };
 vm.createContext(ctx);
-['pad2', 'parseShift', 'toMin', 'mondayOf', 'wfhSeenMinutes', 'approvedMinutes',
+['pad2', 'parseShift', 'toMin', 'mondayOf', 'deskSeenMinutes', 'wfhSeenMinutes', 'approvedMinutes',
  'owedMinutes', 'computeWeeklyShortHours'].forEach(n => vm.runInContext(grab(APP, n), ctx));
 
 /* ---- what the day asks for ---- */

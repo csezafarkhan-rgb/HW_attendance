@@ -837,7 +837,7 @@ function grab(src, name) {
   const ctx = { console, Math, Date, deskTime: {}, satPolicy: {},
                 SAT_DEFAULT: { mode: 'WFH', hours: 4 } };
   vm.createContext(ctx);
-  ['pad2', 'fmtMin', 'getSatPolicy', 'wfhSeenMinutes', 'wfhCellDuration'].forEach(n => vm.runInContext(grab(APP, n), ctx));
+  ['pad2', 'fmtMin', 'getSatPolicy', 'deskSeenMinutes', 'wfhSeenMinutes', 'wfhCellDuration'].forEach(n => vm.runInContext(grab(APP, n), ctx));
   const WEEKDAY = '2026-10-28';        // a Wednesday
   const SAT = '2026-10-31';
   const say = (day, ov, seen, pol) => {
