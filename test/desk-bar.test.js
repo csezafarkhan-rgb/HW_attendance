@@ -224,6 +224,15 @@ check('and so are leave, a holiday, an absence and a day with no record',
   /td\.absent-cell/.test(flat) && /td\.nodata-cell/.test(flat)
   && /td\.holiday-cell/.test(flat) && /td\.prejoin\{ border-bottom-color/.test(flat), null);
 
+/* ---- the day and its bar are one cell ----
+   The line between the times and the bar made the bar look like a row of
+   its own rather than part of the day it measures. The cells that cover
+   both lines keep their bottom edge: that one is the end of the day. */
+check('a day with a bar under it has no line across the middle',
+  /#attTable tr\.has-desk td:not\(\[rowspan\]\)\{ border-bottom-color:transparent; \}/.test(flat), null);
+check('and the day says it has one, so the rule knows which days to join',
+  /\(deskBars\?' has-desk':''\)/.test(flat), null);
+
 /* ---- the switch ---- */
 check('there is a switch for it, under Hide Sunday',
   /id="hideSundayToggle"[\s\S]{0,400}id="deskBarToggle"/.test(flat), null);

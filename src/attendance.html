@@ -2221,6 +2221,11 @@ td.dur-cell.full{color:#000;font-weight:700;}
    it fills the bar and says so by its colour, which is what the colour is
    for. */
 tr.desk-row td{padding:1px 3px 3px;border-top:0;}
+/* The bar belongs to the day above it, so there is no line between them: the
+   times and the bar beneath are one cell with two things written in it. The
+   cells that cover both lines keep their bottom edge - that one is the end of
+   the day rather than a line through the middle of it. */
+#attTable tr.has-desk td:not([rowspan]){ border-bottom-color:transparent; }
 .desk-bar{position:relative;display:block;height:5px;border-radius:2px;background:#C3CEDE;overflow:hidden;}
 .desk-bar i{display:block;height:100%;min-width:2px;}
 .desk-bar.hi i{background:#2F6FD0;}
@@ -20065,7 +20070,7 @@ function buildExcelBackup(){
       });
       var deskBars = deskBarRow(emps, deskByEmp);
       cells = cells.split(RS).join(deskBars ? ' rowspan="2"' : '');
-      html += '<tr class="'+rowCls+(isWeekStart?' week-start':'')+' "'+(dateStr===todayISO_full?' id="todayRow"':'')+'>'
+      html += '<tr class="'+rowCls+(isWeekStart?' week-start':'')+(deskBars?' has-desk':'')+' "'+(dateStr===todayISO_full?' id="todayRow"':'')+'>'
            +  '<td class="date-col"'+(deskBars ? ' rowspan="2"' : '')+'>'+label+'</td>'
            +  cells
            +  '</tr>';
