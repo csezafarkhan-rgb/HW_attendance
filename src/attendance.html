@@ -9850,9 +9850,23 @@ function buildExcelBackup(){
 
      Kept per person per day, by the name this page knows them by. */
   var deskTime = {};
+  /* What was read last time, so a reading that changes nothing redraws
+     nothing. */
+  var deskTimeRaw = '';
   function loadDeskTime(){
     return storage.get('deskTime', true).then(function(res){
-      if(res && res.value){ try{ deskTime = JSON.parse(res.value) || {}; }catch(e){ deskTime = {}; } }
+      var raw = (res && res.value) || '';
+      if(raw){ try{ deskTime = JSON.parse(raw) || {}; }catch(e){ deskTime = {}; } }
+      /* The grid is drawn before this lands, and the bar under each day is
+         made of it: drawn without it, the month has no bars at all until
+         something else happens to redraw the table - which on a quiet morning
+         is nothing. So the arrival of the figures draws them. */
+      var changed = raw !== deskTimeRaw;
+      deskTimeRaw = raw;
+      if(changed && raw){
+        var t = document.getElementById('attTable');
+        if(t && t.rows.length) try{ renderTable(); }catch(e){}
+      }
     }).catch(function(){ deskTime = {}; });
   }
   function saveDeskTime(){

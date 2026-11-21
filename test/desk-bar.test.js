@@ -142,6 +142,18 @@ check('the day is drawn before its row is opened',
   flat.indexOf("var cells = '', deskByEmp = {};") > -1
   && flat.indexOf("var cells = '', deskByEmp = {};") < flat.indexOf('var deskBars = deskBarRow('), null);
 
+/* ---- and the figures arriving after the grid is drawn ----
+   The month is drawn before the desk figures land. Drawn without them it has
+   no bars at all, and on a quiet morning nothing else redraws it - so the
+   arrival of the figures draws them, and only when they have changed, or
+   every refresh would draw the month twice. */
+check('figures arriving after the grid redraw it',
+  /var changed = raw !== deskTimeRaw;[\s\S]{0,220}renderTable\(\)/.test(flat), null);
+check('and a reading that changes nothing redraws nothing',
+  /if\(changed && raw\)\{/.test(flat), null);
+check('nor is anything drawn before there is a table to draw into',
+  /if\(t && t\.rows\.length\)/.test(flat), null);
+
 /* ---- the switch ---- */
 check('there is a switch for it, under Hide Sunday',
   /id="hideSundayToggle"[\s\S]{0,400}id="deskBarToggle"/.test(flat), null);
