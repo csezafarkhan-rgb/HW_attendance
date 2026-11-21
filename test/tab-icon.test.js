@@ -118,6 +118,13 @@ check('the tab asks for it before anybody signs in',
   /<link id="hwTabIcon" rel="icon" type="image\/png" href="\/favicon\.png">/.test(SHELL), null);
 check('and the logo arriving is what sets it off',
   /hwMarkFromLogo\(e\.data\.logo\)/.test(SHELL), null);
+/* The sign-in page had a ball of wool beside its title, which is nobody's
+   logo. It carries the same mark the tab does, from the same place. */
+check('the sign-in page wears the mark too',
+  /<h1><img id="lgMark" class="lg-mark" src="\/favicon\.png"/.test(SHELL), null);
+check('and says the words alone where there is no logo to show',
+  /onerror="this\.style\.display='none'"/.test(SHELL), null);
+check('nothing is left of the emoji that was there', !/🧶/.test(SHELL), null);
 
 /* ---- and what the server hands back ---- */
 const route = SRV.slice(SRV.indexOf("app.get(['/favicon.png', '/favicon.ico']"),
