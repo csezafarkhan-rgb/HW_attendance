@@ -5984,6 +5984,13 @@ async function serveStoredImage(req, res, key) {
     const body = Buffer.from(m[2], 'base64');
     if (!body.length || body.length > 512 * 1024) return res.status(404).end();
     res.set('Content-Type', 'image/' + m[1]);
+    /* These three pictures are meant to be fetched from anywhere: a mail
+       client's image proxy, a bookmark bar, a phone's home screen - and the
+       panel's own preview of a message, which renders it in a frame with no
+       origin at all. Everything else on this server is same-origin by default,
+       which is right; this is the exception, and without saying so the preview
+       showed a broken picture where the message itself was perfectly fine. */
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     /* An hour, and revalidated after that: a logo changes about once in the
        life of a company, and a tab icon that will not let go of the old one
        is its own small annoyance. A message carries the version in the link,

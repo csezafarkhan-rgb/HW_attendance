@@ -9664,6 +9664,11 @@ function buildExcelBackup(){
     var desk = 0, marked = 0, days = 0;
     dates.forEach(function(d){
       if(mondayOf(d) !== monday) return;
+      /* A day still running is not a day to weigh. An hour in, the record
+         credits an hour and the computer has been on for most of it: the
+         week's figure would swing wildly all morning and settle on something
+         true only after everyone had gone home. */
+      if(d >= todayISO_full) return;
       var seen = deskSeenMinutes(emp, d);
       if(seen === null) return;
       var rec = getRecord(emp, d);
@@ -20059,8 +20064,14 @@ function buildExcelBackup(){
           /* Taken here rather than after the cells are drawn, because whether
              these six cover one line or two depends on the answer. Against the
              total the row itself shows, so the bar underneath is a share of
-             the figure above it and not of some other reckoning of the day. */
-          var share = deskShare(emp.name, dateStr, durs.totalMin);
+             the figure above it and not of some other reckoning of the day.
+
+             Not while the day is still running. An hour into the morning the
+             record credits an hour, and the computer has been on for most of
+             it, so the bar reads ninety per cent of nothing - or a thousand
+             per cent where somebody punched in two minutes ago. Neither says
+             anything about the day, which has not happened yet. */
+          var share = dayStillOpen ? null : deskShare(emp.name, dateStr, durs.totalMin);
           deskByEmp[emp.name] = share;
           var mine = share ? '' : RS;
           var hdFlag = getHalfDay(emp.name, dateStr);

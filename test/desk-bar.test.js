@@ -81,7 +81,15 @@ check('and a day DeskTime missed has nothing to share',
    before those cells are drawn, because whether they cover one line or two
    depends on the answer. */
 check('it is taken against the total that row shows',
-  /var share = deskShare\(emp\.name, dateStr, durs\.totalMin\);/.test(APP), null);
+  /var share = dayStillOpen \? null : deskShare\(emp\.name, dateStr, durs\.totalMin\);/.test(APP), null);
+/* An hour into the morning the record credits an hour and the computer has
+   been on for most of it: ninety per cent of nothing, or a thousand per cent
+   where somebody punched in two minutes ago. Neither says anything about a
+   day that has not happened yet. */
+check('and not at all while the day is still running',
+  /var share = dayStillOpen \? null :/.test(APP), null);
+check('nor does the week count a day still running',
+  /if\(d >= todayISO_full\) return;/.test(grab(APP, 'weekDeskShare')), null);
 check('and before the day it belongs to is drawn',
   APP.indexOf('var share = deskShare(') < APP.indexOf("cells += '<td class=\"att-cell '+inCls"), null);
 
@@ -186,6 +194,8 @@ check('nor is anything drawn before there is a table to draw into',
     deskTime: DESK,
     state: { deskBar: true },
     fmtMin: ctx.fmtMin,
+    /* Far enough ahead that every fixture day counts as finished. */
+    todayISO_full: '2026-12-01',
     mondayOf: d => '2026-11-02',
     getRecord: (e, d) => ({ 'in': '09:00', out: '18:00' }),
     computeDurations: () => ({ totalMin: 540 })

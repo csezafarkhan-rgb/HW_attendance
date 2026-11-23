@@ -194,6 +194,13 @@ check('nothing but an image is ever served from it',
   /\^data:image\\\/\(png\|jpeg\|gif\|webp\|x-icon\);base64,/.test(route), null);
 check('and nothing enormous',
   /body\.length > 512 \* 1024/.test(route), null);
+/* The panel renders a message in a frame with no origin at all, and
+   everything on this server is same-origin by default - so the picture that
+   was perfectly fine in the message came out broken in the preview of it.
+   These three are public by design: a mail proxy, a bookmark, a home screen
+   and that preview all fetch them from outside. */
+check('the picture may be fetched from outside this origin',
+  /res\.set\('Cross-Origin-Resource-Policy', 'cross-origin'\);/.test(route), null);
 check('a tab icon is allowed to be cached, but not forever',
   /max-age=3600, must-revalidate/.test(route), null);
 check('and where no logo has been uploaded it simply says there is none',
