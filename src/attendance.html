@@ -9576,6 +9576,17 @@ function buildExcelBackup(){
       if(sp.mode === 'WFH')  return Math.round((sp.hours||0) * 60);
       return full;
     }
+    /* A day from home is owed the working part of the shift, not the span of
+       it. In the building those nine hours include the lunch and the two
+       breaks - the person is there for all of it, and the record counts the
+       span. At home there is no building to be in: what is owed is the work
+       itself, which is the shift less the allowance the office has set, and
+       what it is measured against is the time the computer was in use. Nine
+       hours of that, lunch included, is nine hours of work and not the same
+       day at all.
+       The allowance is the one on the Options panel, so an office that
+       changes its lunch changes this with it. */
+    if(ovA && ovA.cat === 'WFH') return Math.max(0, full - BREAK_ALLOW_MIN);
     return full;
   }
   /* What a WFH cell should say it is worth. A Saturday worked from home is owed

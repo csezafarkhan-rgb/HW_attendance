@@ -47,6 +47,9 @@ const ctx = {
   getLateExcuse: () => null, getEarlyExcuse: () => null,
   getMispunch: () => null, getHalfDay: () => null,
   getSatPolicy: () => ({ mode: 'OFF', hours: 4 }),
+  /* Lunch and the two breaks, as the Options panel sets them: a day from
+     home is owed the shift less these. */
+  BREAK_ALLOW_MIN: 75,
   Date, JSON, Object, Math, String, isNaN, parseInt, parseFloat, console,
 };
 vm.createContext(ctx);
@@ -65,19 +68,27 @@ ctx.overrides[NAME + '|' + WED] = { cat: 'WFH', duration: '', owed: '0:00' };
 check('a day approved as off asks for nothing',
   ctx.owedMinutes(NAME, WED) === 0, ctx.owedMinutes(NAME, WED));
 
+/* With nothing approved, a day from home asks for what such a day asks for:
+   the working part of the shift - nine hours less the lunch and two breaks
+   the office has set - and not the span of it. An ordinary day in the
+   building still asks for the span, which is the check above. */
 ctx.overrides[NAME + '|' + WED] = { cat: 'WFH', duration: '4:00', owed: '' };
-check('a mark with no approved figure still asks for the whole shift',
-  ctx.owedMinutes(NAME, WED) === 540, ctx.owedMinutes(NAME, WED));
+check('a mark with no approved figure asks for the work in the shift',
+  ctx.owedMinutes(NAME, WED) === 465, ctx.owedMinutes(NAME, WED));
 
 /* A figure that does not parse must not become NaN: one NaN poisons the
    week's total and every figure built on it. */
 ['abc', '4', ':30', '  '].forEach(function (bad) {
   ctx.overrides[NAME + '|' + WED] = { cat: 'WFH', duration: '', owed: bad };
-  check('an approved figure of "' + bad + '" falls back to the shift',
-    ctx.owedMinutes(NAME, WED) === 540, ctx.owedMinutes(NAME, WED));
+  check('an approved figure of "' + bad + '" falls back to what the day asks',
+    ctx.owedMinutes(NAME, WED) === 465, ctx.owedMinutes(NAME, WED));
 });
 
 /* Longer than the shift would hand out credit for hours nobody worked. */
+/* Clamped to the shift, which is the longest a day can be asked for; the
+   working part of it is what an unapproved day asks, not a ceiling on what
+   may be approved. Somebody told to work a full nine hours from home is a
+   thing the office may approve. */
 ctx.overrides[NAME + '|' + WED] = { cat: 'WFH', duration: '', owed: '14:00' };
 check('and one longer than the shift is clamped to it',
   ctx.owedMinutes(NAME, WED) === 540, ctx.owedMinutes(NAME, WED));
@@ -111,8 +122,12 @@ const week = (over) => {
 check('four hours approved and four hours worked leaves the week level',
   week({ cat: 'WFH', duration: '4:00', owed: '4:00' }) === 0,
   week({ cat: 'WFH', duration: '4:00', owed: '4:00' }));
-check('the same day without the approval is five hours short',
-  week({ cat: 'WFH', duration: '4:00', owed: '' }) === -300,
+/* Without the approval the day asks what a day from home asks - seven hours
+   forty-five - so four hours worked is three and three quarters short rather
+   than five. The point stands: the approved figure is the difference between
+   a short week and a level one. */
+check('the same day without the approval is short by what it did not work',
+  week({ cat: 'WFH', duration: '4:00', owed: '' }) === -225,
   week({ cat: 'WFH', duration: '4:00', owed: '' }));
 check('working past the approved hours banks the surplus',
   week({ cat: 'WFH', duration: '5:00', owed: '4:00' }) === 60,

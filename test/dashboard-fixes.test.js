@@ -368,10 +368,25 @@ const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(r =>
       { markup, decl: decl && decl.slice(1, 4) });
 
     /* And it must not have reached the things it has no business in. */
-    ['owedMinutes', 'getLateEarly', 'perfScore'].forEach(fn => {
+    ['getLateEarly', 'perfScore'].forEach(fn => {
       check(fn + ' is untouched by the allowance',
         grab(fn).indexOf('BREAK_ALLOW_MIN') === -1, fn);
     });
+    /* It reaches one thing on purpose: what a day from home is owed. In the
+       building the shift includes the lunch and the breaks, because the
+       person is there for all of it and the record counts the span. At home
+       there is no building, so the day is owed the work - the shift less the
+       allowance - and nothing else in owedMinutes knows about it. */
+    {
+      const owed = grab('owedMinutes');
+      check('a day from home is owed the shift less the allowance',
+        /if\(ovA && ovA\.cat === 'WFH'\) return Math\.max\(0, full - BREAK_ALLOW_MIN\);/.test(owed),
+        null);
+      check('and that is the only place in it the allowance appears',
+        (owed.match(/BREAK_ALLOW_MIN/g) || []).length === 1, null);
+      check('an ordinary day is still owed the whole shift',
+        /\n    return full;\n  \}$/.test(owed.replace(/\r/g, '')), owed.slice(-60));
+    }
   }
 
   /* ---- a rule for one table must not reach every table ----

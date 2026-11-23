@@ -49,6 +49,9 @@ const ctx = {
   getRecord: (e, d) => ctx.records[e + '|' + d] || null,
   getLateExcuse: () => null, getEarlyExcuse: () => null,
   getMispunch: () => null, getHalfDay: () => null,
+  /* Lunch and the two breaks, as the Options panel sets them: a day from
+     home is owed the shift less these. */
+  BREAK_ALLOW_MIN: 75,
   Date, JSON, Object, Math, String, isNaN, parseInt, console,
 };
 vm.createContext(ctx);
@@ -72,12 +75,16 @@ const fromHome = (mins, extra) => {
 let r = fromHome([48, 192, 194, 94, 177]);
 check('a week of short days from home is five days, not none',
   r.days === 5, r);
-check('and comes to what the shift asked for less what was worked',
-  r.net === (48 + 192 + 194 + 94 + 177) - 5 * 540, r.net);
+/* A day from home is owed the working part of the shift - nine hours less
+   the lunch and the two breaks the office has set, which is 465 - and not the
+   span of it. In the building those breaks are inside the nine hours because
+   the person is there for all of it; at home there is no building. */
+check('and comes to the work the shift asked for, less what was worked',
+  r.net === (48 + 192 + 194 + 94 + 177) - 5 * 465, r.net);
 check('so the band no longer says the week was completed',
   r.said.s === 'bad' && /^Not completed/.test(r.said.v), r.said);
 check('it says how far short, in the words it uses for everybody else',
-  / 1995m short$/.test(r.said.v), r.said.v);
+  / 1620m short$/.test(r.said.v), r.said.v);
 
 /* The other half of the same screenshot: days from home that were full ones. */
 r = fromHome([534, 535, 518, 582, 547]);
@@ -93,16 +100,29 @@ check('a week DeskTime saw nothing of is left alone as it always was',
   (r.days || 0) === 0 && r.said.s === 'ok' && /full hours$/.test(r.said.v), r);
 r = fromHome([534, null, 518, null, 547]);
 check('and the days it did see are the only ones counted',
-  r.days === 3 && r.net === (534 + 518 + 547) - 3 * 540, r);
+  r.days === 3 && r.net === (534 + 518 + 547) - 3 * 465, r);
 
 /* Hours somebody typed against the day still win: a measurement is better
    than an assumption, and a person who was there beats both. */
+/* Hours typed against the day are what the day was worth, whatever DeskTime
+   saw. Seven forty-five typed is a day from home exactly met; the nine hours
+   this used to type would now be an hour and a quarter of extra, which is
+   true and says nothing about whether the reading works. */
 r = fromHome([48, 48, 48, 48, 48], {
-  '2026-10-19': { duration: '9:00' }, '2026-10-20': { duration: '9:00' },
-  '2026-10-21': { duration: '9:00' }, '2026-10-22': { duration: '9:00' },
-  '2026-10-23': { duration: '9:00' } });
+  '2026-10-19': { duration: '7:45' }, '2026-10-20': { duration: '7:45' },
+  '2026-10-21': { duration: '7:45' }, '2026-10-22': { duration: '7:45' },
+  '2026-10-23': { duration: '7:45' } });
 check('hours typed against the day are still what the day is worth',
   r.days === 5 && r.net === 0, r);
+
+/* The rule itself, stated once: a full day from home is seven hours
+   forty-five of work, not nine hours of being somewhere. */
+r = fromHome([465, 465, 465, 465, 465]);
+check('a week of full days from home is met by the work, not by the span',
+  r.days === 5 && r.net === 0 && r.said.s === 'ok', r);
+r = fromHome([540, 540, 540, 540, 540]);
+check('and nine hours at the computer from home is a week with time over',
+  r.net === 5 * 75, r);
 
 /* A day out on a visit is a day away from the computer by definition. Asking
    DeskTime what it was worth answers nothing, and counting that nothing would
