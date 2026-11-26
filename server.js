@@ -3009,6 +3009,10 @@ async function ensureMailLog() {
   await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS sent_to TEXT');
   await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS sent_cc TEXT');
   await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ');
+  /* And why the asking failed, when it did. A key that may send but not read
+     answers every enquiry with a refusal, and a panel that swallows it looks
+     exactly like a panel with nothing to report. */
+  await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS check_note TEXT');
   mailLogReady = true;
 }
 /* The addresses a message named that Resend did not send to. Compared without
@@ -3051,7 +3055,7 @@ app.get('/api/mail/log', requireRole('admin', 'admin_view'), async (req, res) =>
     await ensureMailLog();
     const r = await pool.query(
       `SELECT id, at, kind, subject, recipients, cc, ok, detail, attached,
-              event, sent_to, sent_cc, checked_at
+              event, sent_to, sent_cc, checked_at, check_note
          FROM mail_log WHERE org_id = $1 ORDER BY id DESC LIMIT 60`, [req.session.orgId]);
     res.json({ sent: r.rows.map(x => Object.assign({}, x, { dropped: droppedFrom(x) })) });
   } catch (e) { res.json({ sent: [] }); }
@@ -3070,6 +3074,15 @@ app.post('/api/mail/log/check', requireRole('admin', 'admin_view'), async (req, 
   let rows = [];
   try {
     await ensureMailLog();
+    /* Asked for again, by hand. An enquiry can fail for a reason that is
+       nothing to do with the message - a key that may send but not read - and
+       once that is put right the rows already marked as asked would otherwise
+       stay unanswered for good. Only the ones that never got an answer. */
+    if (req.body && req.body.again === true) {
+      await pool.query(
+        'UPDATE mail_log SET checked_at = NULL WHERE org_id = $1 AND event IS NULL',
+        [req.session.orgId]);
+    }
     const r = await pool.query(
       `SELECT id, detail, recipients, cc FROM mail_log
         WHERE org_id = $1 AND ok AND detail ~ '^[0-9a-fA-F][0-9a-fA-F-]{19,}$'
@@ -3092,10 +3105,13 @@ app.post('/api/mail/log/check', requireRole('admin', 'admin_view'), async (req, 
        Resend has no record of is asked after once rather than every time the
        panel is opened. */
     if (!got.ok) {
+      const why = String(got.error || 'Resend did not answer').slice(0, 200);
       try {
-        await pool.query('UPDATE mail_log SET checked_at = now() WHERE org_id = $1 AND id = $2',
-          [req.session.orgId, row.id]);
+        await pool.query(
+          'UPDATE mail_log SET checked_at = now(), check_note = $3 WHERE org_id = $1 AND id = $2',
+          [req.session.orgId, row.id, why]);
       } catch (e) { /* the enquiry is worth no more than the sending was */ }
+      out.push({ id: row.id, check_note: why, checked_at: new Date().toISOString(), dropped: [] });
       return;
     }
     const sentTo = held ? addrList(row.recipients) : got.to;
@@ -3109,12 +3125,13 @@ app.post('/api/mail/log/check', requireRole('admin', 'admin_view'), async (req, 
     };
     try {
       await pool.query(
-        `UPDATE mail_log SET event = $3, sent_to = $4, sent_cc = $5, checked_at = now()
+        `UPDATE mail_log SET event = $3, sent_to = $4, sent_cc = $5, checked_at = now(),
+                check_note = NULL
           WHERE org_id = $1 AND id = $2`,
         [req.session.orgId, row.id, seen.event, seen.sent_to, seen.sent_cc]);
     } catch (e) { return; }
     out.push({ id: row.id, event: seen.event, sent_to: seen.sent_to, sent_cc: seen.sent_cc,
-               checked_at: seen.checked_at, dropped: droppedFrom(seen) });
+               checked_at: seen.checked_at, check_note: null, dropped: droppedFrom(seen) });
   }));
   out.sort((a, b) => Number(b.id) - Number(a.id));
   res.json({ checked: out });

@@ -178,6 +178,17 @@ const ID = '01a21629-890b-75e9-b7b4-b2847473b27a';
   check('and the row is marked as partly gone rather than failed',
     / class="ml-row part"/.test(html) && !/ bad/.test(html), html.slice(0, 200));
 
+  /* A key that may send but not read refuses every enquiry. A panel that
+     swallowed that looked exactly like a panel with nothing to report. */
+  html = ui.mailLogRow(Object.assign({}, base, {
+    dropped: [], check_note: 'This API key is restricted to sending emails'
+  }));
+  check('a message that could not be asked after says so, and accuses nobody',
+    html.indexOf('ml-unasked') > -1
+      && html.indexOf('restricted to sending') > -1
+      && html.indexOf('ml-drop') === -1
+      && !/ bad| part/.test(html), html.slice(0, 400));
+
   html = ui.mailLogRow(Object.assign({}, base, { event: 'bounced', dropped: [] }));
   check('a bounce is a failure, and reads as one',
     /ml-row bad/.test(html) && html.indexOf('bounced') > -1, html.slice(0, 200));
@@ -209,7 +220,15 @@ const ID = '01a21629-890b-75e9-b7b4-b2847473b27a';
       && /NOT \(event = ANY\(\$2\)\)/.test(SRV), null);
   check('and one Resend has no record of is asked after once, not forever',
     /at > now\(\) - interval '2 days'/.test(SRV)
-      && /UPDATE mail_log SET checked_at = now\(\)/.test(SRV), null);
+      && /UPDATE mail_log SET checked_at = now\(\), check_note = \$3/.test(SRV), null);
+  check('a refused enquiry writes down why it was refused',
+    /ADD COLUMN IF NOT EXISTS check_note TEXT/.test(SRV)
+      && /String\(got\.error \|\| 'Resend did not answer'\)/.test(SRV), null);
+  check('an answer clears the reason, so it does not outlive the trouble',
+    /check_note = NULL/.test(SRV), null);
+  check('asking again reopens only the ones that never got an answer',
+    /req\.body\.again === true/.test(SRV)
+      && /SET checked_at = NULL WHERE org_id = \$1 AND event IS NULL/.test(SRV), null);
 
   global.fetch = realFetch;
   console.log(results.every(Boolean) ? '\nALL PASS (' + results.length + ')' : '\nSOME FAILED');

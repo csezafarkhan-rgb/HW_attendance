@@ -832,6 +832,11 @@ body{
    is not wrong, so it is not red - but the line below it is. */
 .ml-row.part .ml-what b{ color:#9A6400; }
 .ml-drop{ color:#B3261E !important; }
+/* Why Resend could not be asked. Ours to fix, not a delivery failure, so it
+   is said quietly. */
+.ml-unasked{ font-style:italic; }
+.ml-again{ float:right; font:600 11px/1 'Inter',sans-serif; color:var(--ink-soft);
+  background:none; border:0; padding:2px 0; cursor:pointer; text-decoration:underline; }
 .ml-when{ flex:none; width:64px; font:700 12px/1.2 'Inter',sans-serif; }
 .ml-when span{ display:block; font-weight:500; font-size:10.5px; color:var(--ink-soft); margin-top:2px; }
 .ml-what{ flex:1 1 auto; min-width:0; font-size:12.5px; }
@@ -6372,12 +6377,24 @@ function renderSignSetting(){
       +   '</span>'
       +   (drop.length ? ('<span class="ml-drop">Never reached ' + escapeHtml(drop.join(', '))
             + ' \u2014 Resend is holding that address back, so nothing was sent to it.</span>') : '')
+      +   (r.check_note ? ('<span class="ml-unasked">Resend could not be asked what became of it \u2014 '
+            + escapeHtml(r.check_note) + '</span>') : '')
       +   '</div>'
       + '<button type="button" class="btn ghost" data-ml="' + r.id + '">Open</button>'
       + '</div>';
   }
   function paintMailLog(box, rows){
-    box.innerHTML = rows.map(mailLogRow).join('');
+    /* Worth offering only when something is actually unanswered. */
+    var unasked = rows.some(function(r){ return !!r.check_note; });
+    box.innerHTML = (unasked
+        ? '<button type="button" class="ml-again" id="mlAgain">Ask Resend again</button>'
+        : '')
+      + rows.map(mailLogRow).join('');
+    var again = box.querySelector('#mlAgain');
+    if(again) again.onclick = function(){
+      again.disabled = true; again.textContent = 'Asking\u2026';
+      askMailDelivery(box, rows, true);
+    };
     Array.prototype.forEach.call(box.querySelectorAll('[data-ml]'), function(b){
       b.onclick = function(){ openSentMail(b.getAttribute('data-ml')); };
     });
@@ -6389,11 +6406,12 @@ function renderSignSetting(){
     if(!r.checked_at) return true;
     return !(r.event === 'delivered' || MAIL_EVENT_BAD[r.event] || r.event === 'canceled');
   }
-  function askMailDelivery(box, rows){
-    var i, any = false;
-    for(i = 0; i < rows.length; i++){ if(mailNeedsAsking(rows[i])){ any = true; break; } }
+  function askMailDelivery(box, rows, again){
+    var i, any = !!again;
+    for(i = 0; i < rows.length && !any; i++){ if(mailNeedsAsking(rows[i])) any = true; }
     if(!any) return;
-    fetch('/api/mail/log/check', {method:'POST', credentials:'same-origin', cache:'no-store'})
+    fetch('/api/mail/log/check', {method:'POST', credentials:'same-origin', cache:'no-store',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ again: !!again })})
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(j){
         var up = (j && j.checked) || [];
