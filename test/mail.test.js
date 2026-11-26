@@ -200,6 +200,9 @@ function query(sql, p) {
   if (s.startsWith('DELETE FROM maintenance_done')) { if (db.jobs) delete db.jobs[p[0]]; return rows([]); }
   if (s.startsWith('CREATE TABLE IF NOT EXISTS mail_log')) return rows([]);
   if (s.startsWith('CREATE INDEX IF NOT EXISTS mail_log_recent_idx')) return rows([]);
+  /* The columns the log keeps Resend's own answer in: what it did with the
+     message, and which of the addresses it actually used. */
+  if (s.startsWith('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS')) return rows([]);
   if (s.startsWith('INSERT INTO mail_log')) {
     db.mailLog = (db.mailLog || []);
     db.mailLog.unshift({ id: db.mailLog.length + 1, at: new Date(), kind: p[1], subject: p[2],
@@ -207,12 +210,14 @@ function query(sql, p) {
     return rows([]);
   }
   if (s.startsWith('DELETE FROM mail_log')) return rows([]);
-  if (s.startsWith('SELECT id, at, kind, subject, recipients, cc, ok, detail, attached FROM mail_log')) {
-    return rows((db.mailLog || []).map(x => Object.assign({}, x, { html: undefined })));
-  }
-  if (s.startsWith('SELECT id, at, kind, subject, recipients, cc, ok, detail, attached, html FROM mail_log')) {
+  /* The message itself first: its line is the longer of the two, and the
+     shorter one would otherwise answer for it. */
+  if (s.startsWith('SELECT id, at, kind, subject, recipients, cc, ok, detail, attached, html')) {
     const hit = (db.mailLog || []).find(x => x.id === p[1]);
     return rows(hit ? [hit] : []);
+  }
+  if (s.startsWith('SELECT id, at, kind, subject, recipients, cc, ok, detail, attached')) {
+    return rows((db.mailLog || []).map(x => Object.assign({}, x, { html: undefined })));
   }
   if (s.startsWith('CREATE TABLE IF NOT EXISTS mail_shots')) return rows([]);
   if (s.startsWith('INSERT INTO mail_shots')) { db.shots = (db.shots || []).concat([{ id: p[0], mime: p[1], data: p[2] }]); return rows([]); }

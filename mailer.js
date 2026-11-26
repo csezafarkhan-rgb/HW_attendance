@@ -126,6 +126,37 @@ async function send(msg) {
   }
 }
 
+/* What became of a message, as against what it was asked to do.
+
+   `send` answers the moment Resend accepts the request, and acceptance is not
+   arrival: an address the account holds back - one that bounced once, or that
+   somebody marked as spam - is dropped without a word, and the answer is still
+   a cheerful id. The log wrote that down as ok for months.
+
+   So ask afterwards. The recipients that come back are the ones Resend
+   actually used; anything the send named and this does not is an address the
+   message never reached. */
+async function lookup(id) {
+  const c = conf();
+  if (!c.key) return { ok: false, error: 'RESEND_API_KEY is not set' };
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{7,79}$/.test(String(id || ''))) return { ok: false, error: 'not a message id' };
+  const list = v => (Array.isArray(v) ? v : (v ? [v] : [])).map(String).filter(Boolean);
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 15000);
+    const r = await fetch(API + '/' + encodeURIComponent(id), {
+      headers: { 'Authorization': 'Bearer ' + c.key },
+      signal: ctl.signal
+    }).finally(() => clearTimeout(t));
+    const j = await r.json().catch(() => null);
+    if (!r.ok) return { ok: false, error: (j && (j.message || j.name)) || ('Resend answered ' + r.status) };
+    return { ok: true, to: list(j && j.to), cc: list(j && j.cc),
+             event: String((j && j.last_event) || ''), at: String((j && j.created_at) || '') };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 /* ---------------- signed action links ---------------- */
 
 function b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
@@ -1771,7 +1802,7 @@ function partDayEmail(o) {
 }
 
 module.exports = {
-  conf, ready, baseUrl, send,
+  conf, ready, baseUrl, send, lookup, heldTo: testRecipient,
   signAction, verifyAction, actionToken, ACTION_DAYS,
   esc, stripHtml, layout, button, kindName, dateRange, fmtDay, testRecipient,
   dailyEmail, monthEmail, leaveEmail, tasksEmail, holidayEmail, decisionEmail, requestEmail, excusedEmail,

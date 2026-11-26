@@ -828,6 +828,10 @@ body{
 .ml-row{ display:flex; align-items:center; gap:12px; padding:9px 2px; border-bottom:1px solid var(--line); }
 .ml-row:last-child{ border-bottom:0; }
 .ml-row.bad .ml-what b{ color:#B3261E; }
+/* Accepted by Resend and still not delivered to everyone it named: the subject
+   is not wrong, so it is not red - but the line below it is. */
+.ml-row.part .ml-what b{ color:#9A6400; }
+.ml-drop{ color:#B3261E !important; }
 .ml-when{ flex:none; width:64px; font:700 12px/1.2 'Inter',sans-serif; }
 .ml-when span{ display:block; font-weight:500; font-size:10.5px; color:var(--ink-soft); margin-top:2px; }
 .ml-what{ flex:1 1 auto; min-width:0; font-size:12.5px; }
@@ -6339,25 +6343,74 @@ function renderSignSetting(){
             + 'Messages appear here as they go out.</div>';
           return;
         }
-        box.innerHTML = rows.map(function(r){
-          var when = new Date(r.at);
-          return '<div class="ml-row' + (r.ok ? '' : ' bad') + '">'
-            + '<div class="ml-when">' + escapeHtml(when.toLocaleDateString(undefined, {day:'numeric', month:'short'}))
-            +   '<span>' + escapeHtml(when.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'})) + '</span></div>'
-            + '<div class="ml-what"><b>' + escapeHtml(r.subject || '(no subject)') + '</b>'
-            +   '<span>' + escapeHtml(MAIL_KIND[r.kind] || r.kind) + ' \u00b7 to ' + escapeHtml(r.recipients || '\u2014')
-            +   (r.cc ? (' \u00b7 cc ' + escapeHtml(r.cc)) : '')
-            +   (r.attached ? ' \u00b7 with the record attached' : '')
-            +   (r.ok ? '' : (' \u00b7 did not go: ' + escapeHtml(r.detail || 'no reason given')))
-            +   '</span></div>'
-            + '<button type="button" class="btn ghost" data-ml="' + r.id + '">Open</button>'
-            + '</div>';
-        }).join('');
-        Array.prototype.forEach.call(box.querySelectorAll('[data-ml]'), function(b){
-          b.onclick = function(){ openSentMail(b.getAttribute('data-ml')); };
-        });
+        paintMailLog(box, rows);
+        /* The row says the message was accepted. Whether it arrived is a
+           different question and only Resend can answer it, so ask. */
+        askMailDelivery(box, rows);
       })
       .catch(function(){ box.innerHTML = '<div class="ml-note">Could not read what was sent.</div>'; });
+  }
+  /* Resend's last word on a message, in words. `ok` on a row means only that
+     the request was taken; these say what became of it. */
+  var MAIL_EVENT = { delivered:'delivered', bounced:'bounced', complained:'marked as spam',
+                     delivery_delayed:'delayed on the way', queued:'still queued',
+                     scheduled:'scheduled', canceled:'cancelled', failed:'failed' };
+  var MAIL_EVENT_BAD = { bounced:1, complained:1, failed:1 };
+  function mailLogRow(r){
+    var when = new Date(r.at);
+    var drop = r.dropped || [];
+    var bad = !r.ok || MAIL_EVENT_BAD[r.event];
+    return '<div class="ml-row' + (bad ? ' bad' : '') + (drop.length ? ' part' : '') + '">'
+      + '<div class="ml-when">' + escapeHtml(when.toLocaleDateString(undefined, {day:'numeric', month:'short'}))
+      +   '<span>' + escapeHtml(when.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'})) + '</span></div>'
+      + '<div class="ml-what"><b>' + escapeHtml(r.subject || '(no subject)') + '</b>'
+      +   '<span>' + escapeHtml(MAIL_KIND[r.kind] || r.kind) + ' \u00b7 to ' + escapeHtml(r.recipients || '\u2014')
+      +   (r.cc ? (' \u00b7 cc ' + escapeHtml(r.cc)) : '')
+      +   (r.attached ? ' \u00b7 with the record attached' : '')
+      +   (r.ok ? '' : (' \u00b7 did not go: ' + escapeHtml(r.detail || 'no reason given')))
+      +   (r.ok && MAIL_EVENT[r.event] ? (' \u00b7 ' + MAIL_EVENT[r.event]) : '')
+      +   '</span>'
+      +   (drop.length ? ('<span class="ml-drop">Never reached ' + escapeHtml(drop.join(', '))
+            + ' \u2014 Resend is holding that address back, so nothing was sent to it.</span>') : '')
+      +   '</div>'
+      + '<button type="button" class="btn ghost" data-ml="' + r.id + '">Open</button>'
+      + '</div>';
+  }
+  function paintMailLog(box, rows){
+    box.innerHTML = rows.map(mailLogRow).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ml]'), function(b){
+      b.onclick = function(){ openSentMail(b.getAttribute('data-ml')); };
+    });
+  }
+  /* Ask only when there is something to ask about: a message not yet enquired
+     after, or one Resend had not finished with last time. */
+  function mailNeedsAsking(r){
+    if(!r.ok) return false;
+    if(!r.checked_at) return true;
+    return !(r.event === 'delivered' || MAIL_EVENT_BAD[r.event] || r.event === 'canceled');
+  }
+  function askMailDelivery(box, rows){
+    var i, any = false;
+    for(i = 0; i < rows.length; i++){ if(mailNeedsAsking(rows[i])){ any = true; break; } }
+    if(!any) return;
+    fetch('/api/mail/log/check', {method:'POST', credentials:'same-origin', cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        var up = (j && j.checked) || [];
+        if(!up.length) return;
+        var by = {}, k;
+        for(k = 0; k < up.length; k++) by[String(up[k].id)] = up[k];
+        var next = rows.map(function(r){
+          var u = by[String(r.id)];
+          if(!u) return r;
+          var merged = {}, p;
+          for(p in r) if(Object.prototype.hasOwnProperty.call(r, p)) merged[p] = r[p];
+          for(p in u) if(Object.prototype.hasOwnProperty.call(u, p)) merged[p] = u[p];
+          return merged;
+        });
+        paintMailLog(box, next);
+      })
+      .catch(function(){});
   }
   /* One of them, as it arrived. */
   function openSentMail(id){

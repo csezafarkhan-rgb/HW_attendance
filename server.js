@@ -2994,17 +2994,43 @@ async function leaveDigests(orgId) {
    when. Kept ninety days; the picture inside a message is already kept
    separately and outlives nothing. */
 let mailLogReady = false;
+async function ensureMailLog() {
+  if (mailLogReady) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS mail_log (
+    id BIGSERIAL PRIMARY KEY, org_id INTEGER, at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    kind TEXT NOT NULL, subject TEXT, recipients TEXT, cc TEXT,
+    ok BOOLEAN NOT NULL DEFAULT TRUE, detail TEXT, attached BOOLEAN NOT NULL DEFAULT FALSE,
+    html TEXT)`);
+  await pool.query('CREATE INDEX IF NOT EXISTS mail_log_recent_idx ON mail_log (org_id, id DESC)');
+  /* What Resend did with it afterwards, which is a different thing from
+     whether it took the request: `event` is its last word on the message, and
+     `sent_to` / `sent_cc` are the addresses it actually used. */
+  await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS event TEXT');
+  await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS sent_to TEXT');
+  await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS sent_cc TEXT');
+  await pool.query('ALTER TABLE mail_log ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ');
+  mailLogReady = true;
+}
+/* The addresses a message named that Resend did not send to. Compared without
+   regard to case, because an address is the same address however it is typed,
+   and empty until the row has actually been asked about: a message nobody has
+   enquired after has not dropped anybody, it is simply unknown. */
+function addrList(s) {
+  return String(s || '').split(',').map(x => x.trim()).filter(Boolean);
+}
+function droppedFrom(row) {
+  /* Asked, and answered: an enquiry that failed leaves checked_at set and the
+     recipients empty, and that is not Resend saying it wrote to nobody - it is
+     Resend not saying anything. A message that went out had at least one
+     address, so an empty answer means we still do not know. */
+  if (!row || !row.checked_at || !addrList(row.sent_to).length) return [];
+  const sent = {};
+  addrList(row.sent_to).concat(addrList(row.sent_cc)).forEach(a => { sent[a.toLowerCase()] = 1; });
+  return addrList(row.recipients).concat(addrList(row.cc)).filter(a => !sent[a.toLowerCase()]);
+}
 async function logMail(orgId, kind, msg, result) {
   try {
-    if (!mailLogReady) {
-      await pool.query(`CREATE TABLE IF NOT EXISTS mail_log (
-        id BIGSERIAL PRIMARY KEY, org_id INTEGER, at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        kind TEXT NOT NULL, subject TEXT, recipients TEXT, cc TEXT,
-        ok BOOLEAN NOT NULL DEFAULT TRUE, detail TEXT, attached BOOLEAN NOT NULL DEFAULT FALSE,
-        html TEXT)`);
-      await pool.query('CREATE INDEX IF NOT EXISTS mail_log_recent_idx ON mail_log (org_id, id DESC)');
-      mailLogReady = true;
-    }
+    await ensureMailLog();
     await pool.query(
       `INSERT INTO mail_log (org_id, kind, subject, recipients, cc, ok, detail, attached, html)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
@@ -3022,17 +3048,85 @@ async function logMail(orgId, kind, msg, result) {
 app.get('/api/mail/log', requireRole('admin', 'admin_view'), async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
+    await ensureMailLog();
     const r = await pool.query(
-      `SELECT id, at, kind, subject, recipients, cc, ok, detail, attached
+      `SELECT id, at, kind, subject, recipients, cc, ok, detail, attached,
+              event, sent_to, sent_cc, checked_at
          FROM mail_log WHERE org_id = $1 ORDER BY id DESC LIMIT 60`, [req.session.orgId]);
-    res.json({ sent: r.rows });
+    res.json({ sent: r.rows.map(x => Object.assign({}, x, { dropped: droppedFrom(x) })) });
   } catch (e) { res.json({ sent: [] }); }
+});
+/* Ask Resend what it did, for the messages it has not been asked about yet.
+
+   Twelve at a time, newest first, and never twice about a message Resend has
+   finished with: delivered, bounced, complained, cancelled and failed are its
+   last words, and a row carrying one of those is settled. The rest - queued,
+   scheduled, delayed - are still moving, so they are asked again, though not
+   more than once a minute. */
+const MAIL_SETTLED = ['delivered', 'bounced', 'complained', 'canceled', 'failed'];
+app.post('/api/mail/log/check', requireRole('admin', 'admin_view'), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!mailer.ready()) return res.json({ checked: [] });
+  let rows = [];
+  try {
+    await ensureMailLog();
+    const r = await pool.query(
+      `SELECT id, detail, recipients, cc FROM mail_log
+        WHERE org_id = $1 AND ok AND detail ~ '^[0-9a-fA-F][0-9a-fA-F-]{19,}$'
+          AND at > now() - interval '30 days'
+          AND (checked_at IS NULL
+               OR (checked_at < now() - interval '1 minute'
+                   AND at > now() - interval '2 days'
+                   AND (event IS NULL OR NOT (event = ANY($2)))))
+        ORDER BY id DESC LIMIT 12`, [req.session.orgId, MAIL_SETTLED]);
+    rows = r.rows;
+  } catch (e) { return res.json({ checked: [] }); }
+  /* Held back for testing, every message really did go to the one address and
+     nowhere else. Nothing was dropped there - it was never asked for - so the
+     row is recorded as having gone where it said it would. */
+  const held = !!mailer.heldTo();
+  const out = [];
+  await Promise.all(rows.map(async row => {
+    const got = await mailer.lookup(row.detail);
+    /* Write down that it was asked even when nothing came back, so a message
+       Resend has no record of is asked after once rather than every time the
+       panel is opened. */
+    if (!got.ok) {
+      try {
+        await pool.query('UPDATE mail_log SET checked_at = now() WHERE org_id = $1 AND id = $2',
+          [req.session.orgId, row.id]);
+      } catch (e) { /* the enquiry is worth no more than the sending was */ }
+      return;
+    }
+    const sentTo = held ? addrList(row.recipients) : got.to;
+    const sentCc = held ? addrList(row.cc) : got.cc;
+    const seen = {
+      id: row.id, recipients: row.recipients, cc: row.cc,
+      event: String(got.event || '').slice(0, 40),
+      sent_to: sentTo.join(', ').slice(0, 500),
+      sent_cc: sentCc.join(', ').slice(0, 500),
+      checked_at: new Date().toISOString()
+    };
+    try {
+      await pool.query(
+        `UPDATE mail_log SET event = $3, sent_to = $4, sent_cc = $5, checked_at = now()
+          WHERE org_id = $1 AND id = $2`,
+        [req.session.orgId, row.id, seen.event, seen.sent_to, seen.sent_cc]);
+    } catch (e) { return; }
+    out.push({ id: row.id, event: seen.event, sent_to: seen.sent_to, sent_cc: seen.sent_cc,
+               checked_at: seen.checked_at, dropped: droppedFrom(seen) });
+  }));
+  out.sort((a, b) => Number(b.id) - Number(a.id));
+  res.json({ checked: out });
 });
 app.get('/api/mail/log/:id', requireRole('admin', 'admin_view'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!(id > 0)) return res.status(400).json({ error: 'bad_id' });
+  await ensureMailLog();
   const r = await pool.query(
-    'SELECT id, at, kind, subject, recipients, cc, ok, detail, attached, html FROM mail_log WHERE org_id = $1 AND id = $2',
+    `SELECT id, at, kind, subject, recipients, cc, ok, detail, attached, html,
+            event, sent_to, sent_cc, checked_at
+       FROM mail_log WHERE org_id = $1 AND id = $2`,
     [req.session.orgId, id]);
   if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
   res.json(r.rows[0]);
