@@ -282,10 +282,16 @@ function grab(src, name) {
       r.sql);
 
     const body = grab(SRV, 'takePartDay');
-    /* At two in the morning a night shift belongs to yesterday, and nothing
-       the browser sends gets to choose which day this writes. */
-    check('the day is worked out from the shift, not taken from the browser',
-      /clockDay\(parseJson\(kvShift\.shiftAssignments\)/.test(body) && !/body\.day/.test(body), null);
+    /* At two in the morning a night shift belongs to yesterday, so the clock
+       still answers when nobody names a day. A day may be named now - the day
+       somebody fills this in on is rarely the day it happened - but only one
+       that has already happened and is not yet old enough to be the office's,
+       and that is settled here rather than in the page. */
+    check('the day is worked out from the shift when none is named',
+      /clockDay\(parseJson\(kvShift\.shiftAssignments\)/.test(body) && /let day = today;/.test(body), null);
+    check('a named day has to have happened, and to be recent enough to still be theirs',
+      /error: 'not_yet'/.test(body) && /error: 'too_old'/.test(body)
+        && /SELF_PART_DAY_BACK_DAYS/.test(body), null);
     check('and a locked month is checked before anything is read for writing',
       body.indexOf('lockedMonthsOf') < body.indexOf('FOR UPDATE'), null);
 
@@ -431,16 +437,29 @@ function grab(src, name) {
 
     /* ---- the card they take it from ---- */
     {
+      /* Yesterday, which the card now reaches as well as today. */
+      const YESTERDAY = new Date(Date.parse(TODAY + 'T00:00:00Z') - 86400000)
+        .toISOString().slice(0, 10);
+      const LONG_AGO = new Date(Date.parse(TODAY + 'T00:00:00Z') - 60 * 86400000)
+        .toISOString().slice(0, 10);
       const c3 = {
         todayISO_full: TODAY, halfDays: {}, overrides: {},
+        empWorkingDay: () => TODAY,
+        ewDaysSince: iso => Math.max(0, Math.round(
+          (Date.parse(TODAY + 'T00:00:00Z') - Date.parse(iso + 'T00:00:00Z')) / 86400000)),
+        isMonthLocked: () => false,
+        fmtDayShortish: d => 'on ' + d,
+        Date, Math, Number, isNaN,
         shotEsc: t => String(t == null ? '' : t).replace(/[&<>"]/g, c =>
           ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
         String, Object, console,
       };
       vm.createContext(c3);
       ['hdQty', 'hdLabel', 'hdMark', 'partSaid', 'partDayRow', 'takenOnOwnCard',
-       'partOwnWords', 'partAskWords'].forEach(n => vm.runInContext(grab(APP, n), c3));
+       'partOwnWords', 'partAskWords', 'canTakePartOn', 'partDayWhen']
+        .forEach(n => vm.runInContext(grab(APP, n), c3));
       vm.runInContext(/var PART_SELF = \[[\s\S]*?\];/.exec(APP)[0], c3);
+      vm.runInContext(/var PART_BACK_DAYS = \d+;/.exec(APP)[0], c3);
       /* The card asks the same question of the same setting the server does. */
       c3.leavePolicy = { SHORT: 'self', HALF: 'self' };
 
@@ -454,15 +473,25 @@ function grab(src, name) {
          and labelled optional - the wrong shape and the wrong word for the
          one thing this message carries. */
       check('the reason has its own line and room to write in',
-        /<textarea id="edPartNote"[^>]*rows="2"/.test(html)
+        /<textarea data-pd-note[^>]*rows="2"/.test(html)
         && /Why you are taking it/.test(html) && !/optional/.test(html), null);
       check('and the button says Submit before anything is taken',
         />Submit</.test(html), null);
       check('a whole day away still needs asking, and the card says so',
         /still needs a request/.test(html), null);
-      /* Today only, like the hours and the visit beside it. */
-      check('yesterday is not offered',
-        c3.partDayRow('Keshav Garg', '2026-01-05') === '', null);
+      /* No longer today only. Somebody who leaves early remembers it the next
+         morning, and the day they remember on was the one day the card could
+         not reach - so yesterday is offered, named as itself. A day far
+         enough back is still the office's to settle. */
+      check('yesterday is offered too, which is the day people actually remember on',
+        /value="SHORT"/.test(c3.partDayRow('Keshav Garg', YESTERDAY)), null);
+      check('and it is named as that day rather than called today',
+        /Taking part of on /.test(c3.partDayRow('Keshav Garg', YESTERDAY))
+          && !/Taking part of today/.test(c3.partDayRow('Keshav Garg', YESTERDAY)), null);
+      check('a day two months back is nobody\u2019s to take now',
+        c3.partDayRow('Keshav Garg', LONG_AGO) === '', null);
+      check('and neither is a day that has not happened',
+        c3.partDayRow('Keshav Garg', '2099-01-05') === '', null);
 
       /* ---- and it offers only what the office lets them take ---- */
       c3.leavePolicy = { SHORT: 'self', HALF: 'approval' };
@@ -483,9 +512,9 @@ function grab(src, name) {
       c3.halfDays[K('Keshav Garg')] = { kind: 'SHORT', leave: 'CL', by: 'self', why: 'bank' };
       html = c3.partDayRow('Keshav Garg', TODAY);
       check('one taken before the change can still be put back',
-        /id="edPartClear"/.test(html), null);
+        /data-pd-clear/.test(html), null);
       check('but not changed',
-        !/id="edPartSave"/.test(html) && !/<select id="edPartKind"/.test(html), null);
+        !/data-pd-save/.test(html) && !/<select data-pd-kind/.test(html), null);
       check('and it says why',
         /asked for now rather than taken/.test(html), null);
       c3.halfDays = {};
@@ -496,9 +525,9 @@ function grab(src, name) {
       check('what they took is shown back to them',
         /selected/.test(html) && /second half/.test(html), null);
       check('their own words come back without the prefix in front',
-        /<textarea id="edPartNote"[^>]*>dentist<\/textarea>/.test(html), null);
+        /<textarea data-pd-note[^>]*>dentist<\/textarea>/.test(html), null);
       check('and it can be put back',
-        /edPartClear/.test(html), null);
+        /data-pd-clear/.test(html), null);
       /* Submitted once, it is on the record and counted, so the button stops
          offering to do it again and offers to change it instead. */
       check('the button says what it would be doing now',
@@ -507,7 +536,7 @@ function grab(src, name) {
       c3.halfDays[K('Keshav Garg')] = { kind: 'THREEQ' };
       html = c3.partDayRow('Keshav Garg', TODAY);
       check('a mark the office made is shown but not offered for changing',
-        /entered by the office/.test(html) && !/edPartKind/.test(html), null);
+        /entered by the office/.test(html) && !/data-pd-kind/.test(html), null);
       c3.halfDays = {};
       c3.overrides[K('Keshav Garg')] = { cat: 'LEAVE', detail: 'CL' };
       check('and a day already away whole offers no half of it',
@@ -528,8 +557,9 @@ function grab(src, name) {
          made it, and not without saying what it costs. */
       check('changing one already submitted asks first',
         /hwConfirm\(\{[\s\S]{0,120}you already submitted\?/.test(APP), null);
+      /* Named by its day now, because it is not always today being put back. */
       check('and so does putting one back',
-        /hwConfirm\(\{[\s\S]{0,140}Put today back to a whole working day\?/.test(APP), null);
+        /hwConfirm\(\{[\s\S]{0,140}'Put ' \+ when \+ ' back to a whole working day\?'/.test(APP), null);
       check('the warning says what it costs, not merely that it is a change',
         /already counted against your casual leave/.test(APP)
         && /leave goes back to your balance/.test(APP), null);

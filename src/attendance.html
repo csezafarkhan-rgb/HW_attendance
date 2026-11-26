@@ -2398,6 +2398,7 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
 /* A day with nothing on it at all. Red, not amber: it costs a whole day until
    somebody says what it was. */
 .ew-tag.gap{background:#FDE7E4;color:#C0392B;}
+.ew-tag.early{background:#FDEFD9;color:#9A6400;}
 .ew-tag.punch{background:#E0F2FE;color:#075E8C;}
 .ew-i.now{background:#FDE7E4;border-color:#F3C4BD;}
 .ew-age{flex:none;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;white-space:nowrap;}
@@ -2430,6 +2431,8 @@ td.punches-cell{font-family:'IBM Plex Mono',monospace;font-weight:600;}
    it is before it says what was written, because a reason on its own does
    not tell you whether it excused the day or merely explained it. */
 .day-notes{margin-top:10px;display:flex;flex-direction:column;gap:6px;text-align:left;}
+.day-part{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);text-align:left;}
+.day-part .ed-visit{margin:0;}
 .day-notes.empty{font-size:12px;color:var(--ink-dim);text-align:center;margin-top:12px;}
 .day-note{padding:8px 11px;border-radius:8px;background:var(--panel2);border-left:3px solid var(--line-dk);font-size:12.5px;line-height:1.5;}
 .day-note b{display:block;font-size:12px;}
@@ -3127,7 +3130,7 @@ table.dash-table tr:hover td{background:#F7F9FC;}
    is given the room its longest option needs. */
 .ed-visit #edShiftPick{ min-width:212px; }
 .ed-visit #edVisitKind{ min-width:180px; }
-.ed-visit #edPartKind{ min-width:302px; }
+.ed-visit [data-pd-kind]{ min-width:302px; }
 .ed-visit #edVisitOther{ width:170px; }
 .ed-visit #edVisitNote{ flex:1 1 220px; min-width:160px; }
 /* The reason for a part day is the whole of what the office is told about it,
@@ -3137,7 +3140,7 @@ table.dash-table tr:hover td{background:#F7F9FC;}
 .em-row-fixed{ opacity:.72; cursor:default; }
 .em-row-fixed input{ cursor:default; }
 .ed-visit .pt-why{ margin-top:10px; }
-.ed-visit #edPartNote{ display:block; width:100%; height:auto; min-height:56px;
+.ed-visit [data-pd-note]{ display:block; width:100%; height:auto; min-height:56px;
   padding:9px 10px; border:1px solid var(--line-dk); border-radius:9px; font:inherit;
   font-size:12.5px; background:#fff; resize:vertical; margin-bottom:9px; }
 .ed-visit .bk-btn, .ed-visit .month-btn{ height:38px; padding:0 16px; font-size:12.5px; }
@@ -22868,10 +22871,33 @@ function buildExcelBackup(){
       }
       var l = null;
       try{ l = getLateEarly(name, use); }catch(e){ return; }
-      if(!l || l.late <= (lateThresholdMin || 10)) return;
-      if(getLateExcuse(name, d) || getLatePlea(name, d)) return;   // already answered
-      mine.push({ job:'late', day:d, mins:l.late, came:use['in'] || '',
-                  age:ewDaysSince(d) });
+      if(!l) return;
+      if(l.late > (lateThresholdMin || 10)
+         && !getLateExcuse(name, d) && !getLatePlea(name, d)){
+        mine.push({ job:'late', day:d, mins:l.late, came:use['in'] || '',
+                    age:ewDaysSince(d) });
+        return;                                  // one day, one thing to answer
+      }
+      /* 2c. And a day they went home early with nothing on the record saying
+             why. It was the one gap nobody was ever told about: the control
+             for taking a short leave sat on the day card all day as a
+             standing offer, and somebody who left without pressing it was
+             never asked about it again.
+
+             Only once the day is over - an afternoon still running is not an
+             early finish, and at half past nine it reads as eight hours early.
+
+             And only while they can still answer it. Past that window the day
+             is the office's to settle, and a band nobody can clear is a
+             reproach rather than a reminder. */
+      if(d < mineDay
+         && l.early > (earlyThresholdMin || 10)
+         && takenOnOwnCard('SHORT')
+         && !getEarlyExcuse(name, d) && !getHalfDay(name, d)
+         && !ewSpokenFor(name, d) && canTakePartOn(name, d)){
+        mine.push({ job:'early', day:d, mins:l.early, went:use.out || '',
+                    age:ewDaysSince(d) });
+      }
     });
 
     /* 3. and 4. Their own requests, split by who the next move belongs to. */
@@ -23065,6 +23091,20 @@ function buildExcelBackup(){
           + '">I was here</button>'
           + '<button type="button" class="ew-b p" data-ew-off="' + shotEsc(it.day)
           + '">I was off</button></div>';
+      }
+      /* A day they went home early and nothing on the record says why. The
+         answer is one press away, on the day itself. */
+      if(it.job === 'early'){
+        return '<div class="ew-i"><span class="ew-tag early">left '
+          + shotEsc(minsSaid(it.mins)) + ' early</span>'
+          + '<div class="g"><b>' + shotEsc(fmtDayShortish(it.day)) + '</b>'
+          + (it.went ? (' \u00b7 out at ' + shotEsc(fmtTime(it.went))) : '')
+          + '<div class="sub">Nothing on the record says why. If it was a short leave, '
+          + 'put it on the day \u2014 a quarter of a day off your casual leave, and nobody '
+          + 'has to agree to it.</div></div>'
+          + ewAge(it.age)
+          + '<button type="button" class="ew-b p" data-ew-part="' + shotEsc(it.day)
+          + '">Take a short leave</button></div>';
       }
       if(it.job === 'late'){
         var open = (EW_OPEN_WHY === it.day);
@@ -23300,6 +23340,13 @@ function buildExcelBackup(){
        clock missed them. That is a correction, not leave, and the form
        already has the kind for it - so this opens the one path the office
        already has rather than inventing a second way to write a time. */
+    /* Settled on the day itself, where the control lives - the same one the
+       calendar cell opens, so there is one of it and not two. */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ew-part]'), function(b){
+      b.onclick = function(){
+        openReadOnlyDetail((viewRole && viewRole.name) || '', b.getAttribute('data-ew-part'));
+      };
+    });
     Array.prototype.forEach.call(box.querySelectorAll('[data-ew-here]'), function(b){
       b.onclick = function(){
         var d = b.getAttribute('data-ew-here');
@@ -24236,18 +24283,30 @@ function buildExcelBackup(){
         said('That did not clear (' + ((e && e.message) || 'no answer') + ').', true);
       });
     });
-    /* Taking part of today off. Not written from here: a part-day mark is not
-       an employee's to make, and a request somebody makes for themselves is
-       forced to pending - rightly. So the server grants it and marks it in one
-       go, and this asks it to. */
-    var pKind = document.getElementById('edPartKind');
-    var pSave = document.getElementById('edPartSave');
-    var pClear = document.getElementById('edPartClear');
+    /* Taking part of a day off, wired wherever the control is drawn - the
+       day card for today, the calendar cell for a day gone by. */
+    wirePartDay(box, name, day, function(){ renderEmpDayCard(); });
+  }
+  /* Taking part of a day off. Not written from here: a part-day mark is not an
+     employee's to make, and a request somebody makes for themselves is forced
+     to pending - rightly. So the server grants it and marks it in one go, and
+     this asks it to.
+
+     `root` is whatever the control was drawn inside, because it is drawn in
+     two places now and ids would collide between them. `done` is what to draw
+     again afterwards, which differs by door. */
+  function wirePartDay(root, name, day, done){
+    if(!root) return;
+    var when = partDayWhen(day);
+    var whenCap = (day === todayISO_full) ? 'Today' : fmtDayShortish(day);
+    var pKind = root.querySelector('[data-pd-kind]');
+    var pSave = root.querySelector('[data-pd-save]');
+    var pClear = root.querySelector('[data-pd-clear]');
     var pGo = function(btn, kind, half, note){
       btn.disabled = true;
       fetch('/api/part-day', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: kind, half: half, message: note }) })
+        body: JSON.stringify({ kind: kind, half: half, message: note, day: day }) })
         .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){
           if(!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
           return j;
@@ -24258,9 +24317,9 @@ function buildExcelBackup(){
         .then(function(){ return Promise.all([loadHalfDays(), loadLeaveRequests()]); })
         .then(function(){
           showUploadStatus(kind
-            ? (partSaid(kind, half) + ' taken for today. The office has been told.')
-            : 'Today is a whole working day again. The office has been told.', false);
-          refreshActivePage(); renderEmpDayCard();
+            ? (partSaid(kind, half) + ' taken for ' + when + '. The office has been told.')
+            : whenCap + ' is a whole working day again. The office has been told.', false);
+          refreshActivePage(); done();
           try{ renderMyRequests(); }catch(e){}
         })
         .catch(function(e){
@@ -24270,14 +24329,18 @@ function buildExcelBackup(){
             /month_locked/.test(why)     ? 'That month is closed \u2014 its pay has already been run.'
           : /marked_by_office/.test(why) ? 'The office has already marked part of this day \u2014 ask them to change it.'
           : /day_is_leave/.test(why)     ? 'This whole day is already marked as leave.'
-          : /already_requested/.test(why)? 'You already have a request covering today \u2014 it is on your Requests page.'
-          : /already_taken/.test(why)    ? 'Today is already set to that.'
+          : /already_requested/.test(why)? 'You already have a request covering ' + when + ' \u2014 it is on your Requests page.'
+          : /already_taken/.test(why)    ? whenCap + ' is already set to that.'
           : /nothing_to_undo/.test(why)  ? 'There is nothing to put back.'
+          : /too_old/.test(why)          ? 'That day is too far back to take now \u2014 ask the '
+                                           + 'office to mark it.'
+          : /not_yet/.test(why)          ? 'That day has not happened yet.'
+          : /bad_day/.test(why)          ? 'That is not a day this can be taken for.'
           : /why_needed/.test(why)       ? 'Say why you are taking it.'
           : /needs_request/.test(why)    ? 'That one is asked for now, not taken \u2014 use '
                                            + 'Request time away.'
           : ('That did not go through (' + (why || 'no answer') + ').'), true);
-          renderEmpDayCard();
+          done();
         });
     };
     /* What is already taken, read here rather than carried down from the
@@ -24291,14 +24354,14 @@ function buildExcelBackup(){
         showUploadStatus('Pick how much of the day you are taking \u2014 or Put it back to undo one.', true);
         return;
       }
-      var note = ((document.getElementById('edPartNote') || {}).value || '').trim();
+      var note = ((root.querySelector('[data-pd-note]') || {}).value || '').trim();
       /* Compulsory. Every other kind of leave is asked for, and the asking is
          where the reason goes; this one is taken, so the only place left for
          it is here. */
       if(!note){
         showUploadStatus('Say why you are taking it \u2014 that is the whole of what the office '
           + 'is told.', true);
-        var nb = document.getElementById('edPartNote');
+        var nb = root.querySelector('[data-pd-note]');
         if(nb){ try{ nb.focus(); }catch(e){} }
         return;
       }
@@ -24317,7 +24380,7 @@ function buildExcelBackup(){
     });
     if(pClear) pClear.addEventListener('click', function(){
       hwConfirm({
-        title: 'Put today back to a whole working day?',
+        title: 'Put ' + when + ' back to a whole working day?',
         message: 'The ' + (pHad ? partSaid(pHad.kind, pHad.half).toLowerCase() : 'time off')
                + ' comes off the record, the leave goes back to your balance, and the office '
                + 'is told it was put back.',
@@ -24508,8 +24571,24 @@ function buildExcelBackup(){
         }).join('')
       + '</div>';
   }
+  /* How far back a short leave may still be taken for. The server holds the
+     same line; this only decides whether to offer it. */
+  var PART_BACK_DAYS = 7;
+  /* Whether this is a day they may still take part of for themselves. */
+  function canTakePartOn(name, day){
+    if(!day) return false;
+    var today = empWorkingDay();
+    if(day > today) return false;                       // nobody takes a day ahead
+    if(ewDaysSince(day) > PART_BACK_DAYS) return false; // older than that is the office's
+    if(isMonthLocked(String(day).slice(0, 7))) return false;
+    return true;
+  }
+  /* The day in the words the person would use for it. */
+  function partDayWhen(day){
+    return day === todayISO_full ? 'today' : fmtDayShortish(day);
+  }
   function partDayRow(name, day){
-    if(day !== todayISO_full) return '';        // the day they are actually in
+    if(!canTakePartOn(name, day)) return '';
     var hd = halfDays[name + '|' + day] || null;
     var ov = overrides[name + '|' + day] || null;
     /* Nothing to take a part of: the whole day is already away. */
@@ -24536,10 +24615,10 @@ function buildExcelBackup(){
        but it cannot be changed into something that now has to be asked for. */
     if(!mine.length){
       return '<div class="ed-visit ed-partrow">'
-        + '<div class="lab">Taking part of today off?</div>'
+        + '<div class="lab">Taking part of ' + shotEsc(partDayWhen(day)) + ' off?</div>'
         + '<div class="v-row"><span class="v-tag">' + shotEsc(hdMark(hd.kind)) + '</span>'
         +   '<span class="v-why">' + shotEsc(partSaid(hd.kind, hd.half)) + '</span>'
-        +   '<button type="button" class="month-btn" id="edPartClear">Put it back</button></div>'
+        +   '<button type="button" class="month-btn" data-pd-clear>Put it back</button></div>'
         + '<div class="v-by">Time off is asked for now rather than taken, so this one can be '
         +   'put back but not changed. Ask for the new one with Request time away.</div></div>';
     }
@@ -24549,35 +24628,39 @@ function buildExcelBackup(){
     if(cur && !list.some(function(k){ return k.v === cur; })){
       list = list.concat(PART_SELF.filter(function(k){ return k.v === cur; }));
     }
-    var opts = '<option value="">Not taking time off today</option>'
+    var opts = '<option value="">Not taking time off '
+      + (day === todayISO_full ? 'today' : 'that day') + '</option>'
       + list.map(function(k){
           return '<option value="' + k.v + '"' + (cur === k.v ? ' selected' : '') + '>'
             + shotEsc(k.lab) + '</option>';
         }).join('');
     return '<div class="ed-visit ed-partrow">'
-      + '<div class="lab">Taking part of today off?</div>'
+      + '<div class="lab">Taking part of ' + shotEsc(partDayWhen(day)) + ' off?</div>'
       + '<div class="v-row">'
-      +   '<select id="edPartKind">' + opts + '</select>'
+      +   '<select data-pd-kind>' + opts + '</select>'
       + '</div>'
       /* Its own line, and room to write a sentence in. It was a single line
          sharing the row with the dropdown and the button, and marked
          optional - which is the wrong shape and the wrong word for the one
          thing this message has to carry. */
       + '<div class="lab pt-why">Why you are taking it</div>'
-      + '<textarea id="edPartNote" maxlength="300" rows="2"'
+      + '<textarea data-pd-note maxlength="300" rows="2"'
       +   ' placeholder="A sentence is enough \u2014 the office is told this and nothing more">'
       +   (hd ? shotEsc(hd.why || '') : '') + '</textarea>'
       + '<div class="v-row">'
-      +   '<button type="button" class="bk-btn primary" id="edPartSave">'
+      +   '<button type="button" class="bk-btn primary" data-pd-save>'
       +     (hd ? 'Change it' : 'Submit') + '</button>'
-      +   (hd ? '<button type="button" class="month-btn" id="edPartClear">Put it back</button>' : '')
+      +   (hd ? '<button type="button" class="month-btn" data-pd-clear>Put it back</button>' : '')
       + '</div>'
       + '<div class="v-by">' + (hd
-          ? ('Today counts as <b>' + shotEsc(partSaid(hd.kind, hd.half)) + '</b> \u2014 '
+          ? ((day === todayISO_full ? 'Today' : shotEsc(fmtDayShortish(day)))
+             + ' counts as <b>' + shotEsc(partSaid(hd.kind, hd.half)) + '</b> \u2014 '
              + hdQty(hd.kind) + ' of a day off your casual leave. Nobody had to agree to it, '
              + 'and the office has been told.')
           : (partOwnWords() + ' counts the moment you submit it \u2014 nobody has to agree to it '
-             + '\u2014 and the office is told. ' + partAskWords() + ' Today only.'))
+             + '\u2014 and the office is told. ' + partAskWords()
+             + (day === todayISO_full ? ' Today, or any day in the last week.'
+                                      : ' Any day in the last week.')))
       + '</div></div>';
   }
 
@@ -24881,7 +24964,20 @@ function buildExcelBackup(){
     var noteHtml = notes.length
       ? ('<div class="day-notes">' + notes.join('') + '</div>')
       : '<div class="day-notes empty">Nothing written about this day.</div>';
-    modalBody.innerHTML = statusHtml + punchHtml + noteHtml;
+    /* And, on their own card, the one thing still open to them from here.
+
+       The day card only ever knows about today, which is the day somebody is
+       least likely to be filling this in on: they leave early, and they
+       remember the next morning. The calendar is where they look when they
+       remember, so the control is on the day itself. */
+    var ownCard = !!(viewRole && viewRole.role === 'employee' && viewRole.name === name);
+    var pdHtml = ownCard ? partDayRow(name, dateStr) : '';
+    modalBody.innerHTML = statusHtml + punchHtml + noteHtml
+      + (pdHtml ? ('<div class="day-part">' + pdHtml + '</div>') : '');
+    if(pdHtml) wirePartDay(modalBody, name, dateStr, function(){
+      try{ renderEmployeeCalendar(); }catch(e){}
+      openReadOnlyDetail(name, dateStr);
+    });
     modalOverlay.classList.add('open');
   }
 

@@ -2065,6 +2065,13 @@ app.post('/api/clock', requireAuth, express.json({ limit: '2kb' }), async (req, 
    provable without a database and a browser standing in front of it. It
    answers with the status and the body the route is to send, and with what the
    office is to be told once the write has gone through. */
+/* How far back somebody may still take a short leave for themselves.
+
+   A day is forgotten on the way out of the door, not a fortnight later, and a
+   month that can be rewritten at leisure is not a record. A week covers the
+   evening it was missed and the days after it, and leaves the rest to the
+   office - who can mark any day at all. */
+const SELF_PART_DAY_BACK_DAYS = 7;
 async function takePartDay(orgId, name, userId, body) {
   const kind = String((body && body.kind) || '').trim().toUpperCase();
   /* An empty kind is how a day is put back: they took it, so they can untake
@@ -2100,8 +2107,30 @@ async function takePartDay(orgId, name, userId, body) {
       "SELECT key, value FROM kv WHERE org_id = $1 AND key IN ('shiftAssignments', 'dayShifts') AND user_id IS NULL", [orgId]);
     const kvShift = {};
     sa.rows.forEach(r => { kvShift[r.key] = r.value; });
-    const day = clockDay(parseJson(kvShift.shiftAssignments) || {},
-                         parseJson(kvShift.dayShifts) || {}, name);
+    const today = clockDay(parseJson(kvShift.shiftAssignments) || {},
+                           parseJson(kvShift.dayShifts) || {}, name);
+    /* Their own working day, unless they name an earlier one.
+
+       It used to be today and only today, which is the day somebody is least
+       likely to be filling this in on: they leave early, and they remember
+       the next morning. The naming is still not the browser's to do freely -
+       a day ahead is not a thing anybody takes, and a day far enough back is
+       the office's to settle - so it is checked here and not only there. */
+    let day = today;
+    const asked = String((body && body.day) || '').trim();
+    if (asked && asked !== today) {
+      const t = Date.parse(asked + 'T00:00:00Z');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(asked) || isNaN(t)) {
+        await client.query('ROLLBACK'); return { code: 400, out: { error: 'bad_day' } };
+      }
+      if (asked > today) {
+        await client.query('ROLLBACK'); return { code: 400, out: { error: 'not_yet' } };
+      }
+      if (Math.round((Date.parse(today + 'T00:00:00Z') - t) / 86400000) > SELF_PART_DAY_BACK_DAYS) {
+        await client.query('ROLLBACK'); return { code: 409, out: { error: 'too_old' } };
+      }
+      day = asked;
+    }
     const locked = await lockedMonthsOf(client, orgId);
     if (locked[day.slice(0, 7)]) { await client.query('ROLLBACK'); return { code: 409, out: { error: 'month_locked' } }; }
     const key = name + '|' + day;

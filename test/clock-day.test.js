@@ -128,9 +128,20 @@ check('the clock asks it',
   (SRV.match(/clockDay\(parseJson\(kvShift\.shiftAssignments\) \|\| \{\}/g) || []).length === 2, null);
 check('and nothing works the day out for itself any more',
   !/ownDays\(shiftFor\(parseJson\(/.test(SRV), null);
-/* The browser never names the day: a page is the person's to edit. */
-check('the day is still never taken from the browser',
-  !/body\.day/.test(grab(SRV, 'takePartDay')), null);
+/* The browser may name an earlier day, because the day somebody fills this in
+   on is rarely the day it happened: they leave early and remember the next
+   morning. What it may not do is decide the day unasked, name one that has
+   not happened, or reach back far enough to rewrite a month - so the day the
+   clock gives is still the default, and the named one is checked here. */
+{
+  const tp = grab(SRV, 'takePartDay');
+  check('the day still comes from the clock when none is named',
+    /let day = today;/.test(tp) && /clockDay\(parseJson\(kvShift\.shiftAssignments\)/.test(tp), null);
+  check('a named day is read from the body and nowhere else',
+    /const asked = String\(\(body && body\.day\) \|\| ''\)\.trim\(\);/.test(tp), null);
+  check('and it is checked here rather than trusted',
+    /error: 'bad_day'/.test(tp) && /error: 'not_yet'/.test(tp) && /error: 'too_old'/.test(tp), null);
+}
 
 const bad = results.filter(x => !x).length;
 console.log(bad ? ('FAILED ' + bad + ' of ' + results.length)

@@ -121,7 +121,22 @@ check('and the floor is the form’s own, not a second number',
 check('a day they were signed off for is not lateness',
   /if\(onApprovedLeave\(name, d\)\) return;/.test(gather), null);
 check('nor a lateness already answered, by them or by the office',
-  /if\(getLateExcuse\(name, d\) \|\| getLatePlea\(name, d\)\) return;/.test(gather), null);
+  /!getLateExcuse\(name, d\) && !getLatePlea\(name, d\)/.test(gather), null);
+/* The same day may have been both arrived at late and left early, and the
+   panel raises one thing per day: the morning is asked about first, and the
+   afternoon only where the morning was fine or already answered. */
+check('a day is raised as one thing, not two',
+  /return;\s+\/\/ one day, one thing to answer/.test(gather), null);
+/* An afternoon still running is not an early finish. At half past nine the
+   record reads as eight hours early, which is how today looked. */
+check('an early finish is only raised once the day is over',
+  /if\(d < mineDay/.test(gather), null);
+check('and only where nothing already answers for it',
+  /!getEarlyExcuse\(name, d\) && !getHalfDay\(name, d\)/.test(gather), null);
+check('and only while they can still do something about it',
+  /&& canTakePartOn\(name, d\)/.test(gather), null);
+check('an office that has people ask for a short leave raises none of this',
+  /&& takenOnOwnCard\('SHORT'\)/.test(gather), null);
 check('an archived request is nobody’s job',
   /if\(r\.archived\) return;/.test(gather), null);
 check('the oldest is put first, because that is the one being forgotten',
