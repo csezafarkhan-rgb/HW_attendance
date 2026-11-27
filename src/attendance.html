@@ -1354,6 +1354,21 @@ table.att tr.shift-row th.date-col{
 }
 .subhead-row th.date-col{background:var(--panel);}
 .subhead-row.leave-head th{top:0;}
+/* The frozen column crosses all three header rows, and in each of them it was
+   drawn on the same layer as the cells sliding underneath it. Equal z-index,
+   so the later cell in the markup won: scroll sideways and an employee's
+   banner was painted straight over the Date header, while the dates below it
+   stayed where they were. That is what made it look like the column was frozen
+   everywhere except at the top of it - a body row's own cells claim no layer
+   at all, so there was nothing there to beat the date beside them.
+
+   th.date-col did ask for 50. It is written above the three row rules and
+   carries the same weight as each of them, so every one of them quietly took
+   it back down to 30. A column that does not move has to out-rank the ones
+   that do, and has to say so after them. */
+.emp-header-row th.date-col,
+.shift-row th.date-col,
+.subhead-row th.date-col{ z-index:60; }
 th.dur-col{line-height:1.25;padding:3px 2px !important;}
 td.dur-col{width:40px;max-width:40px;padding:3px 2px;font-size:10px;}
 
